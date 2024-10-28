@@ -4043,6 +4043,7 @@ dependencies = [
  "base64-serde",
  "bytes",
  "cfg-if",
+ "chacha20",
  "clap",
  "crossbeam-utils",
  "dashmap",

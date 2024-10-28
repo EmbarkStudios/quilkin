@@ -222,6 +222,7 @@ fn execute(which: &str) {
                 "config/v1alpha1/config",
                 "filters/capture/v1alpha1/capture",
                 "filters/concatenate/v1alpha1/concatenate",
+                "filters/decryptor/v1alpha1/decryptor",
                 "filters/debug/v1alpha1/debug",
                 "filters/drop/v1alpha1/drop",
                 "filters/firewall/v1alpha1/firewall",
