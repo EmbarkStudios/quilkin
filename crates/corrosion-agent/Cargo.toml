@@ -1,0 +1,11 @@
+[package]
+name = "corrosion-agent"
+version = "0.1.0"
+license.workspace = true
+edition.workspace = true
+
+[dependencies.corro-agent]
+path = "../../../corrosion/crates/corro-agent"
+
+[lints]
+workspace = true
