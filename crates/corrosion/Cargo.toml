@@ -7,10 +7,41 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[dependencies]
+camino = "1.1"
+data-encoding = "2.9"
+rusqlite = "0.33"
+serde.workspace = true
+smallvec = "1.15"
+tempfile.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+uhlc = "0.7"
+
 [dependencies.corro-agent]
+git = "https://github.com/EmbarkStudios/corrosion"
+branch = "update-more"
+
+[dependencies.corro-api-types]
 git = "https://github.com/EmbarkStudios/corrosion"
 branch = "update-more"
 
 [dependencies.corro-client]
 git = "https://github.com/EmbarkStudios/corrosion"
 branch = "update-more"
+
+[dependencies.corro-types]
+git = "https://github.com/EmbarkStudios/corrosion"
+branch = "update-more"
+
+[dependencies.spawn]
+git = "https://github.com/EmbarkStudios/corrosion"
+branch = "update-more"
+
+[dependencies.tripwire]
+git = "https://github.com/EmbarkStudios/corrosion"
+branch = "update-more"
+
+[dev-dependencies]
+
+
