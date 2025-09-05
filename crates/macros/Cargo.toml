@@ -16,7 +16,7 @@
 
 [package]
 name = "quilkin-macros"
-version = "0.10.0-dev"
+version.workspace = true
 authors = ["Erin Power <erin.power@embark-studios.com>"]
 license.workspace = true
 description = "Quilkin is a non-transparent UDP proxy specifically designed for use with large scale multiplayer dedicated game server deployments, to ensure security, access control, telemetry data, metrics and more."

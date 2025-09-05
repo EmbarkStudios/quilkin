@@ -1155,11 +1155,13 @@ name = "corrosion"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "compact_str",
  "corro-agent",
  "corro-api-types",
  "corro-client",
  "corro-types",
  "data-encoding",
+ "quilkin-types",
  "rusqlite",
  "serde",
  "smallvec",
@@ -3930,6 +3932,7 @@ dependencies = [
  "prost-types",
  "quilkin-macros",
  "quilkin-proto",
+ "quilkin-types",
  "quilkin-xdp",
  "quilkin-xds",
  "rand 0.9.2",
@@ -3985,6 +3988,16 @@ dependencies = [
  "prost-types",
  "tonic",
  "tonic-prost",
+]
+
+[[package]]
+name = "quilkin-types"
+version = "0.10.0-dev"
+dependencies = [
+ "data-encoding",
+ "eyre",
+ "schemars",
+ "serde",
 ]
 
 [[package]]

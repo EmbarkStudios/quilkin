@@ -16,7 +16,7 @@
 
 [package]
 name = "quilkin"
-version = "0.10.0-dev"
+version.workspace = true
 authors = [
     "Mark Mandel <markmandel@google.com>",
     "Ifeanyi Ubah <ifeanyi.ubah@embark-studios.com>",
@@ -77,8 +77,9 @@ test = false
 [dependencies]
 # Local
 quilkin-macros = { version = "0.10.0-dev", path = "./crates/macros" }
-quilkin-xds.workspace = true
 quilkin-proto.workspace = true
+quilkin-types.workspace = true
+quilkin-xds.workspace = true
 
 # Crates.io
 arc-swap.workspace = true
@@ -194,6 +195,7 @@ members = [
     "crates/proto-gen",
     "crates/quilkin-proto",
     "crates/test",
+    "crates/types",
     "crates/xdp",
     "crates/xds",
 ]
@@ -201,6 +203,7 @@ members = [
 [workspace.package]
 license = "Apache-2.0"
 edition = "2024"
+version = "0.10.0-dev"
 
 [workspace.dependencies]
 arc-swap = { version = "1.7.1", features = ["serde"] }
@@ -226,6 +229,7 @@ prost = "0.14"
 prost-types = "0.14"
 quilkin = { path = "." }
 quilkin-proto = {version = "0.10.0-dev", path = "crates/quilkin-proto" }
+quilkin-types = { version = "0.10.0-dev", path = "crates/types" }
 quilkin-xds = {version = "0.10.0-dev", path = "crates/xds" }
 rand = "0.9"
 regex = "1.11.1"

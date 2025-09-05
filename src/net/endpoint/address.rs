@@ -25,6 +25,8 @@ use hickory_resolver::TokioResolver;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
+pub use quilkin_types::AddressKind;
+
 use crate::generated::envoy::config::core::v3::{
     SocketAddress as EnvoySocketAddress, address::Address as EnvoyAddress,
 };
@@ -309,42 +311,6 @@ impl<'de> Deserialize<'de> for EndpointAddress {
         // Accept borrowed or owned strings.
         let string = <std::borrow::Cow<'de, str>>::deserialize(de)?;
         string.parse::<Self>().map_err(serde::de::Error::custom)
-    }
-}
-
-/// The kind of address, such as Domain Name or IP address. **Note** that
-/// the `FromStr` implementation doesn't actually validate that the name is
-/// resolvable. Use [`EndpointAddress`] for complete address validation.
-#[derive(Debug, PartialEq, Clone, PartialOrd, Eq, Hash, Ord, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum AddressKind {
-    Name(String),
-    Ip(IpAddr),
-}
-
-impl FromStr for AddressKind {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // check for wrapping "[..]" in an ipv6 host
-        let mut host = s.to_string();
-        let len = host.len();
-        if len > 2 && s.starts_with('[') && s.ends_with(']') {
-            host = host[1..len - 1].to_string();
-        }
-
-        Ok(host
-            .parse()
-            .map_or_else(|_err| Self::Name(s.to_owned()), Self::Ip))
-    }
-}
-
-impl fmt::Display for AddressKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Name(name) => name.fmt(f),
-            Self::Ip(ip) => ip.fmt(f),
-        }
     }
 }
 

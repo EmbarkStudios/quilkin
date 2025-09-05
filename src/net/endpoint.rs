@@ -31,7 +31,6 @@ pub use self::{
 pub use quilkin_xds::locality::Locality;
 
 pub type EndpointMetadata = metadata::MetadataView<Metadata>;
-pub use base64_set::Set;
 
 /// A destination endpoint with any associated metadata.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Eq, schemars::JsonSchema)]
@@ -203,11 +202,7 @@ impl std::hash::Hash for Endpoint {
     Default, Debug, Deserialize, Serialize, PartialEq, Clone, PartialOrd, Eq, schemars::JsonSchema,
 )]
 pub struct Metadata {
-    #[serde(
-        serialize_with = "base64_set::serialize",
-        deserialize_with = "base64_set::deserialize"
-    )]
-    pub tokens: base64_set::Set,
+    pub tokens: quilkin_types::TokenSet,
 }
 
 impl From<Metadata> for crate::net::endpoint::metadata::MetadataView<Metadata> {
@@ -290,60 +285,6 @@ pub enum MetadataError {
         key: &'static str,
         expected: &'static str,
     },
-}
-
-/// A module for providing base64 encoding for a `BTreeSet` at the `serde`
-/// boundary. Accepts a list of strings representing Base64 encoded data,
-/// this list is then converted into its binary representation while in memory,
-/// and then encoded back as a list of base64 strings.
-mod base64_set {
-    use serde::de::Error;
-
-    pub type Set = std::collections::BTreeSet<Vec<u8>>;
-
-    pub fn serialize<S>(set: &Set, ser: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        ser.collect_seq(set.iter().map(crate::codec::base64::encode))
-    }
-
-    pub fn deserialize<'de, D>(de: D) -> Result<Set, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct TokenVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for TokenVisitor {
-            type Value = Set;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str("an array of base64 encoded tokens")
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                let mut set = Set::new();
-
-                while let Some(token) = seq.next_element::<std::borrow::Cow<'_, str>>()? {
-                    let decoded =
-                        crate::codec::base64::decode(token.as_ref()).map_err(Error::custom)?;
-
-                    if !set.insert(decoded) {
-                        return Err(Error::custom(
-                            "Found duplicate tokens in endpoint metadata.",
-                        ));
-                    }
-                }
-
-                Ok(set)
-            }
-        }
-
-        de.deserialize_seq(TokenVisitor)
-    }
 }
 
 #[cfg(test)]

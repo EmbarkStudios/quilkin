@@ -1,53 +1,7 @@
+use crate::api::SqliteParam;
+use quilkin_types::IcaoCode;
+
 pub type TokenSet = std::collections::BTreeSet<Vec<u8>>;
-
-const MAX_TOKENS: usize = u8::MAX as usize >> 1;
-
-#[inline]
-pub fn serialize_tokens_param(tokens: &TokenSet) -> corro_api_types::SqliteParam {
-    let mut blob = smallvec::SmallVec::<[u8; 512]>::new();
-
-    // We could varint encode this instead, but for now just fail
-    debug_assert!(
-        tokens.len() <= MAX_TOKENS,
-        "number of tokens ({}) is more than {MAX_TOKENS}",
-        tokens.len()
-    );
-
-    let len_prefix = if tokens.len() > 1 {
-        // If all the tokens have the same length, and that length is less than
-        // MAX_TOKENS, we can skip length prefixing each token
-        let len = tokens.first().unwrap().len();
-        let same_len = tokens.iter().all(|tok| tok.len() == len);
-
-        if same_len && len <= MAX_TOKENS {
-            blob.push(0x80 | len as u8);
-        } else {
-            blob.push(tokens.len() as u8);
-        }
-
-        !same_len
-    } else {
-        blob.push(1);
-        false
-    };
-
-    for tok in tokens {
-        if len_prefix {
-            debug_assert!(
-                tok.len() <= u8::MAX as usize,
-                "token length {} is more than {}",
-                tok.len(),
-                u8::MAX
-            );
-
-            blob.push(tok.len() as u8);
-        }
-
-        blob.extend_from_slice(&tok);
-    }
-
-    corro_api_types::SqliteParam::Text(data_encoding::BASE64_NOPAD.encode(&blob).into())
-}
 
 pub struct TokenSetColumn(pub TokenSet);
 
@@ -56,12 +10,16 @@ impl<'de> serde::Deserialize<'de> for TokenSetColumn {
     where
         D: serde::Deserializer<'de>,
     {
-        let s = std::borrow::Cow::<'de, str>::deserialize(deserializer)?;
+        let s = Option::<std::borrow::Cow<'de, str>>::deserialize(deserializer)?;
+
+        let mut ts = TokenSet::new();
+        let Some(s) = s else {
+            return Ok(Self(ts));
+        };
+
         let mut tokens = data_encoding::BASE64_NOPAD
             .decode(s.as_bytes())
             .map_err(serde::de::Error::custom)?;
-
-        let mut ts = TokenSet::new();
 
         if tokens.is_empty() {
             return Ok(Self(ts));

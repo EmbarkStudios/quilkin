@@ -315,15 +315,16 @@ impl Providers {
                 .iter()
                 .enumerate()
                 .map(|(ind, sa)| {
-                    let mut tokens = std::collections::BTreeSet::new();
                     let start = ind as u64 * count;
-                    for i in start..(start + count) {
-                        tokens.insert(i.to_le_bytes()[..tt.length].to_vec());
-                    }
 
                     crate::net::endpoint::Endpoint::with_metadata(
                         (*sa).into(),
-                        crate::net::endpoint::Metadata { tokens },
+                        crate::net::endpoint::Metadata {
+                            tokens: quilkin_types::TokenSet::from_iter(
+                                (start..(start + count))
+                                    .map(|i| i.to_le_bytes()[..tt.length].to_vec()),
+                            ),
+                        },
                     )
                 })
                 .collect()
