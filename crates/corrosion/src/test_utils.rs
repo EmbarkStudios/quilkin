@@ -1,3 +1,8 @@
+use crate::{
+    api::{self, Statement},
+    types,
+};
+
 /// Corrosion uses a "tripwire" handle to signal to end async tasks, this just
 /// wraps it so it's easier to use, and removes boilerplate
 pub struct Trip {
@@ -34,18 +39,22 @@ pub struct TestDbPool {
     #[allow(dead_code)]
     temp: tempfile::TempDir,
     sub_path: camino::Utf8PathBuf,
+    subs: types::pubsub::SubsManager,
+    schema: types::schema::Schema,
+    pool: types::agent::SplitPool,
+    trip: Trip,
 }
 
 impl TestDbPool {
     pub async fn new(schema: &str) -> Self {
-        let mut schema = corro_types::schema::parse_sql(schema).expect("failed to parse schema");
+        let mut schema = types::schema::parse_sql(schema).expect("failed to parse schema");
         let temp = tempfile::TempDir::new().expect("failed to create temp dir");
 
         let sub_path = camino::Utf8Path::from_path(temp.path())
             .expect("non-utf8 path")
             .join("subs");
 
-        let pool = corro_types::agent::SplitPool::create(
+        let pool = types::agent::SplitPool::create(
             temp.path().join("db.db"),
             std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         )
@@ -58,23 +67,91 @@ impl TestDbPool {
                 .write_priority()
                 .await
                 .expect("failed to get DB connection");
-            corro_types::sqlite::setup_conn(&conn).expect("failed to setup connection");
-            corro_types::agent::migrate(clock, &mut conn).expect("failed to migrate");
+            types::sqlite::setup_conn(&conn).expect("failed to setup connection");
+            types::agent::migrate(clock, &mut conn).expect("failed to migrate");
             let tx = conn.transaction().expect("failed to start transaction");
-            corro_types::schema::apply_schema(
-                &tx,
-                &corro_types::schema::Schema::default(),
-                &mut schema,
-            )
-            .expect("failed to apply schema");
+            types::schema::apply_schema(&tx, &types::schema::Schema::default(), &mut schema)
+                .expect("failed to apply schema");
             tx.commit().expect("failed to commit schema change");
         }
 
-        Self { temp, sub_path }
+        Self {
+            temp,
+            sub_path,
+            subs: types::pubsub::SubsManager::default(),
+            schema,
+            pool,
+            trip: Trip::new(),
+        }
     }
 
     #[inline]
-    pub fn subscriptions(&self) -> &camino::Utf8Path {
-        &self.sub_path
+    pub fn subscribe_new(
+        &self,
+        sql: &str,
+    ) -> (
+        types::pubsub::MatcherHandle,
+        tokio::sync::mpsc::Receiver<api::QueryEvent>,
+    ) {
+        let (handle, maybe) = self
+            .subs
+            .get_or_insert(
+                sql,
+                &self.sub_path,
+                &self.schema,
+                &self.pool,
+                self.trip.tripwire(),
+            )
+            .expect("failed to create subscription");
+        let created = maybe.expect("did not create a new matcher").evt_rx;
+        (handle, created)
+    }
+
+    pub async fn transaction(&self, ops: impl Iterator<Item = Statement>) {
+        let mut conn = self
+            .pool
+            .write_priority()
+            .await
+            .expect("failed to get connection");
+        let tx = conn.transaction().expect("failed to get transaction");
+
+        for stmt in ops {
+            let mut prepped = tx
+                .prepare(stmt.query())
+                .expect("failed to pepare transaction");
+            match stmt {
+                Statement::Simple(_)
+                | Statement::Verbose {
+                    params: None,
+                    named_params: None,
+                    ..
+                } => prepped.execute([]),
+                Statement::WithParams(_, params)
+                | Statement::Verbose {
+                    params: Some(params),
+                    ..
+                } => prepped.execute(rusqlite::params_from_iter(params)),
+                Statement::WithNamedParams(_, params)
+                | Statement::Verbose {
+                    named_params: Some(params),
+                    ..
+                } => prepped.execute(
+                    params
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v as &dyn rusqlite::ToSql))
+                        .collect::<Vec<(&str, &dyn rusqlite::ToSql)>>()
+                        .as_slice(),
+                ),
+            }
+            .expect("failed to execute");
+        }
+
+        tx.commit().expect("failed to commit transaction");
+    }
+
+    #[inline]
+    pub async fn shutdown(self) {
+        self.subs.drop_handles().await;
+        self.trip.shutdown().await;
     }
 }
