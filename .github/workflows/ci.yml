@@ -74,7 +74,7 @@ jobs:
         run: curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
       - name: Build
         run: cargo build -p qt -p quilkin -p quilkin-xds --tests
-      - run: cargo nextest run --no-tests=pass -p qt -p quilkin -p quilkin-xds
+      - run: cargo nextest run --no-tests=pass -p qt -p quilkin -p quilkin-xds -p corrosion
       - name: Validate Quilkin's clap arguments
         run: |
           set +e # don't fail on error, we expect the command to fail since we aren't providing arguments

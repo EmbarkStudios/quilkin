@@ -11,6 +11,7 @@ workspace = true
 camino = "1.1"
 compact_str = "0.7"
 data-encoding = "2.9"
+eyre.workspace = true
 quilkin-types.workspace = true
 rusqlite = "0.33"
 serde.workspace = true
@@ -18,7 +19,9 @@ smallvec = "1.15"
 tempfile.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
+tracing.workspace = true
 uhlc = "0.7"
+uuid = "1.18"
 
 [dependencies.corro-agent]
 git = "https://github.com/EmbarkStudios/corrosion"
@@ -43,7 +46,3 @@ branch = "update-more"
 [dependencies.tripwire]
 git = "https://github.com/EmbarkStudios/corrosion"
 branch = "update-more"
-
-[dev-dependencies]
-
-

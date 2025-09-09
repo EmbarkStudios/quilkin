@@ -1161,6 +1161,7 @@ dependencies = [
  "corro-client",
  "corro-types",
  "data-encoding",
+ "eyre",
  "quilkin-types",
  "rusqlite",
  "serde",
@@ -1169,8 +1170,10 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tracing",
  "tripwire",
  "uhlc",
+ "uuid",
 ]
 
 [[package]]
