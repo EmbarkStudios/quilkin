@@ -156,7 +156,7 @@ impl GameServer {
     }
 
     #[inline]
-    fn tokens(&self) -> std::collections::BTreeSet<Vec<u8>> {
+    fn tokens(&self) -> quilkin_types::TokenSet {
         self.metadata
             .annotations
             .as_ref()

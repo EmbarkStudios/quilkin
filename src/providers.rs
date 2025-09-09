@@ -320,10 +320,9 @@ impl Providers {
                     crate::net::endpoint::Endpoint::with_metadata(
                         (*sa).into(),
                         crate::net::endpoint::Metadata {
-                            tokens: quilkin_types::TokenSet::from_iter(
-                                (start..(start + count))
-                                    .map(|i| i.to_le_bytes()[..tt.length].to_vec()),
-                            ),
+                            tokens: (start..(start + count))
+                                .map(|i| i.to_le_bytes()[..tt.length].to_vec())
+                                .collect(),
                         },
                     )
                 })

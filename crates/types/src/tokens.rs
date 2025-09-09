@@ -1,7 +1,14 @@
 use std::collections::BTreeSet;
 
 #[derive(Default, Debug, PartialEq, Clone, PartialOrd, Eq, Hash, schemars::JsonSchema)]
-pub struct TokenSet(BTreeSet<Vec<u8>>);
+pub struct TokenSet(pub BTreeSet<Vec<u8>>);
+
+impl TokenSet {
+    #[inline]
+    pub fn iter(&self) -> std::collections::btree_set::Iter<'_, Vec<u8>> {
+        self.0.iter()
+    }
+}
 
 impl IntoIterator for TokenSet {
     type IntoIter = std::collections::btree_set::IntoIter<Vec<u8>>;
@@ -15,6 +22,18 @@ impl IntoIterator for TokenSet {
 impl FromIterator<Vec<u8>> for TokenSet {
     fn from_iter<T: IntoIterator<Item = Vec<u8>>>(iter: T) -> Self {
         Self(BTreeSet::from_iter(iter))
+    }
+}
+
+impl<const N: usize, const N2: usize> From<[[u8; N]; N2]> for TokenSet {
+    fn from(value: [[u8; N]; N2]) -> Self {
+        value.into_iter().map(|v| v.to_vec()).collect()
+    }
+}
+
+impl<const N: usize> From<[Vec<u8>; N]> for TokenSet {
+    fn from(value: [Vec<u8>; N]) -> Self {
+        value.into_iter().collect()
     }
 }
 

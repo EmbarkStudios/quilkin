@@ -1,4 +1,7 @@
-use std::{fmt, net::IpAddr};
+use std::{
+    fmt,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+};
 
 /// The kind of address, such as Domain Name or IP address. **Note** that
 /// the `FromStr` implementation doesn't actually validate that the name is
@@ -10,6 +13,36 @@ use std::{fmt, net::IpAddr};
 pub enum AddressKind {
     Name(String),
     Ip(IpAddr),
+}
+
+impl From<IpAddr> for AddressKind {
+    fn from(value: IpAddr) -> Self {
+        Self::Ip(value)
+    }
+}
+
+impl From<Ipv4Addr> for AddressKind {
+    fn from(value: Ipv4Addr) -> Self {
+        Self::Ip(value.into())
+    }
+}
+
+impl From<Ipv6Addr> for AddressKind {
+    fn from(value: Ipv6Addr) -> Self {
+        Self::Ip(value.into())
+    }
+}
+
+impl From<String> for AddressKind {
+    fn from(value: String) -> Self {
+        Self::Name(value)
+    }
+}
+
+impl<'s> From<&'s str> for AddressKind {
+    fn from(value: &'s str) -> Self {
+        Self::Name(value.to_owned())
+    }
 }
 
 impl std::str::FromStr for AddressKind {

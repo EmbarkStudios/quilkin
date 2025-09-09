@@ -3,6 +3,21 @@ use std::fmt;
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct IcaoCode([u8; 4]);
 
+impl IcaoCode {
+    /// Creates a new Icao from raw bytes
+    ///
+    /// This is meant for testing, and asserts if any of the characters are not valid
+    pub fn new_testing(code: [u8; 4]) -> Self {
+        const VALID_RANGE: std::ops::RangeInclusive<u8> = b'A'..=b'Z';
+
+        for c in code {
+            assert!(VALID_RANGE.contains(&c));
+        }
+
+        Self(code)
+    }
+}
+
 impl AsRef<str> for IcaoCode {
     fn as_ref(&self) -> &str {
         // SAFETY: We don't allow this to be constructed with an invalid utf-8 string

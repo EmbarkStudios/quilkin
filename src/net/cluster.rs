@@ -180,7 +180,7 @@ impl EndpointSet {
         for ep in &self.endpoints {
             ep.hash(&mut hasher);
 
-            for tok in &ep.metadata.known.tokens {
+            for tok in ep.metadata.known.tokens.iter() {
                 let hash = gxhash::gxhash64(tok, HASH_SEED);
                 token_map
                     .entry(hash)
@@ -200,7 +200,7 @@ impl EndpointSet {
 
         // This is only called on proxies, so calculate a token map
         for ep in &self.endpoints {
-            for tok in &ep.metadata.known.tokens {
+            for tok in ep.metadata.known.tokens.iter() {
                 let hash = gxhash::gxhash64(tok, HASH_SEED);
                 token_map
                     .entry(hash)
