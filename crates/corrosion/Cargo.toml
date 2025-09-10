@@ -25,24 +25,24 @@ uuid = "1.18"
 
 [dependencies.corro-agent]
 git = "https://github.com/EmbarkStudios/corrosion"
-branch = "update-more"
+branch = "misc"
 
 [dependencies.corro-api-types]
 git = "https://github.com/EmbarkStudios/corrosion"
-branch = "update-more"
+branch = "misc"
 
 [dependencies.corro-client]
 git = "https://github.com/EmbarkStudios/corrosion"
-branch = "update-more"
+branch = "misc"
 
 [dependencies.corro-types]
 git = "https://github.com/EmbarkStudios/corrosion"
-branch = "update-more"
+branch = "misc"
 
 [dependencies.spawn]
 git = "https://github.com/EmbarkStudios/corrosion"
-branch = "update-more"
+branch = "misc"
 
 [dependencies.tripwire]
 git = "https://github.com/EmbarkStudios/corrosion"
-branch = "update-more"
+branch = "misc"
