@@ -538,33 +538,56 @@ impl Config {
                     });
                 }
                 ResourceType::Datacenter => {
+                    // The Datacenter xDS resource has two distinct propagation
+                    // scenarios.
+                    //
+                    // Normally, the xDS resource `name` will be set to the ip
+                    // address of the datacenter. However, when quilkin wants
+                    // to propagate 'self' as a Datacenter, it doesn't have
+                    // access to its own external IP address. Then the
+                    // QUILKIN_SERVICE_ID (defaults to hostname) is used as the
+                    // `name` instead.
+                    //
+                    // The `name` is used as the key in the version map on the
+                    // xDS client, so as long as they are unique this should be
+                    // ok.
+
+                    #[inline]
+                    fn resource_version(icao_code: &str, qcmp_port: u16) -> String {
+                        format!("{icao_code}-{qcmp_port}")
+                    }
+
                     if let Some(qport) = self.dyn_cfg.qcmp_port() {
-                        let name = self.dyn_cfg.icao_code.load().to_string();
+                        let id = self.dyn_cfg.id.lock().to_string();
+                        let icao_code = self.dyn_cfg.icao_code.load().to_string();
                         let qcmp_port = qport.load();
-                        let port_s = qcmp_port.to_string();
+                        let version = resource_version(icao_code.as_str(), qcmp_port);
 
-                        let resource =
-                            xds::Resource::Datacenter(crate::net::cluster::proto::Datacenter {
-                                qcmp_port: qcmp_port as _,
-                                icao_code: name.clone(),
-                                host: String::new(),
+                        if !client_state.version_matches(&id, &version) {
+                            let resource =
+                                xds::Resource::Datacenter(crate::net::cluster::proto::Datacenter {
+                                    qcmp_port: qcmp_port as _,
+                                    icao_code: icao_code.clone(),
+                                    host: String::new(),
+                                });
+
+                            resources.push(XdsResource {
+                                name: id,
+                                version,
+                                resource: Some(resource.try_encode()?),
+                                aliases: Vec::new(),
+                                ttl: None,
+                                cache_control: None,
                             });
-
-                        resources.push(XdsResource {
-                            name,
-                            version: port_s,
-                            resource: Some(resource.try_encode()?),
-                            aliases: Vec::new(),
-                            ttl: None,
-                            cache_control: None,
-                        });
+                        }
                     }
 
                     if let Some(datacenters) = self.dyn_cfg.datacenters() {
                         for entry in datacenters.read().iter() {
                             let host = entry.key().to_string();
                             let qcmp_port = entry.qcmp_port;
-                            let version = format!("{}-{qcmp_port}", entry.icao_code);
+                            let version =
+                                resource_version(entry.icao_code.to_string().as_str(), qcmp_port);
 
                             if client_state.version_matches(&host, &version) {
                                 continue;
@@ -574,12 +597,12 @@ impl Config {
                                 crate::net::cluster::proto::Datacenter {
                                     qcmp_port: qcmp_port as _,
                                     icao_code: entry.icao_code.to_string(),
-                                    host,
+                                    host: host.clone(),
                                 },
                             );
 
                             resources.push(XdsResource {
-                                name: entry.icao_code.to_string(),
+                                name: host,
                                 version,
                                 resource: Some(resource.try_encode()?),
                                 aliases: Vec::new(),
