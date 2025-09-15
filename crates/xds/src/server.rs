@@ -636,8 +636,6 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                     tracing::info!("xds stream terminated");
                 }
 
-                local.clear(&config, Some(remote_addr));
-
                 res
             }
             .instrument(tracing::trace_span!("handle_delta_discovery_response")),

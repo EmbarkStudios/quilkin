@@ -53,22 +53,6 @@ impl LocalVersions {
             panic!("unable to retrieve `{ty}` versions, available versions are {versions:?}");
         }
     }
-
-    #[inline]
-    pub fn clear<C: crate::config::Configuration>(
-        &self,
-        config: &Arc<C>,
-        remote_addr: Option<std::net::IpAddr>,
-    ) {
-        for (type_url, map) in &self.versions {
-            let mut map = map.lock();
-            let remove = map.keys().cloned().collect::<Vec<_>>();
-            if let Err(error) = config.apply_delta(type_url, vec![], &remove, remote_addr) {
-                tracing::warn!(%error, count = remove.len(), type_url, "failed to remove resources upon connection loss");
-            }
-            map.clear();
-        }
-    }
 }
 
 pub struct ClientState {

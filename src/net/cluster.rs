@@ -548,6 +548,17 @@ where
     }
 
     #[inline]
+    pub fn remove_contributor(&self, remote_addr: Option<std::net::IpAddr>) {
+        self.localities.retain(|k, v| {
+            let keep = *v != remote_addr;
+            if !keep {
+                tracing::debug!(locality=?k, ?remote_addr, "removing locality contributor");
+            }
+            keep
+        });
+    }
+
+    #[inline]
     pub fn remove_locality(
         &self,
         remote_addr: Option<std::net::IpAddr>,

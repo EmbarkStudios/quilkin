@@ -335,6 +335,13 @@ impl quilkin_xds::config::Configuration for Config {
                 dc.remove(ip);
             });
         }
+        if let Some(cl) = self.dyn_cfg.clusters() {
+            cl.modify(|cl| {
+                // Make sure we remove this agent as a contributor to any locality that it has
+                // contributed endpoints for
+                cl.remove_contributor(Some(ip));
+            });
+        }
     }
 }
 
