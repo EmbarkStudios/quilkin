@@ -620,6 +620,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
             let mut stream = stream;
             let mut resource_subscriptions = resource_subscriptions;
 
+            is_healthy.store(true, Ordering::SeqCst);
             loop {
                 tracing::info!(%control_plane, "creating discovery response handler");
                 let mut response_stream = crate::config::handle_delta_discovery_responses(
@@ -638,8 +639,6 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
 
                     match next_response.await {
                         Ok(Some(Ok(response))) => {
-                            is_healthy.store(true, Ordering::SeqCst);
-
                             let node_id = if let Some(node) = &response.node {
                                 node.id.clone()
                             } else {
@@ -721,6 +720,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
                     return Err(error.wrap_err("refresh failed"));
                 }
                 tracing::info!(%control_plane, "xDS connection refreshed");
+                is_healthy.store(true, Ordering::SeqCst);
             }
         }
         .instrument(tracing::trace_span!("xds_client_stream", client_id)),
