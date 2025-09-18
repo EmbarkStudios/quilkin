@@ -41,6 +41,9 @@ use dashmap::DashMap;
 
 use crate::config::{self, IcaoCode};
 
+/// The number of consecutive ping failures after which we will inform that this is a bad node
+const BAD_NODE_THRESHOLD: u64 = 10;
+
 pub fn spawn<M: Clone + Measurement + Sync + Send + 'static>(
     listener: crate::net::TcpListener,
     datacenters: config::Watch<config::DatacenterMap>,
@@ -290,6 +293,7 @@ pub struct Inner<M> {
         tokio::sync::watch::Sender<()>,
         tokio::sync::watch::Receiver<()>,
     ),
+    bad_node_informer: Option<crate::config::BadNodeInformer>,
 }
 
 impl<M: Measurement + 'static> Phoenix<M> {
@@ -324,6 +328,13 @@ impl<M: Measurement + 'static> Phoenix<M> {
                     let consecutive_errors = node.consecutive_errors();
                     if consecutive_errors > 3 {
                         tracing::warn!(%address, %error, %consecutive_errors, "error measuring distance");
+                        if consecutive_errors > BAD_NODE_THRESHOLD {
+                            if let Some(bad_node_informer) = self.bad_node_informer.as_ref() {
+                                if let Err(error) = bad_node_informer.send(address) {
+                                    tracing::warn!(%address, %error, %consecutive_errors, "failed to inform about bad node");
+                                }
+                            }
+                        }
                     } else {
                         tracing::debug!(%address, %error, "error measuring distance");
                     }
@@ -499,6 +510,7 @@ pub struct Builder<M> {
     adjustment_duration: Option<Duration>,
     interval_range: Option<Range<Duration>>,
     subset_percentage: Option<f64>,
+    bad_node_informer: Option<crate::config::BadNodeInformer>,
 }
 
 impl<M: Measurement> Builder<M> {
@@ -516,6 +528,7 @@ impl<M: Measurement> Builder<M> {
             adjustment_duration: None,
             interval_range: None,
             subset_percentage: None,
+            bad_node_informer: None,
         }
     }
 
@@ -553,6 +566,12 @@ impl<M: Measurement> Builder<M> {
         self
     }
 
+    /// Inform about bad nodes that don't respond to pings.
+    pub fn inform_bad_nodes(mut self, bad_node_informer: crate::config::BadNodeInformer) -> Self {
+        self.bad_node_informer = Some(bad_node_informer);
+        self
+    }
+
     pub fn build(self) -> Phoenix<M> {
         Phoenix {
             inner: Arc::new(Inner {
@@ -567,6 +586,7 @@ impl<M: Measurement> Builder<M> {
                 interval_range: self.interval_range.unwrap_or(Self::DEFAULT_INTERVAL_RANGE),
                 subset_percentage: self.subset_percentage.unwrap_or(Self::DEFAULT_SUBSET),
                 update_watcher: tokio::sync::watch::channel(()),
+                bad_node_informer: self.bad_node_informer,
             }),
         }
     }

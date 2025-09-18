@@ -74,11 +74,15 @@ impl LeaderLock {
     }
 }
 
+pub type BadNodeInformer = tokio::sync::mpsc::UnboundedSender<std::net::SocketAddr>;
+
 base64_serde_type!(pub Base64Standard, base64::engine::general_purpose::STANDARD);
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 pub struct Config {
     pub dyn_cfg: DynamicConfig,
+    bad_node_informer: Option<BadNodeInformer>,
+    cancellation_token: Option<tokio_util::sync::CancellationToken>,
 }
 
 #[cfg(test)]
@@ -356,7 +360,18 @@ fn resolve_id(id: Option<String>) -> String {
         .unwrap_or_else(uuid)
 }
 
+impl Drop for Config {
+    fn drop(&mut self) {
+        if let Some(token) = &self.cancellation_token {
+            token.cancel();
+        }
+    }
+}
+
 impl Config {
+    /// Creates and initializes a new Config
+    ///
+    /// This constructor is mainly intended for tests
     pub fn new(
         id: Option<String>,
         icao_code: IcaoCode,
@@ -370,6 +385,8 @@ impl Config {
                 icao_code: NotifyingIcaoCode::new(icao_code),
                 typemap: default_typemap(),
             },
+            bad_node_informer: None,
+            cancellation_token: None,
         };
         providers.init_config(&mut config);
         service.init_config(&mut config);
@@ -377,8 +394,75 @@ impl Config {
         config
     }
 
+    /// Creates and initializes a new Arc<Config>
+    ///
+    /// Spawns a tokio task as a side effect that will be stopped when the cancellation token is
+    /// cancelled. The token _will_ be cancelled when Config is dropped, so make sure to pass in a
+    /// child token if the token is intended to live longer than the Config.
+    pub fn new_rc(
+        id: Option<String>,
+        icao_code: IcaoCode,
+        providers: &crate::Providers,
+        service: &crate::Service,
+        cancellation_token: tokio_util::sync::CancellationToken,
+    ) -> Arc<Self> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<std::net::SocketAddr>();
+
+        let mut config = Self::new(id, icao_code, providers, service);
+        config.cancellation_token = Some(cancellation_token);
+        config.bad_node_informer = Some(tx);
+
+        let config = Arc::new(config);
+        config
+            .spawn_janitor(rx)
+            .expect("spawn_janitor() from new_rc() should not fail");
+
+        config
+    }
+
+    /// Spawns a janitor task to help out with cleaning stale Datacenter entries from the Config
+    fn spawn_janitor(
+        self: &Arc<Config>,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<std::net::SocketAddr>,
+    ) -> eyre::Result<()> {
+        let cancellation_token = self
+            .cancellation_token
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("cancellation token not set"))?
+            .clone();
+
+        // Ensure that we don't keep an owning reference to Arc<Config> so that Drop can occurr
+        let janitor_config_ref = Arc::downgrade(self);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = cancellation_token.cancelled() => {
+                        break;
+                    }
+                    node = rx.recv() => {
+                        if let Some(node) = node {
+                            let ip = node.ip();
+                            if let Some(config) = janitor_config_ref.upgrade() {
+                                if let Some(datacenters) = config.dyn_cfg.datacenters() {
+                                    datacenters.modify(|wg| {
+                                        tracing::warn!(%ip, "removing datacenter from local state");
+                                        wg.remove(ip);
+                                    });
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            tracing::trace!("Stopping janitor task");
+        });
+        Ok(())
+    }
+
     pub fn read_config(
-        &mut self,
+        self: &Arc<Self>,
         config_path: &std::path::Path,
         locality: Option<crate::net::endpoint::Locality>,
     ) -> Result<(), eyre::Error> {
@@ -407,6 +491,10 @@ impl Config {
         self.update_from_json(json, locality)?;
 
         Ok(())
+    }
+
+    pub fn get_bad_node_informer(&self) -> Option<BadNodeInformer> {
+        self.bad_node_informer.clone()
     }
 
     /// Given a list of subscriptions and the current state of the calling client,

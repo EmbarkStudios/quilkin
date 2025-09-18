@@ -39,6 +39,20 @@ pub fn channel() -> (ShutdownTx, ShutdownRx) {
     tokio::sync::watch::channel(())
 }
 
+/// Adapter method to create a `CancellationToken` that will be cancelled when the `ShutdownRx`
+/// watch channel is changed.
+///
+/// Spawns a tokio task so avoid calling more than once, clone the token instead.
+pub fn cancellation_token(mut rx: ShutdownRx) -> tokio_util::sync::CancellationToken {
+    let shutdown_token = tokio_util::sync::CancellationToken::new();
+    let task_token = shutdown_token.clone();
+    tokio::spawn(async move {
+        let _ = rx.changed().await;
+        task_token.cancel();
+    });
+    shutdown_token
+}
+
 pub struct ShutdownHandler {
     tx: ShutdownTx,
     rx: ShutdownRx,

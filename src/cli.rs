@@ -257,18 +257,19 @@ impl Cli {
         tracing::debug!(cli = ?self, "config parameters");
 
         let locality = self.locality.locality();
+        let shutdown_handler = crate::signal::spawn_handler();
+        let drive_token = crate::signal::cancellation_token(shutdown_handler.shutdown_rx());
 
-        let mut config = crate::Config::new(
+        let config = crate::Config::new_rc(
             self.service.id.clone(),
             self.locality.icao_code,
             &self.providers,
             &self.service,
+            drive_token.child_token(),
         );
         config.read_config(&self.config, locality.clone())?;
-        let config = Arc::new(config);
 
         let ready = Arc::<std::sync::atomic::AtomicBool>::default();
-        let shutdown_handler = crate::signal::spawn_handler();
         if self.admin.enabled {
             crate::components::admin::server(
                 config.clone(),

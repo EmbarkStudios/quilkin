@@ -97,18 +97,20 @@ mod tests {
     async fn basic() {
         let providers = Default::default();
         let service = Default::default();
-        let source = Arc::new(crate::Config::new(
+        let source = crate::Config::new_rc(
             Some("basic".into()),
             Default::default(),
             &providers,
             &service,
-        ));
-        let dest = Arc::new(crate::Config::new(
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let dest = crate::Config::new_rc(
             Some("basic".into()),
             Default::default(),
             &providers,
             &service,
-        ));
+            tokio_util::sync::CancellationToken::new(),
+        );
         assert_eq!(source, dest);
 
         let tmp_dir = tempfile::tempdir().unwrap();

@@ -26,7 +26,7 @@ async fn health_server() {
     let mut t = TestHelper::default();
 
     // create server configuration
-    let server_config = std::sync::Arc::new(TestHelper::new_config());
+    let server_config = TestHelper::new_config();
     server_config
         .dyn_cfg
         .clusters()

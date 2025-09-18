@@ -292,14 +292,15 @@ impl TestHelper {
         addr.into()
     }
 
-    pub fn new_config() -> Config {
+    pub fn new_config() -> Arc<Config> {
         let providers = crate::Providers::default();
         let service = crate::Service::builder().udp().qcmp();
-        crate::Config::new(
+        crate::Config::new_rc(
             Some("test-server".into()),
             Default::default(),
             &providers,
             &service,
+            tokio_util::sync::CancellationToken::new(),
         )
     }
 

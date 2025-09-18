@@ -31,7 +31,7 @@ async fn proxy_ping() {
         to: vec![(Ipv4Addr::UNSPECIFIED, 0).into()],
         ..<_>::default()
     };
-    let server_config = std::sync::Arc::new(TestHelper::new_config());
+    let server_config = TestHelper::new_config();
     t.run_server(server_config, Some(server_proxy), None).await;
     ping(qcmp_port).await;
 }

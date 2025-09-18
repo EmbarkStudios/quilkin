@@ -356,11 +356,19 @@ impl Service {
         };
 
         tracing::info!(port=%self.qcmp_port, "starting phoenix service");
-        let phoenix = crate::net::TcpListener::bind(Some(self.phoenix_port))?;
+        let phoenix = {
+            let mut builder =
+                crate::net::phoenix::Phoenix::builder(crate::codec::qcmp::QcmpTransceiver::new()?);
+            if let Some(informer) = config.get_bad_node_informer() {
+                builder = builder.inform_bad_nodes(informer);
+            }
+            builder.build()
+        };
+        let phoenix_listener = crate::net::TcpListener::bind(Some(self.phoenix_port))?;
         let finalizer = crate::net::phoenix::spawn(
-            phoenix,
+            phoenix_listener,
             datacenters.clone(),
-            crate::net::phoenix::Phoenix::new(crate::codec::qcmp::QcmpTransceiver::new()?),
+            phoenix,
             shutdown.shutdown_rx(),
         )?;
 
