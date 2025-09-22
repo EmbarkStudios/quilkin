@@ -306,41 +306,9 @@ impl<M: Measurement + 'static> Phoenix<M> {
     }
 
     async fn update(&self, mut current_interval: std::time::Duration) -> std::time::Duration {
-        let mut total_difference = 0;
-        let mut count = 0;
-
         let nodes = self.select_nodes_to_probe();
 
-        for address in nodes {
-            let Some(mut node) = self.nodes.get_mut(&address) else {
-                tracing::debug!(%address, "node removed between selection and measurement");
-                continue;
-            };
-
-            match self.measurement.measure_distance(address).await {
-                Ok(distance) => {
-                    node.adjust_coordinates(distance);
-                    total_difference += distance.total_nanos();
-                    count += 1;
-                }
-                Err(error) => {
-                    node.increase_error_estimate();
-                    let consecutive_errors = node.consecutive_errors();
-                    if consecutive_errors > 3 {
-                        tracing::warn!(%address, %error, %consecutive_errors, "error measuring distance");
-                        if consecutive_errors > BAD_NODE_THRESHOLD {
-                            if let Some(bad_node_informer) = self.bad_node_informer.as_ref() {
-                                if let Err(error) = bad_node_informer.send(address) {
-                                    tracing::warn!(%address, %error, %consecutive_errors, "failed to inform about bad node");
-                                }
-                            }
-                        }
-                    } else {
-                        tracing::debug!(%address, %error, "error measuring distance");
-                    }
-                }
-            }
-        }
+        let (count, total_difference) = self.measure_nodes(nodes).await;
 
         if count > 0 {
             let avg_difference_ns = total_difference / count;
@@ -413,28 +381,50 @@ impl<M: Measurement + 'static> Phoenix<M> {
             .collect()
     }
 
-    #[cfg(test)]
-    async fn measure_all_nodes(&self) {
-        for address in self
-            .nodes
-            .iter()
-            .map(|entry| *entry.key())
-            .collect::<Vec<_>>()
-        {
-            match self.nodes.get_mut(&address) {
-                Some(mut node) => {
-                    let Ok(distance) = self.measurement.measure_distance(address).await else {
-                        continue;
-                    };
+    async fn measure_nodes(&self, nodes: Vec<SocketAddr>) -> (i64, i64) {
+        let mut total_difference = 0;
+        let mut count = 0;
+        for address in nodes {
+            let Some(mut node) = self.nodes.get_mut(&address) else {
+                tracing::debug!(%address, "node removed between selection and measurement");
+                continue;
+            };
+
+            match self.measurement.measure_distance(address).await {
+                Ok(distance) => {
                     node.adjust_coordinates(distance);
+                    total_difference += distance.total_nanos();
+                    count += 1;
                 }
-                _ => {
-                    self.nodes.entry(address).and_modify(|node| {
-                        node.increase_error_estimate();
-                    });
+                Err(error) => {
+                    node.increase_error_estimate();
+                    let consecutive_errors = node.consecutive_errors();
+                    if consecutive_errors > 3 {
+                        tracing::warn!(%address, %error, %consecutive_errors, "error measuring distance");
+                        if consecutive_errors > BAD_NODE_THRESHOLD {
+                            if let Some(bad_node_informer) = self.bad_node_informer.as_ref() {
+                                if let Err(error) = bad_node_informer.send(address) {
+                                    tracing::warn!(%address, %error, %consecutive_errors, "failed to inform about bad node");
+                                }
+                            }
+                        }
+                    } else {
+                        tracing::debug!(%address, %error, "error measuring distance");
+                    }
                 }
             }
         }
+        (count, total_difference)
+    }
+
+    #[cfg(test)]
+    async fn measure_all_nodes(&self) {
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|entry| *entry.key())
+            .collect::<Vec<_>>();
+        let _ = self.measure_nodes(nodes).await;
     }
 
     pub fn get_coordinates(&self, address: &SocketAddr) -> Option<Coordinates> {
@@ -982,6 +972,40 @@ mod tests {
         assert_eq!(ordered_nodes.len(), 1);
         assert_eq!(ordered_nodes[0].0, abcd());
         assert!(ordered_nodes[0].1 >= 100.);
+    }
+
+    #[tokio::test]
+    async fn bad_nodes_reported() {
+        let ok_node = "127.0.0.1:8080".parse().unwrap();
+        let bad_node = "127.0.0.1:8081".parse().unwrap();
+        let latencies =
+            HashMap::from([(ok_node, (100, 100).into()), (bad_node, (200, 200).into())]);
+        let failed_addresses = Arc::new(Mutex::new(HashSet::from([bad_node])));
+        let measurement = FailedAddressesMock {
+            latencies,
+            failed_addresses,
+        };
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let phoenix = Phoenix::builder(measurement).inform_bad_nodes(tx).build();
+
+        phoenix.add_node(ok_node, abcd());
+        phoenix.add_node(bad_node, efgh());
+
+        for _ in 0..(BAD_NODE_THRESHOLD) {
+            phoenix.measure_all_nodes().await;
+        }
+
+        // Check that we haven't informed yet
+        assert!(rx.try_recv().is_err());
+
+        // But one more measurement brings it over the threshold
+        phoenix.measure_all_nodes().await;
+
+        let result = rx.try_recv();
+        assert!(result.is_ok());
+        let node = result.unwrap();
+        assert_eq!(node, bad_node);
     }
 
     #[tokio::test]
