@@ -1,12 +1,13 @@
 This is an unreal engine 5 plugin for Quilkin, a UDP proxy for gameservers. The plugin provides several features that you can use with Quilkin deployments, such as proxying game traffic, and latency measurement.
 
-You can also find guide level documentation on how the proxy works in the [Quilkin Book](https://googleforgames.github.io/quilkin/main/book/).
+You can also find guide level documentation on how the proxy works in the [Quilkin Book](https://embarkstudios.github.io/quilkin/main/book/).
 
 ### Installation
 
 Copy this plugin to your `Plugins` folder in your `Engine` directory.
 
 ### Configuration
+
 Static configuration is available in the editor through `UQuilkinDeveloperSettings` in "Project Settings".
 
 Dynamic configuration is available through `UQuilkinConfigSubsystem`, it is initialised from the settings provided in `UQuilkinDeveloperSettings`, but can also be updated in code, and users can bind individual properties to delegates allowing them to dynamically set based on custom logic.
@@ -22,13 +23,14 @@ Dynamic configuration is available through `UQuilkinConfigSubsystem`, it is init
 
 - `TArray<FQuilkinEndpoint> Endpoints` A set of Quilkin load balancer endpoints that can be used for the following features.
 - `bool MeasureEndpoints` When enabled, the plugin will start a new `Tick` task that executes at a fixed interval (currently 30 seconds), where it will spawn a new background task that will ping each endpoint in `Endpoints`, and track its measurement in a fixed size circular buffer.
-   Pings are handled through Quilkin Control Message Protocol, this is a bespoke protocol for UDP to be able to support situations where for example using ICMP is not possible, see the [Quilkin Book](https://googleforgames.github.io/quilkin/main/book/services/proxy/qcmp.html) for more details on the protocol data unit.
+   Pings are handled through Quilkin Control Message Protocol, this is a bespoke protocol for UDP to be able to support situations where for example using ICMP is not possible, see the [Quilkin Book](https://embarkstudios.github.io/quilkin/main/book/services/proxy/qcmp.html) for more details on the protocol data unit.
    **Note** `MeasureEndpoints` is orthogonal to `Enabled` and `UseEndpoints` meaning that you can use `MeasureEndpoints` for latency measurements without being required to also use Quilkin for game traffic.
 - `bool UseEndpoints` Whether to use `Endpoints` for game traffic. When enabled, instead of using the provided `FInternetAddr`, the plugin will choose the lowest latency endpoint available and send traffic through that endpoint to connect to the gameserver, and if the latency should exceed `JitterThreshold` then the plugin will attempt to redirect traffic to the next available endpoint with the lowest latency.
 
 ### Delegates
+
 Quilkin exposes a number of delegates to be able to access certain information, they can be accessed through the `FQuilkinDelegates` class.
 
 - `GetQuilkinEndpointMeasurements` returns `TArray<EndpointPair>` representing each endpoint set in `Endpoints` with their median latency. The array will be empty if no endpoints have been set and `MeasureEndpoints` is not enabled.
 
-- `GetLowestLatencyEndpoint` returns `TOptional<EndpointPair>` is a specialisation of `GetQuilkinEndpointMeasurements` returning the lowest latency endpoint and its median latency. The delegate will return `None` if the array is empty and `MeasureEndpoints` is not enabled. 
+- `GetLowestLatencyEndpoint` returns `TOptional<EndpointPair>` is a specialisation of `GetQuilkinEndpointMeasurements` returning the lowest latency endpoint and its median latency. The delegate will return `None` if the array is empty and `MeasureEndpoints` is not enabled.
