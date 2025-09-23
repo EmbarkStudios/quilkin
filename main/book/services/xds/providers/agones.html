@@ -24,28 +24,41 @@
         <link rel="stylesheet" href="../../../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="../../../highlight.css">
-        <link rel="stylesheet" href="../../../tomorrow-night.css">
-        <link rel="stylesheet" href="../../../ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="../../../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../../../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../../../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
 
-        <!-- Provide site root to javascript -->
+        <!-- Provide site root and default themes to javascript -->
         <script>
-            var path_to_root = "../../../";
-            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+            const path_to_root = "../../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../../searchindex.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../toc.js"></script>
     </head>
     <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
     <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
             try {
-                var theme = localStorage.getItem('mdbook-theme');
-                var sidebar = localStorage.getItem('mdbook-sidebar');
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
 
                 if (theme.startsWith('"') && theme.endsWith('"')) {
                     localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
@@ -59,7 +72,8 @@
 
         <!-- Set the theme before any content is loaded, prevents flash -->
         <script>
-            var theme;
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
             const html = document.documentElement;
@@ -72,17 +86,20 @@
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
-            var sidebar = null;
-            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            sidebar_toggle.checked = sidebar === 'visible';
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
@@ -109,13 +126,14 @@
                             <i class="fa fa-paint-brush"></i>
                         </button>
                         <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
                         </button>
                     </div>
@@ -132,7 +150,12 @@
 
                 <div id="search-wrapper" class="hidden">
                     <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
                     </form>
                     <div id="searchresults-outer" class="searchresults-outer hidden">
                         <div id="searchresults-header" class="searchresults-header"></div>
@@ -152,26 +175,12 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="agones-xds-provider"><a class="header" href="#agones-xds-provider">Agones xDS Provider</a></h1>
-<p>The <a href="https://agones.dev">Agones</a> xDS Provider is built to simplify Quilkin integration with Agones
+                        <h1 id="agones-provider"><a class="header" href="#agones-provider">Agones Provider</a></h1>
+<p>The <a href="https://agones.dev">Agones</a> Provider is built to simplify Quilkin integration with Agones
 game server hosting on top of <a href="https://kubernetes.io">Kubernetes</a>.</p>
 <p>This provider watches for changes in Agones
 <a href="https://agones.dev/site/docs/getting-started/create-gameserver/"><code>GameServer</code> resources</a> in a cluster, and
 utilises that information to provide <a href="../../proxy.html#endpoints">Endpoint</a> information to connected Quilkin proxies.</p>
-<p>To view all the options for the agones provider subcommand, run:</p>
-<pre><code class="language-shell">$ quilkin manage agones --help
-Watches Agones' game server CRDs for `Allocated` game server endpoints, and for a `ConfigMap` that specifies the filter configuration
-
-Usage: quilkin manage agones [OPTIONS]
-
-Options:
-  -c, --config-namespace &lt;CONFIG_NAMESPACE&gt;
-          The namespace under which the configmap is stored [env: QUILKIN_AGONES_CONFIG_NAMESPACE=]
-  -g, --gameservers-namespace &lt;GAMESERVERS_NAMESPACE&gt;
-          The namespace under which the game servers run [env: QUILKIN_AGONES_GAMESERVERS_NAMESPACE=] [default: default]
-  -h, --help
-          Print help
-</code></pre>
 <blockquote>
 <p>Currently, the Agones provider can only discover resources within the cluster it is running in.</p>
 </blockquote>
@@ -222,10 +231,9 @@ data:
 <p>By default the Agones xDS provider will look in the <code>default</code> namespace for this <code>ConfigMap</code>, but it can be
 configured via the <code>--config-namespace</code> argument.</p>
 <h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
-<p>As an example, the following runs the server with subcommnad <code>manage agones</code> against a cluster (using default
-kubeconfig authentication) where Quilkin pods run in the <code>quilkin</code> namespace and <code>GameServer</code> pods run in the
-<code>gameservers</code> namespace:</p>
-<pre><code class="language-sh">quilkin manage agones --config-namespace quilkin --gameservers-namespace gameservers
+<p>As an example, the following runs quilkin against a cluster (using default
+kubeconfig authentication) in the <code>default</code> namespace.</p>
+<pre><code class="language-sh">quilkin --provider.k8s.agones --provider.k8s.agones.namespace=default
 </code></pre>
 <p>For a full referenmce of deploying this provider in a Kubernetes cluster, with appropriate <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Deployments</a>, <a href="https://kubernetes.io/docs/concepts/services-networking/service/">Services</a>,
 and <a href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/">RBAC</a> Rules, there is an <a href="https://github.com/googleforgames/quilkin/tree/main/examples/agones-xonotic-xds">Agones, xDS and Xonotic example</a>.</p>
@@ -234,7 +242,7 @@ and <a href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/">RBAC
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../../../services/xds/metrics.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../../../services/xds.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
@@ -248,7 +256,7 @@ and <a href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/">RBAC
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../../../services/xds/metrics.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../../../services/xds.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
@@ -276,6 +284,7 @@ and <a href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/">RBAC
         <script src="../../../book.js"></script>
 
         <!-- Custom JS scripts -->
+
 
 
     </div>

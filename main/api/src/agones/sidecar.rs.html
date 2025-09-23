@@ -132,11 +132,7 @@
 <a href="#131" id="131">131</a>
 <a href="#132" id="132">132</a>
 <a href="#133" id="133">133</a>
-<a href="#134" id="134">134</a>
-<a href="#135" id="135">135</a>
-<a href="#136" id="136">136</a>
-<a href="#137" id="137">137</a>
-<a href="#138" id="138">138</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#134" id="134">134</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2022 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -157,7 +153,7 @@
     <span class="kw">use crate</span>::{Client, game_server, is_gameserver_ready, quilkin_config_map, quilkin_container};
     <span class="kw">use </span>k8s_openapi::api::core::v1::{ConfigMap, ConfigMapVolumeSource, Volume};
     <span class="kw">use </span>kube::{Api, ResourceExt, api::PostParams, runtime::wait::await_condition};
-    <span class="kw">use </span>quilkin::{config::providers::k8s::agones::GameServer, test::TestHelper};
+    <span class="kw">use </span>quilkin::{providers::k8s::agones::GameServer, test::TestHelper};
     <span class="kw">use </span>std::time::Duration;
     <span class="kw">use </span>tokio::time::timeout;
 
@@ -185,10 +181,7 @@
         <span class="kw">let </span>t = TestHelper::default();
         <span class="kw">let </span>recv = t.open_socket_and_recv_single_packet().<span class="kw">await</span>;
         <span class="kw">let </span>address = <span class="kw">crate</span>::gameserver_address(<span class="kw-2">&amp;</span>gs);
-        recv.socket
-            .send_to(<span class="string">"hello"</span>.as_bytes(), address)
-            .<span class="kw">await
-            </span>.unwrap();
+        recv.socket.send_to(<span class="string">b"hello"</span>, address).<span class="kw">await</span>.unwrap();
 
         <span class="kw">let </span>response = timeout(Duration::from_secs(<span class="number">30</span>), recv.packet_rx)
             .<span class="kw">await
@@ -236,7 +229,7 @@ clusters:
         <span class="kw">let </span>mount_name = <span class="string">"config"</span>.to_string();
         template.containers.push(quilkin_container(
             <span class="kw-2">&amp;</span>client,
-            <span class="prelude-val">Some</span>(<span class="macro">vec!</span>[<span class="string">"proxy"</span>.into()]),
+            <span class="prelude-val">Some</span>(<span class="macro">vec!</span>[<span class="string">"--service.udp"</span>.into(), <span class="string">"--provider.fs"</span>.into()]),
             <span class="prelude-val">Some</span>(mount_name.clone()),
             <span class="bool-val">true</span>,
         ));
@@ -253,19 +246,18 @@ clusters:
         <span class="kw">let </span>gs = gameservers.create(<span class="kw-2">&amp;</span>pp, <span class="kw-2">&amp;</span>gs).<span class="kw">await</span>.unwrap();
         <span class="kw">let </span>name = gs.name_unchecked();
         <span class="kw">let </span>ready = await_condition(gameservers.clone(), name.as_str(), is_gameserver_ready());
-        timeout(Duration::from_secs(<span class="number">30</span>), ready)
-            .<span class="kw">await
-            </span>.expect(<span class="string">"GameServer should be ready"</span>)
-            .unwrap();
+
+        <span class="kw">if </span>timeout(Duration::from_secs(<span class="number">30</span>), ready).<span class="kw">await</span>.is_err() {
+            <span class="kw">crate</span>::debug_pods(<span class="kw-2">&amp;</span>client, <span class="string">"role=gameserver"</span>.into()).<span class="kw">await</span>;
+            <span class="macro">panic!</span>(<span class="string">"GameServer should be ready"</span>);
+        }
+
         <span class="kw">let </span>gs = gameservers.get(name.as_str()).<span class="kw">await</span>.unwrap();
 
         <span class="kw">let </span>t = TestHelper::default();
         <span class="kw">let </span>recv = t.open_socket_and_recv_single_packet().<span class="kw">await</span>;
         <span class="kw">let </span>address = <span class="kw">crate</span>::gameserver_address(<span class="kw-2">&amp;</span>gs);
-        recv.socket
-            .send_to(<span class="string">"hello"</span>.as_bytes(), address)
-            .<span class="kw">await
-            </span>.unwrap();
+        recv.socket.send_to(<span class="string">b"hello"</span>, address).<span class="kw">await</span>.unwrap();
 
         <span class="kw">let </span>response = timeout(Duration::from_secs(<span class="number">30</span>), recv.packet_rx)
             .<span class="kw">await

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ShutdownKind"],"fn":["channel","spawn_handler"],"type":["ShutdownRx","ShutdownTx"]};
+window.SIDEBAR_ITEMS = {"fn":["channel","spawn_handler"],"struct":["ShutdownHandler"],"type":["ShutdownRx","ShutdownTx"]};

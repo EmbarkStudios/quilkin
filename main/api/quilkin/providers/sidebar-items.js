@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["fs","k8s"],"struct":["FiltersAndClusters","Providers"]};

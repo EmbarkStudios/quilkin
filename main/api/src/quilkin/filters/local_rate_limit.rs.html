@@ -406,7 +406,14 @@
 <a href="#405" id="405">405</a>
 <a href="#406" id="406">406</a>
 <a href="#407" id="407">407</a>
-<a href="#408" id="408">408</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#408" id="408">408</a>
+<a href="#409" id="409">409</a>
+<a href="#410" id="410">410</a>
+<a href="#411" id="411">411</a>
+<a href="#412" id="412">412</a>
+<a href="#413" id="413">413</a>
+<a href="#414" id="414">414</a>
+<a href="#415" id="415">415</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -437,10 +444,10 @@
 <span class="kw">use </span><span class="kw">crate</span>::generated::quilkin::filters::local_rate_limit::v1alpha1 <span class="kw">as </span>proto;
 
 <span class="comment">// TODO: we should make these values configurable and transparent to the filter.
-</span><span class="doccomment">/// SESSION_TIMEOUT_SECONDS is the default session timeout.
+</span><span class="doccomment">/// The default session timeout.
 </span><span class="kw">pub const </span>SESSION_TIMEOUT_SECONDS: Duration = Duration::from_secs(<span class="number">60</span>);
 
-<span class="doccomment">/// SESSION_EXPIRY_POLL_INTERVAL is the default interval to check for expired sessions.
+<span class="doccomment">/// The default interval to check for expired sessions.
 </span><span class="kw">const </span>SESSION_EXPIRY_POLL_INTERVAL: Duration = Duration::from_secs(<span class="number">60</span>);
 
 <span class="doccomment">/// Bucket stores two atomics.
@@ -463,10 +470,13 @@
 }
 
 <span class="doccomment">/// A filter that implements rate limiting on packets based on the token-bucket
-/// algorithm.  PacketMuts that violate the rate limit are dropped.  It only
-/// applies rate limiting on packets received from a downstream connection (processed
-/// through [`LocalRateLimit::read`]). PacketMuts coming from upstream endpoints
-/// flow through the filter untouched.
+/// algorithm.
+///
+/// Packets that violate the rate limit are dropped. It only applies rate
+/// limiting on packets received from a downstream connection (processed
+/// through [`Self::read`]).
+///
+/// Packets coming from upstream endpoints flow through the filter untouched.
 </span><span class="kw">pub struct </span>LocalRateLimit {
     <span class="doccomment">/// Tracks rate limiting state per source address.
     </span>state: TtlMap&lt;EndpointAddress, Bucket&gt;,
@@ -475,7 +485,7 @@
 }
 
 <span class="kw">impl </span>LocalRateLimit {
-    <span class="doccomment">/// new returns a new LocalRateLimit. It spawns a future in the background
+    <span class="doccomment">/// new returns a new [`Self`]. It spawns a future in the background
     /// that periodically refills the rate limiter's tokens.
     </span><span class="kw">fn </span>new(config: Config) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, CreationError&gt; {
         <span class="kw">if </span>config.period &lt; <span class="number">1 </span>{
@@ -491,7 +501,11 @@
         })
     }
 
-    <span class="doccomment">/// acquire_token is called on behalf of every packet that is eligible
+    <span class="kw">pub fn </span>testing(config: Config) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new(config).unwrap()
+    }
+
+    <span class="doccomment">/// This is called on behalf of every packet that is eligible
     /// for rate limiting.
     ///
     /// It returns whether there exists a token for the corresponding address in
@@ -581,7 +595,7 @@
     <span class="doccomment">/// The maximum number of packets allowed to be forwarded by the rate
     /// limiter in a given duration.
     </span><span class="kw">pub </span>max_packets: usize,
-    <span class="doccomment">/// The duration in seconds during which max_packets applies. If none is provided, it
+    <span class="doccomment">/// The duration in seconds during which `max_packets` applies. If none is provided, it
     /// defaults to one second.
     </span><span class="kw">pub </span>period: u32,
 }

@@ -310,20 +310,7 @@
 <a href="#309" id="309">309</a>
 <a href="#310" id="310">310</a>
 <a href="#311" id="311">311</a>
-<a href="#312" id="312">312</a>
-<a href="#313" id="313">313</a>
-<a href="#314" id="314">314</a>
-<a href="#315" id="315">315</a>
-<a href="#316" id="316">316</a>
-<a href="#317" id="317">317</a>
-<a href="#318" id="318">318</a>
-<a href="#319" id="319">319</a>
-<a href="#320" id="320">320</a>
-<a href="#321" id="321">321</a>
-<a href="#322" id="322">322</a>
-<a href="#323" id="323">323</a>
-<a href="#324" id="324">324</a>
-<a href="#325" id="325">325</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#312" id="312">312</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2024 Google LLC All Rights Reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -339,19 +326,18 @@
  *  limitations under the License.
  */
 
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>error;
-<span class="kw">pub mod </span>packet_router;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>sessions;
-
-<span class="kw">use </span><span class="kw">super</span>::RunArgs;
-<span class="kw">pub use </span>error::PipelineError;
-<span class="kw">pub use </span>sessions::SessionPool;
-<span class="kw">use </span>std::{
+</span><span class="kw">use </span>std::{
     net::SocketAddr,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+};
+
+<span class="kw">pub use crate</span>::{
+    components::RunArgs,
+    config::IcaoCode,
+    net::{error::PipelineError, sessions::SessionPool},
 };
 
 <span class="attr">#[derive(Clone, Debug)]
@@ -397,8 +383,8 @@
     <span class="kw">pub </span>qcmp: socket2::Socket,
     <span class="kw">pub </span>phoenix: <span class="kw">crate</span>::net::TcpListener,
     <span class="kw">pub </span>notifier: <span class="prelude-ty">Option</span>&lt;tokio::sync::mpsc::UnboundedSender&lt;String&gt;&gt;,
-    <span class="kw">pub </span>xdp: <span class="kw">crate</span>::cli::proxy::XdpOptions,
-    <span class="kw">pub </span>termination_timeout: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::cli::Timeout&gt;,
+    <span class="kw">pub </span>xdp: <span class="kw">crate</span>::service::XdpOptions,
+    <span class="kw">pub </span>termination_timeout: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::cli::Duration&gt;,
 }
 
 <span class="kw">impl </span>Default <span class="kw">for </span>Proxy {
@@ -423,15 +409,16 @@
 }
 
 <span class="kw">impl </span>Proxy {
-    <span class="kw">pub async fn </span>run(
+    <span class="kw">pub fn </span>run(
         <span class="kw-2">mut </span><span class="self">self</span>,
         RunArgs {
             config,
             ready,
-            <span class="kw-2">mut </span>shutdown_rx,
+            shutdown,
         }: RunArgs&lt;Ready&gt;,
         initialized: <span class="prelude-ty">Option</span>&lt;tokio::sync::oneshot::Sender&lt;()&gt;&gt;,
-    ) -&gt; <span class="kw">crate</span>::Result&lt;()&gt; {
+    ) -&gt; <span class="kw">crate</span>::Result&lt;tokio::task::JoinHandle&lt;(<span class="kw">crate</span>::signal::ShutdownHandler, <span class="kw">crate</span>::Result&lt;()&gt;)&gt;&gt;
+    {
         <span class="kw">let </span>_mmdb_task = <span class="self">self</span>.mmdb.as_ref().map(|source| {
             <span class="kw">let </span>source = source.clone();
             tokio::spawn(<span class="kw">async move </span>{
@@ -476,25 +463,22 @@
                             <span class="macro">eyre::bail!</span>(<span class="string">"empty filters were not created"</span>)
                         };
 
-                        filters.store(Arc::new(
-                            <span class="kw">crate</span>::filters::FilterChain::try_create([
-                                <span class="kw">crate</span>::filters::Capture::as_filter_config(
-                                    <span class="kw">crate</span>::filters::capture::Config {
-                                        metadata_key: <span class="kw">crate</span>::filters::capture::CAPTURED_BYTES
-                                            .into(),
-                                        strategy: <span class="kw">crate</span>::filters::capture::Strategy::Suffix(
-                                            <span class="kw">crate</span>::filters::capture::Suffix {
-                                                size: tt.length <span class="kw">as _</span>,
-                                                remove: <span class="bool-val">true</span>,
-                                            },
-                                        ),
-                                    },
-                                )
-                                .unwrap(),
-                                <span class="kw">crate</span>::filters::TokenRouter::as_filter_config(<span class="prelude-val">None</span>).unwrap(),
-                            ])
-                            .unwrap(),
-                        ));
+                        <span class="kw">let </span>fc = <span class="kw">crate</span>::filters::FilterChain::try_create([
+                            <span class="kw">crate</span>::filters::Capture::as_filter_config(
+                                <span class="kw">crate</span>::filters::capture::Config {
+                                    metadata_key: <span class="kw">crate</span>::filters::capture::CAPTURED_BYTES.into(),
+                                    strategy: <span class="kw">crate</span>::filters::capture::Strategy::Suffix(
+                                        <span class="kw">crate</span>::filters::capture::Suffix {
+                                            size: tt.length <span class="kw">as _</span>,
+                                            remove: <span class="bool-val">true</span>,
+                                        },
+                                    ),
+                                },
+                            )<span class="question-mark">?</span>,
+                            <span class="kw">crate</span>::filters::TokenRouter::as_filter_config(<span class="prelude-val">None</span>)<span class="question-mark">?</span>,
+                        ])<span class="question-mark">?</span>;
+
+                        filters.store(fc);
                     }
 
                     <span class="kw">let </span>count = tt.count <span class="kw">as </span>u64;
@@ -525,7 +509,7 @@
             };
 
             clusters.modify(|clusters| {
-                clusters.insert(<span class="prelude-val">None</span>, endpoints);
+                clusters.insert(<span class="prelude-val">None</span>, <span class="prelude-val">None</span>, endpoints);
             });
         }
 
@@ -550,7 +534,6 @@
                 <span class="kw-2">&amp;</span>[
                     (<span class="kw">crate</span>::xds::CLUSTER_TYPE, Vec::new()),
                     (<span class="kw">crate</span>::xds::DATACENTER_TYPE, Vec::new()),
-                    (<span class="kw">crate</span>::xds::LISTENER_TYPE, Vec::new()),
                 ],
             ),
         ];
@@ -568,7 +551,7 @@
                 .name(<span class="string">"proxy-subscription"</span>.into())
                 .spawn({
                     <span class="kw">let </span>config = config.clone();
-                    <span class="kw">let </span><span class="kw-2">mut </span>shutdown_rx = shutdown_rx.clone();
+                    <span class="kw">let </span><span class="kw-2">mut </span>shutdown_rx = shutdown.shutdown_rx();
                     <span class="kw">let </span>management_servers = <span class="self">self</span>.management_servers.clone();
                     <span class="kw">let </span>tx = <span class="self">self</span>.notifier.clone();
 
@@ -586,19 +569,19 @@
                             .unwrap();
 
                         runtime.block_on(<span class="kw">async move </span>{
-                            <span class="kw">let </span>client = <span class="kw">crate</span>::net::xds::AdsClient::connect(
-                                String::clone(<span class="kw-2">&amp;</span>id),
-                                management_servers,
-                            )
-                            .<span class="kw">await</span><span class="question-mark">?</span>;
-
                             <span class="kw">let </span>xds_is_healthy =
                                 ready.xds_is_healthy.read().as_ref().unwrap().clone();
 
-                            <span class="kw">let </span>_stream = client
-                                .delta_subscribe(config.clone(), xds_is_healthy.clone(), tx, SUBS)
-                                .<span class="kw">await
-                                </span>.map_err(|<span class="kw">_</span>| <span class="macro">eyre::eyre!</span>(<span class="string">"failed to acquire delta stream"</span>))<span class="question-mark">?</span>;
+                            <span class="kw">let </span>_stream = <span class="kw">crate</span>::net::xds::delta_subscribe(
+                                config,
+                                id,
+                                management_servers,
+                                xds_is_healthy.clone(),
+                                tx,
+                                SUBS,
+                            )
+                            .<span class="kw">await
+                            </span>.map_err(|_err| <span class="macro">eyre::eyre!</span>(<span class="string">"failed to acquire delta stream"</span>))<span class="question-mark">?</span>;
 
                             <span class="kw">let _ </span>= shutdown_rx.changed().<span class="kw">await</span>;
                             <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, eyre::Error&gt;(())
@@ -620,7 +603,7 @@
         )
         .port();
 
-        <span class="kw">let </span>svc_task = <span class="kw">crate</span>::cli::Service::default()
+        <span class="kw">let </span>svc_task = <span class="kw">crate</span>::Service::default()
             .udp()
             .udp_port(udp_port)
             .xdp(<span class="self">self</span>.xdp)
@@ -629,23 +612,14 @@
             .phoenix()
             .phoenix_port(phoenix_port)
             .termination_timeout(<span class="self">self</span>.termination_timeout)
-            .spawn_services(<span class="kw-2">&amp;</span>config, <span class="kw-2">&amp;</span>shutdown_rx)<span class="question-mark">?</span>;
+            .spawn_services(<span class="kw-2">&amp;</span>config, shutdown)<span class="question-mark">?</span>;
 
         <span class="macro">tracing::info!</span>(<span class="string">"Quilkin is ready"</span>);
         <span class="kw">if let </span><span class="prelude-val">Some</span>(initialized) = initialized {
             <span class="kw">let _ </span>= initialized.send(());
         }
 
-        shutdown_rx
-            .changed()
-            .<span class="kw">await
-            </span>.map_err(|error| <span class="macro">eyre::eyre!</span>(error))<span class="question-mark">?</span>;
-
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Err</span>(error)) = svc_task.<span class="kw">await </span>{
-            <span class="macro">tracing::error!</span>(%error, <span class="string">"Quilkin proxy services exited with error"</span>);
-        }
-
-        <span class="prelude-val">Ok</span>(())
+        <span class="prelude-val">Ok</span>(svc_task)
     }
 }
 </code></pre></div></section></main></body></html>

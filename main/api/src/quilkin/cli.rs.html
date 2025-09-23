@@ -356,7 +356,29 @@
 <a href="#355" id="355">355</a>
 <a href="#356" id="356">356</a>
 <a href="#357" id="357">357</a>
-<a href="#358" id="358">358</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#358" id="358">358</a>
+<a href="#359" id="359">359</a>
+<a href="#360" id="360">360</a>
+<a href="#361" id="361">361</a>
+<a href="#362" id="362">362</a>
+<a href="#363" id="363">363</a>
+<a href="#364" id="364">364</a>
+<a href="#365" id="365">365</a>
+<a href="#366" id="366">366</a>
+<a href="#367" id="367">367</a>
+<a href="#368" id="368">368</a>
+<a href="#369" id="369">369</a>
+<a href="#370" id="370">370</a>
+<a href="#371" id="371">371</a>
+<a href="#372" id="372">372</a>
+<a href="#373" id="373">373</a>
+<a href="#374" id="374">374</a>
+<a href="#375" id="375">375</a>
+<a href="#376" id="376">376</a>
+<a href="#377" id="377">377</a>
+<a href="#378" id="378">378</a>
+<a href="#379" id="379">379</a>
+<a href="#380" id="380">380</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2022 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -377,39 +399,12 @@
 <span class="kw">use </span>clap::builder::TypedValueParser;
 <span class="kw">use </span>clap::crate_version;
 
-<span class="kw">use </span><span class="kw">crate</span>::Config;
 <span class="kw">use </span>strum_macros::{Display, EnumString};
 
-<span class="kw">pub use </span><span class="self">self</span>::{
-    agent::Agent,
-    generate_config_schema::GenerateConfigSchema,
-    manage::Manage,
-    proxy::Proxy,
-    qcmp::Qcmp,
-    relay::Relay,
-    service::{Finalizer, Service},
-};
+<span class="kw">pub use </span><span class="self">self</span>::{generate_config_schema::GenerateConfigSchema, qcmp::Qcmp};
 
-<span class="macro">macro_rules!</span> define_port {
-    (<span class="macro-nonterminal">$port</span>:expr_2021) =&gt; {
-        <span class="kw">pub const </span>PORT: u16 = <span class="macro-nonterminal">$port</span>;
-
-        <span class="kw">pub fn </span>default_port() -&gt; u16 {
-            PORT
-        }
-    };
-}
-
-<span class="kw">pub mod </span>agent;
 <span class="kw">pub mod </span>generate_config_schema;
-<span class="kw">pub mod </span>manage;
-<span class="kw">pub mod </span>proxy;
 <span class="kw">pub mod </span>qcmp;
-<span class="kw">pub mod </span>relay;
-<span class="kw">mod </span>service;
-
-<span class="kw">const </span>ETC_CONFIG_PATH: <span class="kw-2">&amp;</span>str = <span class="string">"/etc/quilkin/quilkin.yaml"</span>;
-<span class="kw">const </span>PORT_ENV_VAR: <span class="kw-2">&amp;</span>str = <span class="string">"QUILKIN_PORT"</span>;
 
 <span class="attr">#[derive(Debug, clap::Parser)]
 #[command(next_help_heading = <span class="string">"Administration Options"</span>)]
@@ -453,6 +448,14 @@
         env = <span class="string">"QUILKIN_LOCALITY_SUB_ZONE"
     </span>)]
     </span><span class="kw">pub </span>sub_zone: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    <span class="doccomment">/// The airport ICAO code for the `region` of the instance. When provided
+    /// enables geomapping metrics of instances.
+    </span><span class="attr">#[clap(
+        long = <span class="string">"locality.icao"</span>,
+        env = <span class="string">"QUILKIN_LOCALITY_ICAO"</span>,
+        default_value_t = <span class="kw">crate</span>::config::IcaoCode::default()
+    )]
+    </span><span class="kw">pub </span>icao_code: <span class="kw">crate</span>::config::IcaoCode,
 }
 
 <span class="kw">impl </span>LocalityCli {
@@ -489,14 +492,24 @@
      .map(|s| s.parse::&lt;LogFormats&gt;().unwrap()),
      )]
     <span class="kw">pub </span>log_format: LogFormats,
+    <span class="doccomment">/// The file prefix used for log files
+    </span><span class="attr">#[clap(
+        long = <span class="string">"sys.log.file-prefix"</span>,
+        env = <span class="string">"QUILKIN_SYS_LOG_FILE_PREFIX"</span>,
+        default_value = <span class="string">"quilkin.log"
+    </span>)]
+    </span><span class="kw">pub </span>log_file_prefix: String,
+    <span class="doccomment">/// An optional log file directory path that quilkin should log to
+    </span><span class="attr">#[clap(long = <span class="string">"sys.log.dir"</span>, env = <span class="string">"QUILKIN_SYS_LOG_DIRECTORY"</span>)]
+    </span><span class="kw">pub </span>log_directory: <span class="prelude-ty">Option</span>&lt;PathBuf&gt;,
     <span class="attr">#[command(flatten)]
     </span><span class="kw">pub </span>admin: AdminCli,
     <span class="attr">#[command(flatten)]
     </span><span class="kw">pub </span>locality: LocalityCli,
     <span class="attr">#[command(flatten)]
-    </span><span class="kw">pub </span>providers: <span class="kw">crate</span>::config::providersv2::Providers,
+    </span><span class="kw">pub </span>providers: <span class="kw">crate</span>::Providers,
     <span class="attr">#[command(flatten)]
-    </span><span class="kw">pub </span>service: Service,
+    </span><span class="kw">pub </span>service: <span class="kw">crate</span>::service::Service,
 }
 
 <span class="doccomment">/// The various log format options
@@ -516,14 +529,39 @@
 <span class="kw">impl </span>LogFormats {
     <span class="doccomment">/// Creates the tracing subscriber that pulls from the env for filters
     /// and outputs based on [Self].
-    </span><span class="kw">fn </span>init_tracing_subscriber(<span class="self">self</span>) {
+    </span><span class="kw">fn </span>init_tracing_subscriber(
+        <span class="self">self</span>,
+        quiet: bool,
+        file_writer: <span class="prelude-ty">Option</span>&lt;tracing_appender::non_blocking::NonBlocking&gt;,
+    ) {
+        <span class="kw">use </span>tracing_subscriber::fmt::writer::{BoxMakeWriter, MakeWriterExt};
+
         <span class="kw">let </span>env_filter = tracing_subscriber::EnvFilter::builder()
             .with_default_directive(tracing_subscriber::filter::LevelFilter::INFO.into())
             .from_env_lossy();
+
+        <span class="kw">let </span>mk_writer: BoxMakeWriter = <span class="kw">match </span>file_writer {
+            <span class="prelude-val">Some</span>(file_writer) =&gt; {
+                <span class="kw">if </span>quiet {
+                    BoxMakeWriter::new(file_writer)
+                } <span class="kw">else </span>{
+                    BoxMakeWriter::new(std::io::stdout.and(file_writer))
+                }
+            }
+            <span class="prelude-val">None </span>=&gt; {
+                <span class="kw">if </span>quiet {
+                    BoxMakeWriter::new(std::io::sink)
+                } <span class="kw">else </span>{
+                    BoxMakeWriter::new(std::io::stdout)
+                }
+            }
+        };
+
         <span class="kw">let </span>subscriber = tracing_subscriber::fmt()
             .with_file(<span class="bool-val">true</span>)
             .with_thread_ids(<span class="bool-val">true</span>)
-            .with_env_filter(env_filter);
+            .with_env_filter(env_filter)
+            .with_writer(mk_writer);
 
         <span class="kw">match </span><span class="self">self </span>{
             LogFormats::Auto =&gt; {
@@ -544,13 +582,9 @@
 <span class="doccomment">/// The various Quilkin commands.
 </span><span class="attr">#[derive(Clone, Debug, clap::Subcommand)]
 </span><span class="kw">pub enum </span>Commands {
-    Agent(Agent),
     GenerateConfigSchema(GenerateConfigSchema),
-    Manage(Manage),
     <span class="attr">#[clap(subcommand)]
     </span>Qcmp(Qcmp),
-    Proxy(Proxy),
-    Relay(Relay),
 }
 
 <span class="kw">impl </span>Cli {
@@ -558,9 +592,24 @@
     /// arguments.
     </span><span class="attr">#[tracing::instrument(skip_all)]
     </span><span class="kw">pub async fn </span>drive(<span class="self">self</span>) -&gt; <span class="kw">crate</span>::Result&lt;()&gt; {
-        <span class="kw">if </span>!<span class="self">self</span>.quiet {
-            <span class="self">self</span>.log_format.init_tracing_subscriber();
-        }
+        <span class="comment">// Configure rolling log file appender if directory has been specified.
+        // _log_file_guard should be kept in scope and will trigger the final flush to file when dropped
+        </span><span class="kw">let </span>(file_writer, _log_file_guard) = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.log_directory {
+            <span class="prelude-val">Some</span>(log_directory) =&gt; {
+                <span class="kw">let </span>file_appender = tracing_appender::rolling::Builder::new()
+                    .rotation(tracing_appender::rolling::Rotation::HOURLY)
+                    .filename_prefix(<span class="kw-2">&amp;</span><span class="self">self</span>.log_file_prefix)
+                    .max_log_files(<span class="number">5</span>)
+                    .build(log_directory)
+                    .expect(<span class="string">"failed to build rolling file appender"</span>);
+                <span class="kw">let </span>(file_writer, guard) = tracing_appender::non_blocking(file_appender);
+                (<span class="prelude-val">Some</span>(file_writer), <span class="prelude-val">Some</span>(guard))
+            }
+            <span class="prelude-val">None </span>=&gt; (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>),
+        };
+
+        <span class="self">self</span>.log_format
+            .init_tracing_subscriber(<span class="self">self</span>.quiet, file_writer);
 
         <span class="macro">tracing::info!</span>(
             version = <span class="macro">crate_version!</span>(),
@@ -578,112 +627,98 @@
             <span class="kw">_ </span>=&gt; {}
         }
 
-        <span class="kw">if </span>!<span class="self">self</span>.service.any_service_enabled() &amp;&amp; <span class="self">self</span>.command.is_none() {
-            <span class="macro">eyre::bail!</span>(<span class="string">"no service specified, shutting down"</span>);
+        <span class="kw">if </span>!<span class="self">self</span>.service.any_service_enabled()
+            &amp;&amp; <span class="self">self</span>.command.is_none()
+            &amp;&amp; !<span class="self">self</span>.providers.any_provider_enabled()
+        {
+            <span class="macro">eyre::bail!</span>(<span class="string">"no service, provider, or command specified, shutting down"</span>);
         }
 
         <span class="macro">tracing::debug!</span>(cli = <span class="question-mark">?</span><span class="self">self</span>, <span class="string">"config parameters"</span>);
 
-        <span class="kw">let </span>config = <span class="self">self</span>.read_config()<span class="question-mark">?</span>;
+        <span class="kw">let </span>locality = <span class="self">self</span>.locality.locality();
+
+        <span class="kw">let </span><span class="kw-2">mut </span>config = <span class="kw">crate</span>::Config::new(
+            <span class="self">self</span>.service.id.clone(),
+            <span class="self">self</span>.locality.icao_code,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.providers,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.service,
+        );
+        config.read_config(<span class="kw-2">&amp;</span><span class="self">self</span>.config, locality.clone())<span class="question-mark">?</span>;
+        <span class="kw">let </span>config = Arc::new(config);
 
         <span class="kw">let </span>ready = Arc::&lt;std::sync::atomic::AtomicBool&gt;::default();
+        <span class="kw">let </span>shutdown_handler = <span class="kw">crate</span>::signal::spawn_handler();
         <span class="kw">if </span><span class="self">self</span>.admin.enabled {
-            <span class="kw">crate</span>::components::admin::server(config.clone(), ready.clone(), <span class="self">self</span>.admin.address);
+            <span class="kw">crate</span>::components::admin::server(
+                config.clone(),
+                ready.clone(),
+                shutdown_handler.shutdown_tx(),
+                <span class="self">self</span>.admin.address,
+            );
         }
-
-        <span class="kw">let </span><span class="kw-2">mut </span>shutdown_rx = <span class="kw">crate</span>::signal::spawn_handler();
 
         <span class="kw">crate</span>::alloc::spawn_heap_stats_updates(
             std::time::Duration::from_secs(<span class="number">10</span>),
-            shutdown_rx.clone(),
+            shutdown_handler.shutdown_rx(),
         );
 
-        <span class="kw">let </span>locality = <span class="self">self</span>.locality.locality();
-        <span class="self">self</span>.providers
-            .spawn_providers(<span class="kw-2">&amp;</span>config, ready.clone(), locality.clone());
+        <span class="comment">// Just call this early so there isn't a potential race when spawning xDS
+        </span>quilkin_xds::metrics::set_registry(<span class="kw">crate</span>::metrics::registry());
 
-        <span class="kw">match </span><span class="self">self</span>.command {
-            <span class="prelude-val">Some</span>(Commands::Agent(agent)) =&gt; {
-                <span class="kw">let </span>old_ready = agent::Ready {
-                    provider_is_healthy: ready.clone(),
-                    relay_is_healthy: ready.clone(),
-                    ..&lt;<span class="kw">_</span>&gt;::default()
-                };
-                agent.run(locality, config, old_ready, shutdown_rx).<span class="kw">await
-            </span>}
+        <span class="kw">let </span><span class="kw-2">mut </span>provider_tasks = <span class="self">self</span>.providers.spawn_providers(
+            <span class="kw-2">&amp;</span>config,
+            ready.clone(),
+            locality.clone(),
+            <span class="prelude-val">None</span>,
+            shutdown_handler.shutdown_rx(),
+        );
 
-            <span class="prelude-val">Some</span>(Commands::Proxy(runner)) =&gt; {
-                <span class="kw">let </span>old_ready = proxy::Ready {
-                    xds_is_healthy: parking_lot::RwLock::from(<span class="prelude-val">Some</span>(ready.clone())).into(),
-                    ..&lt;<span class="kw">_</span>&gt;::default()
-                };
-                runner.run(config, old_ready, <span class="prelude-val">None</span>, shutdown_rx).<span class="kw">await
-            </span>}
+        <span class="kw">let </span>shutdown_tx = shutdown_handler.shutdown_tx();
+        <span class="kw">let </span><span class="kw-2">mut </span>service_task = <span class="self">self</span>.service.spawn_services(<span class="kw-2">&amp;</span>config, shutdown_handler)<span class="question-mark">?</span>;
 
-            <span class="prelude-val">Some</span>(Commands::Manage(manager)) =&gt; {
-                <span class="kw">let </span>old_ready = agent::Ready {
-                    provider_is_healthy: ready.clone(),
-                    is_manage: <span class="bool-val">true</span>,
-                    ..&lt;<span class="kw">_</span>&gt;::default()
-                };
-                manager.run(locality, config, old_ready, shutdown_rx).<span class="kw">await
-            </span>}
-
-            <span class="prelude-val">Some</span>(Commands::Relay(relay)) =&gt; {
-                <span class="kw">let </span>old_ready = relay::Ready {
-                    provider_is_healthy: ready.clone(),
-                    ..&lt;<span class="kw">_</span>&gt;::default()
-                };
-
-                relay.run(locality, config, old_ready, shutdown_rx).<span class="kw">await
-            </span>}
-            <span class="prelude-val">None </span>=&gt; {
-                <span class="self">self</span>.service.spawn_services(<span class="kw-2">&amp;</span>config, <span class="kw-2">&amp;</span>shutdown_rx)<span class="question-mark">?</span>;
-                shutdown_rx.changed().<span class="kw">await</span>.map_err(From::from)
-            }
-            <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(),
+        <span class="kw">if </span>provider_tasks.is_empty() {
+            ready.store(<span class="bool-val">true</span>, std::sync::atomic::Ordering::SeqCst);
         }
-    }
 
-    <span class="doccomment">/// Searches for the configuration file, and panics if not found.
-    </span><span class="kw">fn </span>read_config(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Arc&lt;<span class="kw">crate</span>::Config&gt;, eyre::Error&gt; {
-        <span class="kw">let </span>paths = [<span class="kw-2">&amp;</span><span class="self">self</span>.config, std::path::Path::new(ETC_CONFIG_PATH)];
-        <span class="kw">let </span><span class="kw-2">mut </span>paths = paths.iter();
-
-        <span class="kw">let </span>file = <span class="kw">loop </span>{
-            <span class="kw">let </span><span class="prelude-val">Some</span>(path) = paths.next() <span class="kw">else </span>{
-                <span class="kw">let </span>cfg = <span class="kw">if </span><span class="macro">matches!</span>(<span class="self">self</span>.command, <span class="prelude-val">Some</span>(Commands::Agent(..))) {
-                    Config::default_agent()
-                } <span class="kw">else </span>{
-                    Config::default_non_agent()
-                };
-                <span class="kw">return </span><span class="prelude-val">Ok</span>(Arc::new(cfg));
-            };
-
-            <span class="kw">match </span>std::fs::File::open(path) {
-                <span class="prelude-val">Ok</span>(file) =&gt; <span class="kw">break </span>file,
-                <span class="prelude-val">Err</span>(err) <span class="kw">if </span>err.kind() == std::io::ErrorKind::NotFound =&gt; {
-                    <span class="macro">tracing::debug!</span>(path = %path.display(), <span class="string">"config path not found"</span>);
-                    <span class="kw">continue</span>;
-                }
-                <span class="prelude-val">Err</span>(err) =&gt; {
-                    <span class="macro">tracing::error!</span>(path = %path.display(), error = <span class="question-mark">?</span>err, <span class="string">"failed to read path"</span>);
-                    <span class="macro">eyre::bail!</span>(err);
-                }
+        <span class="kw">loop </span>{
+            <span class="macro">tokio::select!</span> {
+                <span class="prelude-val">Some</span>(result) = provider_tasks.join_next() =&gt; {
+                    <span class="kw">match </span>result {
+                        <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; {
+                            <span class="comment">// TODO should improve the provider tasks shutdown so we can log
+                            // exactly which provider has stopped
+                            </span><span class="macro">tracing::info!</span>(<span class="string">"provider task stopped"</span>);
+                        },
+                        <span class="prelude-val">Err</span>(error) =&gt; {
+                            <span class="macro">tracing::error!</span>(task_result=<span class="question-mark">?</span>error, <span class="string">"provider task completed unexpectedly, shutting down."</span>);
+                            <span class="comment">// Trigger shutdown so we can drain the active sessions in the service_task
+                            </span><span class="kw">if let </span><span class="prelude-val">Err</span>(error) = shutdown_tx.send(()) {
+                                <span class="macro">tracing::error!</span>(error=<span class="question-mark">?</span>error, <span class="string">"failed to trigger shutdown"</span>);
+                                <span class="kw">return </span><span class="prelude-val">Err</span>(error.into());
+                            }
+                        },
+                    }
+                },
+                result = <span class="kw-2">&amp;mut </span>service_task =&gt; {
+                    <span class="kw">return match </span>result {
+                        <span class="prelude-val">Ok</span>((<span class="kw">_</span>, result)) =&gt; {
+                            result
+                        }
+                        <span class="prelude-val">Err</span>(join_error) =&gt; {
+                            <span class="prelude-val">Err</span>(<span class="macro">eyre::format_err!</span>(<span class="string">"failed to join services task: {join_error}"</span>))
+                        }
+                    };
+                },
             }
-        };
-
-        <span class="prelude-val">Ok</span>(Arc::new(<span class="kw">crate</span>::Config::from_reader(
-            file,
-            <span class="macro">matches!</span>(<span class="self">self</span>.command, <span class="prelude-val">Some</span>(Commands::Agent(..))),
-        )<span class="question-mark">?</span>))
+        }
     }
 }
 
 <span class="attr">#[derive(Debug, Copy, Clone)]
-</span><span class="kw">pub struct </span>Timeout(std::time::Duration);
+</span><span class="kw">pub struct </span>Duration(std::time::Duration);
 
-<span class="kw">impl </span>std::str::FromStr <span class="kw">for </span>Timeout {
+<span class="kw">impl </span>std::str::FromStr <span class="kw">for </span>Duration {
     <span class="kw">type </span><span class="prelude-val">Err </span>= clap::Error;
 
     <span class="kw">fn </span>from_str(src: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Err&gt; {
@@ -697,12 +732,13 @@
         </span>} <span class="kw">else </span>{
             <span class="kw-2">&amp;</span>src[suffix_pos..]
         };
-
-        <span class="kw">let </span>seconds = <span class="kw">match </span>suffix {
-            <span class="string">"s" </span>| <span class="string">"S" </span>=&gt; num,
-            <span class="string">"m" </span>| <span class="string">"M" </span>=&gt; num * <span class="number">60</span>,
-            <span class="string">"h" </span>| <span class="string">"H" </span>=&gt; num * <span class="number">60 </span>* <span class="number">60</span>,
-            <span class="string">"d" </span>| <span class="string">"D" </span>=&gt; num * <span class="number">60 </span>* <span class="number">60 </span>* <span class="number">24</span>,
+        <span class="kw">use </span>std::time::Duration <span class="kw">as </span>D;
+        <span class="kw">let </span>duration = <span class="kw">match </span>suffix {
+            <span class="string">"ms" </span>| <span class="string">"MS" </span>=&gt; D::from_millis(num),
+            <span class="string">"s" </span>| <span class="string">"S" </span>=&gt; D::from_secs(num),
+            <span class="string">"m" </span>| <span class="string">"M" </span>=&gt; D::from_secs(num * <span class="number">60</span>),
+            <span class="string">"h" </span>| <span class="string">"H" </span>=&gt; D::from_secs(num * <span class="number">60 </span>* <span class="number">60</span>),
+            <span class="string">"d" </span>| <span class="string">"D" </span>=&gt; D::from_secs(num * <span class="number">60 </span>* <span class="number">60 </span>* <span class="number">24</span>),
             s =&gt; {
                 <span class="kw">return </span><span class="prelude-val">Err</span>(clap::Error::raw(
                     clap::error::ErrorKind::ValueValidation,
@@ -711,7 +747,15 @@
             }
         };
 
-        <span class="prelude-val">Ok</span>(<span class="self">Self</span>(std::time::Duration::from_secs(seconds)))
+        <span class="prelude-val">Ok</span>(<span class="self">Self</span>(duration))
     }
+}
+
+<span class="kw">impl </span>std::ops::Deref <span class="kw">for </span>Duration {
+    <span class="kw">type </span>Target = std::time::Duration;
+
+    <span class="kw">fn </span>deref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="self">Self</span>::Target {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0
+    </span>}
 }
 </code></pre></div></section></main></body></html>

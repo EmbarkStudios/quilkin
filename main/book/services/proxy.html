@@ -24,28 +24,41 @@
         <link rel="stylesheet" href="../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="../highlight.css">
-        <link rel="stylesheet" href="../tomorrow-night.css">
-        <link rel="stylesheet" href="../ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
 
-        <!-- Provide site root to javascript -->
+        <!-- Provide site root and default themes to javascript -->
         <script>
-            var path_to_root = "../";
-            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc.js"></script>
     </head>
     <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
     <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
             try {
-                var theme = localStorage.getItem('mdbook-theme');
-                var sidebar = localStorage.getItem('mdbook-sidebar');
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
 
                 if (theme.startsWith('"') && theme.endsWith('"')) {
                     localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
@@ -59,7 +72,8 @@
 
         <!-- Set the theme before any content is loaded, prevents flash -->
         <script>
-            var theme;
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
             const html = document.documentElement;
@@ -72,17 +86,20 @@
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
-            var sidebar = null;
-            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            sidebar_toggle.checked = sidebar === 'visible';
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
@@ -109,13 +126,14 @@
                             <i class="fa fa-paint-brush"></i>
                         </button>
                         <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
                         </button>
                     </div>
@@ -132,7 +150,12 @@
 
                 <div id="search-wrapper" class="hidden">
                     <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
                     </form>
                     <div id="searchresults-outer" class="searchresults-outer hidden">
                         <div id="searchresults-header" class="searchresults-header"></div>
@@ -160,100 +183,6 @@
 </div>
 <p>"Proxy" is the primary Quilkin service, which acts as a non-transparent UDP
 proxy.</p>
-<p>To view all the options for the <code>proxy</code> subcommand, run:</p>
-<pre><code class="language-shell">$ quilkin proxy --help
-Run Quilkin as a UDP reverse proxy
-
-Usage: quilkin proxy [OPTIONS]
-
-Options:
-  -m, --management-server &lt;MANAGEMENT_SERVER&gt;
-          One or more `quilkin manage` endpoints to listen to for config changes
-          
-          [env: QUILKIN_MANAGEMENT_SERVER=]
-
-      --mmdb &lt;MMDB&gt;
-          The remote URL or local file path to retrieve the Maxmind database
-          
-          [env: MMDB=]
-
-  -p, --port &lt;PORT&gt;
-          The port to listen on
-          
-          [env: QUILKIN_PORT=]
-          [default: 7777]
-
-  -q, --qcmp-port &lt;QCMP_PORT&gt;
-          The port to listen on
-          
-          [env: QUILKIN_QCMP_PORT=]
-          [default: 7600]
-
-      --to &lt;TO&gt;
-          One or more socket addresses to forward packets to
-          
-          [env: QUILKIN_DEST=]
-
-      --to-tokens &lt;TO_TOKENS&gt;
-          Assigns dynamic tokens to each address in the `--to` argument
-          
-          Format is `&lt;number of unique tokens&gt;:&lt;length of token suffix for each packet&gt;`
-          
-          [env: QUILKIN_DEST_TOKENS=]
-
-      --idle-request-interval-secs &lt;IDLE_REQUEST_INTERVAL_SECS&gt;
-          The interval in seconds at which the relay will send a discovery request to an management server after receiving no updates
-          
-          [env: QUILKIN_IDLE_REQUEST_INTERVAL_SECS=]
-
-  -w, --workers &lt;WORKERS&gt;
-          Number of worker threads used to process packets.
-          
-          If not specified defaults to number of cpus. Has no effect if XDP is used, as the number of workers is always the same as the NIC queue size.
-          
-          [env: QUILKIN_WORKERS=]
-
-      --service.udp.xdp.network-interface &lt;NETWORK_INTERFACE&gt;
-          The name of the network interface to bind the XDP socket(s) to.
-          
-          If not specified quilkin will attempt to determine the most appropriate network interface to use. Quilkin will exit with an error if the network interface does not exist, or a suitable default cannot be determined.
-          
-          [env: QUILKIN_SERVICE_UDP_XDP_NETWORK_INTERFACE=]
-
-      --service.udp.xdp
-          Forces the use of XDP.
-          
-          If XDP is not available on the chosen NIC, Quilkin exits with an error. If false, io-uring will be used as the fallback implementation.
-          
-          [env: QUILKIN_SERVICE_UDP_XDP=]
-
-      --service.udp.xdp.zerocopy
-          Forces the use of [`XDP_ZEROCOPY`](https://www.kernel.org/doc/html/latest/networking/af_xdp.html#xdp-copy-and-xdp-zerocopy-bind-flags)
-          
-          If zero copy is not available on the chosen NIC, Quilkin exits with an error
-          
-          [env: QUILKIN_SERVICE_UDP_XDP_ZEROCOPY=]
-
-      --service.udp.xdp.tco
-          Forces the use of [TX checksum offload](https://docs.kernel.org/6.8/networking/xsk-tx-metadata.html)
-          
-          TX checksum offload is an optional feature allowing the data portion of a packet to have its internet checksum calculation offloaded to the NIC, as otherwise this is done in software
-          
-          [env: QUILKIN_SERVICE_UDP_XDP_TCO=]
-
-      --service.udp.xdp.memory-limit &lt;MAXIMUM_MEMORY&gt;
-          The maximum amount of memory mapped for packet buffers, in bytes
-          
-          If not specified, this defaults to 4MiB (2k allocated packets of 2k each at a time) per NIC queue, ie 128MiB on a 32 queue NIC
-          
-          [env: QUILKIN_SERVICE_UDP_XDP_MEMORY_LIMIT=]
-
-      --termination-timeout &lt;TERMINATION_TIMEOUT&gt;
-          
-
-  -h, --help
-          Print help (see a summary with '-h')
-</code></pre>
 <h2 id="endpoints"><a class="header" href="#endpoints">Endpoints</a></h2>
 <p>An Endpoint represents an address that Quilkin forwards packets to that it has received from the
 source port.</p>
@@ -304,6 +233,44 @@ that Quilkin proxies traffic to.</p>
 <p>Sessions are established <em>after</em> the filter chain completes. The destination Endpoint of a packet is determined by
 the <a href="./proxy/filters.html">filter chain</a>, so a Session can only be created after filter chain completion. For example, if the
 filter chain drops all packets, then no session will ever be created.</p>
+<h2 id="diagram"><a class="header" href="#diagram">Diagram</a></h2>
+<pre><code class="language-mermaid">architecture-beta
+    group player(cloud)[Player]
+
+    service game(cloud)[Game] in player
+
+    game{group}:B --&gt; T:ioj{group}
+
+    group udpstack(cloud)[Quilkin Stack]
+    group services(server)[Service Layer] in udpstack
+
+    service providers(cloud)[Providers] in udpstack
+    service config(disk)[Configuration] in udpstack
+
+    providers:L --&gt; R:config
+    config:T --&gt; B:fc{group}
+
+    group bizlayer(cloud)[Packet Processing] in services
+    service fc(server)[Filter Chain] in bizlayer
+    service prefilters(server)[preprocessing] in bizlayer
+    service postfilters(server)[postprocessing] in bizlayer
+
+    prefilters:R --&gt; L:fc
+    fc:R --&gt; L:postfilters
+
+    group iolayer(cloud)[UDP layer] in services
+    service xdp(server)[XDP] in iolayer
+    service iouring(server)[io uring] in iolayer
+    junction ioj in iolayer
+    xdp:R -- L:ioj
+    iouring:L -- R:ioj
+    ioj:B --&gt; T:fc{group}
+
+    group gs(cloud)[Game Servers]
+    service gameserver(cloud)[Game Server] in gs
+
+    postfilters{group}:R --&gt; L:gameserver
+</code></pre>
 
                     </main>
 
@@ -351,6 +318,7 @@ filter chain drops all packets, then no session will ever be created.</p>
         <script src="../book.js"></script>
 
         <!-- Custom JS scripts -->
+
 
 
     </div>

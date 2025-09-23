@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["client","config","core","discovery","generated","listener","locality","metrics","net","proto","server","socket_address"],"type":["Result"]};
+window.SIDEBAR_ITEMS = {"mod":["client","config","core","discovery","generated","listener","locality","metrics","net","proto","server","socket_address"],"type":["Result","ShutdownSignal"]};

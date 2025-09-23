@@ -220,7 +220,10 @@
 <a href="#219" id="219">219</a>
 <a href="#220" id="220">220</a>
 <a href="#221" id="221">221</a>
-<a href="#222" id="222">222</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#222" id="222">222</a>
+<a href="#223" id="223">223</a>
+<a href="#224" id="224">224</a>
+<a href="#225" id="225">225</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -272,6 +275,7 @@
 </span><span class="attr">#[doc(inline)]
 </span><span class="kw">pub use </span><span class="self">self</span>::{
     capture::Capture,
+    chain::FilterChain,
     concatenate::Concatenate,
     debug::Debug,
     drop::Drop,
@@ -290,10 +294,12 @@
     write::WriteContext,
 };
 
-<span class="kw">use </span><span class="kw">crate</span>::test::TestFilter;
+<span class="kw">pub use crate</span>::{
+    net::{Packet, PacketMut},
+    test::TestFilter,
+};
 
-<span class="kw">pub use </span><span class="self">self</span>::chain::FilterChain;
-<span class="kw">pub use </span><span class="kw">crate</span>::components::proxy::packet_router::{Packet, PacketMut};
+<span class="kw">use </span><span class="kw">crate</span>::config::filter::Filter <span class="kw">as </span>FilterConfig;
 
 <span class="attr">#[enum_dispatch::enum_dispatch(Filter)]
 </span><span class="kw">pub enum </span>FilterKind {
@@ -372,8 +378,8 @@
 
     <span class="kw">fn </span>as_filter_config(
         config: <span class="kw">impl </span>Into&lt;<span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;&gt;,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">crate</span>::config::Filter, CreationError&gt; {
-        <span class="prelude-val">Ok</span>(<span class="kw">crate</span>::config::Filter {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;FilterConfig, CreationError&gt; {
+        <span class="prelude-val">Ok</span>(FilterConfig {
             name: <span class="self">Self</span>::NAME.into(),
             label: <span class="prelude-val">None</span>,
             config: config
@@ -387,8 +393,8 @@
     </span><span class="kw">fn </span>as_labeled_filter_config(
         config: <span class="kw">impl </span>Into&lt;<span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;&gt;,
         label: String,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">crate</span>::config::Filter, CreationError&gt; {
-        <span class="prelude-val">Ok</span>(<span class="kw">crate</span>::config::Filter {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;FilterConfig, CreationError&gt; {
+        <span class="prelude-val">Ok</span>(FilterConfig {
             name: <span class="self">Self</span>::NAME.into(),
             label: <span class="prelude-val">Some</span>(label),
             config: config

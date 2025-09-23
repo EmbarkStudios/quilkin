@@ -25,28 +25,41 @@
         <link rel="stylesheet" href="fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
 
-        <!-- Provide site root to javascript -->
+        <!-- Provide site root and default themes to javascript -->
         <script>
-            var path_to_root = "";
-            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc.js"></script>
     </head>
     <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
     <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
             try {
-                var theme = localStorage.getItem('mdbook-theme');
-                var sidebar = localStorage.getItem('mdbook-sidebar');
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
 
                 if (theme.startsWith('"') && theme.endsWith('"')) {
                     localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
@@ -60,7 +73,8 @@
 
         <!-- Set the theme before any content is loaded, prevents flash -->
         <script>
-            var theme;
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
             const html = document.documentElement;
@@ -73,17 +87,20 @@
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
-            var sidebar = null;
-            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            sidebar_toggle.checked = sidebar === 'visible';
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
@@ -110,13 +127,14 @@
                             <i class="fa fa-paint-brush"></i>
                         </button>
                         <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
                         </button>
                     </div>
@@ -133,7 +151,12 @@
 
                 <div id="search-wrapper" class="hidden">
                     <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
                     </form>
                     <div id="searchresults-outer" class="searchresults-outer hidden">
                         <div id="searchresults-header" class="searchresults-header"></div>
@@ -185,6 +208,72 @@ depending on how deep an integration you wish for your system.</li>
 <li>Integration with Game Server hosting platforms such as <a href="https://agones.dev">Agones</a>.</li>
 <li>Can be integrated with C/C++ code bases via FFI.</li>
 </ul>
+<h2 id="quilkin-architecture"><a class="header" href="#quilkin-architecture">Quilkin Architecture</a></h2>
+<p>Quilkin is broken up into three main components</p>
+<ul>
+<li><strong>Providers</strong> are data collection sources to enable quilkin to see its environment.</li>
+<li><strong>Services</strong> provide the the core business logic for handling UDP traffic as well meta control-plane functionality.</li>
+<li><strong>Configuration</strong> controls what a given instance is able to do, what services it runs, and providers it pulls from.</li>
+</ul>
+<pre><code class="language-mermaid">architecture-beta
+    group services(cloud)[Services]
+    group public(cloud)[Public Client API] in services
+    group private(cloud)[Internal Service API] in services
+    group providers(cloud)[Providers]
+    group config(cloud)[Configuration]
+
+    service udp(internet)[UDP] in public
+    service qcmp(internet)[QCMP UDP] in public
+    junction sp1 in services
+    junction sp3 in services
+
+    service metrics(internet)[Administration] in private
+    service grpc(internet)[gRPC] in private
+    service http(internet)[HTTP] in private
+    junction sp2 in services
+    junction sp4 in services
+
+    service k8s(cloud)[Kubernetes] in providers
+    service fs(disk)[Filesystem] in providers
+    service xds(cloud)[gRPC] in providers
+    service cli(disk)[CLI] in providers
+    junction p1 in providers
+    junction p2 in providers
+
+    service filters(disk)[Filterchains] in config
+    service endpoints(disk)[Endpoints] in config
+    service gameservers(server)[Game Servers] in config
+    service mmdb(server)[Maxmind DB] in config
+    junction c1 in config
+    junction c2 in config
+
+    service quilkin(server)[Quilkin]
+
+    sp1:T -- R:udp
+    sp1:L -- R:qcmp
+    sp1:B -- T:sp3
+
+    sp2:T -- B:sp3
+    sp2:L -- R:grpc
+    sp2:B -- R:metrics
+    sp4:L -- R:metrics
+    sp4:B -- R:http
+    sp4:T -- B:sp2
+    sp3:R -- L:quilkin
+
+    quilkin:R -- L:p1
+    p1:T -- L:fs
+    p1:R -- L:k8s
+    p1:B -- T:p2
+    p2:R -- L:xds
+    p2:B -- L:cli
+    c2:L -- R:mmdb
+    c2:R -- L:gameservers
+    c1:T -- B:c2
+    c1:R -- L:endpoints
+    c1:L -- R:filters
+    c1:B -- T:quilkin
+</code></pre>
 <h2 id="what-next"><a class="header" href="#what-next">What Next?</a></h2>
 <p>Quilkin provides a variety of different services depending on your use-case.
 The primary service is <a href="./services/proxy.html"><code>proxy</code></a>, which runs a reverse UDP
@@ -198,8 +287,8 @@ proxy. To see a basic usage of the command-line interface run through the
 for deploying quilkin for your game network.</li>
 </ul>
 <pre><code class="language-shell">$ quilkin --help
-{"timestamp":"2025-02-27T13:50:12.630255Z","level":"INFO","fields":{"message":"Starting Quilkin","version":"0.10.0-dev","commit":"9e608b1ea5031b54797c1cf2871de304fb6dd3e4"},"target":"quilkin::cli","filename":"src/cli.rs","threadId":"ThreadId(1)"}
-{"timestamp":"2025-02-27T13:50:12.630416Z","level":"ERROR","fields":{"message":"fatal error","error":"no service specified, shutting down","error_debug":"no service specified, shutting down"},"target":"quilkin","filename":"src/main.rs","threadId":"ThreadId(1)"}
+{"timestamp":"2025-09-23T12:29:00.084377Z","level":"INFO","fields":{"message":"Starting Quilkin","version":"0.10.0-dev","commit":"7d0ba8399a62b5a9b7336bc3b6693f70b303d055"},"target":"quilkin::cli","filename":"src/cli.rs","threadId":"ThreadId(1)"}
+{"timestamp":"2025-09-23T12:29:00.084533Z","level":"ERROR","fields":{"message":"fatal error","error":"no service, provider, or command specified, shutting down"},"target":"quilkin","filename":"src/main.rs","threadId":"ThreadId(1)"}
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="installation"><a class="header" href="#installation">Installation</a></h1>
 <p>There are variety of automated and manual methods for installing Quilkin onto
@@ -211,7 +300,7 @@ your local machine through <a href="installation.html#cargo">Cargo</a>.</p>
 <dl>
   <dt><strong>Source / Method</strong></dt>
   <dd>
-<pre><code>us-docker.pkg.dev/quilkin/release/quilkin:0.10.0-dev-9e608b1
+<pre><code>us-docker.pkg.dev/quilkin/release/quilkin:0.10.0-dev-7d0ba83
 </code></pre>
   </dd>
   <dt><strong>Notes</strong></dt>
@@ -426,8 +515,8 @@ Fleet, that will only be accessible through Quilkin that is hosted within the sa
 an out-of-the-box control plane for integration between Agones and <a href="deployment/quickstarts/../../services/xds.html">Quilkin's xDS configuration API</a> with
 minimal effort.</p>
 <h2 id="2-install-quilkin-agones-xds-provider"><a class="header" href="#2-install-quilkin-agones-xds-provider">2. Install Quilkin Agones xDS Provider</a></h2>
-<p>To install Quilkin as an Agones integrated xDS control plane, we can create a deployment of Quilkin running as
-<code>quilkin manage agones</code>, with the appropriate permissions.</p>
+<p>To install Quilkin as an Agones integrated xDS control plane, we can create a deployment of Quilkin running with
+<code>provider.k8s.agones</code>, with the appropriate permissions.</p>
 <p>Run the following:</p>
 <pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/googleforgames/quilkin/main/examples/agones-xonotic-xds/xds-control-plane.yaml
 </code></pre>
@@ -916,100 +1005,6 @@ proxies will route to the Allocated GameServer, and you can play a gamee!</p>
 </div>
 <p>"Proxy" is the primary Quilkin service, which acts as a non-transparent UDP
 proxy.</p>
-<p>To view all the options for the <code>proxy</code> subcommand, run:</p>
-<pre><code class="language-shell">$ quilkin proxy --help
-Run Quilkin as a UDP reverse proxy
-
-Usage: quilkin proxy [OPTIONS]
-
-Options:
-  -m, --management-server &lt;MANAGEMENT_SERVER&gt;
-          One or more `quilkin manage` endpoints to listen to for config changes
-          
-          [env: QUILKIN_MANAGEMENT_SERVER=]
-
-      --mmdb &lt;MMDB&gt;
-          The remote URL or local file path to retrieve the Maxmind database
-          
-          [env: MMDB=]
-
-  -p, --port &lt;PORT&gt;
-          The port to listen on
-          
-          [env: QUILKIN_PORT=]
-          [default: 7777]
-
-  -q, --qcmp-port &lt;QCMP_PORT&gt;
-          The port to listen on
-          
-          [env: QUILKIN_QCMP_PORT=]
-          [default: 7600]
-
-      --to &lt;TO&gt;
-          One or more socket addresses to forward packets to
-          
-          [env: QUILKIN_DEST=]
-
-      --to-tokens &lt;TO_TOKENS&gt;
-          Assigns dynamic tokens to each address in the `--to` argument
-          
-          Format is `&lt;number of unique tokens&gt;:&lt;length of token suffix for each packet&gt;`
-          
-          [env: QUILKIN_DEST_TOKENS=]
-
-      --idle-request-interval-secs &lt;IDLE_REQUEST_INTERVAL_SECS&gt;
-          The interval in seconds at which the relay will send a discovery request to an management server after receiving no updates
-          
-          [env: QUILKIN_IDLE_REQUEST_INTERVAL_SECS=]
-
-  -w, --workers &lt;WORKERS&gt;
-          Number of worker threads used to process packets.
-          
-          If not specified defaults to number of cpus. Has no effect if XDP is used, as the number of workers is always the same as the NIC queue size.
-          
-          [env: QUILKIN_WORKERS=]
-
-      --service.udp.xdp.network-interface &lt;NETWORK_INTERFACE&gt;
-          The name of the network interface to bind the XDP socket(s) to.
-          
-          If not specified quilkin will attempt to determine the most appropriate network interface to use. Quilkin will exit with an error if the network interface does not exist, or a suitable default cannot be determined.
-          
-          [env: QUILKIN_SERVICE_UDP_XDP_NETWORK_INTERFACE=]
-
-      --service.udp.xdp
-          Forces the use of XDP.
-          
-          If XDP is not available on the chosen NIC, Quilkin exits with an error. If false, io-uring will be used as the fallback implementation.
-          
-          [env: QUILKIN_SERVICE_UDP_XDP=]
-
-      --service.udp.xdp.zerocopy
-          Forces the use of [`XDP_ZEROCOPY`](https://www.kernel.org/doc/html/latest/networking/af_xdp.html#xdp-copy-and-xdp-zerocopy-bind-flags)
-          
-          If zero copy is not available on the chosen NIC, Quilkin exits with an error
-          
-          [env: QUILKIN_SERVICE_UDP_XDP_ZEROCOPY=]
-
-      --service.udp.xdp.tco
-          Forces the use of [TX checksum offload](https://docs.kernel.org/6.8/networking/xsk-tx-metadata.html)
-          
-          TX checksum offload is an optional feature allowing the data portion of a packet to have its internet checksum calculation offloaded to the NIC, as otherwise this is done in software
-          
-          [env: QUILKIN_SERVICE_UDP_XDP_TCO=]
-
-      --service.udp.xdp.memory-limit &lt;MAXIMUM_MEMORY&gt;
-          The maximum amount of memory mapped for packet buffers, in bytes
-          
-          If not specified, this defaults to 4MiB (2k allocated packets of 2k each at a time) per NIC queue, ie 128MiB on a 32 queue NIC
-          
-          [env: QUILKIN_SERVICE_UDP_XDP_MEMORY_LIMIT=]
-
-      --termination-timeout &lt;TERMINATION_TIMEOUT&gt;
-          
-
-  -h, --help
-          Print help (see a summary with '-h')
-</code></pre>
 <h2 id="endpoints"><a class="header" href="#endpoints">Endpoints</a></h2>
 <p>An Endpoint represents an address that Quilkin forwards packets to that it has received from the
 source port.</p>
@@ -1060,6 +1055,44 @@ that Quilkin proxies traffic to.</p>
 <p>Sessions are established <em>after</em> the filter chain completes. The destination Endpoint of a packet is determined by
 the <a href="services/./proxy/filters.html">filter chain</a>, so a Session can only be created after filter chain completion. For example, if the
 filter chain drops all packets, then no session will ever be created.</p>
+<h2 id="diagram"><a class="header" href="#diagram">Diagram</a></h2>
+<pre><code class="language-mermaid">architecture-beta
+    group player(cloud)[Player]
+
+    service game(cloud)[Game] in player
+
+    game{group}:B --&gt; T:ioj{group}
+
+    group udpstack(cloud)[Quilkin Stack]
+    group services(server)[Service Layer] in udpstack
+
+    service providers(cloud)[Providers] in udpstack
+    service config(disk)[Configuration] in udpstack
+
+    providers:L --&gt; R:config
+    config:T --&gt; B:fc{group}
+
+    group bizlayer(cloud)[Packet Processing] in services
+    service fc(server)[Filter Chain] in bizlayer
+    service prefilters(server)[preprocessing] in bizlayer
+    service postfilters(server)[postprocessing] in bizlayer
+
+    prefilters:R --&gt; L:fc
+    fc:R --&gt; L:postfilters
+
+    group iolayer(cloud)[UDP layer] in services
+    service xdp(server)[XDP] in iolayer
+    service iouring(server)[io uring] in iolayer
+    junction ioj in iolayer
+    xdp:R -- L:ioj
+    iouring:L -- R:ioj
+    ioj:B --&gt; T:fc{group}
+
+    group gs(cloud)[Game Servers]
+    service gameserver(cloud)[Game Server] in gs
+
+    postfilters{group}:R --&gt; L:gameserver
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="configuration-file"><a class="header" href="#configuration-file">Configuration File</a></h1>
 <p>While much of Quilkin's proxy configuration can be configured via its
 <a href="services/proxy/../proxy.html">command line interface</a>, if you have a larger or more complex configuration
@@ -1717,7 +1750,7 @@ properties:
     format: uint
     minimum: 0.0
   period:
-    description: The duration in seconds during which max_packets applies. If none is provided, it defaults to one second.
+    description: The duration in seconds during which `max_packets` applies. If none is provided, it defaults to one second.
     type: integer
     format: uint32
     minimum: 0.0
@@ -2157,6 +2190,26 @@ datacentre, and the value being the latency in nanoseconds.</p>
 <p><code>quilkin_phoenix_server_errors</code></p>
 <p>The amount of errors attempting to spawn the phoenix HTTP server</p>
 </li>
+<li>
+<p><code>quilkin_service_qcmp_active</code></p>
+<p>Whether the QCMP service is currently running, either 1 for running or 0 for not.</p>
+</li>
+<li>
+<p><code>quilkin_service_qcmp_bytes_total{kind, asn, ip_prefix}</code></p>
+<p>Total number of bytes processed through QCMP. <code>kind</code> is either <code>valid</code>, <code>invalid</code>, or <code>unsupported</code>.</p>
+</li>
+<li>
+<p><code>quilkin_service_qcmp_errors_total{asn, ip_prefix}</code></p>
+<p>Total number of errors QCMP has encountered.</p>
+</li>
+<li>
+<p><code>quilkin_service_qcmp_packets_total{kind, asn, ip_prefix}</code></p>
+<p>Total number of packets processed through QCMP. <code>kind</code> is either <code>valid</code>, <code>invalid</code>, or <code>unsupported</code>.</p>
+</li>
+<li>
+<p><code>quilkin_service_qcmp_ingress_latency_seconds{asn, ip_prefix}</code></p>
+<p>The time from when the client created the packet, to when QCMP received it.</p>
+</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="proxy-metrics"><a class="header" href="#proxy-metrics">Proxy Metrics</a></h1>
 <p>The following are metrics that Quilkin provides while in Proxy Mode.</p>
@@ -2323,21 +2376,7 @@ complexity of a full xDS management control plane via integrations with popular
 projects and common architecture patterns.</p>
 <p>To view all the providers and options for the <code>manage</code> subcommand, run:</p>
 <pre><code class="language-shell">$ quilkin manage --help
-Runs Quilkin as a xDS management server, using `provider` as a configuration source
-
-Usage: quilkin manage [OPTIONS] &lt;COMMAND&gt;
-
-Commands:
-  agones  Watches Agones' game server CRDs for `Allocated` game server endpoints, and for a `ConfigMap` that specifies the filter configuration
-  file    Watches for changes to the file located at `path`
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -r, --relay &lt;RELAY&gt;                One or more `quilkin relay` endpoints to push configuration changes to [env: QUILKIN_MANAGEMENT_SERVER=]
-  -p, --port &lt;PORT&gt;                  The TCP port to listen to, to serve discovery responses [env: QUILKIN_PORT=] [default: 7800]
-      --address-type &lt;ADDRESS_TYPE&gt;  If specified, filters the available gameserver addresses to the one that matches the specified type
-      --ip-kind &lt;IP_KIND&gt;            If specified, additionally filters the gameserver address by its ip kind [default: any] [possible values: v4, v6, any]
-  -h, --help                         Print help
+{{#include ../../../target/quilkin.manage.commands}}
 </code></pre>
 <h2 id="overview-1"><a class="header" href="#overview-1">Overview</a></h2>
 <p>In addition to static configuration provided upon startup, a Quiklin proxy's configuration can also be updated at
@@ -2361,100 +2400,12 @@ the Aggregated Discovery Service.</p>
 <h2 id="connecting-to-an-xds-management-server"><a class="header" href="#connecting-to-an-xds-management-server">Connecting to an xDS management server</a></h2>
 <p>Connecting a Quilkin proxy to an xDS management server can be implemented via providing one or more URLs to
 the <code>management_servers</code> <a href="services/../../api/quilkin/struct.Proxy.html#structfield.management_server">command line</a>.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="xds-metrics"><a class="header" href="#xds-metrics">xDS Metrics</a></h1>
-<h2 id="proxy-mode"><a class="header" href="#proxy-mode">Proxy Mode</a></h2>
-<p>Quilkin exposes the following metrics around the management servers and its resources when running as a
-<a href="services/xds/../proxy.html">UDP Proxy</a>:</p>
-<ul>
-<li>
-<p><code>quilkin_xds_connected_state</code> (Gauge)</p>
-<p>A boolean that indicates whether or not the proxy is currently connected to a management server. A value <code>1</code> means that the proxy is connected while <code>0</code> means that it is not connected to any server at that point in time.</p>
-</li>
-<li>
-<p><code>quilkin_xds_update_attempt_total</code> (Counter)</p>
-<p>The total number of attempts made by a management server to configure the proxy. This is equivalent to the total number of configuration updates received by the proxy from a management server.</p>
-</li>
-<li>
-<p><code>quilkin_xds_update_success_total</code> (Counter)</p>
-<p>The total number of successful attempts made by a management server to configure the proxy. This is equivalent to the total number of configuration updates received by the proxy from a management server and was successfully applied by the proxy.</p>
-</li>
-<li>
-<p><code>quilkin_xds_update_failure_total</code> (Counter)</p>
-<p>The total number of unsuccessful attempts made by a management server to configure the proxy. This is equivalent to the total number of configuration updates received by the proxy from a management server and was rejected by the proxy (e.g due to a bad/inconsistent configuration).</p>
-</li>
-<li>
-<p><code>quilkin_xds_requests_total</code> (Counter)</p>
-<p>The total number of <a href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/service/discovery/v3/discovery.proto.html#service-discovery-v3-discoveryrequest">DiscoveryRequest</a>s made by the proxy to management servers. This tracks messages flowing in the direction from the proxy to the management server.</p>
-</li>
-</ul>
-<h2 id="xds-provider-mode"><a class="header" href="#xds-provider-mode">xDS Provider Mode</a></h2>
-<p>The following metrics are exposed when Quilkin is running as an <a href="services/xds/../xds.html">xDS provider</a>.</p>
-<ul>
-<li>
-<p><code>quilkin_management_server_connected_proxies</code> (Gauge)</p>
-<p>The number of proxies currently connected to the server.</p>
-</li>
-<li>
-<p><code>quilkin_management_server_discovery_requests_total{request_type}</code> (Counter)</p>
-<p>The total number of xDS Discovery requests received across all proxies.</p>
-<ul>
-<li><code>request_type</code> = <code>type.googleapis.com/envoy.config.cluster.v3.Cluster</code> | <code>type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment</code> | <code>type.googleapis.com/envoy.config.listener.v3.Listener</code>
-Type URL of the requested resource</li>
-</ul>
-</li>
-<li>
-<p><code>quilkin_management_server_discovery_responses_total</code> (Counter)</p>
-<p>The total number of xDS Discovery responses sent back across all proxies in response to Discovery Requests.
-Each Discovery response sent corresponds to a configuration update for some proxy.</p>
-<ul>
-<li><code>request_type</code> = <code>type.googleapis.com/envoy.config.cluster.v3.Cluster</code> | <code>type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment</code> | <code>type.googleapis.com/envoy.config.listener.v3.Listener</code>
-Type URL of the requested resource</li>
-</ul>
-</li>
-<li>
-<p><code>quilkin_management_server_endpoints_total</code> (Gauge)</p>
-<p>The number of active endpoints discovered by the server. The number of active endpoints
-correlates with the size of the cluster configuration update sent to proxies.</p>
-</li>
-<li>
-<p><code>quilkin_management_server_snapshot_generation_errors_total</code> (Counter)</p>
-<p>The total number of errors encountered while generating a configuration snapshot update for a proxy.</p>
-</li>
-<li>
-<p><code>quilkin_management_server_snapshots_generated_total</code> (Counter)</p>
-<p>The total number of configuration snapshot generated across all proxies. A snapshot corresponds
-to a point in time view of a proxy's configuration. However it does not necessarily correspond
-to a proxy update - a proxy only gets the latest snapshot so it might miss intermediate
-snapshots if it lags behind.</p>
-</li>
-<li>
-<p><code>quilkin_management_server_snapshots_cache_size</code> (Gauge)</p>
-<p>The current number of snapshots in the in-memory snapshot cache. This corresponds 1-1 to
-proxies that connect to the server. However the number may be slightly higher than the number
-of connected proxies since snapshots for disconnected proxies are only periodically cleared
-from the cache.</p>
-</li>
-</ul>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="agones-xds-provider"><a class="header" href="#agones-xds-provider">Agones xDS Provider</a></h1>
-<p>The <a href="https://agones.dev">Agones</a> xDS Provider is built to simplify Quilkin integration with Agones
+<div style="break-before: page; page-break-before: always;"></div><h1 id="agones-provider"><a class="header" href="#agones-provider">Agones Provider</a></h1>
+<p>The <a href="https://agones.dev">Agones</a> Provider is built to simplify Quilkin integration with Agones
 game server hosting on top of <a href="https://kubernetes.io">Kubernetes</a>.</p>
 <p>This provider watches for changes in Agones
 <a href="https://agones.dev/site/docs/getting-started/create-gameserver/"><code>GameServer</code> resources</a> in a cluster, and
 utilises that information to provide <a href="services/xds/providers/../../proxy.html#endpoints">Endpoint</a> information to connected Quilkin proxies.</p>
-<p>To view all the options for the agones provider subcommand, run:</p>
-<pre><code class="language-shell">$ quilkin manage agones --help
-Watches Agones' game server CRDs for `Allocated` game server endpoints, and for a `ConfigMap` that specifies the filter configuration
-
-Usage: quilkin manage agones [OPTIONS]
-
-Options:
-  -c, --config-namespace &lt;CONFIG_NAMESPACE&gt;
-          The namespace under which the configmap is stored [env: QUILKIN_AGONES_CONFIG_NAMESPACE=]
-  -g, --gameservers-namespace &lt;GAMESERVERS_NAMESPACE&gt;
-          The namespace under which the game servers run [env: QUILKIN_AGONES_GAMESERVERS_NAMESPACE=] [default: default]
-  -h, --help
-          Print help
-</code></pre>
 <blockquote>
 <p>Currently, the Agones provider can only discover resources within the cluster it is running in.</p>
 </blockquote>
@@ -2505,34 +2456,17 @@ data:
 <p>By default the Agones xDS provider will look in the <code>default</code> namespace for this <code>ConfigMap</code>, but it can be
 configured via the <code>--config-namespace</code> argument.</p>
 <h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
-<p>As an example, the following runs the server with subcommnad <code>manage agones</code> against a cluster (using default
-kubeconfig authentication) where Quilkin pods run in the <code>quilkin</code> namespace and <code>GameServer</code> pods run in the
-<code>gameservers</code> namespace:</p>
-<pre><code class="language-sh">quilkin manage agones --config-namespace quilkin --gameservers-namespace gameservers
+<p>As an example, the following runs quilkin against a cluster (using default
+kubeconfig authentication) in the <code>default</code> namespace.</p>
+<pre><code class="language-sh">quilkin --provider.k8s.agones --provider.k8s.agones.namespace=default
 </code></pre>
 <p>For a full referenmce of deploying this provider in a Kubernetes cluster, with appropriate <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Deployments</a>, <a href="https://kubernetes.io/docs/concepts/services-networking/service/">Services</a>,
 and <a href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/">RBAC</a> Rules, there is an <a href="https://github.com/googleforgames/quilkin/tree/main/examples/agones-xonotic-xds">Agones, xDS and Xonotic example</a>.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="filesystem-xds-provider"><a class="header" href="#filesystem-xds-provider">Filesystem xDS Provider</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="filesystem-provider"><a class="header" href="#filesystem-provider">Filesystem Provider</a></h1>
 <p>The filesystem provider watches a configuration file on disk and sends updates to proxies whenever that file changes.</p>
-<p>To view all the options for the file provider subcommand, run:</p>
-<pre><code class="language-shell">$ quilkin manage agones --help
-Watches for changes to the file located at `path`
-
-Usage: quilkin manage file &lt;PATH&gt;
-
-Arguments:
-  &lt;PATH&gt;  The path to the source config [env: QUILKIN_FS_PATH=]
-
-Options:
-  -h, --help  Print help
-</code></pre>
 <p>For example:</p>
-<pre><code class="language-sh">quilkin manage file quilkin.yaml
+<pre><code class="language-sh">quilkin --provider.fs.path quilkin.yaml
 </code></pre>
-<p>We run this on port 1800, in this example, in case you are running this locally, and the
-default port is taken up by an existing Quilkin proxy.</p>
-<p>After running this command, any proxy that connects to port 18000 will receive updates as configured in <code>config.yaml</code>
-file.</p>
 <p>You can find the configuration file schema in <a href="services/xds/providers/../../../services/proxy/configuration.html">Configuration File</a>.</p>
 <p>Example:</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -2677,6 +2611,19 @@ clusters:
 </ul>
 </li>
 <li>
+<p><a href="services/xds/proto/index.html#quilkin_pprof-proto">quilkin/pprof.proto</a></p>
+<ul>
+<li><a href="services/xds/proto/index.html#perftools-profiles-Function">Function</a></li>
+<li><a href="services/xds/proto/index.html#perftools-profiles-Label">Label</a></li>
+<li><a href="services/xds/proto/index.html#perftools-profiles-Line">Line</a></li>
+<li><a href="services/xds/proto/index.html#perftools-profiles-Location">Location</a></li>
+<li><a href="services/xds/proto/index.html#perftools-profiles-Mapping">Mapping</a></li>
+<li><a href="services/xds/proto/index.html#perftools-profiles-Profile">Profile</a></li>
+<li><a href="services/xds/proto/index.html#perftools-profiles-Sample">Sample</a></li>
+<li><a href="services/xds/proto/index.html#perftools-profiles-ValueType">ValueType</a></li>
+</ul>
+</li>
+<li>
 <p><a href="services/xds/proto/index.html#scalar-value-types">Scalar Value Types</a></p>
 </li>
 </ul>
@@ -2696,7 +2643,8 @@ xDS server without the relay needing to maintain a list
 of xDS servers to connect to in the relay itself.</p>
 <div class="table-wrapper"><table><thead><tr><th>Method Name</th><th>Request Type</th><th>Response Type</th><th>Description</th></tr></thead><tbody>
 <tr><td>StreamAggregatedResources</td><td><a href="services/xds/proto/index.html#envoy-service-discovery-v3-DiscoveryResponse">.envoy.service.discovery.v3.DiscoveryResponse</a> stream</td><td><a href="services/xds/proto/index.html#envoy-service-discovery-v3-DiscoveryRequest">.envoy.service.discovery.v3.DiscoveryRequest</a> stream</td><td>This RPC is not supported but remains here as part of the xDS standard, as Quilkin only uses a delta configuration transport for performance reasons.</td></tr>
-<tr><td>DeltaAggregatedResources</td><td><a href="services/xds/proto/index.html#envoy-service-discovery-v3-DeltaDiscoveryResponse">.envoy.service.discovery.v3.DeltaDiscoveryResponse</a> stream</td><td><a href="services/xds/proto/index.html#envoy-service-discovery-v3-DeltaDiscoveryRequest">.envoy.service.discovery.v3.DeltaDiscoveryRequest</a> stream</td><td>Delta (Incremental) xDS implementation</td></tr>
+<tr><td>DeltaAggregatedResources</td><td><a href="services/xds/proto/index.html#envoy-service-discovery-v3-DeltaDiscoveryResponse">.envoy.service.discovery.v3.DeltaDiscoveryResponse</a> stream</td><td><a href="services/xds/proto/index.html#envoy-service-discovery-v3-DeltaDiscoveryRequest">.envoy.service.discovery.v3.DeltaDiscoveryRequest</a> stream</td><td>Delta (Incremental) xDS implementation, used by agents and/or management servers to update the relay with their configuration</td></tr>
+<tr><td>SubscribeDeltaResources</td><td><a href="services/xds/proto/index.html#envoy-service-discovery-v3-DeltaDiscoveryRequest">.envoy.service.discovery.v3.DeltaDiscoveryRequest</a> stream</td><td><a href="services/xds/proto/index.html#envoy-service-discovery-v3-DeltaDiscoveryResponse">.envoy.service.discovery.v3.DeltaDiscoveryResponse</a> stream</td><td>Used by proxies to subscribe to changes from the relay</td></tr>
 </tbody></table>
 </div>
 <p><a name="quilkin_config_v1alpha1_config-proto"></a></p>
@@ -2953,6 +2901,112 @@ of xDS servers to connect to in the relay itself.</p>
 <tr><td>metadata_key</td><td><a href="services/xds/proto/index.html#google-protobuf-StringValue">google.protobuf.StringValue</a></td><td></td><td></td></tr>
 </tbody></table>
 </div>
+<p><a name="quilkin_pprof-proto"></a></p>
+<p align="right"><a href="services/xds/proto/index.html#top">Top</a></p>
+<h2 id="quilkinpprofproto"><a class="header" href="#quilkinpprofproto">quilkin/pprof.proto</a></h2>
+<p><a name="perftools-profiles-Function"></a></p>
+<h3 id="function"><a class="header" href="#function">Function</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Label</th><th>Description</th></tr></thead><tbody>
+<tr><td>id</td><td><a href="services/xds/proto/index.html#uint64">uint64</a></td><td></td><td>Unique nonzero id for the function.</td></tr>
+<tr><td>name</td><td><a href="services/xds/proto/index.html#int64">int64</a></td><td></td><td>Name of the function, in human-readable form if available.</td></tr>
+</tbody></table>
+</div>
+<p>Index into string table |
+| system_name | <a href="services/xds/proto/index.html#int64">int64</a> |  | Name of the function, as identified by the system. For instance, it can be a C++ mangled name.</p>
+<p>Index into string table |
+| filename | <a href="services/xds/proto/index.html#int64">int64</a> |  | Source file containing the function.</p>
+<p>Index into string table |
+| start_line | <a href="services/xds/proto/index.html#int64">int64</a> |  | Line number in source file. |</p>
+<p><a name="perftools-profiles-Label"></a></p>
+<h3 id="label"><a class="header" href="#label">Label</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Label</th><th>Description</th></tr></thead><tbody>
+<tr><td>key</td><td><a href="services/xds/proto/index.html#int64">int64</a></td><td></td><td>Index into string table</td></tr>
+<tr><td>str</td><td><a href="services/xds/proto/index.html#int64">int64</a></td><td></td><td>At most one of the following must be present</td></tr>
+</tbody></table>
+</div>
+<p>Index into string table |
+| num | <a href="services/xds/proto/index.html#int64">int64</a> |  |  |
+| num_unit | <a href="services/xds/proto/index.html#int64">int64</a> |  | Should only be present when num is present. Specifies the units of num. Use arbitrary string (for example, "requests") as a custom count unit. If no unit is specified, consumer may apply heuristic to deduce the unit. Consumers may also interpret units like "bytes" and "kilobytes" as memory units and units like "seconds" and "nanoseconds" as time units, and apply appropriate unit conversions to these.</p>
+<p>Index into string table |</p>
+<p><a name="perftools-profiles-Line"></a></p>
+<h3 id="line"><a class="header" href="#line">Line</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Label</th><th>Description</th></tr></thead><tbody>
+<tr><td>function_id</td><td><a href="services/xds/proto/index.html#uint64">uint64</a></td><td></td><td>The id of the corresponding profile.Function for this line.</td></tr>
+<tr><td>line</td><td><a href="services/xds/proto/index.html#int64">int64</a></td><td></td><td>Line number in source code.</td></tr>
+</tbody></table>
+</div>
+<p><a name="perftools-profiles-Location"></a></p>
+<h3 id="location"><a class="header" href="#location">Location</a></h3>
+<p>Describes function and line table debug information.</p>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Label</th><th>Description</th></tr></thead><tbody>
+<tr><td>id</td><td><a href="services/xds/proto/index.html#uint64">uint64</a></td><td></td><td>Unique nonzero id for the location. A profile could use instruction addresses or any integer sequence as ids.</td></tr>
+<tr><td>mapping_id</td><td><a href="services/xds/proto/index.html#uint64">uint64</a></td><td></td><td>The id of the corresponding profile.Mapping for this location. It can be unset if the mapping is unknown or not applicable for this profile type.</td></tr>
+<tr><td>address</td><td><a href="services/xds/proto/index.html#uint64">uint64</a></td><td></td><td>The instruction address for this location, if available. It should be within [Mapping.memory_start...Mapping.memory_limit] for the corresponding mapping. A non-leaf address may be in the middle of a call instruction. It is up to display tools to find the beginning of the instruction if necessary.</td></tr>
+<tr><td>line</td><td><a href="services/xds/proto/index.html#perftools-profiles-Line">Line</a></td><td>repeated</td><td>Multiple line indicates this location has inlined functions, where the last entry represents the caller into which the preceding entries were inlined.</td></tr>
+</tbody></table>
+</div>
+<p>E.g., if memcpy() is inlined into printf: line[0].function_name == "memcpy" line[1].function_name == "printf" |
+| is_folded | <a href="services/xds/proto/index.html#bool">bool</a> |  | Provides an indication that multiple symbols map to this location's address, for example due to identical code folding by the linker. In that case the line information above represents one of the multiple symbols. This field must be recomputed when the symbolization state of the profile changes. |</p>
+<p><a name="perftools-profiles-Mapping"></a></p>
+<h3 id="mapping"><a class="header" href="#mapping">Mapping</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Label</th><th>Description</th></tr></thead><tbody>
+<tr><td>id</td><td><a href="services/xds/proto/index.html#uint64">uint64</a></td><td></td><td>Unique nonzero id for the mapping.</td></tr>
+<tr><td>memory_start</td><td><a href="services/xds/proto/index.html#uint64">uint64</a></td><td></td><td>Address at which the binary (or DLL) is loaded into memory.</td></tr>
+<tr><td>memory_limit</td><td><a href="services/xds/proto/index.html#uint64">uint64</a></td><td></td><td>The limit of the address range occupied by this mapping.</td></tr>
+<tr><td>file_offset</td><td><a href="services/xds/proto/index.html#uint64">uint64</a></td><td></td><td>Offset in the binary that corresponds to the first mapped address.</td></tr>
+<tr><td>filename</td><td><a href="services/xds/proto/index.html#int64">int64</a></td><td></td><td>The object this entry is loaded from. This can be a filename on disk for the main binary and shared libraries, or virtual abstractions like "[vdso]".</td></tr>
+</tbody></table>
+</div>
+<p>Index into string table |
+| build_id | <a href="services/xds/proto/index.html#int64">int64</a> |  | A string that uniquely identifies a particular program version with high probability. E.g., for binaries generated by GNU tools, it could be the contents of the .note.gnu.build-id field.</p>
+<p>Index into string table |
+| has_functions | <a href="services/xds/proto/index.html#bool">bool</a> |  | The following fields indicate the resolution of symbolic info. |
+| has_filenames | <a href="services/xds/proto/index.html#bool">bool</a> |  |  |
+| has_line_numbers | <a href="services/xds/proto/index.html#bool">bool</a> |  |  |
+| has_inline_frames | <a href="services/xds/proto/index.html#bool">bool</a> |  |  |</p>
+<p><a name="perftools-profiles-Profile"></a></p>
+<h3 id="profile"><a class="header" href="#profile">Profile</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Label</th><th>Description</th></tr></thead><tbody>
+<tr><td>sample_type</td><td><a href="services/xds/proto/index.html#perftools-profiles-ValueType">ValueType</a></td><td>repeated</td><td>A description of the samples associated with each Sample.value. For a cpu profile this might be: [["cpu","nanoseconds"]] or [["wall","seconds"]] or [["syscall","count"]] For a heap profile, this might be: [["allocations","count"], ["space","bytes"]], If one of the values represents the number of events represented by the sample, by convention it should be at index 0 and use sample_type.unit == "count".</td></tr>
+<tr><td>sample</td><td><a href="services/xds/proto/index.html#perftools-profiles-Sample">Sample</a></td><td>repeated</td><td>The set of samples recorded in this profile.</td></tr>
+<tr><td>mapping</td><td><a href="services/xds/proto/index.html#perftools-profiles-Mapping">Mapping</a></td><td>repeated</td><td>Mapping from address ranges to the image/binary/library mapped into that address range. mapping[0] will be the main binary.</td></tr>
+<tr><td>location</td><td><a href="services/xds/proto/index.html#perftools-profiles-Location">Location</a></td><td>repeated</td><td>Useful program location</td></tr>
+<tr><td>function</td><td><a href="services/xds/proto/index.html#perftools-profiles-Function">Function</a></td><td>repeated</td><td>Functions referenced by locations</td></tr>
+<tr><td>string_table</td><td><a href="services/xds/proto/index.html#string">string</a></td><td>repeated</td><td>A common table for strings referenced by various messages. string_table[0] must always be "".</td></tr>
+<tr><td>drop_frames</td><td><a href="services/xds/proto/index.html#int64">int64</a></td><td></td><td>frames with Function.function_name fully matching the following regexp will be dropped from the samples, along with their successors.</td></tr>
+</tbody></table>
+</div>
+<p>Index into string table. |
+| keep_frames | <a href="services/xds/proto/index.html#int64">int64</a> |  | frames with Function.function_name fully matching the following regexp will be kept, even if it matches drop_functions.</p>
+<p>Index into string table. |
+| time_nanos | <a href="services/xds/proto/index.html#int64">int64</a> |  | Time of collection (UTC) represented as nanoseconds past the epoch. |
+| duration_nanos | <a href="services/xds/proto/index.html#int64">int64</a> |  | Duration of the profile, if a duration makes sense. |
+| period_type | <a href="services/xds/proto/index.html#perftools-profiles-ValueType">ValueType</a> |  | The kind of events between sampled ocurrences. e.g [ "cpu","cycles" ] or [ "heap","bytes" ] |
+| period | <a href="services/xds/proto/index.html#int64">int64</a> |  | The number of events between sampled occurrences. |
+| comment | <a href="services/xds/proto/index.html#int64">int64</a> | repeated | Freeform text associated to the profile.</p>
+<p>Indices into string table. |
+| default_sample_type | <a href="services/xds/proto/index.html#int64">int64</a> |  | Index into the string table of the type of the preferred sample value. If unset, clients should default to the last sample value. |</p>
+<p><a name="perftools-profiles-Sample"></a></p>
+<h3 id="sample"><a class="header" href="#sample">Sample</a></h3>
+<p>Each Sample records values encountered in some program
+context. The program context is typically a stack trace, perhaps
+augmented with auxiliary information like the thread-id, some
+indicator of a higher level request being handled etc.</p>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Label</th><th>Description</th></tr></thead><tbody>
+<tr><td>location_id</td><td><a href="services/xds/proto/index.html#uint64">uint64</a></td><td>repeated</td><td>The ids recorded here correspond to a Profile.location.id. The leaf is at location_id[0].</td></tr>
+<tr><td>value</td><td><a href="services/xds/proto/index.html#int64">int64</a></td><td>repeated</td><td>The type and unit of each value is defined by the corresponding entry in Profile.sample_type. All samples must have the same number of values, the same as the length of Profile.sample_type. When aggregating multiple samples into a single sample, the result has a list of values that is the elemntwise sum of the lists of the originals.</td></tr>
+<tr><td>label</td><td><a href="services/xds/proto/index.html#perftools-profiles-Label">Label</a></td><td>repeated</td><td>label includes additional context for this sample. It can include things like a thread id, allocation size, etc</td></tr>
+</tbody></table>
+</div>
+<p><a name="perftools-profiles-ValueType"></a></p>
+<h3 id="valuetype"><a class="header" href="#valuetype">ValueType</a></h3>
+<p>ValueType describes the semantics and measurement units of a value.</p>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Label</th><th>Description</th></tr></thead><tbody>
+<tr><td>ty</td><td><a href="services/xds/proto/index.html#int64">int64</a></td><td></td><td>Rename it from type to ty to avoid using keyword in Rust.</td></tr>
+</tbody></table>
+</div>
+<p>Index into string table. |
+| unit | <a href="services/xds/proto/index.html#int64">int64</a> |  | Index into string table. |</p>
 <h2 id="scalar-value-types"><a class="header" href="#scalar-value-types">Scalar Value Types</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>.proto Type</th><th>Notes</th><th>C++</th><th>Java</th><th>Python</th><th>Go</th><th>C#</th><th>PHP</th><th>Ruby</th></tr></thead><tbody>
 <tr><td><a name="double" /> double</td><td></td><td>double</td><td>double</td><td>float</td><td>float64</td><td>double</td><td>float</td><td>Float</td></tr>
@@ -2992,24 +3046,7 @@ relay's ADS endpoint, you use the same <code>--management-server</code> argument
 connecting to control planes.</p>
 <p>To view all options for the <code>relay</code> subcommand, run:</p>
 <pre><code class="language-shell">$ quilkin relay --help
-Runs Quilkin as a relay service that runs a Manager Discovery Service (mDS) for accepting cluster and configuration information from xDS management services, and exposing it as a single merged xDS service for proxy services
-
-Usage: quilkin relay [OPTIONS] [COMMAND]
-
-Commands:
-  agones  Watches Agones' game server CRDs for `Allocated` game server endpoints, and for a `ConfigMap` that specifies the filter configuration
-  file    Watches for changes to the file located at `path`
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -m, --mds-port &lt;MDS_PORT&gt;
-          Port for mDS service [env: QUILKIN_MDS_PORT=] [default: 7900]
-  -x, --xds-port &lt;XDS_PORT&gt;
-          Port for xDS management_server service [env: QUILKIN_PORT=] [default: 7800]
-      --idle-request-interval-secs &lt;IDLE_REQUEST_INTERVAL_SECS&gt;
-          The interval in seconds at which the relay will send a discovery request to an management server after receiving no updates [env: QUILKIN_IDLE_REQUEST_INTERVAL_SECS=]
-  -h, --help
-          Print help
+{{#include ../../../target/quilkin.relay.commands}}
 </code></pre>
 <blockquote>
 <p>Each sub-control planes (<code>file</code>, <code>agones</code>, etc) matches the <code>quilkin manage</code> providers capabilities.
@@ -3028,18 +3065,17 @@ clusters:
     - address: 127.0.0.1:8888
 </code></pre>
 <p>To start the relay, run the <code>relay</code> command:</p>
-<pre><code>quilkin relay 
+<pre><code>quilkin --service.mds
 </code></pre>
 <p>To spawn the control plane and have the control plane send its configuration,
-we need to run the <code>manage</code> command with the <code>--relay</code> flag with the address
+we need to run quilkin with the <code>provider.mds.endpoints</code> flag with the address
 of the relay of the relay server we just spawned which is at port <code>7900</code> by
-default. We're also going to set <code>--admin-address</code> and <code>--port</code> flags to avoid
-port collision with the relay's admin and xds endpoints.</p>
-<pre><code>quilkin --admin-address http://localhost:8001 \
-    manage \
-    --port 7801 \
-    --relay http://localhost:7900 \
-    file quilkin.yaml
+default. We're also going to set <code>admin.address</code> to a different port to not
+conflict.</p>
+<pre><code>quilkin \
+    --admin.address http://localhost:8001 \
+    --provider.fs.path quilkin.yaml \
+    --provider.mds.endpoints http://localhost:7900 \
 </code></pre>
 <p>Now if we run cURL on both the relay and the control plane we should see that
 they both contain the same set of endpoints.</p>
@@ -3050,10 +3086,9 @@ curl localhost:8000/config
 </code></pre>
 <p>Since the relay service also exposes a aDS control plane endpoint, that
 represents the merged set of all sources, to connect this to the proxy all we
-have to do is use the same <code>--management-server</code> flag that we use to specify
-the location of control planes, then the proxies will be able to pull
-configuration from the relay.</p>
-<pre><code>quilkin --admin-address http://localhost:8002 proxy --management-server http://127.0.0.1:7800
+have to do is use <code>provider.xds.endpoints</code> to specify the location of control
+planes, then the proxies will be able to pull configuration from the relay.</p>
+<pre><code>quilkin --service.udp --admin.address http://localhost:8002 --provider.xds.endpoints http://127.0.0.1:7800
 </code></pre>
 <p>We can also additionally add a second control plane source to the relay, which
 will be merged with our control plane's configuration to create a singular
@@ -3064,11 +3099,10 @@ clusters:
   - endpoints:
     - address: 127.0.0.1:9999
 </code></pre>
-<pre><code>quilkin --admin-address http://localhost:8003 \
-    manage \
-    --port 7802 \
-    --relay http://localhost:7900 \
-    file quilkin.yaml
+<pre><code>quilkin \
+    --admin.address http://localhost:8003 \
+    --provider.fs.path quilkin2.yaml \
+    --provider.mds.endpoints http://localhost:7900 \
 </code></pre>
 <p>And that's it! We've just setup control planes to look for configuration changes
 in our system, a relay to merge any changes into a unified dataset, and set up
@@ -3085,22 +3119,7 @@ configuration information to a <code>relay</code> service.</p>
 <a href="services/./xds/providers/filesystem.html">Filesystem</a> and <a href="services/./xds/providers/agones.html">Agones</a>.</p>
 <p>To view all options for the <code>agent</code> subcommand, run:</p>
 <pre><code class="language-shell">$ quilkin agent --help
-Runs Quilkin as a relay service that runs a Manager Discovery Service (mDS) for accepting cluster and configuration information from xDS management services, and exposing it as a single merged xDS service for proxy services
-
-Usage: quilkin agent [OPTIONS] [COMMAND]
-
-Commands:
-  agones  Watches Agones' game server CRDs for `Allocated` game server endpoints, and for a `ConfigMap` that specifies the filter configuration
-  file    Watches for changes to the file located at `path`
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -q, --qcmp-port &lt;QCMP_PORT&gt;        Port for QCMP service [env: QCMP_PORT=] [default: 7600]
-  -r, --relay &lt;RELAY&gt;                One or more `quilkin relay` endpoints to push configuration changes to [env: QUILKIN_MANAGEMENT_SERVER=]
-      --address-type &lt;ADDRESS_TYPE&gt;  If specified, filters the available gameserver addresses to the one that matches the specified type
-      --ip-kind &lt;IP_KIND&gt;            If specified, additionally filters the gameserver address by its ip kind [possible values: v4, v6, any]
-  -i, --icao-code &lt;ICAO_CODE&gt;        The ICAO code for the agent [env: ICAO_CODE=] [default: XXXX]
-  -h, --help                         Print help
+{{#include ../../../target/quilkin.agent.commands}}
 </code></pre>
 <h2 id="quickstart-1"><a class="header" href="#quickstart-1">Quickstart</a></h2>
 <p>The simplest version of the <code>agent</code> service is just running <code>quilkin agent</code>,
@@ -3123,7 +3142,7 @@ curl localhost:8000/config
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="quilkin-unreal-engine-plugin"><a class="header" href="#quilkin-unreal-engine-plugin">Quilkin Unreal Engine Plugin</a></h1>
 <p>This is an unreal engine 5 plugin for Quilkin, a UDP proxy for gameservers. The plugin provides several features that you can use with Quilkin deployments, such as proxying game traffic, and latency measurement.</p>
-<p>You can also find guide level documentation on how the proxy works in the <a href="https://googleforgames.github.io/quilkin/main/book/">Quilkin Book</a>.</p>
+<p>You can also find guide level documentation on how the proxy works in the <a href="https://embarkstudios.github.io/quilkin/main/book/">Quilkin Book</a>.</p>
 <h3 id="installation-1"><a class="header" href="#installation-1">Installation</a></h3>
 <p>Copy this plugin to your <code>Plugins</code> folder in your <code>Engine</code> directory.</p>
 <h3 id="configuration-2"><a class="header" href="#configuration-2">Configuration</a></h3>
@@ -3140,7 +3159,7 @@ curl localhost:8000/config
 <ul>
 <li><code>TArray&lt;FQuilkinEndpoint&gt; Endpoints</code> A set of Quilkin load balancer endpoints that can be used for the following features.</li>
 <li><code>bool MeasureEndpoints</code> When enabled, the plugin will start a new <code>Tick</code> task that executes at a fixed interval (currently 30 seconds), where it will spawn a new background task that will ping each endpoint in <code>Endpoints</code>, and track its measurement in a fixed size circular buffer.
-Pings are handled through Quilkin Control Message Protocol, this is a bespoke protocol for UDP to be able to support situations where for example using ICMP is not possible, see the <a href="https://googleforgames.github.io/quilkin/main/book/services/proxy/qcmp.html">Quilkin Book</a> for more details on the protocol data unit.
+Pings are handled through Quilkin Control Message Protocol, this is a bespoke protocol for UDP to be able to support situations where for example using ICMP is not possible, see the <a href="https://embarkstudios.github.io/quilkin/main/book/services/proxy/qcmp.html">Quilkin Book</a> for more details on the protocol data unit.
 <strong>Note</strong> <code>MeasureEndpoints</code> is orthogonal to <code>Enabled</code> and <code>UseEndpoints</code> meaning that you can use <code>MeasureEndpoints</code> for latency measurements without being required to also use Quilkin for game traffic.</li>
 <li><code>bool UseEndpoints</code> Whether to use <code>Endpoints</code> for game traffic. When enabled, instead of using the provided <code>FInternetAddr</code>, the plugin will choose the lowest latency endpoint available and send traffic through that endpoint to connect to the gameserver, and if the latency should exceed <code>JitterThreshold</code> then the plugin will attempt to redirect traffic to the next available endpoint with the lowest latency.</li>
 </ul>
@@ -3209,11 +3228,11 @@ check period (e.g.  <code>periodSeconds=1</code>) and a low success threshold
 (e.g. <code>successThreshold=1</code>), but a high <code>failureThreshold</code>
 (e.g. <code>failureThreshold=60</code>) and <code>terminationGracePeriodSeconds</code> to allow for
 backoff attempts and existing player sessions to continue without disruption.</p>
-<h4 id="proxy-mode-1"><a class="header" href="#proxy-mode-1">Proxy Mode</a></h4>
+<h4 id="proxy-mode"><a class="header" href="#proxy-mode">Proxy Mode</a></h4>
 <p>Will return an HTTP status of 200 when there is at least one endpoint to send data to. This is primarily to ensure
 that new proxies that have yet to get configuration information from an <a href="deployment/../services/xds.html">xDS server</a> aren't send data
 until they are fully populated.</p>
-<h4 id="xds-provider-mode-1"><a class="header" href="#xds-provider-mode-1">xDS Provider Mode</a></h4>
+<h4 id="xds-provider-mode"><a class="header" href="#xds-provider-mode">xDS Provider Mode</a></h4>
 <p>Will return an HTTP status of 200 when all health checks pass.</p>
 <h3 id="metrics-4"><a class="header" href="#metrics-4">/metrics</a></h3>
 <p>Outputs <a href="https://prometheus.io/">Prometheus</a> formatted metrics for this instance.</p>
@@ -3467,6 +3486,7 @@ of protection and observability when orchestrating game servers on top of Kubern
             window.setTimeout(window.print, 100);
         });
         </script>
+
 
     </div>
     </body>

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_QCMP_PACKET_LEN","MIN_QCMP_PACKET_LEN"],"enum":["Error","Protocol"],"fn":["spawn"],"struct":["QcmpMeasurement","QcmpPacket"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_QCMP_PACKET_LEN","MIN_QCMP_PACKET_LEN"],"enum":["Error","Protocol"],"fn":["port_channel","spawn"],"struct":["QcmpPacket","QcmpTransceiver"]};

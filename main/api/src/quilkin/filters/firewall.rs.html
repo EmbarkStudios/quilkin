@@ -187,7 +187,15 @@
 <a href="#186" id="186">186</a>
 <a href="#187" id="187">187</a>
 <a href="#188" id="188">188</a>
-<a href="#189" id="189">189</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#189" id="189">189</a>
+<a href="#190" id="190">190</a>
+<a href="#191" id="191">191</a>
+<a href="#192" id="192">192</a>
+<a href="#193" id="193">193</a>
+<a href="#194" id="194">194</a>
+<a href="#195" id="195">195</a>
+<a href="#196" id="196">196</a>
+<a href="#197" id="197">197</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2021 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -210,7 +218,8 @@
 <span class="kw">use </span><span class="kw">crate</span>::filters::prelude::<span class="kw-2">*</span>;
 <span class="kw">use </span><span class="kw">crate</span>::generated::quilkin::filters::firewall::v1alpha1 <span class="kw">as </span>proto;
 
-<span class="kw">pub use </span>config::{Action, Config, PortRange, PortRangeError, Rule};
+<span class="kw">pub use </span>config::{Action, Cidr, Config, PortRange, PortRangeError, Rule};
+<span class="kw">pub use </span>ipnetwork::IpNetwork;
 
 <span class="doccomment">/// Filter for allowing/blocking traffic by IP and port.
 </span><span class="kw">pub struct </span>Firewall {
@@ -220,6 +229,13 @@
 
 <span class="kw">impl </span>Firewall {
     <span class="kw">fn </span>new(config: Config) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            on_read: config.on_read,
+            on_write: config.on_write,
+        }
+    }
+
+    <span class="kw">pub fn </span>testing(config: Config) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             on_read: config.on_read,
             on_write: config.on_write,

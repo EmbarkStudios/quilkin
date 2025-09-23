@@ -279,7 +279,8 @@
 <a href="#278" id="278">278</a>
 <a href="#279" id="279">279</a>
 <a href="#280" id="280">280</a>
-<a href="#281" id="281">281</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#281" id="281">281</a>
+<a href="#282" id="282">282</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -335,6 +336,10 @@
             metadata_key: config.metadata_key,
         }
     }
+
+    <span class="kw">pub fn </span>testing(config: Config) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new(config)
+    }
 }
 
 <span class="kw">impl </span>Filter <span class="kw">for </span>Capture {
@@ -346,25 +351,22 @@
             metadata::Value::Bool(capture.is_some()),
         );
 
-        <span class="kw">match </span>capture {
-            <span class="prelude-val">Some</span>((value, remove)) =&gt; {
-                <span class="macro">tracing::trace!</span>(key=%<span class="self">self</span>.metadata_key, %value, <span class="string">"captured value"</span>);
-                ctx.metadata.insert(<span class="self">self</span>.metadata_key, value);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((value, remove)) = capture {
+            <span class="macro">tracing::trace!</span>(key=%<span class="self">self</span>.metadata_key, %value, <span class="string">"captured value"</span>);
+            ctx.metadata.insert(<span class="self">self</span>.metadata_key, value);
 
-                <span class="kw">if </span>remove != <span class="number">0 </span>{
-                    <span class="kw">if </span>remove &lt; <span class="number">0 </span>{
-                        ctx.contents.remove_head(remove.unsigned_abs());
-                    } <span class="kw">else </span>{
-                        ctx.contents.remove_tail(remove <span class="kw">as _</span>);
-                    }
+            <span class="kw">if </span>remove != <span class="number">0 </span>{
+                <span class="kw">if </span>remove &lt; <span class="number">0 </span>{
+                    ctx.contents.remove_head(remove.unsigned_abs());
+                } <span class="kw">else </span>{
+                    ctx.contents.remove_tail(remove <span class="kw">as _</span>);
                 }
+            }
 
-                <span class="prelude-val">Ok</span>(())
-            }
-            <span class="kw">_ </span>=&gt; {
-                <span class="macro">tracing::trace!</span>(key = %<span class="self">self</span>.metadata_key, <span class="string">"No value captured"</span>);
-                <span class="prelude-val">Err</span>(FilterError::NoValueCaptured)
-            }
+            <span class="prelude-val">Ok</span>(())
+        } <span class="kw">else </span>{
+            <span class="macro">tracing::trace!</span>(key = %<span class="self">self</span>.metadata_key, <span class="string">"No value captured"</span>);
+            <span class="prelude-val">Err</span>(FilterError::NoValueCaptured)
         }
     }
 }

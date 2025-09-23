@@ -102,8 +102,7 @@
 <a href="#101" id="101">101</a>
 <a href="#102" id="102">102</a>
 <a href="#103" id="103">103</a>
-<a href="#104" id="104">104</a>
-<a href="#105" id="105">105</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#104" id="104">104</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2021 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -129,7 +128,6 @@
 
 <span class="doccomment">/// The configuration for [`load_balancer`][super].
 </span><span class="attr">#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, JsonSchema)]
-#[non_exhaustive]
 </span><span class="kw">pub struct </span>Config {
     <span class="attr">#[serde(default)]
     </span><span class="kw">pub </span>policy: Policy,

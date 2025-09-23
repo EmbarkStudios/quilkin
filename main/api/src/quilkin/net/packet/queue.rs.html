@@ -101,7 +101,7 @@
 
 <span class="doccomment">/// A simple packet queue that signals when a packet is pushed
 ///
-/// For io_uring this notifies an eventfd that will be processed on the next
+/// For `io_uring` this notifies an eventfd that will be processed on the next
 /// completion loop
 </span><span class="attr">#[derive(Clone)]
 </span><span class="kw">pub struct </span>PacketQueueSender {
@@ -142,11 +142,11 @@
 
 <span class="macro">cfg_if::cfg_if!</span> {
     <span class="kw">if </span><span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)] </span>{
-        <span class="kw">pub type </span>PacketQueueReceiver = <span class="kw">crate</span>::net::io_uring::EventFd;
-        <span class="kw">type </span>PacketQueueNotifier = <span class="kw">crate</span>::net::io_uring::EventFdWriter;
+        <span class="kw">pub type </span>PacketQueueReceiver = <span class="kw">crate</span>::net::io::completion::io_uring::EventFd;
+        <span class="kw">type </span>PacketQueueNotifier = <span class="kw">crate</span>::net::io::completion::io_uring::EventFdWriter;
 
         <span class="kw">fn </span>packet_queue() -&gt; std::io::Result&lt;(PacketQueueNotifier, PacketQueueReceiver)&gt; {
-            <span class="kw">let </span>rx = <span class="kw">crate</span>::net::io_uring::EventFd::new()<span class="question-mark">?</span>;
+            <span class="kw">let </span>rx = <span class="kw">crate</span>::net::io::completion::io_uring::EventFd::new()<span class="question-mark">?</span>;
             <span class="prelude-val">Ok</span>((rx.writer(), rx))
         }
 

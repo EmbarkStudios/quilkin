@@ -285,13 +285,13 @@
 <span class="kw">impl </span>PartialEq <span class="kw">for </span>FilterError {
     <span class="kw">fn </span>eq(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; bool {
         <span class="kw">match </span>(<span class="self">self</span>, other) {
-            (<span class="self">Self</span>::NoValueCaptured, <span class="self">Self</span>::NoValueCaptured) =&gt; <span class="bool-val">true</span>,
+            (<span class="self">Self</span>::FirewallDenied, <span class="self">Self</span>::FirewallDenied)
+            | (<span class="self">Self</span>::MatchNoMetadata, <span class="self">Self</span>::MatchNoMetadata)
+            | (<span class="self">Self</span>::Dropped, <span class="self">Self</span>::Dropped)
+            | (<span class="self">Self</span>::RateLimitExceeded, <span class="self">Self</span>::RateLimitExceeded)
+            | (<span class="self">Self</span>::NoValueCaptured, <span class="self">Self</span>::NoValueCaptured) =&gt; <span class="bool-val">true</span>,
             (<span class="self">Self</span>::TokenRouter(tra), <span class="self">Self</span>::TokenRouter(trb)) =&gt; tra.eq(trb),
             (<span class="self">Self</span>::Io(ia), <span class="self">Self</span>::Io(ib)) =&gt; ia.kind().eq(<span class="kw-2">&amp;</span>ib.kind()),
-            (<span class="self">Self</span>::FirewallDenied, <span class="self">Self</span>::FirewallDenied) =&gt; <span class="bool-val">true</span>,
-            (<span class="self">Self</span>::MatchNoMetadata, <span class="self">Self</span>::MatchNoMetadata) =&gt; <span class="bool-val">true</span>,
-            (<span class="self">Self</span>::Dropped, <span class="self">Self</span>::Dropped) =&gt; <span class="bool-val">true</span>,
-            (<span class="self">Self</span>::RateLimitExceeded, <span class="self">Self</span>::RateLimitExceeded) =&gt; <span class="bool-val">true</span>,
             (<span class="self">Self</span>::Custom(a), <span class="self">Self</span>::Custom(b)) =&gt; a == b,
             <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
         }

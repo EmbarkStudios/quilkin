@@ -297,7 +297,16 @@
 <a href="#296" id="296">296</a>
 <a href="#297" id="297">297</a>
 <a href="#298" id="298">298</a>
-<a href="#299" id="299">299</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#299" id="299">299</a>
+<a href="#300" id="300">300</a>
+<a href="#301" id="301">301</a>
+<a href="#302" id="302">302</a>
+<a href="#303" id="303">303</a>
+<a href="#304" id="304">304</a>
+<a href="#305" id="305">305</a>
+<a href="#306" id="306">306</a>
+<a href="#307" id="307">307</a>
+<a href="#308" id="308">308</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2021 Google LLC All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -371,6 +380,15 @@
     </span><span class="kw">pub </span>strategy: Strategy,
 }
 
+<span class="kw">impl </span>Config {
+    <span class="kw">pub fn </span>with_strategy(strategy: <span class="kw">impl </span>Into&lt;Strategy&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            metadata_key: <span class="kw">crate</span>::net::endpoint::metadata::Key::from_static(CAPTURED_BYTES),
+            strategy: strategy.into(),
+        }
+    }
+}
+
 <span class="kw">impl </span>Serialize <span class="kw">for </span>Config {
     <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
     <span class="kw">where
@@ -410,7 +428,7 @@
         <span class="kw">impl</span>&lt;<span class="lifetime">'de</span>&gt; serde::de::Visitor&lt;<span class="lifetime">'de</span>&gt; <span class="kw">for </span>ConfigVisitor {
             <span class="kw">type </span>Value = Config;
 
-            <span class="kw">fn </span>expecting(<span class="kw-2">&amp;</span><span class="self">self</span>, formatter: <span class="kw-2">&amp;mut </span>std::fmt::Formatter) -&gt; std::fmt::Result {
+            <span class="kw">fn </span>expecting(<span class="kw-2">&amp;</span><span class="self">self</span>, formatter: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; std::fmt::Result {
                 formatter.write_str(<span class="string">"Capture config"</span>)
             }
 

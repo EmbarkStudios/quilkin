@@ -187,7 +187,15 @@
 <a href="#186" id="186">186</a>
 <a href="#187" id="187">187</a>
 <a href="#188" id="188">188</a>
-<a href="#189" id="189">189</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#189" id="189">189</a>
+<a href="#190" id="190">190</a>
+<a href="#191" id="191">191</a>
+<a href="#192" id="192">192</a>
+<a href="#193" id="193">193</a>
+<a href="#194" id="194">194</a>
+<a href="#195" id="195">195</a>
+<a href="#196" id="196">196</a>
+<a href="#197" id="197">197</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2021 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -234,6 +242,14 @@
             config,
             label: <span class="prelude-val">None</span>,
             filter,
+        }))
+    }
+
+    <span class="kw">pub fn </span>testing(filter: <span class="kw">impl </span>Into&lt;FilterKind&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>(Arc::new(FilterInstanceData {
+            config: serde_json::Value::Null,
+            label: <span class="prelude-val">None</span>,
+            filter: filter.into(),
         }))
     }
 
@@ -285,7 +301,7 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;serde_json::Value, CreationError&gt;;
 
     <span class="doccomment">/// Returns the [`ConfigType`] from the provided Option, otherwise it returns
-    /// Error::MissingConfig if the Option is None.
+    /// [`Error::MissingConfig`] if the Option is None.
     </span><span class="kw">fn </span>require_config(<span class="kw-2">&amp;</span><span class="self">self</span>, config: <span class="prelude-ty">Option</span>&lt;ConfigType&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;ConfigType, CreationError&gt; {
         config.ok_or_else(|| CreationError::MissingConfig(<span class="self">self</span>.name()))
     }

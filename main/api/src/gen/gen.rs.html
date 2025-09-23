@@ -413,7 +413,26 @@
 <a href="#412" id="412">412</a>
 <a href="#413" id="413">413</a>
 <a href="#414" id="414">414</a>
-<a href="#415" id="415">415</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#415" id="415">415</a>
+<a href="#416" id="416">416</a>
+<a href="#417" id="417">417</a>
+<a href="#418" id="418">418</a>
+<a href="#419" id="419">419</a>
+<a href="#420" id="420">420</a>
+<a href="#421" id="421">421</a>
+<a href="#422" id="422">422</a>
+<a href="#423" id="423">423</a>
+<a href="#424" id="424">424</a>
+<a href="#425" id="425">425</a>
+<a href="#426" id="426">426</a>
+<a href="#427" id="427">427</a>
+<a href="#428" id="428">428</a>
+<a href="#429" id="429">429</a>
+<a href="#430" id="430">430</a>
+<a href="#431" id="431">431</a>
+<a href="#432" id="432">432</a>
+<a href="#433" id="433">433</a>
+<a href="#434" id="434">434</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2021 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -435,7 +454,7 @@
 };
 
 <span class="comment">// The proto-gen version to use, installing if needed
-</span><span class="kw">const </span>VERSION: <span class="kw-2">&amp;</span>str = <span class="string">"0.3.0"</span>;
+</span><span class="kw">const </span>VERSION: <span class="kw-2">&amp;</span>str = <span class="string">"0.4.0"</span>;
 
 <span class="kw">fn </span>check_version(name: <span class="kw-2">&amp;</span>str, prefix: <span class="kw-2">&amp;</span>str, wanted: <span class="kw-2">&amp;</span>str) -&gt; bool {
     <span class="kw">if let </span><span class="prelude-val">Ok</span>(output) = Command::new(name).arg(<span class="string">"--version"</span>).output() {
@@ -492,14 +511,15 @@
         }
 
         <span class="comment">// Determine the appropriate cargo/bin directory to place the binary in
-        </span><span class="kw">let </span><span class="kw-2">mut </span>cargo_root = std::env::var_os(<span class="string">"CARGO_HOME"</span>)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
+        </span><span class="kw">let </span><span class="kw-2">mut </span>cargo_root = std::env::var_os(<span class="string">"CARGO_HOME"</span>).map_or_else(
+            || {
                 <span class="kw">let </span>home = std::env::var_os(<span class="string">"HOME"</span>).expect(<span class="string">"failed to locate CARGO_HOME or HOME"</span>);
                 <span class="kw">let </span><span class="kw-2">mut </span>home = PathBuf::from(home);
                 home.push(<span class="string">".cargo"</span>);
                 home
-            });
+            },
+            PathBuf::from,
+        );
 
         cargo_root.push(<span class="string">"bin"</span>);
 
@@ -525,8 +545,24 @@
         <span class="kw">if </span>!child.wait().expect(<span class="string">"tar is not installed"</span>).success() {
             <span class="macro">panic!</span>(<span class="string">"failed to extract proto-gen binary from tarball"</span>);
         }
+    } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(local) = std::env::var(<span class="string">"PROTO_GEN_SRC"</span>) {
+        <span class="kw">if </span>!Command::new(<span class="string">"cargo"</span>)
+            .args([<span class="string">"install"</span>, <span class="string">"--locked"</span>, <span class="string">"-f"</span>, <span class="string">"--path"</span>, <span class="kw-2">&amp;</span>local])
+            .status()
+            .expect(<span class="string">"cargo not installed"</span>)
+            .success()
+        {
+            <span class="macro">panic!</span>(<span class="string">"failed to install proto-gen from local path"</span>);
+        }
     } <span class="kw">else if </span>!Command::new(<span class="string">"cargo"</span>)
-        .args([<span class="string">"install"</span>, <span class="string">"--locked"</span>, <span class="string">"-f"</span>, <span class="string">"proto-gen"</span>])
+        .args([
+            <span class="string">"install"</span>,
+            <span class="string">"--version"</span>,
+            VERSION,
+            <span class="string">"--locked"</span>,
+            <span class="string">"-f"</span>,
+            <span class="string">"proto-gen"</span>,
+        ])
         .status()
         .expect(<span class="string">"cargo not installed"</span>)
         .success()
@@ -535,7 +571,7 @@
     }
 }
 
-<span class="kw">const </span>VERSION_PROTOC: <span class="kw-2">&amp;</span>str = <span class="string">"25.3"</span>;
+<span class="kw">const </span>VERSION_PROTOC: <span class="kw-2">&amp;</span>str = <span class="string">"32.0"</span>;
 
 <span class="kw">fn </span>install_protoc() {
     <span class="kw">if </span>std::env::var_os(<span class="string">"CI"</span>).is_none() {
@@ -560,14 +596,15 @@
         <span class="macro">panic!</span>(<span class="string">"curl failed to download protoc zip"</span>);
     }
 
-    <span class="kw">let </span><span class="kw-2">mut </span>cargo_root = std::env::var_os(<span class="string">"CARGO_HOME"</span>)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
+    <span class="kw">let </span><span class="kw-2">mut </span>cargo_root = std::env::var_os(<span class="string">"CARGO_HOME"</span>).map_or_else(
+        || {
             <span class="kw">let </span>home = std::env::var_os(<span class="string">"HOME"</span>).expect(<span class="string">"failed to locate CARGO_HOME or HOME"</span>);
             <span class="kw">let </span><span class="kw-2">mut </span>home = PathBuf::from(home);
             home.push(<span class="string">".cargo"</span>);
             home
-        });
+        },
+        PathBuf::from,
+    );
 
     <span class="kw">if </span>!Command::new(<span class="string">"unzip"</span>)
         .arg(<span class="string">"-q"</span>)
@@ -628,6 +665,7 @@
                 <span class="string">"filters/pass/v1alpha1/pass"</span>,
                 <span class="string">"filters/token_router/v1alpha1/token_router"</span>,
                 <span class="string">"filters/timestamp/v1alpha1/timestamp"</span>,
+                <span class="string">"pprof"</span>,
             ],
         ),
     ];

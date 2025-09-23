@@ -423,12 +423,7 @@
 <a href="#422" id="422">422</a>
 <a href="#423" id="423">423</a>
 <a href="#424" id="424">424</a>
-<a href="#425" id="425">425</a>
-<a href="#426" id="426">426</a>
-<a href="#427" id="427">427</a>
-<a href="#428" id="428">428</a>
-<a href="#429" id="429">429</a>
-<a href="#430" id="430">430</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#425" id="425">425</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2021 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -492,7 +487,7 @@
     /// if present.
     </span><span class="kw">pub fn </span>to_socket_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; std::io::Result&lt;SocketAddr&gt; {
         <span class="kw">static </span>DNS: Lazy&lt;TokioResolver&gt; =
-            Lazy::new(|| TokioResolver::tokio_from_system_conf().unwrap());
+            Lazy::new(|| TokioResolver::builder_tokio().unwrap().build());
 
         <span class="kw">let </span>ip = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.host {
             AddressKind::Ip(ip) =&gt; <span class="kw-2">*</span>ip,
@@ -500,30 +495,26 @@
                 <span class="kw">static </span>CACHE: Lazy&lt;<span class="kw">crate</span>::collections::ttl::TtlMap&lt;String, IpAddr&gt;&gt; =
                     Lazy::new(&lt;<span class="kw">_</span>&gt;::default);
 
-                <span class="kw">match </span>CACHE.get(name) {
-                    <span class="prelude-val">Some</span>(ip) =&gt; <span class="kw-2">**</span>ip,
-                    <span class="prelude-val">None </span>=&gt; {
-                        <span class="kw">let </span>handle = tokio::runtime::Handle::current();
-                        <span class="kw">let </span>set = handle
-                            .block_on(DNS.lookup_ip(<span class="kw-2">&amp;**</span>name))<span class="question-mark">?
-                            </span>.iter()
-                            .collect::&lt;std::collections::HashSet&lt;<span class="kw">_</span>&gt;&gt;();
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(ip) = CACHE.get(name) {
+                    <span class="kw-2">**</span>ip
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>handle = tokio::runtime::Handle::current();
+                    <span class="kw">let </span>set = handle
+                        .block_on(DNS.lookup_ip(<span class="kw-2">&amp;**</span>name))<span class="question-mark">?
+                        </span>.iter()
+                        .collect::&lt;std::collections::HashSet&lt;<span class="kw">_</span>&gt;&gt;();
 
-                        <span class="kw">let </span>ip = set
-                            .iter()
-                            .find(|item| <span class="macro">matches!</span>(item, IpAddr::V6(<span class="kw">_</span>)))
-                            .or_else(|| set.iter().find(|item| <span class="macro">matches!</span>(item, IpAddr::V4(<span class="kw">_</span>))))
-                            .copied()
-                            .ok_or_else(|| {
-                                std::io::Error::new(
-                                    std::io::ErrorKind::Other,
-                                    <span class="string">"no ip address found"</span>,
-                                )
-                            })<span class="question-mark">?</span>;
+                    <span class="kw">let </span>ip = set
+                        .iter()
+                        .find(|item| <span class="macro">matches!</span>(item, IpAddr::V6(<span class="kw">_</span>)))
+                        .or_else(|| set.iter().find(|item| <span class="macro">matches!</span>(item, IpAddr::V4(<span class="kw">_</span>))))
+                        .copied()
+                        .ok_or_else(|| {
+                            std::io::Error::new(std::io::ErrorKind::Other, <span class="string">"no ip address found"</span>)
+                        })<span class="question-mark">?</span>;
 
-                        CACHE.insert(name.clone(), ip);
-                        ip
-                    }
+                    CACHE.insert(name.clone(), ip);
+                    ip
                 }
             }
         };
@@ -769,8 +760,7 @@
 
         <span class="prelude-val">Ok</span>(host
             .parse()
-            .map(<span class="self">Self</span>::Ip)
-            .unwrap_or_else(|<span class="kw">_</span>| <span class="self">Self</span>::Name(s.to_owned())))
+            .map_or_else(|_err| <span class="self">Self</span>::Name(s.to_owned()), <span class="self">Self</span>::Ip))
     }
 }
 
@@ -813,7 +803,7 @@
         <span class="kw">match </span>endpoint.host {
             AddressKind::Name(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">"Shouldn't be a name"</span>),
             AddressKind::Ip(ip) =&gt; {
-                <span class="macro">assert_eq!</span>(<span class="string">"2345:425:2ca1::567:5673:24b5"</span>, ip.to_string())
+                <span class="macro">assert_eq!</span>(<span class="string">"2345:425:2ca1::567:5673:24b5"</span>, ip.to_string());
             }
         };
         <span class="macro">assert_eq!</span>(<span class="number">25999</span>, endpoint.port);
@@ -835,7 +825,7 @@
         <span class="kw">match </span>ak {
             AddressKind::Name(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">"Shouldn't be a name"</span>),
             AddressKind::Ip(ip) =&gt; {
-                <span class="macro">assert_eq!</span>(<span class="string">"2345:425:2ca1::567:5673:24b5"</span>, ip.to_string())
+                <span class="macro">assert_eq!</span>(<span class="string">"2345:425:2ca1::567:5673:24b5"</span>, ip.to_string());
             }
         };
 
@@ -845,14 +835,14 @@
         <span class="kw">match </span>ak {
             AddressKind::Name(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">"Shouldn't be a name"</span>),
             AddressKind::Ip(ip) =&gt; {
-                <span class="macro">assert_eq!</span>(<span class="string">"2345:425:2ca1::567:5673:24b5"</span>, ip.to_string())
+                <span class="macro">assert_eq!</span>(<span class="string">"2345:425:2ca1::567:5673:24b5"</span>, ip.to_string());
             }
         };
 
         <span class="kw">let </span>ak = <span class="string">"my.domain.com"</span>.parse::&lt;AddressKind&gt;().unwrap();
         <span class="kw">match </span>ak {
             AddressKind::Name(name) =&gt; {
-                <span class="macro">assert_eq!</span>(<span class="string">"my.domain.com"</span>, name)
+                <span class="macro">assert_eq!</span>(<span class="string">"my.domain.com"</span>, name);
             }
             AddressKind::Ip(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">"shouldn't be an ip"</span>),
         };

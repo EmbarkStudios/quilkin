@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["update_endpoints_from_gameservers","update_filters_from_configmap"],"mod":["agones"]};

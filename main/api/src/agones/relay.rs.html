@@ -401,7 +401,35 @@
 <a href="#400" id="400">400</a>
 <a href="#401" id="401">401</a>
 <a href="#402" id="402">402</a>
-<a href="#403" id="403">403</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#403" id="403">403</a>
+<a href="#404" id="404">404</a>
+<a href="#405" id="405">405</a>
+<a href="#406" id="406">406</a>
+<a href="#407" id="407">407</a>
+<a href="#408" id="408">408</a>
+<a href="#409" id="409">409</a>
+<a href="#410" id="410">410</a>
+<a href="#411" id="411">411</a>
+<a href="#412" id="412">412</a>
+<a href="#413" id="413">413</a>
+<a href="#414" id="414">414</a>
+<a href="#415" id="415">415</a>
+<a href="#416" id="416">416</a>
+<a href="#417" id="417">417</a>
+<a href="#418" id="418">418</a>
+<a href="#419" id="419">419</a>
+<a href="#420" id="420">420</a>
+<a href="#421" id="421">421</a>
+<a href="#422" id="422">422</a>
+<a href="#423" id="423">423</a>
+<a href="#424" id="424">424</a>
+<a href="#425" id="425">425</a>
+<a href="#426" id="426">426</a>
+<a href="#427" id="427">427</a>
+<a href="#428" id="428">428</a>
+<a href="#429" id="429">429</a>
+<a href="#430" id="430">430</a>
+<a href="#431" id="431">431</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2023 Google LLC All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -444,7 +472,7 @@
     <span class="kw">use </span>tokio::time::timeout;
 
     <span class="kw">use </span>quilkin::{
-        config::providers::k8s::agones::{Fleet, GameServer},
+        providers::k8s::agones::{Fleet, GameServer},
         test::TestHelper,
     };
 
@@ -462,11 +490,13 @@
     /// for this test, we should only run Agones integration test in a serial manner, since they
     /// could easily collide with each other.
     </span><span class="kw">async fn </span>agones_token_router() {
+        quilkin::test::enable_log(<span class="string">"agones=debug"</span>);
+
         run_test(<span class="bool-val">true</span>, <span class="bool-val">true</span>, <span class="bool-val">true</span>, <span class="number">0</span>).<span class="kw">await</span>;
-        run_test(<span class="bool-val">true</span>, <span class="bool-val">true</span>, <span class="bool-val">false</span>, <span class="number">1</span>).<span class="kw">await</span>;
-        run_test(<span class="bool-val">true</span>, <span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="number">2</span>).<span class="kw">await</span>;
-        run_test(<span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="bool-val">true</span>, <span class="number">3</span>).<span class="kw">await</span>;
-    }
+        <span class="comment">//run_test(true, true, false, 1).await;
+        //run_test(true, false, true, 2).await;
+        //run_test(false, true, true, 3).await;
+    </span>}
 
     <span class="kw">async fn </span>run_test(proxy: bool, relay: bool, agent: bool, id: u8) {
         <span class="macro">println!</span>(<span class="string">"running agones_token_router {id}"</span>);
@@ -481,8 +511,8 @@
         <span class="kw">let </span>dp = DeleteParams::default();
 
         <span class="kw">let </span>config_map = create_token_router_config(<span class="kw-2">&amp;</span>config_maps).<span class="kw">await</span>;
-        <span class="kw">let </span>(relay_name, agent_name) =
-            agones_agent_deployment(<span class="kw-2">&amp;</span>client, deployments.clone(), relay, agent, id).<span class="kw">await</span>;
+        <span class="kw">let </span>(relay_name, agent_names) =
+            agones_agent_deployment(<span class="kw-2">&amp;</span>client, deployments.clone(), relay, agent, <span class="number">1</span>, id).<span class="kw">await</span>;
 
         <span class="kw">let </span>relay_proxy_name = <span class="macro">format!</span>(<span class="string">"quilkin-relay-proxy-{id}"</span>);
         <span class="kw">let </span>proxy_address = quilkin_proxy_deployment(
@@ -501,10 +531,7 @@
 
         <span class="kw">let </span><span class="kw-2">mut </span>t = TestHelper::default();
         <span class="kw">let </span>(<span class="kw-2">mut </span>rx, socket) = t.open_socket_and_recv_multiple_packets().<span class="kw">await</span>;
-        socket
-            .send_to(<span class="string">"ALLOCATE"</span>.as_bytes(), gs_address)
-            .<span class="kw">await
-            </span>.unwrap();
+        socket.send_to(<span class="string">b"ALLOCATE"</span>, gs_address).<span class="kw">await</span>.unwrap();
 
         <span class="kw">let </span>response = timeout(Duration::from_secs(<span class="number">30</span>), rx.recv())
             .<span class="kw">await
@@ -548,7 +575,13 @@
                 <span class="kw">break</span>;
             }
         }
-        <span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"NAME: {}\n"</span>, gs.name_unchecked()), response);
+
+        <span class="kw">if </span><span class="macro">format!</span>(<span class="string">"NAME: {}\n"</span>, gs.name_unchecked()) != response {
+            debug_pods(<span class="kw-2">&amp;</span>client, <span class="macro">format!</span>(<span class="string">"role={relay_proxy_name}"</span>)).<span class="kw">await</span>;
+            debug_pods(<span class="kw-2">&amp;</span>client, <span class="string">"role=relay"</span>.into()).<span class="kw">await</span>;
+            debug_pods(<span class="kw-2">&amp;</span>client, <span class="string">"role=agent"</span>.into()).<span class="kw">await</span>;
+            <span class="macro">panic!</span>(<span class="string">"failed send packets to {}"</span>, gs.name_unchecked());
+        }
 
         <span class="comment">// let's remove the token from the gameserver, which should remove access.
         </span><span class="kw">let </span><span class="kw-2">mut </span>gs = gameservers.get(gs.name_unchecked().as_str()).<span class="kw">await</span>.unwrap();
@@ -635,9 +668,20 @@
             <span class="prelude-val">Ok</span>(())
         }
 
+        <span class="kw">async fn </span>delete_agents(
+            dp: <span class="kw-2">&amp;</span>Api&lt;Deployment&gt;,
+            agents: Vec&lt;String&gt;,
+        ) -&gt; <span class="prelude-ty">Result</span>&lt;(), kube::Error&gt; {
+            <span class="kw">for </span>agent <span class="kw">in </span>agents {
+                delete_deployment(dp, <span class="kw-2">&amp;</span>agent).<span class="kw">await</span><span class="question-mark">?</span>;
+            }
+
+            <span class="prelude-val">Ok</span>(())
+        }
+
         <span class="macro">tokio::try_join!</span>(
             delete_deployment(<span class="kw-2">&amp;</span>deployments, <span class="kw-2">&amp;</span>relay_proxy_name),
-            delete_deployment(<span class="kw-2">&amp;</span>deployments, <span class="kw-2">&amp;</span>agent_name),
+            delete_agents(<span class="kw-2">&amp;</span>deployments, agent_names),
             delete_deployment(<span class="kw-2">&amp;</span>deployments, <span class="kw-2">&amp;</span>relay_name),
         )
         .expect(<span class="string">"failed to delete deployment(s) within timeout"</span>);
@@ -649,8 +693,9 @@
         deployments: Api&lt;Deployment&gt;,
         relay: bool,
         agent: bool,
+        agent_count: u8,
         id: u8,
-    ) -&gt; (String, String) {
+    ) -&gt; (String, Vec&lt;String&gt;) {
         <span class="kw">let </span>service_accounts: Api&lt;ServiceAccount&gt; = client.namespaced_api();
         <span class="kw">let </span>cluster_roles: Api&lt;ClusterRole&gt; = Api::all(client.kubernetes.clone());
         <span class="kw">let </span>role_bindings: Api&lt;RoleBinding&gt; = client.namespaced_api();
@@ -666,9 +711,10 @@
 
         <span class="comment">// Setup the relay
         </span><span class="kw">let </span>args = [
-            <span class="string">"relay"</span>,
-            <span class="string">"agones"</span>,
-            <span class="string">"--config-namespace"</span>,
+            <span class="string">"--service.xds"</span>,
+            <span class="string">"--service.mds"</span>,
+            <span class="string">"--provider.k8s"</span>,
+            <span class="string">"--provider.k8s.namespace"</span>,
             client.namespace.as_str(),
         ]
         .map(String::from)
@@ -741,67 +787,77 @@
         .<span class="kw">await</span>;
         <span class="kw">if </span>result.is_err() {
             debug_pods(client, <span class="string">"role=relay"</span>.into()).<span class="kw">await</span>;
+            debug_pods(client, <span class="string">"role=agent"</span>.into()).<span class="kw">await</span>;
+            debug_pods(client, <span class="string">"role=proxy"</span>.into()).<span class="kw">await</span>;
 
             <span class="macro">panic!</span>(<span class="string">"Relay Deployment should be ready"</span>);
         }
         result.unwrap().expect(<span class="string">"Should have a relay deployment"</span>);
 
-        <span class="kw">let </span>agent_name = <span class="macro">format!</span>(<span class="string">"quilkin-agones-agent-{id}"</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>agent_names = Vec::with_capacity(agent_count <span class="kw">as _</span>);
+        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..agent_count {
+            <span class="kw">let </span>agent_name = <span class="macro">format!</span>(<span class="string">"quilkin-agones-agent-{id}-{i}"</span>);
+            <span class="kw">let </span>icao = <span class="macro">format!</span>(<span class="string">"XXX{}"</span>, <span class="string">"ABCD"</span>.get(i <span class="kw">as </span>usize..(i + <span class="number">1</span>) <span class="kw">as </span>usize).unwrap());
 
-        <span class="comment">// agent deployment
-        </span><span class="kw">let </span>args = [
-            <span class="string">"agent"</span>,
-            <span class="string">"--relay"</span>,
-            <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"http://{relay_name}:7900"</span>),
-            <span class="string">"agones"</span>,
-            <span class="string">"--config-namespace"</span>,
-            client.namespace.as_str(),
-            <span class="string">"--gameservers-namespace"</span>,
-            client.namespace.as_str(),
-        ]
-        .map(String::from)
-        .to_vec();
-        <span class="kw">let </span>labels = BTreeMap::from([(<span class="string">"role"</span>.to_string(), <span class="string">"agent"</span>.to_string())]);
-        <span class="kw">let </span>deployment = Deployment {
-            metadata: ObjectMeta {
-                name: <span class="prelude-val">Some</span>(agent_name.clone()),
-                labels: <span class="prelude-val">Some</span>(labels.clone()),
-                ..Default::default()
-            },
-            spec: <span class="prelude-val">Some</span>(DeploymentSpec {
-                replicas: <span class="prelude-val">Some</span>(<span class="number">1</span>),
-                selector: LabelSelector {
-                    match_expressions: <span class="prelude-val">None</span>,
-                    match_labels: <span class="prelude-val">Some</span>(labels.clone()),
+            <span class="comment">// agent deployment
+            </span><span class="kw">let </span>args = [
+                <span class="string">"--provider.mds.endpoints"</span>,
+                <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"http://{relay_name}:7900"</span>),
+                <span class="string">"--locality.icao"</span>,
+                <span class="kw-2">&amp;</span>icao,
+                <span class="string">"--provider.k8s"</span>,
+                <span class="string">"--provider.k8s.namespace"</span>,
+                client.namespace.as_str(),
+                <span class="string">"--provider.k8s.agones"</span>,
+                <span class="string">"--provider.k8s.agones.namespace"</span>,
+                client.namespace.as_str(),
+            ]
+            .map(String::from)
+            .to_vec();
+            <span class="kw">let </span>labels = BTreeMap::from([(<span class="string">"role"</span>.to_string(), <span class="string">"agent"</span>.to_string())]);
+            <span class="kw">let </span>deployment = Deployment {
+                metadata: ObjectMeta {
+                    name: <span class="prelude-val">Some</span>(agent_name.clone()),
+                    labels: <span class="prelude-val">Some</span>(labels.clone()),
+                    ..Default::default()
                 },
-                template: PodTemplateSpec {
-                    metadata: <span class="prelude-val">Some</span>(ObjectMeta {
-                        labels: <span class="prelude-val">Some</span>(labels.clone()),
-                        ..Default::default()
-                    }),
-                    spec: <span class="prelude-val">Some</span>(PodSpec {
-                        containers: <span class="macro">vec!</span>[quilkin_container(client, <span class="prelude-val">Some</span>(args), <span class="prelude-val">None</span>, agent)],
-                        service_account_name: <span class="prelude-val">Some</span>(rbac_name),
-                        ..Default::default()
-                    }),
-                },
+                spec: <span class="prelude-val">Some</span>(DeploymentSpec {
+                    replicas: <span class="prelude-val">Some</span>(<span class="number">1</span>),
+                    selector: LabelSelector {
+                        match_expressions: <span class="prelude-val">None</span>,
+                        match_labels: <span class="prelude-val">Some</span>(labels.clone()),
+                    },
+                    template: PodTemplateSpec {
+                        metadata: <span class="prelude-val">Some</span>(ObjectMeta {
+                            labels: <span class="prelude-val">Some</span>(labels.clone()),
+                            ..Default::default()
+                        }),
+                        spec: <span class="prelude-val">Some</span>(PodSpec {
+                            containers: <span class="macro">vec!</span>[quilkin_container(client, <span class="prelude-val">Some</span>(args), <span class="prelude-val">None</span>, agent)],
+                            service_account_name: <span class="prelude-val">Some</span>(rbac_name.clone()),
+                            ..Default::default()
+                        }),
+                    },
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
-        <span class="kw">let </span>agent_deployment = deployments.create(<span class="kw-2">&amp;</span>pp, <span class="kw-2">&amp;</span>deployment).<span class="kw">await</span>.unwrap();
-        <span class="kw">let </span>name = agent_deployment.name_unchecked();
-        <span class="kw">let </span>result = timeout(
-            SLOW,
-            await_condition(deployments.clone(), name.as_str(), is_deployment_ready()),
-        )
-        .<span class="kw">await</span>;
-        <span class="kw">if </span>result.is_err() {
-            debug_pods(client, <span class="string">"role=agent"</span>.into()).<span class="kw">await</span>;
-            <span class="macro">panic!</span>(<span class="string">"Agent Deployment should be ready"</span>);
+            };
+            <span class="kw">let </span>agent_deployment = deployments.create(<span class="kw-2">&amp;</span>pp, <span class="kw-2">&amp;</span>deployment).<span class="kw">await</span>.unwrap();
+            <span class="kw">let </span>name = agent_deployment.name_unchecked();
+            <span class="kw">let </span>result = timeout(
+                SLOW,
+                await_condition(deployments.clone(), name.as_str(), is_deployment_ready()),
+            )
+            .<span class="kw">await</span>;
+            <span class="kw">if </span>result.is_err() {
+                debug_pods(client, <span class="string">"role=agent"</span>.into()).<span class="kw">await</span>;
+                <span class="macro">panic!</span>(<span class="string">"Agent Deployment should be ready"</span>);
+            }
+            result.unwrap().expect(<span class="string">"Should have an agent deployment"</span>);
+            agent_names.push(agent_name);
         }
-        result.unwrap().expect(<span class="string">"Should have an agent deployment"</span>);
-        (relay_name, agent_name)
+
+        (relay_name, agent_names)
     }
 }
 </code></pre></div></section></main></body></html>

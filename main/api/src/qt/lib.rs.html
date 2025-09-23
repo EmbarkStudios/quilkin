@@ -734,19 +734,221 @@
 <a href="#733" id="733">733</a>
 <a href="#734" id="734">734</a>
 <a href="#735" id="735">735</a>
-<a href="#736" id="736">736</a></pre></div><pre class="rust"><code><span class="kw">use </span>quilkin::{
+<a href="#736" id="736">736</a>
+<a href="#737" id="737">737</a>
+<a href="#738" id="738">738</a>
+<a href="#739" id="739">739</a>
+<a href="#740" id="740">740</a>
+<a href="#741" id="741">741</a>
+<a href="#742" id="742">742</a>
+<a href="#743" id="743">743</a>
+<a href="#744" id="744">744</a>
+<a href="#745" id="745">745</a>
+<a href="#746" id="746">746</a>
+<a href="#747" id="747">747</a>
+<a href="#748" id="748">748</a>
+<a href="#749" id="749">749</a>
+<a href="#750" id="750">750</a>
+<a href="#751" id="751">751</a>
+<a href="#752" id="752">752</a>
+<a href="#753" id="753">753</a>
+<a href="#754" id="754">754</a>
+<a href="#755" id="755">755</a>
+<a href="#756" id="756">756</a>
+<a href="#757" id="757">757</a>
+<a href="#758" id="758">758</a>
+<a href="#759" id="759">759</a>
+<a href="#760" id="760">760</a>
+<a href="#761" id="761">761</a>
+<a href="#762" id="762">762</a>
+<a href="#763" id="763">763</a>
+<a href="#764" id="764">764</a>
+<a href="#765" id="765">765</a>
+<a href="#766" id="766">766</a>
+<a href="#767" id="767">767</a>
+<a href="#768" id="768">768</a>
+<a href="#769" id="769">769</a>
+<a href="#770" id="770">770</a>
+<a href="#771" id="771">771</a>
+<a href="#772" id="772">772</a>
+<a href="#773" id="773">773</a>
+<a href="#774" id="774">774</a>
+<a href="#775" id="775">775</a>
+<a href="#776" id="776">776</a>
+<a href="#777" id="777">777</a>
+<a href="#778" id="778">778</a>
+<a href="#779" id="779">779</a>
+<a href="#780" id="780">780</a>
+<a href="#781" id="781">781</a>
+<a href="#782" id="782">782</a>
+<a href="#783" id="783">783</a>
+<a href="#784" id="784">784</a>
+<a href="#785" id="785">785</a>
+<a href="#786" id="786">786</a>
+<a href="#787" id="787">787</a>
+<a href="#788" id="788">788</a>
+<a href="#789" id="789">789</a>
+<a href="#790" id="790">790</a>
+<a href="#791" id="791">791</a>
+<a href="#792" id="792">792</a>
+<a href="#793" id="793">793</a>
+<a href="#794" id="794">794</a>
+<a href="#795" id="795">795</a>
+<a href="#796" id="796">796</a>
+<a href="#797" id="797">797</a>
+<a href="#798" id="798">798</a>
+<a href="#799" id="799">799</a>
+<a href="#800" id="800">800</a>
+<a href="#801" id="801">801</a>
+<a href="#802" id="802">802</a>
+<a href="#803" id="803">803</a>
+<a href="#804" id="804">804</a>
+<a href="#805" id="805">805</a>
+<a href="#806" id="806">806</a>
+<a href="#807" id="807">807</a>
+<a href="#808" id="808">808</a>
+<a href="#809" id="809">809</a>
+<a href="#810" id="810">810</a>
+<a href="#811" id="811">811</a>
+<a href="#812" id="812">812</a>
+<a href="#813" id="813">813</a>
+<a href="#814" id="814">814</a>
+<a href="#815" id="815">815</a>
+<a href="#816" id="816">816</a>
+<a href="#817" id="817">817</a>
+<a href="#818" id="818">818</a>
+<a href="#819" id="819">819</a>
+<a href="#820" id="820">820</a>
+<a href="#821" id="821">821</a>
+<a href="#822" id="822">822</a>
+<a href="#823" id="823">823</a>
+<a href="#824" id="824">824</a>
+<a href="#825" id="825">825</a>
+<a href="#826" id="826">826</a>
+<a href="#827" id="827">827</a>
+<a href="#828" id="828">828</a>
+<a href="#829" id="829">829</a>
+<a href="#830" id="830">830</a>
+<a href="#831" id="831">831</a>
+<a href="#832" id="832">832</a>
+<a href="#833" id="833">833</a>
+<a href="#834" id="834">834</a>
+<a href="#835" id="835">835</a>
+<a href="#836" id="836">836</a>
+<a href="#837" id="837">837</a>
+<a href="#838" id="838">838</a>
+<a href="#839" id="839">839</a>
+<a href="#840" id="840">840</a>
+<a href="#841" id="841">841</a>
+<a href="#842" id="842">842</a>
+<a href="#843" id="843">843</a>
+<a href="#844" id="844">844</a>
+<a href="#845" id="845">845</a>
+<a href="#846" id="846">846</a>
+<a href="#847" id="847">847</a>
+<a href="#848" id="848">848</a>
+<a href="#849" id="849">849</a>
+<a href="#850" id="850">850</a>
+<a href="#851" id="851">851</a>
+<a href="#852" id="852">852</a>
+<a href="#853" id="853">853</a>
+<a href="#854" id="854">854</a>
+<a href="#855" id="855">855</a>
+<a href="#856" id="856">856</a>
+<a href="#857" id="857">857</a>
+<a href="#858" id="858">858</a>
+<a href="#859" id="859">859</a>
+<a href="#860" id="860">860</a>
+<a href="#861" id="861">861</a>
+<a href="#862" id="862">862</a>
+<a href="#863" id="863">863</a>
+<a href="#864" id="864">864</a>
+<a href="#865" id="865">865</a>
+<a href="#866" id="866">866</a>
+<a href="#867" id="867">867</a>
+<a href="#868" id="868">868</a>
+<a href="#869" id="869">869</a>
+<a href="#870" id="870">870</a>
+<a href="#871" id="871">871</a>
+<a href="#872" id="872">872</a>
+<a href="#873" id="873">873</a>
+<a href="#874" id="874">874</a>
+<a href="#875" id="875">875</a>
+<a href="#876" id="876">876</a>
+<a href="#877" id="877">877</a>
+<a href="#878" id="878">878</a>
+<a href="#879" id="879">879</a>
+<a href="#880" id="880">880</a>
+<a href="#881" id="881">881</a>
+<a href="#882" id="882">882</a>
+<a href="#883" id="883">883</a>
+<a href="#884" id="884">884</a>
+<a href="#885" id="885">885</a>
+<a href="#886" id="886">886</a>
+<a href="#887" id="887">887</a>
+<a href="#888" id="888">888</a>
+<a href="#889" id="889">889</a>
+<a href="#890" id="890">890</a>
+<a href="#891" id="891">891</a>
+<a href="#892" id="892">892</a>
+<a href="#893" id="893">893</a>
+<a href="#894" id="894">894</a>
+<a href="#895" id="895">895</a>
+<a href="#896" id="896">896</a>
+<a href="#897" id="897">897</a>
+<a href="#898" id="898">898</a>
+<a href="#899" id="899">899</a>
+<a href="#900" id="900">900</a>
+<a href="#901" id="901">901</a>
+<a href="#902" id="902">902</a>
+<a href="#903" id="903">903</a>
+<a href="#904" id="904">904</a>
+<a href="#905" id="905">905</a>
+<a href="#906" id="906">906</a>
+<a href="#907" id="907">907</a>
+<a href="#908" id="908">908</a>
+<a href="#909" id="909">909</a>
+<a href="#910" id="910">910</a>
+<a href="#911" id="911">911</a>
+<a href="#912" id="912">912</a>
+<a href="#913" id="913">913</a>
+<a href="#914" id="914">914</a>
+<a href="#915" id="915">915</a>
+<a href="#916" id="916">916</a>
+<a href="#917" id="917">917</a>
+<a href="#918" id="918">918</a>
+<a href="#919" id="919">919</a>
+<a href="#920" id="920">920</a>
+<a href="#921" id="921">921</a>
+<a href="#922" id="922">922</a>
+<a href="#923" id="923">923</a>
+<a href="#924" id="924">924</a>
+<a href="#925" id="925">925</a>
+<a href="#926" id="926">926</a>
+<a href="#927" id="927">927</a>
+<a href="#928" id="928">928</a>
+<a href="#929" id="929">929</a>
+<a href="#930" id="930">930</a>
+<a href="#931" id="931">931</a>
+<a href="#932" id="932">932</a>
+<a href="#933" id="933">933</a>
+<a href="#934" id="934">934</a></pre></div><pre class="rust"><code><span class="attr">#![allow(clippy::unimplemented)]
+
+</span><span class="kw">use </span>quilkin::{
     Config,
     collections::{BufferPool, PoolBuffer},
-    components::{<span class="self">self</span>, RunArgs},
-    config::Providers,
     net::TcpListener,
     signal::ShutdownTx,
     test::TestConfig,
 };
 <span class="kw">pub use </span>serde_json::json;
-<span class="kw">use </span>std::{net::SocketAddr, num::NonZeroUsize, path::PathBuf, sync::Arc};
+<span class="kw">use </span>std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 <span class="kw">use </span>tokio::sync::mpsc;
 
+<span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)]
+</span><span class="kw">pub mod </span>xdp_util;
+
+<span class="kw">pub const </span>MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(<span class="number">10</span>);
 <span class="kw">pub static </span>BUFFER_POOL: once_cell::sync::Lazy&lt;Arc&lt;BufferPool&gt;&gt; =
     once_cell::sync::Lazy::new(|| Arc::new(BufferPool::default()));
 
@@ -897,7 +1099,7 @@
 <span class="kw">impl </span>ConfigFile {
     <span class="kw">pub fn </span>update(<span class="kw-2">&amp;mut </span><span class="self">self</span>, update: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>TestConfig)) {
         update(<span class="kw-2">&amp;mut </span><span class="self">self</span>.config);
-        <span class="self">self</span>.config.write_to_file(<span class="kw-2">&amp;</span><span class="self">self</span>.path)
+        <span class="self">self</span>.config.write_to_file(<span class="kw-2">&amp;</span><span class="self">self</span>.path);
     }
 }
 
@@ -905,7 +1107,9 @@
     (<span class="macro-nonterminal">$pail</span>:ty) =&gt; {
         <span class="kw">impl </span>Drop <span class="kw">for </span><span class="macro-nonterminal">$pail </span>{
             <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-                <span class="self">self</span>.task.abort();
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(task) = <span class="self">self</span>.task.take() {
+                    task.abort();
+                }
             }
         }
     };
@@ -922,7 +1126,9 @@
     <span class="kw">pub </span>pails: Vec&lt;SandboxPailConfig&gt;,
 }
 
-<span class="kw">pub type </span>JoinHandle = tokio::task::JoinHandle&lt;quilkin::Result&lt;()&gt;&gt;;
+<span class="kw">pub type </span>JoinHandle =
+    tokio::task::JoinHandle&lt;(quilkin::signal::ShutdownHandler, quilkin::Result&lt;()&gt;)&gt;;
+<span class="kw">pub type </span>JoinSet = tokio::task::JoinSet&lt;quilkin::Result&lt;()&gt;&gt;;
 
 <span class="kw">pub struct </span>ServerPail {
     <span class="doccomment">/// The server socket's ephmeral port
@@ -930,7 +1136,7 @@
     <span class="kw">pub </span>packet_rx: <span class="prelude-ty">Option</span>&lt;mpsc::Receiver&lt;String&gt;&gt;,
     <span class="doccomment">/// The join handle to the task driving the socket. Used to both cancel the task
     /// and/or wait for it to finish
-    </span><span class="kw">pub </span>task: tokio::task::JoinHandle&lt;usize&gt;,
+    </span><span class="kw">pub </span>task: <span class="prelude-ty">Option</span>&lt;tokio::task::JoinHandle&lt;usize&gt;&gt;,
 }
 
 <span class="macro">abort_task!</span>(ServerPail);
@@ -938,7 +1144,9 @@
 <span class="kw">pub struct </span>RelayPail {
     <span class="kw">pub </span>xds_port: u16,
     <span class="kw">pub </span>mds_port: u16,
-    <span class="kw">pub </span>task: JoinHandle,
+    <span class="kw">pub </span>task: <span class="prelude-ty">Option</span>&lt;JoinHandle&gt;,
+    <span class="kw">pub </span>provider_task: JoinSet,
+    <span class="kw">pub </span>healthy: Arc&lt;std::sync::atomic::AtomicBool&gt;,
     <span class="kw">pub </span>shutdown: ShutdownTx,
     <span class="kw">pub </span>config_file: <span class="prelude-ty">Option</span>&lt;ConfigFile&gt;,
     <span class="kw">pub </span>config: Arc&lt;Config&gt;,
@@ -948,7 +1156,9 @@
 
 <span class="kw">pub struct </span>AgentPail {
     <span class="kw">pub </span>qcmp_port: u16,
-    <span class="kw">pub </span>task: JoinHandle,
+    <span class="kw">pub </span>task: <span class="prelude-ty">Option</span>&lt;JoinHandle&gt;,
+    <span class="kw">pub </span>provider_task: JoinSet,
+    <span class="kw">pub </span>healthy: Arc&lt;std::sync::atomic::AtomicBool&gt;,
     <span class="kw">pub </span>shutdown: ShutdownTx,
     <span class="kw">pub </span>config_file: <span class="prelude-ty">Option</span>&lt;ConfigFile&gt;,
     <span class="kw">pub </span>config: Arc&lt;Config&gt;,
@@ -960,7 +1170,9 @@
     <span class="kw">pub </span>port: u16,
     <span class="kw">pub </span>qcmp_port: u16,
     <span class="kw">pub </span>phoenix_port: u16,
-    <span class="kw">pub </span>task: JoinHandle,
+    <span class="kw">pub </span>task: <span class="prelude-ty">Option</span>&lt;JoinHandle&gt;,
+    <span class="kw">pub </span>provider_task: JoinSet,
+    <span class="kw">pub </span>healthy: Arc&lt;std::sync::atomic::AtomicBool&gt;,
     <span class="kw">pub </span>shutdown: ShutdownTx,
     <span class="kw">pub </span>config: Arc&lt;Config&gt;,
     <span class="kw">pub </span>delta_applies: <span class="prelude-ty">Option</span>&lt;tokio::sync::mpsc::UnboundedReceiver&lt;String&gt;&gt;,
@@ -987,16 +1199,53 @@
             <span class="self">Self</span>::Server(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">"no config"</span>),
         }
     }
+
+    <span class="kw">pub fn </span>is_healthy(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">match </span><span class="self">self </span>{
+            Pail::Relay(p) =&gt; p.healthy.load(std::sync::atomic::Ordering::Relaxed),
+            Pail::Agent(p) =&gt; p.healthy.load(std::sync::atomic::Ordering::Relaxed),
+            Pail::Proxy(p) =&gt; p.healthy.load(std::sync::atomic::Ordering::Relaxed),
+            Pail::Server(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">"no health"</span>),
+        }
+    }
+
+    <span class="kw">async fn </span>stop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">if let </span><span class="self">Self</span>::Relay(rp) = <span class="self">self </span>{
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(task) = rp.task.take() {
+                <span class="kw">let _ </span>= rp.shutdown.send(());
+                <span class="kw">let </span>result = task.<span class="kw">await</span>.unwrap();
+                <span class="macro">tracing::info!</span>(result = <span class="question-mark">?</span>result.<span class="number">1</span>, <span class="string">"task finished"</span>);
+            }
+        } <span class="kw">else </span>{
+            <span class="macro">unimplemented!</span>();
+        }
+    }
+
+    <span class="kw">async fn </span>start(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">if let </span><span class="self">Self</span>::Relay(rp) = <span class="self">self </span>{
+            <span class="kw">if </span>rp.task.is_some() {
+                <span class="macro">panic!</span>(<span class="string">"relay still running"</span>);
+            }
+
+            <span class="kw">let </span>svc = quilkin::Service::default()
+                .xds()
+                .xds_port(rp.xds_port)
+                .mds()
+                .mds_port(rp.mds_port);
+            <span class="kw">let </span>(tx, rx) = quilkin::signal::channel();
+            <span class="kw">let </span>sh = quilkin::signal::ShutdownHandler::new(tx.clone(), rx);
+            <span class="kw">let </span>task = svc.spawn_services(<span class="kw-2">&amp;</span>rp.config, sh).unwrap();
+
+            rp.shutdown = tx;
+            rp.task = <span class="prelude-val">Some</span>(task);
+        } <span class="kw">else </span>{
+            <span class="macro">unimplemented!</span>();
+        }
+    }
 }
 
 <span class="kw">impl </span>Pail {
-    <span class="kw">pub fn </span>construct(
-        spc: SandboxPailConfig,
-        pails: <span class="kw-2">&amp;</span>Pails,
-        td: <span class="kw-2">&amp;</span>std::path::Path,
-    ) -&gt; (<span class="self">Self</span>, <span class="prelude-ty">Option</span>&lt;tokio::sync::oneshot::Receiver&lt;()&gt;&gt;) {
-        <span class="kw">let </span><span class="kw-2">mut </span>rx = <span class="prelude-val">None</span>;
-
+    <span class="kw">pub fn </span>construct(spc: SandboxPailConfig, pails: <span class="kw-2">&amp;</span>Pails, td: <span class="kw-2">&amp;</span>std::path::Path) -&gt; <span class="self">Self </span>{
         <span class="kw">let </span>pail = <span class="kw">match </span>spc.config {
             PailConfig::Server(sspc) =&gt; {
                 <span class="kw">let </span>(packet_tx, packet_rx) = mpsc::channel::&lt;String&gt;(<span class="number">10</span>);
@@ -1037,13 +1286,11 @@
 
                 <span class="self">Self</span>::Server(ServerPail {
                     port,
-                    task,
+                    task: <span class="prelude-val">Some</span>(task),
                     packet_rx: <span class="prelude-val">Some</span>(packet_rx),
                 })
             }
             PailConfig::Relay(rpc) =&gt; {
-                <span class="kw">use </span>components::relay;
-
                 <span class="kw">let </span>xds_port = TcpListener::bind(<span class="prelude-val">None</span>).unwrap().port();
                 <span class="kw">let </span>mds_port = TcpListener::bind(<span class="prelude-val">None</span>).unwrap().port();
 
@@ -1054,30 +1301,44 @@
 
                 <span class="kw">let </span>config_path = path.clone();
 
-                <span class="kw">let </span>(shutdown, shutdown_rx) =
-                    quilkin::signal::channel(quilkin::signal::ShutdownKind::Testing);
+                <span class="kw">let </span>(shutdown, shutdown_rx) = quilkin::signal::channel();
 
-                <span class="kw">let </span>config = Arc::new(Config::default_non_agent());
-                config.dyn_cfg.id.store(Arc::new(spc.name.into()));
+                <span class="kw">let </span>providers = quilkin::Providers::default().fs().fs_path(path);
+                <span class="kw">let </span>svc = quilkin::Service::default()
+                    .xds()
+                    .xds_port(xds_port)
+                    .mds()
+                    .mds_port(mds_port);
 
-                <span class="kw">let </span>task = tokio::spawn(
-                    relay::Relay {
-                        xds_port,
-                        mds_port,
-                        locality: <span class="prelude-val">None</span>,
-                        provider: <span class="prelude-val">Some</span>(Providers::File { path }),
-                    }
-                    .run(RunArgs {
-                        config: config.clone(),
-                        ready: relay::Ready::default(),
-                        shutdown_rx,
-                    }),
+                <span class="kw">let </span>config = Arc::new(<span class="kw">crate</span>::Config::new(
+                    <span class="prelude-val">Some</span>(<span class="string">"test-relay"</span>.into()),
+                    Default::default(),
+                    <span class="kw-2">&amp;</span>providers,
+                    <span class="kw-2">&amp;</span>svc,
+                ));
+
+                <span class="kw-2">*</span>config.dyn_cfg.id.lock() = spc.name.into();
+                <span class="kw">let </span>healthy = Arc::new(std::sync::atomic::AtomicBool::new(<span class="bool-val">false</span>));
+                <span class="kw">let </span>provider_task = providers.spawn_providers(
+                    <span class="kw-2">&amp;</span>config,
+                    healthy.clone(),
+                    <span class="prelude-val">None</span>,
+                    <span class="prelude-val">None</span>,
+                    shutdown_rx.clone(),
                 );
+                <span class="kw">let </span>task = svc
+                    .spawn_services(
+                        <span class="kw-2">&amp;</span>config,
+                        quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
+                    )
+                    .unwrap();
 
                 <span class="self">Self</span>::Relay(RelayPail {
                     xds_port,
                     mds_port,
-                    task,
+                    task: <span class="prelude-val">Some</span>(task),
+                    provider_task,
+                    healthy,
                     shutdown,
                     config_file: <span class="prelude-val">Some</span>(ConfigFile {
                         path: config_path,
@@ -1122,40 +1383,50 @@
                                 .expect(<span class="string">"failed to parse endpoint"</span>),
                         )
                     })
-                    .collect();
+                    .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
 
-                <span class="kw">let </span>(shutdown, shutdown_rx) =
-                    quilkin::signal::channel(quilkin::signal::ShutdownKind::Testing);
+                <span class="kw">let </span>(shutdown, shutdown_rx) = quilkin::signal::channel();
 
                 <span class="kw">let </span>port = quilkin::net::socket_port(
                     <span class="kw-2">&amp;</span>quilkin::net::raw_socket_with_reuse(<span class="number">0</span>).expect(<span class="string">"failed to bind qcmp socket"</span>),
                 );
 
                 <span class="kw">let </span>config_path = path.clone();
-                <span class="kw">let </span>config = Arc::new(Config::default_agent());
-                config.dyn_cfg.id.store(Arc::new(spc.name.into()));
-                <span class="kw">let </span>acfg = config.clone();
+                <span class="kw">let </span>svc = quilkin::Service::default().qcmp().qcmp_port(port);
+                <span class="kw">let </span>providers = quilkin::Providers::default()
+                    .fs()
+                    .fs_path(path)
+                    .grpc_push_endpoints(relay_servers);
 
-                <span class="kw">let </span>task = tokio::spawn(<span class="kw">async move </span>{
-                    components::agent::Agent {
-                        locality: <span class="prelude-val">None</span>,
-                        icao_code: <span class="prelude-val">Some</span>(apc.icao_code),
-                        relay_servers,
-                        port,
-                        provider: <span class="prelude-val">Some</span>(Providers::File { path }),
-                        address_selector: <span class="prelude-val">None</span>,
-                    }
-                    .run(RunArgs {
-                        config,
-                        ready: Default::default(),
-                        shutdown_rx,
-                    })
-                    .<span class="kw">await
-                </span>});
+                <span class="kw">let </span>config = Arc::new(<span class="kw">crate</span>::Config::new(
+                    <span class="prelude-val">Some</span>(<span class="string">"test-agent"</span>.into()),
+                    apc.icao_code,
+                    <span class="kw-2">&amp;</span>providers,
+                    <span class="kw-2">&amp;</span>svc,
+                ));
+
+                <span class="kw-2">*</span>config.dyn_cfg.id.lock() = spc.name.into();
+                <span class="kw">let </span>acfg = config.clone();
+                <span class="kw">let </span>healthy = Arc::new(std::sync::atomic::AtomicBool::new(<span class="bool-val">false</span>));
+                <span class="kw">let </span>provider_task = providers.spawn_providers(
+                    <span class="kw-2">&amp;</span>config,
+                    healthy.clone(),
+                    <span class="prelude-val">None</span>,
+                    <span class="prelude-val">None</span>,
+                    shutdown_rx.clone(),
+                );
+                <span class="kw">let </span>task = svc
+                    .spawn_services(
+                        <span class="kw-2">&amp;</span>config,
+                        quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
+                    )
+                    .unwrap();
 
                 <span class="self">Self</span>::Agent(AgentPail {
                     qcmp_port: port,
-                    task,
+                    task: <span class="prelude-val">Some</span>(task),
+                    provider_task,
+                    healthy,
                     shutdown,
                     config_file: <span class="prelude-val">Some</span>(ConfigFile {
                         path: config_path,
@@ -1169,12 +1440,13 @@
                 <span class="kw">let </span>qcmp =
                     quilkin::net::raw_socket_with_reuse(<span class="number">0</span>).expect(<span class="string">"failed to bind qcmp socket"</span>);
                 <span class="kw">let </span>qcmp_port = quilkin::net::socket_port(<span class="kw-2">&amp;</span>qcmp);
-                <span class="kw">let </span>phoenix = TcpListener::bind(<span class="prelude-val">None</span>).expect(<span class="string">"failed to bind phoenix socket"</span>);
-                <span class="kw">let </span>phoenix_port = phoenix.port();
+                <span class="kw">let </span>phoenix_port = TcpListener::bind(<span class="prelude-val">None</span>)
+                    .expect(<span class="string">"failed to bind phoenix socket"</span>)
+                    .port();
 
                 <span class="kw">let </span>port = quilkin::net::socket_port(<span class="kw-2">&amp;</span>socket);
 
-                <span class="kw">let </span>management_servers = spc
+                <span class="kw">let </span>management_servers: Vec&lt;<span class="kw">_</span>&gt; = spc
                     .dependencies
                     .iter()
                     .filter_map(|dname| {
@@ -1189,12 +1461,24 @@
                     })
                     .collect();
 
-                <span class="kw">let </span>(shutdown, shutdown_rx) =
-                    quilkin::signal::channel(quilkin::signal::ShutdownKind::Testing);
+                <span class="kw">let </span>providers =
+                    quilkin::Providers::default().grpc_pull_endpoints(management_servers);
 
-                <span class="kw">let </span>(tx, orx) = tokio::sync::oneshot::channel();
+                <span class="kw">let </span>svc = quilkin::Service::default()
+                    .udp()
+                    .udp_port(port)
+                    .qcmp()
+                    .qcmp_port(qcmp_port)
+                    .phoenix()
+                    .phoenix_port(phoenix_port)
+                    .termination_timeout(<span class="prelude-val">None</span>);
 
-                <span class="kw">let </span>config = Arc::new(Config::default_non_agent());
+                <span class="kw">let </span>config = Arc::new(<span class="kw">crate</span>::Config::new(
+                    <span class="prelude-val">Some</span>(<span class="string">"test-proxy"</span>.into()),
+                    Default::default(),
+                    <span class="kw-2">&amp;</span>Default::default(),
+                    <span class="kw-2">&amp;</span>svc,
+                ));
 
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(cfg) = ppc.config {
                     <span class="kw">if </span>!cfg.clusters.is_empty() {
@@ -1202,11 +1486,7 @@
                     }
 
                     <span class="kw">if </span>!cfg.filters.is_empty() {
-                        config
-                            .dyn_cfg
-                            .filters()
-                            .unwrap()
-                            .store(Arc::new(cfg.filters));
+                        config.dyn_cfg.filters().unwrap().store(cfg.filters);
                     }
                 }
 
@@ -1232,46 +1512,40 @@
                         .modify(|clusters| clusters.insert_default(endpoints));
                 }
 
-                config.dyn_cfg.id.store(Arc::new(spc.name.into()));
-                <span class="kw">let </span>pconfig = config.clone();
+                <span class="kw-2">*</span>config.dyn_cfg.id.lock() = spc.name.into();
 
                 <span class="kw">let </span>(rttx, rtrx) = tokio::sync::mpsc::unbounded_channel();
+                <span class="kw">let </span>(shutdown, shutdown_rx) = quilkin::signal::channel();
 
-                <span class="kw">let </span>task = tokio::spawn(<span class="kw">async move </span>{
-                    components::proxy::Proxy {
-                        num_workers: NonZeroUsize::new(<span class="number">1</span>).unwrap(),
-                        management_servers,
-                        socket: <span class="prelude-val">Some</span>(socket),
-                        qcmp,
-                        phoenix,
-                        notifier: <span class="prelude-val">Some</span>(rttx),
-                        ..Default::default()
-                    }
-                    .run(
-                        RunArgs {
-                            config: pconfig,
-                            ready: Default::default(),
-                            shutdown_rx,
-                        },
-                        <span class="prelude-val">Some</span>(tx),
+                <span class="kw">let </span>healthy = Arc::new(std::sync::atomic::AtomicBool::new(<span class="bool-val">false</span>));
+                <span class="kw">let </span>provider_task = providers.spawn_providers(
+                    <span class="kw-2">&amp;</span>config,
+                    healthy.clone(),
+                    <span class="prelude-val">None</span>,
+                    <span class="prelude-val">Some</span>(rttx),
+                    shutdown_rx.clone(),
+                );
+                <span class="kw">let </span>task = svc
+                    .spawn_services(
+                        <span class="kw-2">&amp;</span>config,
+                        quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
                     )
-                    .<span class="kw">await
-                </span>});
-
-                rx = <span class="prelude-val">Some</span>(orx);
+                    .unwrap();
 
                 <span class="self">Self</span>::Proxy(ProxyPail {
                     port,
                     qcmp_port,
                     phoenix_port,
                     shutdown,
-                    task,
+                    task: <span class="prelude-val">Some</span>(task),
+                    provider_task,
+                    healthy,
                     config,
                     delta_applies: <span class="prelude-val">Some</span>(rtrx),
                 })
             }
         };
-        (pail, rx)
+        pail
     }
 }
 
@@ -1302,6 +1576,8 @@
 
 <span class="kw">impl </span>SandboxConfig {
     <span class="kw">pub fn </span>new(name: <span class="kw">impl </span>Into&lt;String&gt;) -&gt; <span class="self">Self </span>{
+        quilkin_xds::metrics::set_registry(quilkin::metrics::registry());
+
         <span class="self">Self </span>{
             name: name.into(),
             pails: Vec::new(),
@@ -1352,11 +1628,7 @@
         <span class="kw">let </span><span class="kw-2">mut </span>pails = Pails::new();
         <span class="kw">for </span>pc <span class="kw">in </span><span class="self">self</span>.pails {
             <span class="kw">let </span>name = pc.name;
-            <span class="kw">let </span>(pail, rx) = Pail::construct(pc, <span class="kw-2">&amp;</span>pails, td.path());
-
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(rx) = rx {
-                rx.<span class="kw">await</span>.unwrap();
-            }
+            <span class="kw">let </span>pail = Pail::construct(pc, <span class="kw-2">&amp;</span>pails, td.path());
 
             <span class="kw">if </span>pails.insert(name, pail).is_some() {
                 <span class="macro">panic!</span>(<span class="string">"{name} already existed"</span>);
@@ -1408,7 +1680,7 @@
         <span class="kw">match </span>pail {
             Pail::Relay(rp) =&gt; rp.config_file.take().unwrap(),
             Pail::Agent(ap) =&gt; ap.config_file.take().unwrap(),
-            <span class="kw">_ </span>=&gt; <span class="macro">unimplemented!</span>(<span class="string">"no config_file for this pail"</span>),
+            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"no config_file for this pail"</span>),
         }
     }
 
@@ -1433,18 +1705,21 @@
     <span class="doccomment">/// Sleeps for the specified number of milliseconds
     </span><span class="attr">#[inline]
     </span><span class="kw">pub async fn </span>sleep(<span class="kw-2">&amp;</span><span class="self">self</span>, ms: u64) {
-        tokio::time::sleep(std::time::Duration::from_millis(ms)).<span class="kw">await
-    </span>}
+        tokio::time::sleep(Duration::from_millis(ms)).<span class="kw">await</span>;
+    }
 
     <span class="doccomment">/// Runs a future, expecting it complete before the specified timeout
     </span><span class="attr">#[inline]
-    </span><span class="kw">pub async fn </span>timeout&lt;F&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, ms: u64, fut: F) -&gt; F::Output
+    </span><span class="kw">pub async fn </span>timeout&lt;F&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, ms: u64, fut: F) -&gt; (F::Output, Duration)
     <span class="kw">where
         </span>F: std::future::Future,
     {
-        tokio::time::timeout(std::time::Duration::from_millis(ms), fut)
+        <span class="kw">let </span>start = tokio::time::Instant::now();
+        <span class="kw">let </span>res = tokio::time::timeout(Duration::from_millis(ms), fut)
             .<span class="kw">await
-            </span>.expect(<span class="string">"operation timed out"</span>)
+            </span>.expect(<span class="string">"operation timed out"</span>);
+
+        (res, start.elapsed())
     }
 
     <span class="attr">#[inline]
@@ -1452,7 +1727,7 @@
     <span class="kw">where
         </span>F: std::future::Future,
     {
-        tokio::time::timeout(std::time::Duration::from_millis(ms), fut)
+        tokio::time::timeout(Duration::from_millis(ms), fut)
             .<span class="kw">await
             </span>.ok()
     }
@@ -1465,9 +1740,130 @@
         </span>F: std::future::Future,
         F::Output: std::fmt::Debug,
     {
-        tokio::time::timeout(std::time::Duration::from_millis(ms), fut)
+        tokio::time::timeout(Duration::from_millis(ms), fut)
             .<span class="kw">await
             </span>.expect_err(<span class="string">"expected future to timeout"</span>);
     }
+
+    <span class="kw">pub async fn </span>restart(<span class="kw-2">&amp;mut </span><span class="self">self</span>, which: <span class="kw-2">&amp;</span>str, dead_time: Duration) {
+        <span class="kw">let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, pail)) = <span class="self">self</span>.pails.iter_mut().find(|(name, <span class="kw">_</span>)| <span class="kw-2">**</span>name == which) <span class="kw">else </span>{
+            <span class="macro">panic!</span>(<span class="string">"failed to find '{which}'"</span>);
+        };
+
+        <span class="kw">const </span>TIMEOUT: Duration = Duration::from_secs(<span class="number">10</span>);
+
+        tokio::time::timeout(TIMEOUT, pail.stop())
+            .<span class="kw">await
+            </span>.expect(<span class="string">"failed to stop"</span>);
+        tokio::time::sleep(dead_time).<span class="kw">await</span>;
+        tokio::time::timeout(TIMEOUT, pail.start())
+            .<span class="kw">await
+            </span>.expect(<span class="string">"failed to start"</span>);
+    }
+
+    <span class="kw">pub async fn </span>stop(<span class="kw-2">&amp;mut </span><span class="self">self</span>, which: <span class="kw-2">&amp;</span>str) {
+        <span class="kw">let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, pail)) = <span class="self">self</span>.pails.iter_mut().find(|(name, <span class="kw">_</span>)| <span class="kw-2">**</span>name == which) <span class="kw">else </span>{
+            <span class="macro">panic!</span>(<span class="string">"failed to find '{which}'"</span>);
+        };
+        <span class="macro">tracing::info!</span>(<span class="string">"stopping {which}"</span>);
+        pail.stop().<span class="kw">await</span>;
+        <span class="macro">tracing::info!</span>(<span class="string">"stopped {which}"</span>);
+    }
+
+    <span class="kw">pub async fn </span>start(<span class="kw-2">&amp;mut </span><span class="self">self</span>, which: <span class="kw-2">&amp;</span>str) {
+        <span class="kw">let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, pail)) = <span class="self">self</span>.pails.iter_mut().find(|(name, <span class="kw">_</span>)| <span class="kw-2">**</span>name == which) <span class="kw">else </span>{
+            <span class="macro">panic!</span>(<span class="string">"failed to find '{which}'"</span>);
+        };
+        <span class="macro">tracing::info!</span>(<span class="string">"starting {which}"</span>);
+        pail.start().<span class="kw">await</span>;
+        <span class="macro">tracing::info!</span>(<span class="string">"started {which}"</span>);
+    }
+
+    <span class="attr">#[inline]
+    </span><span class="kw">pub async fn </span>block_until_ready(<span class="kw-2">&amp;</span><span class="self">self</span>, which: <span class="kw-2">&amp;</span>str) {
+        <span class="self">self</span>.wait_for_health_state(which, <span class="bool-val">true</span>).<span class="kw">await</span>;
+    }
+
+    <span class="attr">#[inline]
+    </span><span class="kw">pub async fn </span>block_until_not_ready(<span class="kw-2">&amp;</span><span class="self">self</span>, which: <span class="kw-2">&amp;</span>str) {
+        <span class="self">self</span>.wait_for_health_state(which, <span class="bool-val">false</span>).<span class="kw">await</span>;
+    }
+
+    <span class="kw">async fn </span>wait_for_health_state(<span class="kw-2">&amp;</span><span class="self">self</span>, which: <span class="kw-2">&amp;</span>str, health_state: bool) {
+        <span class="kw">let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, pail)) = <span class="self">self</span>.pails.iter().find(|(name, <span class="kw">_</span>)| <span class="kw-2">**</span>name == which) <span class="kw">else </span>{
+            <span class="macro">panic!</span>(<span class="string">"failed to find '{which}'"</span>);
+        };
+
+        <span class="kw">let </span>start = tokio::time::Instant::now();
+        <span class="kw">while </span>pail.is_healthy() != health_state {
+            <span class="macro">tracing::debug!</span>(
+                <span class="string">"waiting for '{}' to enter health state '{}'"</span>,
+                which,
+                health_state
+            );
+            tokio::time::sleep(std::time::Duration::from_secs(<span class="number">1</span>)).<span class="kw">await</span>;
+
+            <span class="kw">if </span>start.elapsed() &gt; MAX_WAIT {
+                <span class="macro">panic!</span>(
+                    <span class="string">"timed out waiting for '{which}' to enter healthy state '{health_state}' after {MAX_WAIT:?}"
+                </span>);
+            }
+        }
+    }
+
+    <span class="kw">pub async fn </span>block_until_packet_gets_through(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        msg: <span class="kw-2">&amp;</span>[u8],
+        expected: <span class="kw-2">&amp;</span>str,
+        client: <span class="kw-2">&amp;</span>quilkin::net::DualStackEpollSocket,
+        proxy_address: <span class="kw-2">&amp;</span>std::net::SocketAddr,
+        server_rx: <span class="kw-2">&amp;mut </span>tokio::sync::mpsc::Receiver&lt;String&gt;,
+    ) {
+        <span class="kw">const </span>PACKET_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(<span class="number">500</span>);
+        <span class="kw">let </span>start = tokio::time::Instant::now();
+        <span class="kw">loop </span>{
+            <span class="macro">tracing::debug!</span>(len = msg.len(), <span class="string">"sending packet"</span>);
+            client.send_to(msg, <span class="kw-2">&amp;</span>proxy_address).<span class="kw">await</span>.unwrap();
+
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(rmsg) = <span class="self">self
+                </span>.maybe_timeout(PACKET_TIMEOUT.as_millis() <span class="kw">as </span>u64, server_rx.recv())
+                .<span class="kw">await
+            </span>{
+                <span class="macro">tracing::debug!</span>(len = msg.len(), <span class="string">"received packet"</span>);
+                <span class="kw">match </span>rmsg {
+                    <span class="prelude-val">Some</span>(rmsg) =&gt; {
+                        <span class="macro">assert_eq!</span>(expected, rmsg);
+                    }
+                    <span class="prelude-val">None </span>=&gt; {
+                        <span class="macro">panic!</span>(<span class="string">"got None message, was server_rx channel closed?"</span>);
+                    }
+                }
+                <span class="kw">break</span>;
+            }
+            <span class="macro">tracing::warn!</span>(len = msg.len(), <span class="string">"packet timeout, probably dropped"</span>);
+
+            <span class="kw">if </span>start.elapsed() &gt; MAX_WAIT {
+                <span class="macro">panic!</span>(<span class="string">"unable to pass message through proxy after {MAX_WAIT:?}"</span>);
+            }
+        }
+    }
+}
+
+<span class="attr">#[macro_export]
+</span><span class="macro">macro_rules!</span> filter_chain {
+    ([$(<span class="macro-nonterminal">$kind</span>:ident =&gt; <span class="macro-nonterminal">$filter</span>:expr,)<span class="kw-2">*</span>]) =&gt; {
+        quilkin::filters::FilterChain::testing([
+            $(
+                quilkin::filters::FilterInstance::testing(quilkin::filters::<span class="macro-nonterminal">$kind::testing</span>(<span class="macro-nonterminal">$filter</span>))
+            ),*
+        ])
+    };
+    ([$(<span class="macro-nonterminal">$kind</span>:ident =&gt; <span class="macro-nonterminal">$filter</span>:expr),<span class="kw-2">*</span>]) =&gt; {
+        quilkin::filters::FilterChain::testing([
+            $(
+                quilkin::filters::FilterInstance::testing(quilkin::filters::<span class="macro-nonterminal">$kind::testing</span>(<span class="macro-nonterminal">$filter</span>))
+            ),*
+        ])
+    };
 }
 </code></pre></div></section></main></body></html>

@@ -141,7 +141,39 @@
 <a href="#140" id="140">140</a>
 <a href="#141" id="141">141</a>
 <a href="#142" id="142">142</a>
-<a href="#143" id="143">143</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#143" id="143">143</a>
+<a href="#144" id="144">144</a>
+<a href="#145" id="145">145</a>
+<a href="#146" id="146">146</a>
+<a href="#147" id="147">147</a>
+<a href="#148" id="148">148</a>
+<a href="#149" id="149">149</a>
+<a href="#150" id="150">150</a>
+<a href="#151" id="151">151</a>
+<a href="#152" id="152">152</a>
+<a href="#153" id="153">153</a>
+<a href="#154" id="154">154</a>
+<a href="#155" id="155">155</a>
+<a href="#156" id="156">156</a>
+<a href="#157" id="157">157</a>
+<a href="#158" id="158">158</a>
+<a href="#159" id="159">159</a>
+<a href="#160" id="160">160</a>
+<a href="#161" id="161">161</a>
+<a href="#162" id="162">162</a>
+<a href="#163" id="163">163</a>
+<a href="#164" id="164">164</a>
+<a href="#165" id="165">165</a>
+<a href="#166" id="166">166</a>
+<a href="#167" id="167">167</a>
+<a href="#168" id="168">168</a>
+<a href="#169" id="169">169</a>
+<a href="#170" id="170">170</a>
+<a href="#171" id="171">171</a>
+<a href="#172" id="172">172</a>
+<a href="#173" id="173">173</a>
+<a href="#174" id="174">174</a>
+<a href="#175" id="175">175</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2021 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -157,31 +189,31 @@
  *  limitations under the License.
  */
 
-</span><span class="kw">use </span>arc_swap::ArcSwap;
-<span class="kw">use </span>once_cell::sync::Lazy;
+</span><span class="kw">use </span>once_cell::sync::Lazy;
 <span class="kw">use </span>prometheus::{IntCounterVec, IntGaugeVec, Registry};
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>NODE_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"node"</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>CONTROL_PLANE_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"control_plane"</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>TYPE_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"type"</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>KIND_CLIENT: <span class="kw-2">&amp;</span>str = <span class="string">"client"</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>KIND_SERVER: <span class="kw-2">&amp;</span>str = <span class="string">"server"</span>;
 
 <span class="doccomment">/// TODO: Remove and replace with a local registry.
-</span><span class="kw">static </span>REGISTRY: Lazy&lt;ArcSwap&lt;Registry&gt;&gt; = Lazy::new(|| {
-    ArcSwap::new(std::sync::Arc::new(
-        Registry::new_custom(<span class="prelude-val">Some</span>(<span class="string">"quilkin"</span>.into()), <span class="prelude-val">None</span>).unwrap(),
-    ))
-});
+</span><span class="kw">static </span>REGISTRY_ONCE: parking_lot::Once = parking_lot::Once::new();
+<span class="kw">static </span><span class="kw-2">mut </span>REGISTRY: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'static </span>Registry&gt; = <span class="prelude-val">None</span>;
 
-<span class="doccomment">/// Sets the [prometheus::Registry] containing all the metrics
-/// registered in xDS.
-</span><span class="kw">pub fn </span>set_registry(registry: std::sync::Arc&lt;Registry&gt;) {
-    REGISTRY.store(registry);
+<span class="doccomment">/// Sets the [`Registry`] containing all the metrics registered in xDS.
+</span><span class="kw">pub fn </span>set_registry(registry: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>Registry) {
+    REGISTRY_ONCE.call_once(|| <span class="kw">unsafe </span>{
+        REGISTRY = <span class="prelude-val">Some</span>(registry);
+    });
 }
 
-<span class="doccomment">/// Returns the [prometheus::Registry] containing all the metrics
-/// registered in xDS.
-</span><span class="kw">pub fn </span>registry() -&gt; arc_swap::Guard&lt;std::sync::Arc&lt;Registry&gt;&gt; {
-    REGISTRY.load()
+<span class="doccomment">/// Returns the [`Registry`] containing all the metrics registered in xDS.
+</span><span class="attr">#[inline]
+#[track_caller]
+</span><span class="kw">pub fn </span>registry() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>Registry {
+    <span class="kw">unsafe </span>{ REGISTRY }.expect(<span class="string">"set_registry must be called"</span>)
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>active_control_planes(control_plane: <span class="kw-2">&amp;</span>str) -&gt; prometheus::IntGauge {
@@ -265,6 +297,38 @@
     });
 
     NACKS.with_label_values(<span class="kw-2">&amp;</span>[control_plane, type_url])
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>errors_total(stream_kind: <span class="kw-2">&amp;</span>str, reason: <span class="kw-2">&amp;</span>str) -&gt; prometheus::IntCounter {
+    <span class="kw">static </span>ERRORS_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
+        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
+            <span class="macro">prometheus::opts!</span> {
+                <span class="string">"xds_errors_total"</span>,
+                <span class="string">"Total number of xDS errors"</span>,
+            },
+            <span class="kw-2">&amp;</span>[<span class="string">"kind"</span>, <span class="string">"reason"</span>],
+            <span class="kw">crate</span>::metrics::registry(),
+        }
+        .unwrap()
+    });
+
+    ERRORS_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[stream_kind, reason])
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>actions_total(stream_kind: <span class="kw-2">&amp;</span>str, action: <span class="kw-2">&amp;</span>str) -&gt; prometheus::IntCounter {
+    <span class="kw">static </span>ACTIONS_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
+        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
+            <span class="macro">prometheus::opts!</span> {
+                <span class="string">"xds_actions_total"</span>,
+                <span class="string">"Total number of xDS actions"</span>,
+            },
+            <span class="kw-2">&amp;</span>[<span class="string">"kind"</span>, <span class="string">"action"</span>],
+            <span class="kw">crate</span>::metrics::registry(),
+        }
+        .unwrap()
+    });
+
+    ACTIONS_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[stream_kind, action])
 }
 
 <span class="kw">pub struct </span>StreamConnectionMetrics {

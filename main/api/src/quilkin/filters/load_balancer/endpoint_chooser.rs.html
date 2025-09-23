@@ -132,9 +132,9 @@
 
 <span class="kw">use </span><span class="kw">crate</span>::net::{ClusterMap, EndpointAddress};
 
-<span class="doccomment">/// EndpointChooser chooses from a set of endpoints that a proxy is connected to.
+<span class="doccomment">/// Chooses from a set of endpoints that a proxy is connected to.
 </span><span class="kw">pub trait </span>EndpointChooser: Send + Sync {
-    <span class="doccomment">/// choose_endpoints asks for the next endpoint(s) to use.
+    <span class="doccomment">/// Asks for the next endpoint(s) to use.
     </span><span class="kw">fn </span>choose_endpoints(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         destinations: <span class="kw-2">&amp;mut </span>Vec&lt;EndpointAddress&gt;,
@@ -143,7 +143,7 @@
     );
 }
 
-<span class="doccomment">/// RoundRobinEndpointChooser chooses endpoints in round-robin order.
+<span class="doccomment">/// Chooses endpoints in round-robin order.
 </span><span class="kw">pub struct </span>RoundRobinEndpointChooser {
     next_endpoint: AtomicUsize,
 }
@@ -175,7 +175,7 @@
     }
 }
 
-<span class="doccomment">/// RandomEndpointChooser chooses endpoints in random order.
+<span class="doccomment">/// Chooses endpoints in random order.
 </span><span class="kw">pub struct </span>RandomEndpointChooser;
 
 <span class="kw">impl </span>EndpointChooser <span class="kw">for </span>RandomEndpointChooser {
@@ -191,7 +191,7 @@
     }
 }
 
-<span class="doccomment">/// HashEndpointChooser chooses endpoints based on a hash of source IP and port.
+<span class="doccomment">/// Chooses endpoints based on a hash of source IP and port.
 </span><span class="kw">pub struct </span>HashEndpointChooser;
 
 <span class="kw">impl </span>EndpointChooser <span class="kw">for </span>HashEndpointChooser {

@@ -227,7 +227,7 @@
 
 <span class="kw">use </span><span class="kw">super</span>::proto;
 <span class="kw">use crate</span>::{
-    config::Filter,
+    config::filter::Filter,
     filters::{ConvertProtoConfigError, StaticFilter},
 };
 
@@ -413,7 +413,7 @@ on_read:
                 }),
                 on_write: <span class="prelude-val">None</span>,
             }
-        )
+        );
     }
 }
 </code></pre></div></section></main></body></html>

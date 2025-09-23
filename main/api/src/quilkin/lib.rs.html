@@ -68,9 +68,7 @@
 <a href="#67" id="67">67</a>
 <a href="#68" id="68">68</a>
 <a href="#69" id="69">69</a>
-<a href="#70" id="70">70</a>
-<a href="#71" id="71">71</a>
-<a href="#72" id="72">72</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#70" id="70">70</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -88,35 +86,33 @@
 
 </span><span class="attr">#![deny(unused_must_use)]
 
-</span><span class="kw">pub mod </span>alloc;
-<span class="kw">pub mod </span>collections;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>metrics;
-<span class="kw">pub mod </span>signal;
-<span class="kw">pub mod </span>time;
-
-<span class="comment">// Above other modules for thr `uring_spawn` macro.
+</span><span class="comment">// Above other modules for thr `uring_spawn` macro.
 </span><span class="attr">#[macro_use]
 </span><span class="kw">pub mod </span>net;
 
+<span class="kw">pub mod </span>alloc;
 <span class="kw">pub mod </span>cli;
 <span class="kw">pub mod </span>codec;
+<span class="kw">pub mod </span>collections;
 <span class="kw">pub mod </span>components;
 <span class="kw">pub mod </span>config;
 <span class="kw">pub mod </span>filters;
+<span class="kw">pub mod </span>metrics;
+<span class="kw">pub mod </span>providers;
+<span class="kw">pub mod </span>service;
+<span class="kw">pub mod </span>signal;
+<span class="kw">pub mod </span>time;
 <span class="kw">pub mod </span>xds;
 
 <span class="attr">#[doc(hidden)]
 </span><span class="kw">pub mod </span>test;
 
-<span class="kw">pub use </span>quilkin_proto <span class="kw">as </span>generated;
+<span class="kw">pub use </span>{providers::Providers, quilkin_proto <span class="kw">as </span>generated, service::Service};
 
 <span class="kw">pub type </span><span class="prelude-ty">Result</span>&lt;T, E = eyre::Error&gt; = std::result::Result&lt;T, E&gt;;
 
 <span class="attr">#[doc(inline)]
-</span><span class="kw">pub use </span><span class="self">self</span>::{
-    cli::{Cli, Proxy},
-    config::Config,
-};
+</span><span class="kw">pub use </span><span class="self">self</span>::{cli::Cli, config::Config};
 
 <span class="kw">pub use </span>quilkin_macros::include_proto;
 

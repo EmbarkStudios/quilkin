@@ -737,7 +737,8 @@
 <a href="#736" id="736">736</a>
 <a href="#737" id="737">737</a>
 <a href="#738" id="738">738</a>
-<a href="#739" id="739">739</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#739" id="739">739</a>
+<a href="#740" id="740">740</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2022 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -789,7 +790,7 @@
 <span class="kw">use </span>tokio::{sync::OnceCell, time::timeout};
 <span class="kw">use </span>tracing::debug;
 
-<span class="kw">use </span>quilkin::config::providers::k8s::agones::{
+<span class="kw">use </span>quilkin::providers::k8s::agones::{
     Fleet, FleetSpec, GameServer, GameServerPort, GameServerSpec, GameServerState,
     GameServerTemplateSpec,
 };
@@ -828,8 +829,9 @@
     /// Executes the setup required:
     /// * Creates a test namespace for this test
     /// * Removes previous test namespaces
-    /// * Retrieves the IMAGE_TAG to test from env vars, and panics if it if not available.
+    /// * Retrieves the `IMAGE_TAG` to test from env vars, and panics if it if not available.
     </span><span class="kw">pub async fn </span>new() -&gt; Client {
+        <span class="kw">let </span>_provider = rustls::crypto::ring::default_provider().install_default();
         <span class="kw">let </span><span class="kw-2">mut </span>client = CLIENT
             .get_or_init(|| <span class="kw">async </span>{
                 <span class="kw">let </span>client = kube::Client::try_default()
@@ -963,11 +965,11 @@
         }]),
     };
 
-    <span class="kw">let _ </span>= role_bindings.create(<span class="kw-2">&amp;</span>pp, <span class="kw-2">&amp;</span>role_binding).<span class="kw">await</span>.unwrap();
+    role_bindings.create(<span class="kw-2">&amp;</span>pp, <span class="kw-2">&amp;</span>role_binding).<span class="kw">await</span>.unwrap();
 }
 
 <span class="doccomment">/// Creates a Service account and related RBAC objects to enable a process to query Agones
-/// and ConfigMap resources within a cluster
+/// and [`ConfigMap`] resources within a cluster
 </span><span class="kw">pub async fn </span>create_agones_rbac_read_account(
     client: <span class="kw-2">&amp;</span>Client,
     service_accounts: Api&lt;ServiceAccount&gt;,
@@ -1057,8 +1059,9 @@
     <span class="kw">let </span><span class="kw-2">mut </span>container = quilkin_container(
         client,
         <span class="prelude-val">Some</span>(<span class="macro">vec!</span>[
-            <span class="string">"proxy"</span>.into(),
-            <span class="macro">format!</span>(<span class="string">"--management-server={management_server}"</span>),
+            <span class="string">"--service.udp"</span>.into(),
+            <span class="string">"--service.qcmp"</span>.into(),
+            <span class="macro">format!</span>(<span class="string">"--provider.xds.endpoints={management_server}"</span>),
         ]),
         <span class="prelude-val">None</span>,
         current,
@@ -1147,8 +1150,8 @@
     SocketAddr::new(external_ip.parse().unwrap(), host_port)
 }
 
-<span class="doccomment">/// Create a Fleet, and pick on it's GameServers and add the token to it.
-/// Returns the details of the GameServer that has been selected.
+<span class="doccomment">/// Create a Fleet, and pick on it's [`GameServer`]s and add the token to it.
+/// Returns the details of the [`GameServer`] that has been selected.
 </span><span class="kw">pub async fn </span>create_tokenised_gameserver(
     fleets: Api&lt;Fleet&gt;,
     gameservers: Api&lt;GameServer&gt;,
@@ -1192,17 +1195,19 @@
     gs
 }
 
-<span class="doccomment">/// Returns a test GameServer with the UDP test binary that is used for
+<span class="doccomment">/// Returns a test [`GameServer`] with the UDP test binary that is used for
 /// Agones e2e tests.
 </span><span class="kw">pub fn </span>game_server() -&gt; GameServer {
     <span class="kw">let </span><span class="kw-2">mut </span>resources = BTreeMap::new();
 
     resources.insert(<span class="string">"cpu"</span>.into(), Quantity(<span class="string">"30m"</span>.into()));
     resources.insert(<span class="string">"memory"</span>.into(), Quantity(<span class="string">"32Mi"</span>.into()));
+    <span class="kw">let </span>labels = BTreeMap::from([(<span class="string">"role"</span>.to_string(), <span class="string">"gameserver"</span>.to_string())]);
 
     GameServer {
         metadata: ObjectMeta {
             generate_name: <span class="prelude-val">Some</span>(<span class="string">"gameserver-"</span>.into()),
+            labels: <span class="prelude-val">Some</span>(labels.clone()),
             ..Default::default()
         },
         spec: GameServerSpec {
@@ -1236,7 +1241,7 @@
     }
 }
 
-<span class="doccomment">/// Returns a Fleet of 3 replicas of the UDP testing GameServer
+<span class="doccomment">/// Returns a Fleet of 3 replicas of the UDP testing [`GameServer`]
 </span><span class="kw">pub fn </span>fleet() -&gt; Fleet {
     <span class="kw">let </span>gs = game_server();
     Fleet {
@@ -1256,12 +1261,11 @@
     }
 }
 
-<span class="doccomment">/// Condition to wait for a GameServer to become Ready.
+<span class="doccomment">/// Condition to wait for a [`GameServer`] to become Ready.
 </span><span class="kw">pub fn </span>is_gameserver_ready() -&gt; <span class="kw">impl </span>Condition&lt;GameServer&gt; {
     |obj: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>GameServer&gt;| {
         obj.and_then(|gs| gs.status.clone())
-            .map(|status| <span class="macro">matches!</span>(status.state, GameServerState::Ready))
-            .unwrap_or(<span class="bool-val">false</span>)
+            .is_some_and(|status| <span class="macro">matches!</span>(status.state, GameServerState::Ready))
     }
 }
 
@@ -1293,8 +1297,7 @@
                 .status
                 .as_ref()
                 .and_then(|status| status.ready_replicas)
-                .map(|replicas| <span class="kw-2">&amp;</span>replicas == expected)
-                .unwrap_or(<span class="bool-val">false</span>);
+                .is_some_and(|replicas| <span class="kw-2">&amp;</span>replicas == expected);
         }
         <span class="bool-val">false
     </span>}
@@ -1310,8 +1313,7 @@
                 .status
                 .as_ref()
                 .and_then(|status| status.ready_replicas)
-                .map(|replicas| <span class="kw-2">&amp;</span>replicas == expected)
-                .unwrap_or(<span class="bool-val">false</span>);
+                .is_some_and(|replicas| <span class="kw-2">&amp;</span>replicas == expected);
         }
         <span class="bool-val">false
     </span>}
@@ -1367,13 +1369,13 @@
             name,
             mount_path: <span class="string">"/etc/quilkin"</span>.into(),
             ..Default::default()
-        }])
+        }]);
     };
 
     container
 }
 
-<span class="doccomment">/// Return a ConfigMap in the format that Quilkin expects it to be able to
+<span class="doccomment">/// Return a [`ConfigMap`] in the format that Quilkin expects it to be able to
 /// consume the config yaml.
 </span><span class="kw">pub fn </span>quilkin_config_map(config: <span class="kw-2">&amp;</span>str) -&gt; ConfigMap {
     ConfigMap {
@@ -1389,7 +1391,7 @@
     }
 }
 
-<span class="doccomment">/// Return a ConfigMap that has a standard testing Token Router configuration
+<span class="doccomment">/// Return a [`ConfigMap`] that has a standard testing Token Router configuration
 </span><span class="kw">pub async fn </span>create_token_router_config(config_maps: <span class="kw-2">&amp;</span>Api&lt;ConfigMap&gt;) -&gt; ConfigMap {
     <span class="kw">let </span>pp = PostParams::default();
 
@@ -1413,7 +1415,7 @@ filters:
     config_maps.create(<span class="kw-2">&amp;</span>pp, <span class="kw-2">&amp;</span>config_map).<span class="kw">await</span>.unwrap()
 }
 
-<span class="doccomment">/// Convenience function to return the address with the first port of GameServer
+<span class="doccomment">/// Convenience function to return the address with the first port of [`GameServer`]
 </span><span class="kw">pub fn </span>gameserver_address(gs: <span class="kw-2">&amp;</span>GameServer) -&gt; String {
     <span class="kw">let </span>status = gs.status.as_ref().unwrap();
     <span class="kw">let </span>address = <span class="macro">format!</span>(

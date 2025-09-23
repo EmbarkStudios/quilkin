@@ -81,7 +81,11 @@
 <a href="#80" id="80">80</a>
 <a href="#81" id="81">81</a>
 <a href="#82" id="82">82</a>
-<a href="#83" id="83">83</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#83" id="83">83</a>
+<a href="#84" id="84">84</a>
+<a href="#85" id="85">85</a>
+<a href="#86" id="86">86</a>
+<a href="#87" id="87">87</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -117,11 +121,15 @@
 
 <span class="kw">impl </span>Concatenate {
     <span class="kw">pub fn </span>new(config: Config) -&gt; <span class="self">Self </span>{
-        Concatenate {
+        <span class="self">Self </span>{
             on_read: config.on_read,
             on_write: config.on_write,
             bytes: config.bytes,
         }
+    }
+
+    <span class="kw">pub fn </span>testing(config: Config) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new(config)
     }
 }
 

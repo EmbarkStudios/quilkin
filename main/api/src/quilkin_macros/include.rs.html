@@ -83,7 +83,7 @@
 }
 
 <span class="kw">impl </span>Parse <span class="kw">for </span>IncludeProto {
-    <span class="kw">fn </span>parse(input: ParseStream) -&gt; syn::Result&lt;<span class="self">Self</span>&gt; {
+    <span class="kw">fn </span>parse(input: ParseStream&lt;<span class="lifetime">'_</span>&gt;) -&gt; syn::Result&lt;<span class="self">Self</span>&gt; {
         <span class="kw">let </span>lit = input.parse::&lt;syn::LitStr&gt;()<span class="question-mark">?</span>;
         <span class="kw">let </span>id = lit.value();
 

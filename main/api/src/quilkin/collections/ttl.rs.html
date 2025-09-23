@@ -802,7 +802,12 @@
 <a href="#801" id="801">801</a>
 <a href="#802" id="802">802</a>
 <a href="#803" id="803">803</a>
-<a href="#804" id="804">804</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#804" id="804">804</a>
+<a href="#805" id="805">805</a>
+<a href="#806" id="806">806</a>
+<a href="#807" id="807">807</a>
+<a href="#808" id="808">808</a>
+<a href="#809" id="809">809</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2021 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -857,7 +862,7 @@
     }
 
     <span class="doccomment">/// Get the expiration time for this value. The returned value is the
-    /// number of seconds relative to some reference point (e.g UNIX_EPOCH), based
+    /// number of seconds relative to some reference point (e.g `UNIX_EPOCH`), based
     /// on the clock being used.
     </span><span class="attr">#[inline]
     </span><span class="kw">fn </span>expiration_secs(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
@@ -924,10 +929,13 @@
     }
 }
 
-<span class="doccomment">/// TtlMap is a key value hash map where entries are associated with a TTL.
+<span class="doccomment">/// A key value hash map where entries are associated with a TTL.
+///
 /// When the TTL for an entry elapses, the entry is removed from the map.
+///
 /// The TTL is reset each time the entry is (re)inserted or read via [`TtlMap::get`],
 /// [`TtlMap::get_mut`] functions, or via the [`TtlMap::entry`] interface.
+///
 /// During tests, the internal clock implementation is driven by [`tokio::time`] so
 /// functions like [`tokio::time::pause`] and [`tokio::time::advance`] can be used.
 </span><span class="kw">pub struct </span>TtlMap&lt;K, V&gt;(Arc&lt;Map&lt;K, V&gt;&gt;);
@@ -964,7 +972,7 @@
     }
 
     <span class="doccomment">/// Returns the current time as the number of seconds relative to some initial
-    /// reference point (e.g UNIX_EPOCH), based on the clock implementation being used.
+    /// reference point (e.g `UNIX_EPOCH`), based on the clock implementation being used.
     /// In tests, this will be driven by [`tokio::time`]
     </span><span class="attr">#[inline]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>now_relative_secs(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
@@ -980,10 +988,10 @@
 {
     <span class="doccomment">/// Returns a reference to value corresponding to key.
     </span><span class="attr">#[inline]
-    </span><span class="kw">pub fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, key: <span class="kw-2">&amp;</span>K) -&gt; <span class="prelude-ty">Option</span>&lt;Ref&lt;K, Value&lt;V&gt;&gt;&gt; {
+    </span><span class="kw">pub fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, key: <span class="kw-2">&amp;</span>K) -&gt; <span class="prelude-ty">Option</span>&lt;Ref&lt;<span class="lifetime">'_</span>, K, Value&lt;V&gt;&gt;&gt; {
         <span class="kw">let </span>value = <span class="self">self</span>.<span class="number">0</span>.inner.get(key);
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>value) = value {
-            value.update_expiration(<span class="self">self</span>.<span class="number">0</span>.ttl)
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(value) = <span class="kw-2">&amp;</span>value {
+            value.update_expiration(<span class="self">self</span>.<span class="number">0</span>.ttl);
         }
 
         value
@@ -991,10 +999,10 @@
 
     <span class="doccomment">/// Returns a reference to value corresponding to key.
     </span><span class="attr">#[inline]
-    </span><span class="kw">pub fn </span>try_get(<span class="kw-2">&amp;</span><span class="self">self</span>, key: <span class="kw-2">&amp;</span>K) -&gt; TryResult&lt;Ref&lt;K, Value&lt;V&gt;&gt;&gt; {
+    </span><span class="kw">pub fn </span>try_get(<span class="kw-2">&amp;</span><span class="self">self</span>, key: <span class="kw-2">&amp;</span>K) -&gt; TryResult&lt;Ref&lt;<span class="lifetime">'_</span>, K, Value&lt;V&gt;&gt;&gt; {
         <span class="kw">let </span>value = <span class="self">self</span>.<span class="number">0</span>.inner.try_get(key);
-        <span class="kw">if let </span>TryResult::Present(<span class="kw-2">ref </span>value) = value {
-            value.update_expiration(<span class="self">self</span>.<span class="number">0</span>.ttl)
+        <span class="kw">if let </span>TryResult::Present(value) = <span class="kw-2">&amp;</span>value {
+            value.update_expiration(<span class="self">self</span>.<span class="number">0</span>.ttl);
         }
 
         value
@@ -1003,7 +1011,7 @@
     <span class="doccomment">/// Returns a mutable reference to value corresponding to key.
     /// The value will be reset to expire at the configured TTL after the time of retrieval.
     </span><span class="attr">#[inline]
-    </span><span class="kw">pub fn </span>get_mut(<span class="kw-2">&amp;</span><span class="self">self</span>, key: <span class="kw-2">&amp;</span>K) -&gt; <span class="prelude-ty">Option</span>&lt;RefMut&lt;K, Value&lt;V&gt;&gt;&gt; {
+    </span><span class="kw">pub fn </span>get_mut(<span class="kw-2">&amp;</span><span class="self">self</span>, key: <span class="kw-2">&amp;</span>K) -&gt; <span class="prelude-ty">Option</span>&lt;RefMut&lt;<span class="lifetime">'_</span>, K, Value&lt;V&gt;&gt;&gt; {
         <span class="kw">let </span>value = <span class="self">self</span>.<span class="number">0</span>.inner.get_mut(key);
         <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>value) = value {
             value.update_expiration(<span class="self">self</span>.<span class="number">0</span>.ttl);
@@ -1063,7 +1071,7 @@
     /// Note: This acquires a write lock on the map's shard that corresponds
     /// to the entry.
     </span><span class="attr">#[inline]
-    </span><span class="kw">pub fn </span>entry(<span class="kw-2">&amp;</span><span class="self">self</span>, key: K) -&gt; Entry&lt;K, Value&lt;V&gt;&gt; {
+    </span><span class="kw">pub fn </span>entry(<span class="kw-2">&amp;</span><span class="self">self</span>, key: K) -&gt; Entry&lt;<span class="lifetime">'_</span>, K, Value&lt;V&gt;&gt; {
         <span class="kw">let </span>ttl = <span class="self">self</span>.<span class="number">0</span>.ttl;
         <span class="kw">match </span><span class="self">self</span>.<span class="number">0</span>.inner.entry(key) {
             inner @ DashMapEntry::Occupied(<span class="kw">_</span>) =&gt; Entry::Occupied(OccupiedEntry {
@@ -1140,7 +1148,7 @@
                 value.update_expiration(<span class="self">self</span>.ttl);
                 value
             }
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"BUG: entry type should be occupied"</span>),
+            DashMapEntry::Vacant(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"BUG: entry type should be occupied"</span>),
         }
     }
 
@@ -1154,7 +1162,7 @@
                 value.update_expiration(<span class="self">self</span>.ttl);
                 value
             }
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"BUG: entry type should be occupied"</span>),
+            DashMapEntry::Vacant(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"BUG: entry type should be occupied"</span>),
         }
     }
 
@@ -1166,7 +1174,7 @@
             DashMapEntry::Occupied(entry) =&gt; {
                 entry.insert(Value::new(value, <span class="self">self</span>.ttl, <span class="self">self</span>.clock.clone()))
             }
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"BUG: entry type should be occupied"</span>),
+            DashMapEntry::Vacant(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"BUG: entry type should be occupied"</span>),
         }
     }
 }
@@ -1182,7 +1190,7 @@
             DashMapEntry::Vacant(entry) =&gt; {
                 entry.insert(Value::new(value, <span class="self">self</span>.ttl, <span class="self">self</span>.clock.clone()))
             }
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"BUG: entry type should be vacant"</span>),
+            DashMapEntry::Occupied(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"BUG: entry type should be vacant"</span>),
         }
     }
 }
@@ -1262,13 +1270,14 @@
     }
 
     <span class="doccomment">/// Returns the current time in seconds, relative to some base time instant.
-    /// For non test cases, relative to UNIX_EPOCH, while during test, a random
+    /// For non test cases, relative to `UNIX_EPOCH`, while during test, a random
     /// point in the past is used.
+    </span><span class="attr">#[cfg_attr(not(test), allow(clippy::unused_self))]
     </span><span class="kw">fn </span>now_relative_secs(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;u64, String&gt; {
         <span class="attr">#[cfg(not(test))]
         </span><span class="kw">return </span>SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|<span class="kw">_</span>| {
+            .map_err(|_err| {
                 String::from(<span class="string">"duration_since was called with time later than the current time"</span>)
             })
             .map(|t| t.as_secs());
@@ -1278,11 +1287,12 @@
     }
 
     <span class="doccomment">/// Returns the expiration time from now in seconds for the given ttl.
+    </span><span class="attr">#[cfg_attr(not(test), allow(clippy::unused_self))]
     </span><span class="kw">fn </span>compute_expiration_secs(<span class="kw-2">&amp;</span><span class="self">self</span>, ttl: Duration) -&gt; <span class="prelude-ty">Result</span>&lt;u64, String&gt; {
         <span class="attr">#[cfg(not(test))]
         </span><span class="kw">return </span>(SystemTime::now() + ttl)
             .duration_since(UNIX_EPOCH)
-            .map_err(|<span class="kw">_</span>| {
+            .map_err(|_err| {
                 String::from(<span class="string">"duration_since was called with time later than the current time"</span>)
             })
             .map(|t| t.as_secs());
@@ -1398,7 +1408,7 @@
                 <span class="macro">assert_eq!</span>(entry.get().value, <span class="number">1</span>);
                 entry.insert(<span class="number">5</span>);
             }
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
+            Entry::Vacant(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
         }
 
         <span class="macro">assert_eq!</span>(map.get(<span class="kw-2">&amp;</span>one).unwrap().value, <span class="number">5</span>);
@@ -1418,7 +1428,7 @@
             Entry::Occupied(<span class="kw-2">mut </span>entry) =&gt; {
                 entry.get_mut().value = <span class="number">5</span>;
             }
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
+            Entry::Vacant(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
         }
 
         <span class="macro">assert_eq!</span>(map.get(<span class="kw-2">&amp;</span>one).unwrap().value, <span class="number">5</span>);
@@ -1439,7 +1449,7 @@
                 <span class="macro">assert_eq!</span>(e.value, <span class="number">1</span>);
                 e.value = <span class="number">5</span>;
             }
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
+            Entry::Occupied(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
         }
 
         <span class="macro">assert_eq!</span>(map.get(<span class="kw-2">&amp;</span>one).unwrap().value, <span class="number">5</span>);
@@ -1464,7 +1474,7 @@
 
         <span class="kw">let </span>exp2 = <span class="kw">match </span>map.entry(one.clone()) {
             Entry::Occupied(entry) =&gt; entry.get().expiration_secs(),
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
+            Entry::Vacant(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
         };
 
         <span class="macro">assert!</span>(exp1 &lt; exp2);
@@ -1490,7 +1500,7 @@
 
         <span class="kw">let </span>exp2 = <span class="kw">match </span>map.entry(one) {
             Entry::Occupied(<span class="kw-2">mut </span>entry) =&gt; entry.get_mut().expiration_secs(),
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
+            Entry::Vacant(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
         };
 
         <span class="macro">assert!</span>(exp1 &lt; exp2);
@@ -1516,7 +1526,7 @@
 
         <span class="kw">let </span>old_exp1 = <span class="kw">match </span>map.entry(one.clone()) {
             Entry::Occupied(<span class="kw-2">mut </span>entry) =&gt; entry.insert(<span class="number">9</span>).expiration_secs(),
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
+            Entry::Vacant(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"expected occupied entry"</span>),
         };
 
         <span class="kw">let </span>exp2 = map.get(<span class="kw-2">&amp;</span>one).unwrap().expiration_secs();
@@ -1540,7 +1550,7 @@
 
         <span class="kw">let </span>exp1 = <span class="kw">match </span>map.entry(one.clone()) {
             Entry::Vacant(entry) =&gt; entry.insert(<span class="number">9</span>).expiration_secs(),
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"expected vacant entry"</span>),
+            Entry::Occupied(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"expected vacant entry"</span>),
         };
 
         time::advance(Duration::from_secs(<span class="number">2</span>)).<span class="kw">await</span>;
@@ -1566,7 +1576,7 @@
 
         <span class="kw">let </span>exp = <span class="kw">match </span>map.entry(one) {
             Entry::Vacant(entry) =&gt; entry.insert(<span class="number">9</span>).expiration_secs(),
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"expected vacant entry"</span>),
+            Entry::Occupied(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"expected vacant entry"</span>),
         };
 
         <span class="comment">// Check that it expires at our configured TTL.
@@ -1591,7 +1601,7 @@
         time::advance(Duration::from_secs(<span class="number">4</span>)).<span class="kw">await</span>;
 
         <span class="comment">// Read one key so that it does not expire at the original ttl.
-        </span><span class="kw">let _ </span>= map.get(<span class="kw-2">&amp;</span>two).unwrap();
+        </span>map.get(<span class="kw-2">&amp;</span>two).unwrap();
 
         <span class="comment">// Check that only the un-read key is deleted.
         </span>time::advance(Duration::from_secs(<span class="number">4</span>)).<span class="kw">await</span>;

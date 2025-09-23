@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Error","SessionError"],"struct":["Session","SessionKey","SessionPool"],"trait":["SessionManager"],"type":["SessionMap"]};

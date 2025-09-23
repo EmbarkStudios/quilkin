@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["raw_socket_with_reuse","raw_socket_with_reuse_and_address","socket_port"],"mod":["cluster","endpoint","packet","phoenix","xdp"],"struct":["DualStackEpollSocket","DualStackLocalSocket","TcpListener"],"type":["DualStackLocalSocketRc"]};
+window.SIDEBAR_ITEMS = {"fn":["raw_socket_with_reuse","raw_socket_with_reuse_and_address","socket_port"],"mod":["cluster","endpoint","error","io","packet","phoenix","sessions"],"struct":["DualStackEpollSocket","DualStackLocalSocket","TcpListener"],"type":["DualStackLocalSocketRc"]};

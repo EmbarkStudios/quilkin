@@ -76,7 +76,12 @@
 <a href="#75" id="75">75</a>
 <a href="#76" id="76">76</a>
 <a href="#77" id="77">77</a>
-<a href="#78" id="78">78</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#78" id="78">78</a>
+<a href="#79" id="79">79</a>
+<a href="#80" id="80">80</a>
+<a href="#81" id="81">81</a>
+<a href="#82" id="82">82</a>
+<a href="#83" id="83">83</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2021 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -102,19 +107,23 @@
 <span class="attr">#[derive(Clone)]
 </span><span class="kw">pub struct </span>Health {
     healthy: Arc&lt;AtomicBool&gt;,
+    shutdown_tx: <span class="kw">crate</span>::signal::ShutdownTx,
 }
 
 <span class="kw">impl </span>Health {
-    <span class="kw">pub fn </span>new() -&gt; <span class="self">Self </span>{
+    <span class="kw">pub fn </span>new(shutdown_tx: <span class="kw">crate</span>::signal::ShutdownTx) -&gt; <span class="self">Self </span>{
         <span class="kw">let </span>health = <span class="self">Self </span>{
             healthy: Arc::new(AtomicBool::new(<span class="bool-val">true</span>)),
+            shutdown_tx,
         };
 
         <span class="kw">let </span>healthy = health.healthy.clone();
+        <span class="kw">let </span>shutdown_tx = health.shutdown_tx.clone();
         <span class="kw">let </span>default_hook = panic::take_hook();
         panic::set_hook(Box::new(<span class="kw">move </span>|panic_info| {
             <span class="macro">tracing::error!</span>(%panic_info, <span class="string">"Panic has occurred. Moving to Unhealthy"</span>);
             healthy.swap(<span class="bool-val">false</span>, Relaxed);
+            <span class="kw">let _ </span>= shutdown_tx.send(());
             default_hook(panic_info);
         }));
 
@@ -141,12 +150,13 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>panic_hook() {
-        <span class="kw">let </span>health = Health::new();
+        <span class="kw">let </span>(shutdown_tx, _shutdown_rx) = <span class="kw">crate</span>::signal::channel();
+        <span class="kw">let </span>health = Health::new(shutdown_tx);
 
         <span class="kw">let </span>response = health.check_liveness();
         <span class="macro">assert_eq!</span>(response.status(), StatusCode::OK);
 
-        <span class="kw">let _ </span>= std::panic::catch_unwind(|| {
+        <span class="kw">let </span>_unused = std::panic::catch_unwind(|| {
             <span class="macro">panic!</span>(<span class="string">"oh no!"</span>);
         });
 

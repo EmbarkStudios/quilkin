@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["envoy","google","quilkin","validate","xds"]};
+window.SIDEBAR_ITEMS = {"mod":["envoy","google","perftools","quilkin","validate","xds"]};

@@ -237,7 +237,7 @@
     }
 
     <span class="doccomment">/// Returns a by reference iterator over the set of filters.
-    </span><span class="kw">pub fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Iter {
+    </span><span class="kw">pub fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Iter&lt;<span class="lifetime">'_</span>&gt; {
         Iter {
             inner: <span class="self">self</span>.<span class="number">0</span>.iter(),
         }

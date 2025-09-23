@@ -305,7 +305,31 @@
 <a href="#304" id="304">304</a>
 <a href="#305" id="305">305</a>
 <a href="#306" id="306">306</a>
-<a href="#307" id="307">307</a></pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::discovery::{DeltaDiscoveryRequest, DeltaDiscoveryResponse, Resource};
+<a href="#307" id="307">307</a>
+<a href="#308" id="308">308</a>
+<a href="#309" id="309">309</a>
+<a href="#310" id="310">310</a>
+<a href="#311" id="311">311</a>
+<a href="#312" id="312">312</a>
+<a href="#313" id="313">313</a>
+<a href="#314" id="314">314</a>
+<a href="#315" id="315">315</a>
+<a href="#316" id="316">316</a>
+<a href="#317" id="317">317</a>
+<a href="#318" id="318">318</a>
+<a href="#319" id="319">319</a>
+<a href="#320" id="320">320</a>
+<a href="#321" id="321">321</a>
+<a href="#322" id="322">322</a>
+<a href="#323" id="323">323</a>
+<a href="#324" id="324">324</a>
+<a href="#325" id="325">325</a>
+<a href="#326" id="326">326</a>
+<a href="#327" id="327">327</a>
+<a href="#328" id="328">328</a>
+<a href="#329" id="329">329</a>
+<a href="#330" id="330">330</a>
+<a href="#331" id="331">331</a></pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::discovery::{DeltaDiscoveryRequest, DeltaDiscoveryResponse, Resource};
 <span class="kw">use </span>std::{
     collections::{BTreeSet, HashMap},
     sync::Arc,
@@ -328,39 +352,55 @@
         .unwrap_or(<span class="number">256 </span>* <span class="number">1024 </span>* <span class="number">1024</span>)
 }
 
+<span class="kw">pub type </span>VersionMap = HashMap&lt;String, String&gt;;
+<span class="kw">pub type </span>TypeUrl = <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str;
+
 <span class="doccomment">/// Keeps tracking of the local versions of each resource sent from the management
 /// server, allowing reconnections to the same/new management servers to send initial
 /// versions to reduce the initial response size
 </span><span class="kw">pub struct </span>LocalVersions {
-    versions: Vec&lt;(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, parking_lot::Mutex&lt;HashMap&lt;String, String&gt;&gt;)&gt;,
+    versions: Vec&lt;(TypeUrl, parking_lot::Mutex&lt;VersionMap&gt;)&gt;,
 }
 
 <span class="kw">impl </span>LocalVersions {
     <span class="attr">#[inline]
-    </span><span class="kw">pub fn </span>new(types: <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str&gt;) -&gt; <span class="self">Self </span>{
+    </span><span class="kw">pub fn </span>new(types: <span class="kw">impl </span>Iterator&lt;Item = TypeUrl&gt;) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             versions: types.map(|ty| (ty, Default::default())).collect(),
         }
     }
 
     <span class="attr">#[inline]
-    </span><span class="kw">pub fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, ty: <span class="kw-2">&amp;</span>str) -&gt; parking_lot::MutexGuard&lt;<span class="lifetime">'_</span>, HashMap&lt;String, String&gt;&gt; {
-        <span class="self">self</span>.versions
+    </span><span class="kw">pub fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, ty: <span class="kw-2">&amp;</span>str) -&gt; parking_lot::MutexGuard&lt;<span class="lifetime">'_</span>, VersionMap&gt; {
+        <span class="kw">let </span>g = <span class="self">self
+            </span>.versions
             .iter()
-            .find_map(|(t, hm)| (<span class="kw-2">*</span>t == ty).then_some(hm))
-            .unwrap()
-            .lock()
+            .find_map(|(t, hm)| (<span class="kw-2">*</span>t == ty).then_some(hm));
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(ml) = g {
+            ml.lock()
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>versions = <span class="self">self</span>.versions.iter().map(|(ty, <span class="kw">_</span>)| <span class="kw-2">*</span>ty).collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+            <span class="macro">panic!</span>(<span class="string">"unable to retrieve `{ty}` versions, available versions are {versions:?}"</span>);
+        }
     }
 
     <span class="attr">#[inline]
-    </span><span class="kw">pub fn </span>reset(<span class="kw-2">&amp;</span><span class="self">self</span>) {
-        <span class="kw">for </span>(<span class="kw">_</span>, map) <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.versions {
-            map.lock().clear();
+    </span><span class="kw">pub fn </span>clear&lt;C: <span class="kw">crate</span>::config::Configuration&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        config: <span class="kw-2">&amp;</span>Arc&lt;C&gt;,
+        remote_addr: <span class="prelude-ty">Option</span>&lt;std::net::IpAddr&gt;,
+    ) {
+        <span class="kw">for </span>(type_url, map) <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.versions {
+            <span class="kw">let </span><span class="kw-2">mut </span>map = map.lock();
+            <span class="kw">let </span>remove = map.keys().cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+            <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = config.apply_delta(type_url, <span class="macro">vec!</span>[], <span class="kw-2">&amp;</span>remove, remote_addr) {
+                <span class="macro">tracing::warn!</span>(%error, count = remove.len(), type_url, <span class="string">"failed to remove resources upon connection loss"</span>);
+            }
+            map.clear();
         }
     }
 }
-
-<span class="kw">pub type </span>VersionMap = HashMap&lt;String, String&gt;;
 
 <span class="kw">pub struct </span>ClientState {
     <span class="kw">pub </span>resource_type: String,
@@ -378,7 +418,7 @@
     }
 
     <span class="kw">pub fn </span>reset(<span class="kw-2">&amp;mut </span><span class="self">self</span>, versions: VersionMap) {
-        <span class="kw">let _ </span>= std::mem::replace(<span class="kw-2">&amp;mut </span><span class="self">self</span>.versions, versions);
+        drop(std::mem::replace(<span class="kw-2">&amp;mut </span><span class="self">self</span>.versions, versions));
         <span class="self">self</span>.subscribed.clear();
     }
 
@@ -489,6 +529,10 @@
 <span class="kw">pub trait </span>Configuration: Send + Sync + Sized + <span class="lifetime">'static </span>{
     <span class="kw">fn </span>identifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; String;
 
+    <span class="doccomment">/// Returns whether the current instance is considered the leader of a set
+    /// of replicas, if leader election is enabled in a config provider.
+    </span><span class="kw">fn </span>is_leader(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;bool&gt;;
+
     <span class="kw">fn </span>apply_delta(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         resource_type: <span class="kw-2">&amp;</span>str,
@@ -507,12 +551,16 @@
     <span class="kw">fn </span>on_changed(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         subscribed: <span class="kw">crate</span>::server::ControlPlane&lt;<span class="self">Self</span>&gt;,
+        shutdown: tokio::sync::watch::Receiver&lt;()&gt;,
     ) -&gt; <span class="kw">impl </span>std::future::Future&lt;Output = ()&gt; + Send + <span class="lifetime">'static</span>;
 
     <span class="kw">fn </span>interested_resources(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         server_version: <span class="kw-2">&amp;</span>str,
     ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, Vec&lt;String&gt;)&gt;;
+
+    <span class="doccomment">/// Called when the remote endpoint disconnects from this server
+    </span><span class="kw">fn </span>client_disconnected(<span class="kw-2">&amp;</span><span class="self">self</span>, ip: std::net::IpAddr);
 }
 
 <span class="kw">pub struct </span>DeltaDiscoveryRes {
@@ -529,7 +577,7 @@
     local: Arc&lt;LocalVersions&gt;,
     remote_addr: <span class="prelude-ty">Option</span>&lt;std::net::IpAddr&gt;,
     <span class="kw-2">mut </span>notifier: <span class="prelude-ty">Option</span>&lt;tokio::sync::mpsc::UnboundedSender&lt;String&gt;&gt;,
-) -&gt; std::pin::Pin&lt;Box&lt;<span class="kw">dyn </span>futures::Stream&lt;Item = <span class="kw">crate</span>::Result&lt;DeltaDiscoveryRequest&gt;&gt; + Send&gt;&gt; {
+) -&gt; std::pin::Pin&lt;Box&lt;<span class="kw">dyn </span>futures::Stream&lt;Item = tonic::Result&lt;DeltaDiscoveryRequest&gt;&gt; + Send&gt;&gt; {
     Box::pin(<span class="macro">async_stream::try_stream!</span> {
         <span class="kw">let </span>_stream_metrics = <span class="kw">crate</span>::metrics::StreamConnectionMetrics::new(identifier.clone());
         <span class="macro">tracing::trace!</span>(<span class="string">"awaiting delta response"</span>);
@@ -538,7 +586,7 @@
             <span class="kw">let </span>response = <span class="kw">match </span>response {
                 <span class="prelude-val">Ok</span>(response) =&gt; response,
                 <span class="prelude-val">Err</span>(error) =&gt; {
-                    <span class="macro">tracing::warn!</span>(%error, <span class="string">"Error from xDS server"</span>);
+                    <span class="kw">yield </span><span class="prelude-val">Err</span>(error)<span class="question-mark">?</span>;
                     <span class="kw">break</span>;
                 }
             };
@@ -591,17 +639,17 @@
                 }
             }
 
-            <span class="kw">let </span>error_detail = <span class="kw">match </span>result { <span class="prelude-val">Err</span>(error) =&gt; {
+            <span class="kw">let </span>error_detail = <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = result {
                 <span class="kw">crate</span>::metrics::nacks(control_plane_identifier, <span class="kw-2">&amp;</span>type_url).inc();
                 <span class="prelude-val">Some</span>(quilkin_proto::generated::google::rpc::Status {
                     code: <span class="number">3</span>,
                     message: error.to_string(),
                     ..Default::default()
                 })
-            } <span class="kw">_ </span>=&gt; {
+            } <span class="kw">else </span>{
                 <span class="kw">crate</span>::metrics::acks(control_plane_identifier, <span class="kw-2">&amp;</span>type_url).inc();
                 <span class="prelude-val">None
-            </span>}};
+            </span>};
 
             <span class="kw">yield </span>DeltaDiscoveryRequest {
                 type_url,

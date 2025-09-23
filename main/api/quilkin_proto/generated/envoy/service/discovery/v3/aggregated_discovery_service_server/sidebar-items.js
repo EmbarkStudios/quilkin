@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["AggregatedDiscoveryServiceServer"],"trait":["AggregatedDiscoveryService"]};
+window.SIDEBAR_ITEMS = {"constant":["SERVICE_NAME"],"struct":["AggregatedDiscoveryServiceServer"],"trait":["AggregatedDiscoveryService"]};

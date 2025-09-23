@@ -356,52 +356,7 @@
 <a href="#355" id="355">355</a>
 <a href="#356" id="356">356</a>
 <a href="#357" id="357">357</a>
-<a href="#358" id="358">358</a>
-<a href="#359" id="359">359</a>
-<a href="#360" id="360">360</a>
-<a href="#361" id="361">361</a>
-<a href="#362" id="362">362</a>
-<a href="#363" id="363">363</a>
-<a href="#364" id="364">364</a>
-<a href="#365" id="365">365</a>
-<a href="#366" id="366">366</a>
-<a href="#367" id="367">367</a>
-<a href="#368" id="368">368</a>
-<a href="#369" id="369">369</a>
-<a href="#370" id="370">370</a>
-<a href="#371" id="371">371</a>
-<a href="#372" id="372">372</a>
-<a href="#373" id="373">373</a>
-<a href="#374" id="374">374</a>
-<a href="#375" id="375">375</a>
-<a href="#376" id="376">376</a>
-<a href="#377" id="377">377</a>
-<a href="#378" id="378">378</a>
-<a href="#379" id="379">379</a>
-<a href="#380" id="380">380</a>
-<a href="#381" id="381">381</a>
-<a href="#382" id="382">382</a>
-<a href="#383" id="383">383</a>
-<a href="#384" id="384">384</a>
-<a href="#385" id="385">385</a>
-<a href="#386" id="386">386</a>
-<a href="#387" id="387">387</a>
-<a href="#388" id="388">388</a>
-<a href="#389" id="389">389</a>
-<a href="#390" id="390">390</a>
-<a href="#391" id="391">391</a>
-<a href="#392" id="392">392</a>
-<a href="#393" id="393">393</a>
-<a href="#394" id="394">394</a>
-<a href="#395" id="395">395</a>
-<a href="#396" id="396">396</a>
-<a href="#397" id="397">397</a>
-<a href="#398" id="398">398</a>
-<a href="#399" id="399">399</a>
-<a href="#400" id="400">400</a>
-<a href="#401" id="401">401</a>
-<a href="#402" id="402">402</a>
-<a href="#403" id="403">403</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#358" id="358">358</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2022 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -417,64 +372,17 @@
  * limitations under the License.
  */
 
-</span><span class="kw">pub mod </span>packet;
-
-<span class="doccomment">/// On linux spawns a io-uring runtime + thread, everywhere else spawns a regular tokio task.
-</span><span class="attr">#[cfg(not(target_os = <span class="string">"linux"</span>))]
-</span><span class="macro">macro_rules!</span> uring_spawn {
-    (<span class="macro-nonterminal">$span</span>:expr_2021, <span class="macro-nonterminal">$future</span>:expr_2021) =&gt; {{
-        <span class="kw">let </span>(tx, rx) = std::sync::mpsc::channel::&lt;()&gt;();
-        <span class="kw">use </span>tracing::Instrument <span class="kw">as _</span>;
-
-        <span class="kw">use </span>tracing::instrument::WithSubscriber <span class="kw">as _</span>;
-
-        <span class="kw">let </span>fut = <span class="kw">async move </span>{
-            <span class="kw">let _ </span>= tx.send(());
-            <span class="macro-nonterminal">$future</span>.<span class="kw">await
-        </span>};
-
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(span) = <span class="macro-nonterminal">$span </span>{
-            tokio::spawn(fut.instrument(span).with_current_subscriber());
-        } <span class="kw">else </span>{
-            tokio::spawn(fut.with_current_subscriber());
-        }
-        rx
-    }};
-}
-
-<span class="doccomment">/// On linux spawns a io-uring task, everywhere else spawns a regular tokio task.
-</span><span class="attr">#[cfg(not(target_os = <span class="string">"linux"</span>))]
-</span><span class="macro">macro_rules!</span> uring_inner_spawn {
-    (<span class="macro-nonterminal">$future</span>:expr_2021) =&gt; {
-        tokio::spawn(<span class="macro-nonterminal">$future</span>);
-    };
-}
-
-<span class="doccomment">/// Allows creation of spans only when debug_assertions are enabled, to avoid
-/// hitting the cap of 4096 threads that is unconfigurable in tracing_subscriber -&gt; sharded_slab
-/// for span ids
-</span><span class="macro">macro_rules!</span> uring_span {
-    (<span class="macro-nonterminal">$span</span>:expr_2021) =&gt; {{
-        <span class="macro">cfg_if::cfg_if!</span> {
-            <span class="kw">if </span><span class="attr">#[cfg(debug_assertions)] </span>{
-                <span class="prelude-val">Some</span>(<span class="macro-nonterminal">$span</span>)
-            } <span class="kw">else </span>{
-                <span class="prelude-ty">Option</span>::&lt;tracing::Span&gt;::None
-            }
-        }
-    }};
-}
-
-<span class="kw">pub mod </span>cluster;
+</span><span class="kw">pub mod </span>cluster;
 <span class="kw">pub mod </span>endpoint;
+<span class="kw">pub mod </span>error;
+<span class="kw">pub mod </span>io;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>maxmind_db;
+<span class="kw">pub mod </span>packet;
 <span class="kw">pub mod </span>phoenix;
-
-<span class="kw">pub use </span>quilkin_xds <span class="kw">as </span>xds;
-<span class="kw">pub use </span>xds::net::TcpListener;
+<span class="kw">pub mod </span>sessions;
 
 <span class="kw">use </span>std::{
-    io,
+    io::Result <span class="kw">as </span>IoResult,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
@@ -483,22 +391,24 @@
 <span class="macro">cfg_if::cfg_if!</span> {
     <span class="kw">if </span><span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)] </span>{
         <span class="kw">use </span>std::net::UdpSocket;
-
-        <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>io_uring;
-        <span class="kw">pub mod </span>xdp;
     } <span class="kw">else </span>{
         <span class="kw">use </span>tokio::net::UdpSocket;
     }
 }
 
-<span class="kw">pub use </span><span class="self">self</span>::{
-    cluster::ClusterMap,
-    endpoint::{Endpoint, EndpointAddress},
+<span class="kw">pub use </span>{
+    <span class="self">self</span>::{
+        cluster::ClusterMap,
+        endpoint::{Endpoint, EndpointAddress},
+        error::PipelineError,
+        packet::{Packet, PacketMut, PacketQueue, PacketQueueSender, queue},
+        sessions::SessionPool,
+    },
+    quilkin_xds <span class="kw">as </span>xds,
+    xds::net::TcpListener,
 };
 
-<span class="kw">pub use </span><span class="self">self</span>::packet::{PacketQueue, PacketQueueSender, queue};
-
-<span class="kw">fn </span>socket_with_reuse_and_address(addr: SocketAddr) -&gt; std::io::Result&lt;UdpSocket&gt; {
+<span class="kw">fn </span>socket_with_reuse_and_address(addr: SocketAddr) -&gt; IoResult&lt;UdpSocket&gt; {
     <span class="macro">cfg_if::cfg_if!</span> {
         <span class="kw">if </span><span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)] </span>{
             raw_socket_with_reuse_and_address(addr)
@@ -509,24 +419,24 @@
     }
 }
 
-<span class="kw">fn </span>epoll_socket_with_reuse(port: u16) -&gt; std::io::Result&lt;tokio::net::UdpSocket&gt; {
+<span class="kw">fn </span>epoll_socket_with_reuse(port: u16) -&gt; IoResult&lt;tokio::net::UdpSocket&gt; {
     raw_socket_with_reuse_and_address((Ipv6Addr::UNSPECIFIED, port).into())
         .map(From::from)
         .and_then(tokio::net::UdpSocket::from_std)
 }
 
-<span class="kw">fn </span>epoll_socket_with_reuse_and_address(addr: SocketAddr) -&gt; std::io::Result&lt;tokio::net::UdpSocket&gt; {
+<span class="kw">fn </span>epoll_socket_with_reuse_and_address(addr: SocketAddr) -&gt; IoResult&lt;tokio::net::UdpSocket&gt; {
     raw_socket_with_reuse_and_address(addr)
         .map(From::from)
         .and_then(tokio::net::UdpSocket::from_std)
 }
 
 <span class="attr">#[inline]
-</span><span class="kw">pub fn </span>raw_socket_with_reuse(port: u16) -&gt; std::io::Result&lt;Socket&gt; {
+</span><span class="kw">pub fn </span>raw_socket_with_reuse(port: u16) -&gt; IoResult&lt;Socket&gt; {
     raw_socket_with_reuse_and_address((Ipv6Addr::UNSPECIFIED, port).into())
 }
 
-<span class="kw">pub fn </span>raw_socket_with_reuse_and_address(addr: SocketAddr) -&gt; std::io::Result&lt;Socket&gt; {
+<span class="kw">pub fn </span>raw_socket_with_reuse_and_address(addr: SocketAddr) -&gt; IoResult&lt;Socket&gt; {
     <span class="kw">let </span>domain = <span class="kw">match </span>addr {
         SocketAddr::V4(<span class="kw">_</span>) =&gt; socket2::Domain::IPV4,
         SocketAddr::V6(<span class="kw">_</span>) =&gt; socket2::Domain::IPV6,
@@ -553,19 +463,19 @@
 }
 
 <span class="attr">#[cfg(not(target_family = <span class="string">"windows"</span>))]
-</span><span class="kw">fn </span>enable_reuse(sock: <span class="kw-2">&amp;</span>Socket) -&gt; io::Result&lt;()&gt; {
+</span><span class="kw">fn </span>enable_reuse(sock: <span class="kw-2">&amp;</span>Socket) -&gt; IoResult&lt;()&gt; {
     sock.set_reuse_port(<span class="bool-val">true</span>)<span class="question-mark">?</span>;
     <span class="prelude-val">Ok</span>(())
 }
 
 <span class="attr">#[cfg(target_family = <span class="string">"windows"</span>)]
-</span><span class="kw">fn </span>enable_reuse(sock: <span class="kw-2">&amp;</span>Socket) -&gt; io::Result&lt;()&gt; {
+</span><span class="kw">fn </span>enable_reuse(sock: <span class="kw-2">&amp;</span>Socket) -&gt; IoResult&lt;()&gt; {
     sock.set_reuse_address(<span class="bool-val">true</span>)<span class="question-mark">?</span>;
     <span class="prelude-val">Ok</span>(())
 }
 
 <span class="doccomment">/// An ipv6 socket that can accept and send data from either a local ipv4 address or ipv6 address
-/// with port reuse enabled and only_v6 set to false.
+/// with port reuse enabled and `only_v6` set to false.
 </span><span class="kw">pub struct </span>DualStackLocalSocket {
     socket: UdpSocket,
     local_addr: SocketAddr,
@@ -587,24 +497,24 @@
         <span class="self">Self </span>{ socket, local_addr }
     }
 
-    <span class="kw">pub fn </span>new(port: u16) -&gt; std::io::Result&lt;<span class="self">Self</span>&gt; {
+    <span class="kw">pub fn </span>new(port: u16) -&gt; IoResult&lt;<span class="self">Self</span>&gt; {
         raw_socket_with_reuse(port).map(<span class="self">Self</span>::from_raw)
     }
 
-    <span class="kw">pub fn </span>bind_local(port: u16) -&gt; std::io::Result&lt;<span class="self">Self</span>&gt; {
+    <span class="kw">pub fn </span>bind_local(port: u16) -&gt; IoResult&lt;<span class="self">Self</span>&gt; {
         <span class="kw">let </span>local_addr = (Ipv6Addr::LOCALHOST, port).into();
         <span class="kw">let </span>socket = socket_with_reuse_and_address(local_addr)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{ socket, local_addr })
     }
 
-    <span class="kw">pub fn </span>local_ipv4_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; io::Result&lt;SocketAddr&gt; {
+    <span class="kw">pub fn </span>local_ipv4_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; IoResult&lt;SocketAddr&gt; {
         <span class="prelude-val">Ok</span>(<span class="kw">match </span><span class="self">self</span>.local_addr {
             SocketAddr::V4(<span class="kw">_</span>) =&gt; <span class="self">self</span>.local_addr,
             SocketAddr::V6(<span class="kw">_</span>) =&gt; (Ipv4Addr::UNSPECIFIED, <span class="self">self</span>.local_addr.port()).into(),
         })
     }
 
-    <span class="kw">pub fn </span>local_ipv6_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; io::Result&lt;SocketAddr&gt; {
+    <span class="kw">pub fn </span>local_ipv6_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; IoResult&lt;SocketAddr&gt; {
         <span class="prelude-val">Ok</span>(<span class="kw">match </span><span class="self">self</span>.local_addr {
             SocketAddr::V4(v4addr) =&gt; SocketAddr::new(
                 IpAddr::V6(v4addr.ip().to_ipv6_mapped()),
@@ -616,12 +526,12 @@
 
     <span class="macro">cfg_if::cfg_if!</span> {
         <span class="kw">if </span><span class="attr">#[cfg(not(target_os = <span class="string">"linux"</span>))] </span>{
-            <span class="kw">pub async fn </span>recv_from&lt;B: std::ops::DerefMut&lt;Target = [u8]&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>buf: B) -&gt; (io::Result&lt;(usize, SocketAddr)&gt;, B) {
+            <span class="kw">pub async fn </span>recv_from&lt;B: std::ops::DerefMut&lt;Target = [u8]&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>buf: B) -&gt; (IoResult&lt;(usize, SocketAddr)&gt;, B) {
                 <span class="kw">let </span>result = <span class="self">self</span>.socket.recv_from(<span class="kw-2">&amp;mut </span>buf).<span class="kw">await</span>;
                 (result, buf)
             }
 
-            <span class="kw">pub async fn </span>send_to&lt;B: std::ops::Deref&lt;Target = [u8]&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: B, target: SocketAddr) -&gt; (io::Result&lt;usize&gt;, B) {
+            <span class="kw">pub async fn </span>send_to&lt;B: std::ops::Deref&lt;Target = [u8]&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: B, target: SocketAddr) -&gt; (IoResult&lt;usize&gt;, B) {
                 <span class="kw">let </span>result = <span class="self">self</span>.socket.send_to(<span class="kw-2">&amp;</span>buf, target).<span class="kw">await</span>;
                 (result, buf)
             }
@@ -647,41 +557,41 @@
     }
 }
 
-<span class="doccomment">/// The same as DualStackSocket but uses epoll instead of uring.
+<span class="doccomment">/// The same as [`DualStackSocket`] but uses epoll instead of uring.
 </span><span class="attr">#[derive(Debug)]
 </span><span class="kw">pub struct </span>DualStackEpollSocket {
     socket: tokio::net::UdpSocket,
 }
 
 <span class="kw">impl </span>DualStackEpollSocket {
-    <span class="kw">pub fn </span>new(port: u16) -&gt; std::io::Result&lt;<span class="self">Self</span>&gt; {
+    <span class="kw">pub fn </span>new(port: u16) -&gt; IoResult&lt;<span class="self">Self</span>&gt; {
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             socket: epoll_socket_with_reuse(port)<span class="question-mark">?</span>,
         })
     }
 
-    <span class="kw">pub fn </span>bind_local(port: u16) -&gt; std::io::Result&lt;<span class="self">Self</span>&gt; {
+    <span class="kw">pub fn </span>bind_local(port: u16) -&gt; IoResult&lt;<span class="self">Self</span>&gt; {
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             socket: epoll_socket_with_reuse_and_address((Ipv6Addr::LOCALHOST, port).into())<span class="question-mark">?</span>,
         })
     }
 
     <span class="doccomment">/// Primarily used for testing of ipv4 vs ipv6 addresses.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new_with_address(addr: SocketAddr) -&gt; std::io::Result&lt;<span class="self">Self</span>&gt; {
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new_with_address(addr: SocketAddr) -&gt; IoResult&lt;<span class="self">Self</span>&gt; {
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             socket: epoll_socket_with_reuse_and_address(addr)<span class="question-mark">?</span>,
         })
     }
 
-    <span class="kw">pub async fn </span>recv_from(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>[u8]) -&gt; io::Result&lt;(usize, SocketAddr)&gt; {
+    <span class="kw">pub async fn </span>recv_from(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>[u8]) -&gt; IoResult&lt;(usize, SocketAddr)&gt; {
         <span class="self">self</span>.socket.recv_from(buf).<span class="kw">await
     </span>}
 
-    <span class="kw">pub fn </span>local_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; io::Result&lt;SocketAddr&gt; {
+    <span class="kw">pub fn </span>local_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; IoResult&lt;SocketAddr&gt; {
         <span class="self">self</span>.socket.local_addr()
     }
 
-    <span class="kw">pub fn </span>local_ipv4_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; io::Result&lt;SocketAddr&gt; {
+    <span class="kw">pub fn </span>local_ipv4_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; IoResult&lt;SocketAddr&gt; {
         <span class="kw">let </span>addr = <span class="self">self</span>.socket.local_addr()<span class="question-mark">?</span>;
         <span class="kw">match </span>addr {
             SocketAddr::V4(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(addr),
@@ -689,7 +599,7 @@
         }
     }
 
-    <span class="kw">pub fn </span>local_ipv6_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; io::Result&lt;SocketAddr&gt; {
+    <span class="kw">pub fn </span>local_ipv6_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; IoResult&lt;SocketAddr&gt; {
         <span class="kw">let </span>addr = <span class="self">self</span>.socket.local_addr()<span class="question-mark">?</span>;
         <span class="kw">match </span>addr {
             SocketAddr::V4(v4addr) =&gt; <span class="prelude-val">Ok</span>(SocketAddr::new(
@@ -704,7 +614,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         buf: <span class="kw-2">&amp;</span>[u8],
         target: A,
-    ) -&gt; io::Result&lt;usize&gt; {
+    ) -&gt; IoResult&lt;usize&gt; {
         <span class="self">self</span>.socket.send_to(buf, target).<span class="kw">await
     </span>}
 }

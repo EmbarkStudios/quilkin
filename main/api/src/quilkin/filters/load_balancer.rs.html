@@ -257,7 +257,11 @@
 <a href="#256" id="256">256</a>
 <a href="#257" id="257">257</a>
 <a href="#258" id="258">258</a>
-<a href="#259" id="259">259</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#259" id="259">259</a>
+<a href="#260" id="260">260</a>
+<a href="#261" id="261">261</a>
+<a href="#262" id="262">262</a>
+<a href="#263" id="263">263</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -293,6 +297,10 @@
         <span class="self">Self </span>{
             endpoint_chooser: config.policy.as_endpoint_chooser(),
         }
+    }
+
+    <span class="kw">pub fn </span>testing(config: Config) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new(config)
     }
 }
 

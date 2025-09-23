@@ -374,13 +374,7 @@
 <a href="#373" id="373">373</a>
 <a href="#374" id="374">374</a>
 <a href="#375" id="375">375</a>
-<a href="#376" id="376">376</a>
-<a href="#377" id="377">377</a>
-<a href="#378" id="378">378</a>
-<a href="#379" id="379">379</a>
-<a href="#380" id="380">380</a>
-<a href="#381" id="381">381</a>
-<a href="#382" id="382">382</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#376" id="376">376</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2024 Google LLC All Rights Reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -559,17 +553,14 @@
     /// The suffix will be [len - length, len) and this buffer will now be [0, len - length)
     </span><span class="attr">#[inline]
     </span><span class="kw">pub fn </span>split_suffix(<span class="kw-2">&amp;mut </span><span class="self">self</span>, length: usize) -&gt; <span class="kw-2">&amp;</span>[u8] {
-        <span class="kw">match </span><span class="self">self</span>.suffix.take() {
-            <span class="prelude-val">Some</span>(current) =&gt; {
-                <span class="kw">let </span>prev_len = current.len();
-                <span class="self">self</span>.inner.unsplit(current);
-                <span class="self">self</span>.suffix = <span class="prelude-val">Some</span>(<span class="self">self</span>.inner.split_off(<span class="self">self</span>.inner.len() - length - prev_len));
-                <span class="self">self</span>.suffix.as_deref().map(|b| <span class="kw-2">&amp;</span>b[..length]).unwrap()
-            }
-            <span class="kw">_ </span>=&gt; {
-                <span class="self">self</span>.suffix = <span class="prelude-val">Some</span>(<span class="self">self</span>.inner.split_off(<span class="self">self</span>.inner.len() - length));
-                <span class="self">self</span>.suffix.as_deref().unwrap()
-            }
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(current) = <span class="self">self</span>.suffix.take() {
+            <span class="kw">let </span>prev_len = current.len();
+            <span class="self">self</span>.inner.unsplit(current);
+            <span class="self">self</span>.suffix = <span class="prelude-val">Some</span>(<span class="self">self</span>.inner.split_off(<span class="self">self</span>.inner.len() - length - prev_len));
+            <span class="self">self</span>.suffix.as_deref().map(|b| <span class="kw-2">&amp;</span>b[..length]).unwrap()
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.suffix = <span class="prelude-val">Some</span>(<span class="self">self</span>.inner.split_off(<span class="self">self</span>.inner.len() - length));
+            <span class="self">self</span>.suffix.as_deref().unwrap()
         }
     }
 
@@ -578,18 +569,15 @@
     /// The prefix will be [0, at) and this buffer will now be [at, len)
     </span><span class="attr">#[inline]
     </span><span class="kw">pub fn </span>split_prefix(<span class="kw-2">&amp;mut </span><span class="self">self</span>, at: usize) -&gt; <span class="kw-2">&amp;</span>[u8] {
-        <span class="kw">match </span><span class="self">self</span>.prefix.take() {
-            <span class="prelude-val">Some</span>(<span class="kw-2">mut </span>current) =&gt; {
-                <span class="kw">let </span>len = current.len();
-                current.unsplit(std::mem::replace(<span class="kw-2">&amp;mut </span><span class="self">self</span>.inner, BytesMut::new()));
-                <span class="self">self</span>.inner = current.split_off(at + len);
-                <span class="self">self</span>.prefix = <span class="prelude-val">Some</span>(current);
-                <span class="self">self</span>.prefix.as_deref().map(|b| <span class="kw-2">&amp;</span>b[..at]).unwrap()
-            }
-            <span class="kw">_ </span>=&gt; {
-                <span class="self">self</span>.prefix = <span class="prelude-val">Some</span>(<span class="self">self</span>.inner.split_to(at));
-                <span class="self">self</span>.prefix.as_deref().unwrap()
-            }
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>current) = <span class="self">self</span>.prefix.take() {
+            <span class="kw">let </span>len = current.len();
+            current.unsplit(std::mem::replace(<span class="kw-2">&amp;mut </span><span class="self">self</span>.inner, BytesMut::new()));
+            <span class="self">self</span>.inner = current.split_off(at + len);
+            <span class="self">self</span>.prefix = <span class="prelude-val">Some</span>(current);
+            <span class="self">self</span>.prefix.as_deref().map(|b| <span class="kw-2">&amp;</span>b[..at]).unwrap()
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.prefix = <span class="prelude-val">Some</span>(<span class="self">self</span>.inner.split_to(at));
+            <span class="self">self</span>.prefix.as_deref().unwrap()
         }
     }
 
@@ -657,7 +645,7 @@
             inner.unsplit(suffix);
         }
 
-        <span class="self">self</span>.owner.absorb(inner, <span class="self">self</span>.index)
+        <span class="self">self</span>.owner.absorb(inner, <span class="self">self</span>.index);
     }
 }
 

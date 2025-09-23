@@ -54,60 +54,326 @@
 <a href="#53" id="53">53</a>
 <a href="#54" id="54">54</a>
 <a href="#55" id="55">55</a>
-<a href="#56" id="56">56</a></pre></div><pre class="rust"><code><span class="doccomment">/// Receiver for a shutdown event.
-</span><span class="kw">pub type </span>ShutdownRx = tokio::sync::watch::Receiver&lt;ShutdownKind&gt;;
-<span class="kw">pub type </span>ShutdownTx = tokio::sync::watch::Sender&lt;ShutdownKind&gt;;
+<a href="#56" id="56">56</a>
+<a href="#57" id="57">57</a>
+<a href="#58" id="58">58</a>
+<a href="#59" id="59">59</a>
+<a href="#60" id="60">60</a>
+<a href="#61" id="61">61</a>
+<a href="#62" id="62">62</a>
+<a href="#63" id="63">63</a>
+<a href="#64" id="64">64</a>
+<a href="#65" id="65">65</a>
+<a href="#66" id="66">66</a>
+<a href="#67" id="67">67</a>
+<a href="#68" id="68">68</a>
+<a href="#69" id="69">69</a>
+<a href="#70" id="70">70</a>
+<a href="#71" id="71">71</a>
+<a href="#72" id="72">72</a>
+<a href="#73" id="73">73</a>
+<a href="#74" id="74">74</a>
+<a href="#75" id="75">75</a>
+<a href="#76" id="76">76</a>
+<a href="#77" id="77">77</a>
+<a href="#78" id="78">78</a>
+<a href="#79" id="79">79</a>
+<a href="#80" id="80">80</a>
+<a href="#81" id="81">81</a>
+<a href="#82" id="82">82</a>
+<a href="#83" id="83">83</a>
+<a href="#84" id="84">84</a>
+<a href="#85" id="85">85</a>
+<a href="#86" id="86">86</a>
+<a href="#87" id="87">87</a>
+<a href="#88" id="88">88</a>
+<a href="#89" id="89">89</a>
+<a href="#90" id="90">90</a>
+<a href="#91" id="91">91</a>
+<a href="#92" id="92">92</a>
+<a href="#93" id="93">93</a>
+<a href="#94" id="94">94</a>
+<a href="#95" id="95">95</a>
+<a href="#96" id="96">96</a>
+<a href="#97" id="97">97</a>
+<a href="#98" id="98">98</a>
+<a href="#99" id="99">99</a>
+<a href="#100" id="100">100</a>
+<a href="#101" id="101">101</a>
+<a href="#102" id="102">102</a>
+<a href="#103" id="103">103</a>
+<a href="#104" id="104">104</a>
+<a href="#105" id="105">105</a>
+<a href="#106" id="106">106</a>
+<a href="#107" id="107">107</a>
+<a href="#108" id="108">108</a>
+<a href="#109" id="109">109</a>
+<a href="#110" id="110">110</a>
+<a href="#111" id="111">111</a>
+<a href="#112" id="112">112</a>
+<a href="#113" id="113">113</a>
+<a href="#114" id="114">114</a>
+<a href="#115" id="115">115</a>
+<a href="#116" id="116">116</a>
+<a href="#117" id="117">117</a>
+<a href="#118" id="118">118</a>
+<a href="#119" id="119">119</a>
+<a href="#120" id="120">120</a>
+<a href="#121" id="121">121</a>
+<a href="#122" id="122">122</a>
+<a href="#123" id="123">123</a>
+<a href="#124" id="124">124</a>
+<a href="#125" id="125">125</a>
+<a href="#126" id="126">126</a>
+<a href="#127" id="127">127</a>
+<a href="#128" id="128">128</a>
+<a href="#129" id="129">129</a>
+<a href="#130" id="130">130</a>
+<a href="#131" id="131">131</a>
+<a href="#132" id="132">132</a>
+<a href="#133" id="133">133</a>
+<a href="#134" id="134">134</a>
+<a href="#135" id="135">135</a>
+<a href="#136" id="136">136</a>
+<a href="#137" id="137">137</a>
+<a href="#138" id="138">138</a>
+<a href="#139" id="139">139</a>
+<a href="#140" id="140">140</a>
+<a href="#141" id="141">141</a>
+<a href="#142" id="142">142</a>
+<a href="#143" id="143">143</a>
+<a href="#144" id="144">144</a>
+<a href="#145" id="145">145</a>
+<a href="#146" id="146">146</a>
+<a href="#147" id="147">147</a>
+<a href="#148" id="148">148</a>
+<a href="#149" id="149">149</a>
+<a href="#150" id="150">150</a>
+<a href="#151" id="151">151</a>
+<a href="#152" id="152">152</a>
+<a href="#153" id="153">153</a>
+<a href="#154" id="154">154</a>
+<a href="#155" id="155">155</a>
+<a href="#156" id="156">156</a>
+<a href="#157" id="157">157</a>
+<a href="#158" id="158">158</a>
+<a href="#159" id="159">159</a>
+<a href="#160" id="160">160</a>
+<a href="#161" id="161">161</a>
+<a href="#162" id="162">162</a>
+<a href="#163" id="163">163</a>
+<a href="#164" id="164">164</a>
+<a href="#165" id="165">165</a>
+<a href="#166" id="166">166</a>
+<a href="#167" id="167">167</a>
+<a href="#168" id="168">168</a>
+<a href="#169" id="169">169</a>
+<a href="#170" id="170">170</a>
+<a href="#171" id="171">171</a>
+<a href="#172" id="172">172</a>
+<a href="#173" id="173">173</a>
+<a href="#174" id="174">174</a>
+<a href="#175" id="175">175</a>
+<a href="#176" id="176">176</a>
+<a href="#177" id="177">177</a>
+<a href="#178" id="178">178</a>
+<a href="#179" id="179">179</a>
+<a href="#180" id="180">180</a>
+<a href="#181" id="181">181</a>
+<a href="#182" id="182">182</a>
+<a href="#183" id="183">183</a>
+<a href="#184" id="184">184</a>
+<a href="#185" id="185">185</a>
+<a href="#186" id="186">186</a>
+<a href="#187" id="187">187</a>
+<a href="#188" id="188">188</a>
+<a href="#189" id="189">189</a></pre></div><pre class="rust"><code><span class="doccomment">/// Receiver for a shutdown event.
+</span><span class="kw">pub type </span>ShutdownRx = tokio::sync::watch::Receiver&lt;()&gt;;
+<span class="kw">pub type </span>ShutdownTx = tokio::sync::watch::Sender&lt;()&gt;;
 
 <span class="doccomment">/// Creates a new handler for shutdown signal (e.g. SIGTERM, SIGINT), and
 /// returns a receiver channel that will receive an event when a shutdown has
 /// been requested.
-</span><span class="kw">pub fn </span>spawn_handler() -&gt; ShutdownRx {
-    <span class="kw">let </span>(tx, rx) = channel(ShutdownKind::default());
-    ShutdownKind::spawn_signal_handler(tx);
-    rx
-}
+</span><span class="kw">pub fn </span>spawn_handler() -&gt; ShutdownHandler {
+    <span class="kw">let </span>(tx, rx) = channel();
+    <span class="kw">crate</span>::metrics::shutdown_initiated().set(<span class="bool-val">false </span><span class="kw">as _</span>);
 
-<span class="kw">pub fn </span>channel(kind: ShutdownKind) -&gt; (ShutdownTx, ShutdownRx) {
-    tokio::sync::watch::channel(kind)
-}
+    <span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)]
+    </span><span class="kw">let </span><span class="kw-2">mut </span>sig_term_fut =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
 
-<span class="attr">#[derive(Copy, Clone, PartialEq, Default, Debug)]
-</span><span class="kw">pub enum </span>ShutdownKind {
-    <span class="doccomment">/// Normal shutdown kind, the receiver should perform proper shutdown procedures
-    </span><span class="attr">#[default]
-    </span>Normal,
-    <span class="doccomment">/// In a testing environment, some or all shutdown behavior may be skippable
-    </span>Testing,
-    <span class="doccomment">/// In a benching environment, some or all shutdown behavior may be skippable
-    </span>Benching,
-}
-
-<span class="kw">impl </span>ShutdownKind {
-    <span class="attr">#[inline]
-    </span><span class="kw">fn </span>spawn_signal_handler(shutdown_tx: ShutdownTx) {
-        <span class="kw">crate</span>::metrics::shutdown_initiated().set(<span class="bool-val">false </span><span class="kw">as _</span>);
-
+    <span class="kw">let </span>shutdown_tx = tx.clone();
+    tokio::spawn(<span class="kw">async move </span>{
         <span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)]
-        </span><span class="kw">let </span><span class="kw-2">mut </span>sig_term_fut =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+        </span><span class="kw">let </span>sig_term = sig_term_fut.recv();
+        <span class="attr">#[cfg(not(target_os = <span class="string">"linux"</span>))]
+        </span><span class="kw">let </span>sig_term = std::future::pending();
 
-        tokio::spawn(<span class="kw">async move </span>{
-            <span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)]
-            </span><span class="kw">let </span>sig_term = sig_term_fut.recv();
-            <span class="attr">#[cfg(not(target_os = <span class="string">"linux"</span>))]
-            </span><span class="kw">let </span>sig_term = std::future::pending();
+        <span class="kw">let </span>signal = <span class="macro">tokio::select!</span> {
+            <span class="kw">_ </span>= tokio::signal::ctrl_c() =&gt; <span class="string">"SIGINT"</span>,
+            <span class="kw">_ </span>= sig_term =&gt; <span class="string">"SIGTERM"</span>,
+        };
 
-            <span class="kw">let </span>signal = <span class="macro">tokio::select!</span> {
-                <span class="kw">_ </span>= tokio::signal::ctrl_c() =&gt; <span class="string">"SIGINT"</span>,
-                <span class="kw">_ </span>= sig_term =&gt; <span class="string">"SIGTERM"</span>,
-            };
+        <span class="kw">crate</span>::metrics::shutdown_initiated().set(<span class="bool-val">true </span><span class="kw">as _</span>);
+        <span class="macro">tracing::info!</span>(%signal, <span class="string">"shutting down from signal"</span>);
+        <span class="comment">// Don't unwrap in order to ensure that we execute
+        // any subsequent shutdown tasks.
+        </span><span class="kw">let _ </span>= shutdown_tx.send(());
+    });
 
-            <span class="kw">crate</span>::metrics::shutdown_initiated().set(<span class="bool-val">true </span><span class="kw">as _</span>);
-            <span class="macro">tracing::info!</span>(%signal, <span class="string">"shutting down from signal"</span>);
-            <span class="comment">// Don't unwrap in order to ensure that we execute
-            // any subsequent shutdown tasks.
-            </span>shutdown_tx.send(<span class="self">Self</span>::Normal).ok();
-        });
+    ShutdownHandler::new(tx, rx)
+}
+
+<span class="kw">pub fn </span>channel() -&gt; (ShutdownTx, ShutdownRx) {
+    tokio::sync::watch::channel(())
+}
+
+<span class="kw">pub struct </span>ShutdownHandler {
+    tx: ShutdownTx,
+    rx: ShutdownRx,
+    services:
+        std::collections::BTreeMap&lt;<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, tokio::sync::oneshot::Receiver&lt;eyre::Result&lt;()&gt;&gt;&gt;,
+}
+
+<span class="kw">impl </span>ShutdownHandler {
+    <span class="kw">pub fn </span>new(tx: ShutdownTx, rx: ShutdownRx) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            tx,
+            rx,
+            services: Default::default(),
+        }
+    }
+
+    <span class="attr">#[inline]
+    </span><span class="kw">pub fn </span>push(<span class="kw-2">&amp;mut </span><span class="self">self</span>, svc: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str) -&gt; tokio::sync::oneshot::Sender&lt;eyre::Result&lt;()&gt;&gt; {
+        <span class="kw">let </span>(tx, rx) = tokio::sync::oneshot::channel();
+        <span class="kw">if </span><span class="self">self</span>.services.insert(svc, rx).is_some() {
+            <span class="macro">panic!</span>(<span class="string">"service '{svc}' already registered"</span>);
+        }
+        tx
+    }
+
+    <span class="attr">#[inline]
+    </span><span class="kw">pub fn </span>shutdown_rx(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ShutdownRx {
+        <span class="self">self</span>.rx.clone()
+    }
+
+    <span class="attr">#[inline]
+    </span><span class="kw">pub fn </span>shutdown_tx(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ShutdownTx {
+        <span class="self">self</span>.tx.clone()
+    }
+
+    <span class="attr">#[inline]
+    </span><span class="kw">pub async fn </span>wait_signal(
+        <span class="kw-2">mut </span><span class="self">self</span>,
+    ) -&gt; (
+        ShutdownTx,
+        ShutdownRx,
+        Vec&lt;(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, eyre::Result&lt;()&gt;)&gt;,
+    ) {
+        <span class="kw">let _ </span>= <span class="self">self</span>.rx.changed().<span class="kw">await</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>results = Vec::with_capacity(<span class="self">self</span>.services.len());
+        <span class="kw">let </span>(t, r) = <span class="self">self</span>.await_all(<span class="kw-2">&amp;mut </span>results).<span class="kw">await</span>;
+        (t, r, results)
+    }
+
+    <span class="attr">#[inline]
+    </span><span class="kw">pub async fn </span>shutdown(
+        <span class="self">self</span>,
+    ) -&gt; (
+        ShutdownTx,
+        ShutdownRx,
+        Vec&lt;(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, eyre::Result&lt;()&gt;)&gt;,
+    ) {
+        <span class="kw">let _ </span>= <span class="self">self</span>.tx.send(());
+        <span class="kw">let </span><span class="kw-2">mut </span>results = Vec::with_capacity(<span class="self">self</span>.services.len());
+        <span class="kw">let </span>(t, r) = <span class="self">self</span>.await_all(<span class="kw-2">&amp;mut </span>results).<span class="kw">await</span>;
+        (t, r, results)
+    }
+
+    <span class="kw">pub async fn </span>await_any_then_shutdown(
+        <span class="kw-2">mut </span><span class="self">self</span>,
+    ) -&gt; (
+        ShutdownTx,
+        ShutdownRx,
+        Vec&lt;(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, eyre::Result&lt;()&gt;)&gt;,
+    ) {
+        <span class="kw">let </span>(which, res) = {
+            <span class="kw">let </span><span class="kw-2">mut </span>completions = <span class="macro">std::pin::pin!</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>.services);
+            <span class="kw">let </span><span class="kw-2">mut </span>srx = <span class="macro">std::pin::pin!</span>(<span class="self">self</span>.rx.changed());
+            std::future::poll_fn(<span class="kw">move </span>|cx| {
+                <span class="kw">use </span>std::task::Poll;
+
+                <span class="kw">if </span>srx.as_mut().poll(cx).is_ready() {
+                    <span class="kw">return </span>Poll::Ready((<span class="string">""</span>, <span class="prelude-val">Ok</span>(())));
+                }
+
+                <span class="kw">for </span>(key, value) <span class="kw">in </span>completions.as_mut().iter_mut() {
+                    <span class="kw">if let </span>Poll::Ready(res) = <span class="macro">std::pin::pin!</span>(value).as_mut().poll(cx) {
+                        <span class="kw">return </span>Poll::Ready((key, res.unwrap_or(<span class="prelude-val">Ok</span>(()))));
+                    }
+                }
+
+                Poll::Pending
+            })
+            .<span class="kw">await
+        </span>};
+
+        <span class="kw">let </span><span class="kw-2">mut </span>results = Vec::with_capacity(<span class="self">self</span>.services.len());
+
+        <span class="comment">// If the future completed due to a task exiting, signal shutdown to ensure
+        // all the other tasks know to exit
+        </span><span class="kw">if </span>!which.is_empty() {
+            <span class="kw">let _ </span>= <span class="self">self</span>.tx.send(());
+            results.push((which, res));
+        }
+
+        <span class="kw">let </span>(t, r) = <span class="self">self</span>.await_all(<span class="kw-2">&amp;mut </span>results).<span class="kw">await</span>;
+        (t, r, results)
+    }
+
+    <span class="kw">async fn </span>await_all(
+        <span class="kw-2">mut </span><span class="self">self</span>,
+        results: <span class="kw-2">&amp;mut </span>Vec&lt;(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, eyre::Result&lt;()&gt;)&gt;,
+    ) -&gt; (ShutdownTx, ShutdownRx) {
+        <span class="kw">let </span>start = tokio::time::Instant::now();
+        <span class="kw">let </span><span class="kw-2">mut </span>report = tokio::time::Instant::now();
+        <span class="kw">let </span><span class="kw-2">mut </span>sleep = std::time::Duration::from_millis(<span class="number">10</span>);
+
+        <span class="kw">loop </span>{
+            <span class="self">self</span>.services.retain(|k, v| <span class="kw">match </span>v.try_recv() {
+                <span class="prelude-val">Ok</span>(res) =&gt; {
+                    results.push((<span class="kw-2">*</span>k, res));
+                    <span class="bool-val">false
+                </span>}
+                <span class="prelude-val">Err</span>(tokio::sync::oneshot::error::TryRecvError::Empty) =&gt; <span class="bool-val">true</span>,
+                <span class="prelude-val">Err</span>(tokio::sync::oneshot::error::TryRecvError::Closed) =&gt; {
+                    results.push((
+                        <span class="kw-2">*</span>k,
+                        <span class="prelude-val">Err</span>(<span class="macro">eyre::format_err!</span>(<span class="string">"task exited without providing result"</span>)),
+                    ));
+                    <span class="bool-val">false
+                </span>}
+            });
+
+            <span class="kw">if </span><span class="self">self</span>.services.is_empty() {
+                <span class="macro">tracing::info!</span>(elapsed = <span class="question-mark">?</span>start.elapsed(), count = results.len(), <span class="string">"services all finished"</span>);
+                <span class="kw">break</span>;
+            }
+
+            <span class="kw">if </span>report.elapsed() &gt; std::time::Duration::from_secs(<span class="number">5</span>) {
+                report = tokio::time::Instant::now();
+                <span class="macro">tracing::debug!</span>(tasks = <span class="question-mark">?</span><span class="self">self</span>.services.keys().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(), <span class="string">"tasks still running"</span>);
+            }
+
+            tokio::time::sleep(sleep).<span class="kw">await</span>;
+            sleep = std::cmp::min(
+                sleep + std::time::Duration::from_millis(<span class="number">10</span>),
+                std::time::Duration::from_millis(<span class="number">100</span>),
+            );
+        }
+
+        (<span class="self">self</span>.tx, <span class="self">self</span>.rx)
     }
 }
 </code></pre></div></section></main></body></html>

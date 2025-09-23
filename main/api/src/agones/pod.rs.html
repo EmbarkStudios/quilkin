@@ -57,7 +57,13 @@
 <a href="#56" id="56">56</a>
 <a href="#57" id="57">57</a>
 <a href="#58" id="58">58</a>
-<a href="#59" id="59">59</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#59" id="59">59</a>
+<a href="#60" id="60">60</a>
+<a href="#61" id="61">61</a>
+<a href="#62" id="62">62</a>
+<a href="#63" id="63">63</a>
+<a href="#64" id="64">64</a>
+<a href="#65" id="65">65</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2022 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -90,7 +96,13 @@
         <span class="kw">let </span>client = Client::new().<span class="kw">await</span>;
 
         <span class="kw">let </span>pods: Api&lt;Pod&gt; = client.namespaced_api();
-        <span class="kw">let </span>cmds = [<span class="string">"proxy"</span>, <span class="string">"--to"</span>, <span class="string">"127.0.0.1:0"</span>].map(String::from).to_vec();
+        <span class="kw">let </span>cmds = [
+            <span class="string">"--service.udp"</span>,
+            <span class="string">"--provider.static.endpoints"</span>,
+            <span class="string">"127.0.0.1:9999"</span>,
+        ]
+        .map(String::from)
+        .to_vec();
         <span class="kw">let </span>pod = Pod {
             metadata: ObjectMeta {
                 generate_name: <span class="prelude-val">Some</span>(<span class="string">"quilkin-"</span>.into()),

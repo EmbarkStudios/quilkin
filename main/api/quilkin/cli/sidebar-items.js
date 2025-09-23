@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Commands","LogFormats"],"mod":["agent","generate_config_schema","manage","proxy","qcmp","relay"],"struct":["AdminCli","Cli","LocalityCli","Service","Timeout"],"type":["Finalizer"]};
+window.SIDEBAR_ITEMS = {"enum":["Commands","LogFormats"],"mod":["generate_config_schema","qcmp"],"struct":["AdminCli","Cli","Duration","LocalityCli"]};

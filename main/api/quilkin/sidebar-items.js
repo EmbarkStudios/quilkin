@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"macro":["__func_name","include_proto","temp_file"],"mod":["alloc","cli","codec","collections","components","config","filters","net","signal","time","xds"],"struct":["Cli","Config","Proxy"],"type":["Result"]};
+window.SIDEBAR_ITEMS = {"macro":["__func_name","include_proto","temp_file"],"mod":["alloc","cli","codec","collections","components","config","filters","metrics","net","providers","service","signal","time","xds"],"struct":["Cli","Config"],"type":["Result"]};

@@ -307,7 +307,8 @@
 <a href="#306" id="306">306</a>
 <a href="#307" id="307">307</a>
 <a href="#308" id="308">308</a>
-<a href="#309" id="309">309</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#309" id="309">309</a>
+<a href="#310" id="310">310</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2021 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -322,6 +323,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+</span><span class="attr">#![allow(clippy::trait_duplication_in_bounds)]
 
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>symbol;
 
@@ -444,19 +447,18 @@
     <span class="kw">fn </span>eq(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; bool {
         <span class="kw">match </span>(<span class="self">self</span>, other) {
             (<span class="self">Self</span>::Bool(a), <span class="self">Self</span>::Bool(b)) =&gt; a == b,
-            (<span class="self">Self</span>::Bool(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
             (<span class="self">Self</span>::Number(a), <span class="self">Self</span>::Number(b)) =&gt; a == b,
             (<span class="self">Self</span>::Number(num), <span class="self">Self</span>::Bytes(bytes)) =&gt; {
                 bytes.len() == <span class="number">1 </span>&amp;&amp; <span class="kw-2">*</span>num == u64::from(bytes[<span class="number">0</span>])
             }
-            (<span class="self">Self</span>::Number(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
             (<span class="self">Self</span>::List(a), <span class="self">Self</span>::List(b)) =&gt; a == b,
-            (<span class="self">Self</span>::List(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
             (<span class="self">Self</span>::String(a), <span class="self">Self</span>::String(b)) =&gt; a == b,
             (<span class="self">Self</span>::Bytes(a), <span class="self">Self</span>::Bytes(b)) =&gt; a == b,
             (<span class="self">Self</span>::String(a), <span class="self">Self</span>::Bytes(b)) | (<span class="self">Self</span>::Bytes(b), <span class="self">Self</span>::String(a)) =&gt; a == b,
-            (<span class="self">Self</span>::String(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
-            (<span class="self">Self</span>::Bytes(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
+            (
+                <span class="self">Self</span>::String(<span class="kw">_</span>) | <span class="self">Self</span>::Bytes(<span class="kw">_</span>) | <span class="self">Self</span>::List(<span class="kw">_</span>) | <span class="self">Self</span>::Number(<span class="kw">_</span>) | <span class="self">Self</span>::Bool(<span class="kw">_</span>),
+                <span class="kw">_</span>,
+            ) =&gt; <span class="bool-val">false</span>,
         }
     }
 }

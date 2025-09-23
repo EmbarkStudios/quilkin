@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Action","PortRangeError"],"struct":["Config","Firewall","PortRange","Rule"]};
+window.SIDEBAR_ITEMS = {"enum":["Action","IpNetwork","PortRangeError"],"struct":["Cidr","Config","Firewall","PortRange","Rule"]};

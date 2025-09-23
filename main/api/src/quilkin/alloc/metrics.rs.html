@@ -182,19 +182,19 @@
                 <span class="kw">let </span>stats = <span class="kw">super</span>::tracking::Allocator::stats();
 
                 BYTES_TOTAL
-                    .with_label_values(<span class="kw-2">&amp;</span>[])
+                    .with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[])
                     .inc_by(stats.cumul_alloc_size - bytes_total);
                 bytes_total = stats.cumul_alloc_size;
                 ALLOCS_TOTAL
-                    .with_label_values(<span class="kw-2">&amp;</span>[])
+                    .with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[])
                     .inc_by(stats.cumul_alloc_count - alloc_total);
                 alloc_total = stats.cumul_alloc_count;
 
                 <span class="kw">if let </span><span class="prelude-val">Ok</span>(val) = stats.current_allocated_size().try_into() {
-                    EXTANT_SIZE.with_label_values(<span class="kw-2">&amp;</span>[]).set(val);
+                    EXTANT_SIZE.with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[]).set(val);
                 }
                 <span class="kw">if let </span><span class="prelude-val">Ok</span>(val) = stats.current_allocation_count().try_into() {
-                    EXTANT_COUNT.with_label_values(<span class="kw-2">&amp;</span>[]).set(val);
+                    EXTANT_COUNT.with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[]).set(val);
                 }
             } <span class="kw">else </span>{
                 <span class="macro">tracing::trace!</span>(<span class="string">"exiting heap-stats task"</span>);

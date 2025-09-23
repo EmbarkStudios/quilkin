@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["default_xdp_state","endpoints","make_config"],"struct":["SimpleLoop","TestPacket"]};
