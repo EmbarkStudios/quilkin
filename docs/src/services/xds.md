@@ -61,6 +61,6 @@ the `management_servers` [command line](../../api/quilkin/struct.Proxy.html#stru
 [locality]: https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/core/v3/base.proto#config-core-v3-locality
 [filters-doc]: ./proxy/filters.md
 [xds-variants]: https://www.envoyproxy.io/docs/envoy/latest/api-docs/xds_protocol#variants-of-the-xds-transport-protocol
-[filter-protos]: https://github.com/googleforgames/quilkin/tree/{{GITHUB_REF_NAME}}/proto/quilkin/filters
+[filter-protos]: https://github.com/EmbarkStudios/quilkin/tree/{{GITHUB_REF_NAME}}/proto/quilkin/filters
 [xds-endpoint-metadata]: https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/core/v3/base.proto#envoy-v3-api-msg-config-core-v3-metadata
 

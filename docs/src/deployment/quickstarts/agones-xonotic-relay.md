@@ -1,7 +1,7 @@
 # Quickstart: Quilkin with Agones and Xonotic (Relay)
 
 {{#include _agones.md}}
-* A local copy of the [Quilkin Binary](https://github.com/googleforgames/quilkin/releases).
+* A local copy of the [Quilkin Binary](https://github.com/EmbarkStudios/quilkin/releases).
 
 ## 1. Overview
 
@@ -27,7 +27,7 @@ To install Quilkin as an Agones integrated relay control plane, we can create a 
 Run the following:
 
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/relay-control-plane.yaml
+kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/relay-control-plane.yaml
 ```
 
 This applies several resources to your cluster:
@@ -66,7 +66,7 @@ To install the Quilkin Proxy pool which connects to the above Relay xDS provider
 proxy instances that point to the aforementioned Service, like so:
 
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/proxy-pool.yaml
+kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/proxy-pool.yaml
 ```
 
 This will set up three instances of Quilkin running as `quilkin proxy --management-server
@@ -130,7 +130,7 @@ $ curl -s http://localhost:8001/config | jq
 This shows us the current configuration of the proxies coming from the xDS server created via `quilkin agent 
 agones`. The most interesting part that we see here, is that we have a matching set of 
 [Filters](../../services/proxy/filters.md) that are found in the `ConfigMap` in the 
-[relay-control-plane.yaml](https://github.com/googleforgames/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/relay-control-plane.yaml)
+[relay-control-plane.yaml](https://github.com/EmbarkStudios/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/relay-control-plane.yaml)
 we installed earlier.
 
 ## 4. Create the Agones Fleet
@@ -139,10 +139,10 @@ Now we will create an [Agones Fleet](https://agones.dev/site/docs/reference/flee
 game servers.
 
 Thankfully, Agones Fleets require no specific configuration to work with Quilkin proxies, so this yaml is a 
-[standard Agones Fleet configuration](https://github.com/googleforgames/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/fleet.yaml)
+[standard Agones Fleet configuration](https://github.com/EmbarkStudios/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/fleet.yaml)
 
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/fleet.yaml
+kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/fleet.yaml
 ```
 
 Run `kubectl get gameservers` until all the `GameServer` records show that they are `Ready` and able to take players.
@@ -169,7 +169,7 @@ Since you can add annotations to `GameServers` at
 and apply the annotation at the same time!
 
 ```shell
-kubectl create -f https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/gameserverallocation.yaml
+kubectl create -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/gameserverallocation.yaml
 ```
 
 If we check our `GameServers` now, we should see that one of them has moved to the `Allocated` state, marking it as 
@@ -254,19 +254,19 @@ Let's run `curl -s http://localhost:8001/config` again, so we can see what has c
 }
 ```
 
-Looking under `clusters` > `endpoints` we can see an address and token that matches up with the 
+Looking under `clusters` > `endpoints` we can see an address and token that matches up with the
 `GameServer` record we created above!
 
-The Agones agent process saw that allocated `GameServer`, turned it into a Quilkin `Endpoint` and applied the set 
-routing token appropriately -- without you having to write a line of xDS compliant code! 
+The Agones agent process saw that allocated `GameServer`, turned it into a Quilkin `Endpoint` and applied the set
+routing token appropriately -- without you having to write a line of xDS compliant code!
 
 ## Connecting Client Side
 
 Instead of connecting to Xonotic or an Agones `GameServer` directly, we'll want to grab the IP and exposed port of
-the `Service` that fronts all our Quilkin proxies and connect to that instead -- but we'll have to append our 
+the `Service` that fronts all our Quilkin proxies and connect to that instead -- but we'll have to append our
 routing token `456` from before, to ensure our traffic gets routed to the correct Xonotic `GameServer` address.
 
-Run `kubectl get service quilkin-proxies` to get the `EXTERNAL-IP` of the Service you created. 
+Run `kubectl get service quilkin-proxies` to get the `EXTERNAL-IP` of the Service you created.
 
 ```shell
 $ kubectl get service quilkin-proxies
@@ -274,15 +274,15 @@ NAME              TYPE           CLUSTER-IP    EXTERNAL-IP     PORT(S)          
 quilkin-proxies   LoadBalancer   10.109.0.12   35.246.94.14    7777:30174/UDP   3h22m
 ```
 
-We have a [Quilkin config yaml](https://github.com/googleforgames/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/client-token.yaml)
-file all ready for you, that is configured to append the routing token `456` to each 
-packet that passes through it, via the power of a 
+We have a [Quilkin config yaml](https://github.com/EmbarkStudios/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/client-token.yaml)
+file all ready for you, that is configured to append the routing token `456` to each
+packet that passes through it, via the power of a
 [Concatenate](../../services/proxy/filters/concatenate.md) Filter.
 
 Download `client-token.yaml` locally, so you can edit it:
 
 ```shell
-curl https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/client-token.yaml --output client-token.yaml  
+curl https://raw.githubusercontent.com/EmbarkStudios/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-relay/client-token.yaml --output client-token.yaml  
 ```
 
 We then take the EXTERNAL-IP and port from the `quilkin-proxies` service, and replace the`${LOADBALANCER_IP}`

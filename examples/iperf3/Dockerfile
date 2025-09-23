@@ -15,7 +15,7 @@
 FROM rust:latest
 WORKDIR /app
 # How to install quilkin
-ARG install_args="--git https://github.com/googleforgames/quilkin quilkin"
+ARG install_args="--git https://github.com/EmbarkStudios/quilkin quilkin"
 RUN apt update && apt install -y iperf3 socat
 RUN cargo install $install_args
 COPY ./run.sh /app

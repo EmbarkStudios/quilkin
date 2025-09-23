@@ -37,13 +37,13 @@ cargo install quilkin
   <dd>Compiled from source using cargo</dd>
 </dl>
 
-### [GitHub](https://github.com/googleforgames/quilkin)
+### [GitHub](https://github.com/EmbarkStudios/quilkin)
 
 <dl>
   <dt><strong>Source / Method</strong></dt>
   <dd>
 
-[GitHub Releases](https://github.com/googleforgames/quilkin/releases)
+[GitHub Releases](https://github.com/EmbarkStudios/quilkin/releases)
 
   </dd>
   <dt><strong>Notes</strong></dt>

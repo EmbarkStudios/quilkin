@@ -7,12 +7,12 @@ We welcome development from the community on Quilkin!
 We use several submodules, so make sure you have them downloaded and updated.
 
 ```shell script
-git clone https://github.com/googleforgames/quilkin.git
+git clone https://github.com/EmbarkStudios/quilkin.git
 cd quilkin
 git submodule update --init --recursive
 ```
 
-You will likely want to replace `https://github.com/googleforgames/quilkin.git` with your own fork of the repository
+You will likely want to replace `https://github.com/EmbarkStudios/quilkin.git` with your own fork of the repository
 for your development.
 
 ### Developing with Rust tooling

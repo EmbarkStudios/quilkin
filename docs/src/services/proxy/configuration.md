@@ -95,5 +95,5 @@ properties:
               - address
 ```
 
-[examples]: https://github.com/googleforgames/quilkin/blob/{{GITHUB_REF_NAME}}/examples
+[examples]: https://github.com/EmbarkStudios/quilkin/blob/{{GITHUB_REF_NAME}}/examples
 
