@@ -493,7 +493,7 @@ impl Config {
         Ok(())
     }
 
-    pub fn get_bad_node_informer(&self) -> Option<BadNodeInformer> {
+    pub fn bad_node_informer(&self) -> Option<BadNodeInformer> {
         self.bad_node_informer.clone()
     }
 

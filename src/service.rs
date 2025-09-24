@@ -359,7 +359,7 @@ impl Service {
         let phoenix = {
             let mut builder =
                 crate::net::phoenix::Phoenix::builder(crate::codec::qcmp::QcmpTransceiver::new()?);
-            if let Some(informer) = config.get_bad_node_informer() {
+            if let Some(informer) = config.bad_node_informer() {
                 builder = builder.inform_bad_nodes(informer);
             }
             builder.build()
