@@ -378,7 +378,8 @@
 <a href="#377" id="377">377</a>
 <a href="#378" id="378">378</a>
 <a href="#379" id="379">379</a>
-<a href="#380" id="380">380</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#380" id="380">380</a>
+<a href="#381" id="381">381</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2022 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -637,18 +638,19 @@
         <span class="macro">tracing::debug!</span>(cli = <span class="question-mark">?</span><span class="self">self</span>, <span class="string">"config parameters"</span>);
 
         <span class="kw">let </span>locality = <span class="self">self</span>.locality.locality();
+        <span class="kw">let </span>shutdown_handler = <span class="kw">crate</span>::signal::spawn_handler();
+        <span class="kw">let </span>drive_token = <span class="kw">crate</span>::signal::cancellation_token(shutdown_handler.shutdown_rx());
 
-        <span class="kw">let </span><span class="kw-2">mut </span>config = <span class="kw">crate</span>::Config::new(
+        <span class="kw">let </span>config = <span class="kw">crate</span>::Config::new_rc(
             <span class="self">self</span>.service.id.clone(),
             <span class="self">self</span>.locality.icao_code,
             <span class="kw-2">&amp;</span><span class="self">self</span>.providers,
             <span class="kw-2">&amp;</span><span class="self">self</span>.service,
+            drive_token.child_token(),
         );
         config.read_config(<span class="kw-2">&amp;</span><span class="self">self</span>.config, locality.clone())<span class="question-mark">?</span>;
-        <span class="kw">let </span>config = Arc::new(config);
 
         <span class="kw">let </span>ready = Arc::&lt;std::sync::atomic::AtomicBool&gt;::default();
-        <span class="kw">let </span>shutdown_handler = <span class="kw">crate</span>::signal::spawn_handler();
         <span class="kw">if </span><span class="self">self</span>.admin.enabled {
             <span class="kw">crate</span>::components::admin::server(
                 config.clone(),

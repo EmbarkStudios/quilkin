@@ -735,7 +735,15 @@
 <a href="#734" id="734">734</a>
 <a href="#735" id="735">735</a>
 <a href="#736" id="736">736</a>
-<a href="#737" id="737">737</a></pre></div><pre class="rust"><code><span class="kw">use </span>eyre::ContextCompat;
+<a href="#737" id="737">737</a>
+<a href="#738" id="738">738</a>
+<a href="#739" id="739">739</a>
+<a href="#740" id="740">740</a>
+<a href="#741" id="741">741</a>
+<a href="#742" id="742">742</a>
+<a href="#743" id="743">743</a>
+<a href="#744" id="744">744</a>
+<a href="#745" id="745">745</a></pre></div><pre class="rust"><code><span class="kw">use </span>eyre::ContextCompat;
 <span class="kw">use </span>std::sync::Arc;
 
 <span class="kw">use crate</span>::{components::proxy::SessionPool, config::Config, signal::ShutdownHandler};
@@ -1093,11 +1101,19 @@
         };
 
         <span class="macro">tracing::info!</span>(port=%<span class="self">self</span>.qcmp_port, <span class="string">"starting phoenix service"</span>);
-        <span class="kw">let </span>phoenix = <span class="kw">crate</span>::net::TcpListener::bind(<span class="prelude-val">Some</span>(<span class="self">self</span>.phoenix_port))<span class="question-mark">?</span>;
+        <span class="kw">let </span>phoenix = {
+            <span class="kw">let </span><span class="kw-2">mut </span>builder =
+                <span class="kw">crate</span>::net::phoenix::Phoenix::builder(<span class="kw">crate</span>::codec::qcmp::QcmpTransceiver::new()<span class="question-mark">?</span>);
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(informer) = config.bad_node_informer() {
+                builder = builder.inform_bad_nodes(informer);
+            }
+            builder.build()
+        };
+        <span class="kw">let </span>phoenix_listener = <span class="kw">crate</span>::net::TcpListener::bind(<span class="prelude-val">Some</span>(<span class="self">self</span>.phoenix_port))<span class="question-mark">?</span>;
         <span class="kw">let </span>finalizer = <span class="kw">crate</span>::net::phoenix::spawn(
-            phoenix,
+            phoenix_listener,
             datacenters.clone(),
-            <span class="kw">crate</span>::net::phoenix::Phoenix::new(<span class="kw">crate</span>::codec::qcmp::QcmpTransceiver::new()<span class="question-mark">?</span>),
+            phoenix,
             shutdown.shutdown_rx(),
         )<span class="question-mark">?</span>;
 

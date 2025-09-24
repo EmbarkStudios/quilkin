@@ -187,7 +187,21 @@
 <a href="#186" id="186">186</a>
 <a href="#187" id="187">187</a>
 <a href="#188" id="188">188</a>
-<a href="#189" id="189">189</a></pre></div><pre class="rust"><code><span class="doccomment">/// Receiver for a shutdown event.
+<a href="#189" id="189">189</a>
+<a href="#190" id="190">190</a>
+<a href="#191" id="191">191</a>
+<a href="#192" id="192">192</a>
+<a href="#193" id="193">193</a>
+<a href="#194" id="194">194</a>
+<a href="#195" id="195">195</a>
+<a href="#196" id="196">196</a>
+<a href="#197" id="197">197</a>
+<a href="#198" id="198">198</a>
+<a href="#199" id="199">199</a>
+<a href="#200" id="200">200</a>
+<a href="#201" id="201">201</a>
+<a href="#202" id="202">202</a>
+<a href="#203" id="203">203</a></pre></div><pre class="rust"><code><span class="doccomment">/// Receiver for a shutdown event.
 </span><span class="kw">pub type </span>ShutdownRx = tokio::sync::watch::Receiver&lt;()&gt;;
 <span class="kw">pub type </span>ShutdownTx = tokio::sync::watch::Sender&lt;()&gt;;
 
@@ -226,6 +240,20 @@
 
 <span class="kw">pub fn </span>channel() -&gt; (ShutdownTx, ShutdownRx) {
     tokio::sync::watch::channel(())
+}
+
+<span class="doccomment">/// Adapter method to create a `CancellationToken` that will be cancelled when the `ShutdownRx`
+/// watch channel is changed.
+///
+/// Spawns a tokio task so avoid calling more than once, clone the token instead.
+</span><span class="kw">pub fn </span>cancellation_token(<span class="kw-2">mut </span>rx: ShutdownRx) -&gt; tokio_util::sync::CancellationToken {
+    <span class="kw">let </span>shutdown_token = tokio_util::sync::CancellationToken::new();
+    <span class="kw">let </span>task_token = shutdown_token.clone();
+    tokio::spawn(<span class="kw">async move </span>{
+        <span class="kw">let _ </span>= rx.changed().<span class="kw">await</span>;
+        task_token.cancel();
+    });
+    shutdown_token
 }
 
 <span class="kw">pub struct </span>ShutdownHandler {

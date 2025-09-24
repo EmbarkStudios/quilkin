@@ -1040,7 +1040,51 @@
 <a href="#1039" id="1039">1039</a>
 <a href="#1040" id="1040">1040</a>
 <a href="#1041" id="1041">1041</a>
-<a href="#1042" id="1042">1042</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#1042" id="1042">1042</a>
+<a href="#1043" id="1043">1043</a>
+<a href="#1044" id="1044">1044</a>
+<a href="#1045" id="1045">1045</a>
+<a href="#1046" id="1046">1046</a>
+<a href="#1047" id="1047">1047</a>
+<a href="#1048" id="1048">1048</a>
+<a href="#1049" id="1049">1049</a>
+<a href="#1050" id="1050">1050</a>
+<a href="#1051" id="1051">1051</a>
+<a href="#1052" id="1052">1052</a>
+<a href="#1053" id="1053">1053</a>
+<a href="#1054" id="1054">1054</a>
+<a href="#1055" id="1055">1055</a>
+<a href="#1056" id="1056">1056</a>
+<a href="#1057" id="1057">1057</a>
+<a href="#1058" id="1058">1058</a>
+<a href="#1059" id="1059">1059</a>
+<a href="#1060" id="1060">1060</a>
+<a href="#1061" id="1061">1061</a>
+<a href="#1062" id="1062">1062</a>
+<a href="#1063" id="1063">1063</a>
+<a href="#1064" id="1064">1064</a>
+<a href="#1065" id="1065">1065</a>
+<a href="#1066" id="1066">1066</a>
+<a href="#1067" id="1067">1067</a>
+<a href="#1068" id="1068">1068</a>
+<a href="#1069" id="1069">1069</a>
+<a href="#1070" id="1070">1070</a>
+<a href="#1071" id="1071">1071</a>
+<a href="#1072" id="1072">1072</a>
+<a href="#1073" id="1073">1073</a>
+<a href="#1074" id="1074">1074</a>
+<a href="#1075" id="1075">1075</a>
+<a href="#1076" id="1076">1076</a>
+<a href="#1077" id="1077">1077</a>
+<a href="#1078" id="1078">1078</a>
+<a href="#1079" id="1079">1079</a>
+<a href="#1080" id="1080">1080</a>
+<a href="#1081" id="1081">1081</a>
+<a href="#1082" id="1082">1082</a>
+<a href="#1083" id="1083">1083</a>
+<a href="#1084" id="1084">1084</a>
+<a href="#1085" id="1085">1085</a>
+<a href="#1086" id="1086">1086</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2024 Google LLC All Rights Reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -1082,6 +1126,9 @@
 <span class="kw">use </span>dashmap::DashMap;
 
 <span class="kw">use </span><span class="kw">crate</span>::config::{<span class="self">self</span>, IcaoCode};
+
+<span class="doccomment">/// The number of consecutive ping failures after which we will inform that this is a bad node
+</span><span class="kw">const </span>BAD_NODE_THRESHOLD: u64 = <span class="number">10</span>;
 
 <span class="kw">pub fn </span>spawn&lt;M: Clone + Measurement + Sync + Send + <span class="lifetime">'static</span>&gt;(
     listener: <span class="kw">crate</span>::net::TcpListener,
@@ -1332,6 +1379,7 @@
         tokio::sync::watch::Sender&lt;()&gt;,
         tokio::sync::watch::Receiver&lt;()&gt;,
     ),
+    bad_node_informer: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::config::BadNodeInformer&gt;,
 }
 
 <span class="kw">impl</span>&lt;M: Measurement + <span class="lifetime">'static</span>&gt; Phoenix&lt;M&gt; {
@@ -1344,34 +1392,9 @@
     }
 
     <span class="kw">async fn </span>update(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>current_interval: std::time::Duration) -&gt; std::time::Duration {
-        <span class="kw">let </span><span class="kw-2">mut </span>total_difference = <span class="number">0</span>;
-        <span class="kw">let </span><span class="kw-2">mut </span>count = <span class="number">0</span>;
-
         <span class="kw">let </span>nodes = <span class="self">self</span>.select_nodes_to_probe();
 
-        <span class="kw">for </span>address <span class="kw">in </span>nodes {
-            <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>node) = <span class="self">self</span>.nodes.get_mut(<span class="kw-2">&amp;</span>address) <span class="kw">else </span>{
-                <span class="macro">tracing::debug!</span>(%address, <span class="string">"node removed between selection and measurement"</span>);
-                <span class="kw">continue</span>;
-            };
-
-            <span class="kw">match </span><span class="self">self</span>.measurement.measure_distance(address).<span class="kw">await </span>{
-                <span class="prelude-val">Ok</span>(distance) =&gt; {
-                    node.adjust_coordinates(distance);
-                    total_difference += distance.total_nanos();
-                    count += <span class="number">1</span>;
-                }
-                <span class="prelude-val">Err</span>(error) =&gt; {
-                    node.increase_error_estimate();
-                    <span class="kw">let </span>consecutive_errors = node.consecutive_errors();
-                    <span class="kw">if </span>consecutive_errors &gt; <span class="number">3 </span>{
-                        <span class="macro">tracing::warn!</span>(%address, %error, %consecutive_errors, <span class="string">"error measuring distance"</span>);
-                    } <span class="kw">else </span>{
-                        <span class="macro">tracing::debug!</span>(%address, %error, <span class="string">"error measuring distance"</span>);
-                    }
-                }
-            }
-        }
+        <span class="kw">let </span>(count, total_difference) = <span class="self">self</span>.measure_nodes(nodes).<span class="kw">await</span>;
 
         <span class="kw">if </span>count &gt; <span class="number">0 </span>{
             <span class="kw">let </span>avg_difference_ns = total_difference / count;
@@ -1444,28 +1467,50 @@
             </span>.collect()
     }
 
-    <span class="attr">#[cfg(test)]
-    </span><span class="kw">async fn </span>measure_all_nodes(<span class="kw-2">&amp;</span><span class="self">self</span>) {
-        <span class="kw">for </span>address <span class="kw">in </span><span class="self">self
-            </span>.nodes
-            .iter()
-            .map(|entry| <span class="kw-2">*</span>entry.key())
-            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
-        {
-            <span class="kw">match </span><span class="self">self</span>.nodes.get_mut(<span class="kw-2">&amp;</span>address) {
-                <span class="prelude-val">Some</span>(<span class="kw-2">mut </span>node) =&gt; {
-                    <span class="kw">let </span><span class="prelude-val">Ok</span>(distance) = <span class="self">self</span>.measurement.measure_distance(address).<span class="kw">await else </span>{
-                        <span class="kw">continue</span>;
-                    };
+    <span class="kw">async fn </span>measure_nodes(<span class="kw-2">&amp;</span><span class="self">self</span>, nodes: Vec&lt;SocketAddr&gt;) -&gt; (i64, i64) {
+        <span class="kw">let </span><span class="kw-2">mut </span>total_difference = <span class="number">0</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>count = <span class="number">0</span>;
+        <span class="kw">for </span>address <span class="kw">in </span>nodes {
+            <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>node) = <span class="self">self</span>.nodes.get_mut(<span class="kw-2">&amp;</span>address) <span class="kw">else </span>{
+                <span class="macro">tracing::debug!</span>(%address, <span class="string">"node removed between selection and measurement"</span>);
+                <span class="kw">continue</span>;
+            };
+
+            <span class="kw">match </span><span class="self">self</span>.measurement.measure_distance(address).<span class="kw">await </span>{
+                <span class="prelude-val">Ok</span>(distance) =&gt; {
                     node.adjust_coordinates(distance);
+                    total_difference += distance.total_nanos();
+                    count += <span class="number">1</span>;
                 }
-                <span class="kw">_ </span>=&gt; {
-                    <span class="self">self</span>.nodes.entry(address).and_modify(|node| {
-                        node.increase_error_estimate();
-                    });
+                <span class="prelude-val">Err</span>(error) =&gt; {
+                    node.increase_error_estimate();
+                    <span class="kw">let </span>consecutive_errors = node.consecutive_errors();
+                    <span class="kw">if </span>consecutive_errors &gt; <span class="number">3 </span>{
+                        <span class="macro">tracing::warn!</span>(%address, %error, %consecutive_errors, <span class="string">"error measuring distance"</span>);
+                        <span class="kw">if </span>consecutive_errors &gt; BAD_NODE_THRESHOLD {
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(bad_node_informer) = <span class="self">self</span>.bad_node_informer.as_ref() {
+                                <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = bad_node_informer.send(address) {
+                                    <span class="macro">tracing::warn!</span>(%address, %error, %consecutive_errors, <span class="string">"failed to inform about bad node"</span>);
+                                }
+                            }
+                        }
+                    } <span class="kw">else </span>{
+                        <span class="macro">tracing::debug!</span>(%address, %error, <span class="string">"error measuring distance"</span>);
+                    }
                 }
             }
         }
+        (count, total_difference)
+    }
+
+    <span class="attr">#[cfg(test)]
+    </span><span class="kw">async fn </span>measure_all_nodes(<span class="kw-2">&amp;</span><span class="self">self</span>) {
+        <span class="kw">let </span>nodes = <span class="self">self
+            </span>.nodes
+            .iter()
+            .map(|entry| <span class="kw-2">*</span>entry.key())
+            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+        <span class="kw">let _ </span>= <span class="self">self</span>.measure_nodes(nodes).<span class="kw">await</span>;
     }
 
     <span class="kw">pub fn </span>get_coordinates(<span class="kw-2">&amp;</span><span class="self">self</span>, address: <span class="kw-2">&amp;</span>SocketAddr) -&gt; <span class="prelude-ty">Option</span>&lt;Coordinates&gt; {
@@ -1541,6 +1586,7 @@
     adjustment_duration: <span class="prelude-ty">Option</span>&lt;Duration&gt;,
     interval_range: <span class="prelude-ty">Option</span>&lt;Range&lt;Duration&gt;&gt;,
     subset_percentage: <span class="prelude-ty">Option</span>&lt;f64&gt;,
+    bad_node_informer: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::config::BadNodeInformer&gt;,
 }
 
 <span class="kw">impl</span>&lt;M: Measurement&gt; Builder&lt;M&gt; {
@@ -1558,6 +1604,7 @@
             adjustment_duration: <span class="prelude-val">None</span>,
             interval_range: <span class="prelude-val">None</span>,
             subset_percentage: <span class="prelude-val">None</span>,
+            bad_node_informer: <span class="prelude-val">None</span>,
         }
     }
 
@@ -1595,6 +1642,12 @@
         <span class="self">self
     </span>}
 
+    <span class="doccomment">/// Inform about bad nodes that don't respond to pings.
+    </span><span class="kw">pub fn </span>inform_bad_nodes(<span class="kw-2">mut </span><span class="self">self</span>, bad_node_informer: <span class="kw">crate</span>::config::BadNodeInformer) -&gt; <span class="self">Self </span>{
+        <span class="self">self</span>.bad_node_informer = <span class="prelude-val">Some</span>(bad_node_informer);
+        <span class="self">self
+    </span>}
+
     <span class="kw">pub fn </span>build(<span class="self">self</span>) -&gt; Phoenix&lt;M&gt; {
         Phoenix {
             inner: Arc::new(Inner {
@@ -1609,6 +1662,7 @@
                 interval_range: <span class="self">self</span>.interval_range.unwrap_or(<span class="self">Self</span>::DEFAULT_INTERVAL_RANGE),
                 subset_percentage: <span class="self">self</span>.subset_percentage.unwrap_or(<span class="self">Self</span>::DEFAULT_SUBSET),
                 update_watcher: tokio::sync::watch::channel(()),
+                bad_node_informer: <span class="self">self</span>.bad_node_informer,
             }),
         }
     }
@@ -2004,6 +2058,40 @@
         <span class="macro">assert_eq!</span>(ordered_nodes.len(), <span class="number">1</span>);
         <span class="macro">assert_eq!</span>(ordered_nodes[<span class="number">0</span>].<span class="number">0</span>, abcd());
         <span class="macro">assert!</span>(ordered_nodes[<span class="number">0</span>].<span class="number">1 </span>&gt;= <span class="number">100.</span>);
+    }
+
+    <span class="attr">#[tokio::test]
+    </span><span class="kw">async fn </span>bad_nodes_reported() {
+        <span class="kw">let </span>ok_node = <span class="string">"127.0.0.1:8080"</span>.parse().unwrap();
+        <span class="kw">let </span>bad_node = <span class="string">"127.0.0.1:8081"</span>.parse().unwrap();
+        <span class="kw">let </span>latencies =
+            HashMap::from([(ok_node, (<span class="number">100</span>, <span class="number">100</span>).into()), (bad_node, (<span class="number">200</span>, <span class="number">200</span>).into())]);
+        <span class="kw">let </span>failed_addresses = Arc::new(Mutex::new(HashSet::from([bad_node])));
+        <span class="kw">let </span>measurement = FailedAddressesMock {
+            latencies,
+            failed_addresses,
+        };
+
+        <span class="kw">let </span>(tx, <span class="kw-2">mut </span>rx) = tokio::sync::mpsc::unbounded_channel();
+        <span class="kw">let </span>phoenix = Phoenix::builder(measurement).inform_bad_nodes(tx).build();
+
+        phoenix.add_node(ok_node, abcd());
+        phoenix.add_node(bad_node, efgh());
+
+        <span class="kw">for _ in </span><span class="number">0</span>..(BAD_NODE_THRESHOLD) {
+            phoenix.measure_all_nodes().<span class="kw">await</span>;
+        }
+
+        <span class="comment">// Check that we haven't informed yet
+        </span><span class="macro">assert!</span>(rx.try_recv().is_err());
+
+        <span class="comment">// But one more measurement brings it over the threshold
+        </span>phoenix.measure_all_nodes().<span class="kw">await</span>;
+
+        <span class="kw">let </span>result = rx.try_recv();
+        <span class="macro">assert!</span>(result.is_ok());
+        <span class="kw">let </span>node = result.unwrap();
+        <span class="macro">assert_eq!</span>(node, bad_node);
     }
 
     <span class="attr">#[tokio::test]

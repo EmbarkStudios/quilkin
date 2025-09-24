@@ -556,7 +556,8 @@
 <a href="#555" id="555">555</a>
 <a href="#556" id="556">556</a>
 <a href="#557" id="557">557</a>
-<a href="#558" id="558">558</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#558" id="558">558</a>
+<a href="#559" id="559">559</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -850,14 +851,15 @@
         addr.into()
     }
 
-    <span class="kw">pub fn </span>new_config() -&gt; Config {
+    <span class="kw">pub fn </span>new_config() -&gt; Arc&lt;Config&gt; {
         <span class="kw">let </span>providers = <span class="kw">crate</span>::Providers::default();
         <span class="kw">let </span>service = <span class="kw">crate</span>::Service::builder().udp().qcmp();
-        <span class="kw">crate</span>::Config::new(
+        <span class="kw">crate</span>::Config::new_rc(
             <span class="prelude-val">Some</span>(<span class="string">"test-server"</span>.into()),
             Default::default(),
             <span class="kw-2">&amp;</span>providers,
             <span class="kw-2">&amp;</span>service,
+            tokio_util::sync::CancellationToken::new(),
         )
     }
 

@@ -932,7 +932,14 @@
 <a href="#931" id="931">931</a>
 <a href="#932" id="932">932</a>
 <a href="#933" id="933">933</a>
-<a href="#934" id="934">934</a></pre></div><pre class="rust"><code><span class="attr">#![allow(clippy::unimplemented)]
+<a href="#934" id="934">934</a>
+<a href="#935" id="935">935</a>
+<a href="#936" id="936">936</a>
+<a href="#937" id="937">937</a>
+<a href="#938" id="938">938</a>
+<a href="#939" id="939">939</a>
+<a href="#940" id="940">940</a>
+<a href="#941" id="941">941</a></pre></div><pre class="rust"><code><span class="attr">#![allow(clippy::unimplemented)]
 
 </span><span class="kw">use </span>quilkin::{
     Config,
@@ -1302,6 +1309,7 @@
                 <span class="kw">let </span>config_path = path.clone();
 
                 <span class="kw">let </span>(shutdown, shutdown_rx) = quilkin::signal::channel();
+                <span class="kw">let </span>pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
 
                 <span class="kw">let </span>providers = quilkin::Providers::default().fs().fs_path(path);
                 <span class="kw">let </span>svc = quilkin::Service::default()
@@ -1310,12 +1318,13 @@
                     .mds()
                     .mds_port(mds_port);
 
-                <span class="kw">let </span>config = Arc::new(<span class="kw">crate</span>::Config::new(
+                <span class="kw">let </span>config = <span class="kw">crate</span>::Config::new_rc(
                     <span class="prelude-val">Some</span>(<span class="string">"test-relay"</span>.into()),
                     Default::default(),
                     <span class="kw-2">&amp;</span>providers,
                     <span class="kw-2">&amp;</span>svc,
-                ));
+                    pail_token,
+                );
 
                 <span class="kw-2">*</span>config.dyn_cfg.id.lock() = spc.name.into();
                 <span class="kw">let </span>healthy = Arc::new(std::sync::atomic::AtomicBool::new(<span class="bool-val">false</span>));
@@ -1386,6 +1395,7 @@
                     .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
 
                 <span class="kw">let </span>(shutdown, shutdown_rx) = quilkin::signal::channel();
+                <span class="kw">let </span>pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
 
                 <span class="kw">let </span>port = quilkin::net::socket_port(
                     <span class="kw-2">&amp;</span>quilkin::net::raw_socket_with_reuse(<span class="number">0</span>).expect(<span class="string">"failed to bind qcmp socket"</span>),
@@ -1398,12 +1408,13 @@
                     .fs_path(path)
                     .grpc_push_endpoints(relay_servers);
 
-                <span class="kw">let </span>config = Arc::new(<span class="kw">crate</span>::Config::new(
+                <span class="kw">let </span>config = <span class="kw">crate</span>::Config::new_rc(
                     <span class="prelude-val">Some</span>(<span class="string">"test-agent"</span>.into()),
                     apc.icao_code,
                     <span class="kw-2">&amp;</span>providers,
                     <span class="kw-2">&amp;</span>svc,
-                ));
+                    pail_token,
+                );
 
                 <span class="kw-2">*</span>config.dyn_cfg.id.lock() = spc.name.into();
                 <span class="kw">let </span>acfg = config.clone();
@@ -1473,12 +1484,16 @@
                     .phoenix_port(phoenix_port)
                     .termination_timeout(<span class="prelude-val">None</span>);
 
-                <span class="kw">let </span>config = Arc::new(<span class="kw">crate</span>::Config::new(
+                <span class="kw">let </span>(shutdown, shutdown_rx) = quilkin::signal::channel();
+                <span class="kw">let </span>pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
+
+                <span class="kw">let </span>config = <span class="kw">crate</span>::Config::new_rc(
                     <span class="prelude-val">Some</span>(<span class="string">"test-proxy"</span>.into()),
                     Default::default(),
                     <span class="kw-2">&amp;</span>Default::default(),
                     <span class="kw-2">&amp;</span>svc,
-                ));
+                    pail_token,
+                );
 
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(cfg) = ppc.config {
                     <span class="kw">if </span>!cfg.clusters.is_empty() {
@@ -1515,7 +1530,6 @@
                 <span class="kw-2">*</span>config.dyn_cfg.id.lock() = spc.name.into();
 
                 <span class="kw">let </span>(rttx, rtrx) = tokio::sync::mpsc::unbounded_channel();
-                <span class="kw">let </span>(shutdown, shutdown_rx) = quilkin::signal::channel();
 
                 <span class="kw">let </span>healthy = Arc::new(std::sync::atomic::AtomicBool::new(<span class="bool-val">false</span>));
                 <span class="kw">let </span>provider_task = providers.spawn_providers(

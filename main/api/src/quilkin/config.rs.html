@@ -832,7 +832,95 @@
 <a href="#831" id="831">831</a>
 <a href="#832" id="832">832</a>
 <a href="#833" id="833">833</a>
-<a href="#834" id="834">834</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#834" id="834">834</a>
+<a href="#835" id="835">835</a>
+<a href="#836" id="836">836</a>
+<a href="#837" id="837">837</a>
+<a href="#838" id="838">838</a>
+<a href="#839" id="839">839</a>
+<a href="#840" id="840">840</a>
+<a href="#841" id="841">841</a>
+<a href="#842" id="842">842</a>
+<a href="#843" id="843">843</a>
+<a href="#844" id="844">844</a>
+<a href="#845" id="845">845</a>
+<a href="#846" id="846">846</a>
+<a href="#847" id="847">847</a>
+<a href="#848" id="848">848</a>
+<a href="#849" id="849">849</a>
+<a href="#850" id="850">850</a>
+<a href="#851" id="851">851</a>
+<a href="#852" id="852">852</a>
+<a href="#853" id="853">853</a>
+<a href="#854" id="854">854</a>
+<a href="#855" id="855">855</a>
+<a href="#856" id="856">856</a>
+<a href="#857" id="857">857</a>
+<a href="#858" id="858">858</a>
+<a href="#859" id="859">859</a>
+<a href="#860" id="860">860</a>
+<a href="#861" id="861">861</a>
+<a href="#862" id="862">862</a>
+<a href="#863" id="863">863</a>
+<a href="#864" id="864">864</a>
+<a href="#865" id="865">865</a>
+<a href="#866" id="866">866</a>
+<a href="#867" id="867">867</a>
+<a href="#868" id="868">868</a>
+<a href="#869" id="869">869</a>
+<a href="#870" id="870">870</a>
+<a href="#871" id="871">871</a>
+<a href="#872" id="872">872</a>
+<a href="#873" id="873">873</a>
+<a href="#874" id="874">874</a>
+<a href="#875" id="875">875</a>
+<a href="#876" id="876">876</a>
+<a href="#877" id="877">877</a>
+<a href="#878" id="878">878</a>
+<a href="#879" id="879">879</a>
+<a href="#880" id="880">880</a>
+<a href="#881" id="881">881</a>
+<a href="#882" id="882">882</a>
+<a href="#883" id="883">883</a>
+<a href="#884" id="884">884</a>
+<a href="#885" id="885">885</a>
+<a href="#886" id="886">886</a>
+<a href="#887" id="887">887</a>
+<a href="#888" id="888">888</a>
+<a href="#889" id="889">889</a>
+<a href="#890" id="890">890</a>
+<a href="#891" id="891">891</a>
+<a href="#892" id="892">892</a>
+<a href="#893" id="893">893</a>
+<a href="#894" id="894">894</a>
+<a href="#895" id="895">895</a>
+<a href="#896" id="896">896</a>
+<a href="#897" id="897">897</a>
+<a href="#898" id="898">898</a>
+<a href="#899" id="899">899</a>
+<a href="#900" id="900">900</a>
+<a href="#901" id="901">901</a>
+<a href="#902" id="902">902</a>
+<a href="#903" id="903">903</a>
+<a href="#904" id="904">904</a>
+<a href="#905" id="905">905</a>
+<a href="#906" id="906">906</a>
+<a href="#907" id="907">907</a>
+<a href="#908" id="908">908</a>
+<a href="#909" id="909">909</a>
+<a href="#910" id="910">910</a>
+<a href="#911" id="911">911</a>
+<a href="#912" id="912">912</a>
+<a href="#913" id="913">913</a>
+<a href="#914" id="914">914</a>
+<a href="#915" id="915">915</a>
+<a href="#916" id="916">916</a>
+<a href="#917" id="917">917</a>
+<a href="#918" id="918">918</a>
+<a href="#919" id="919">919</a>
+<a href="#920" id="920">920</a>
+<a href="#921" id="921">921</a>
+<a href="#922" id="922">922</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -908,11 +996,15 @@
     }
 }
 
+<span class="kw">pub type </span>BadNodeInformer = tokio::sync::mpsc::UnboundedSender&lt;std::net::SocketAddr&gt;;
+
 <span class="macro">base64_serde_type!</span>(<span class="kw">pub </span>Base64Standard, base64::engine::general_purpose::STANDARD);
 <span class="attr">#[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 </span><span class="kw">pub struct </span>Config {
     <span class="kw">pub </span>dyn_cfg: DynamicConfig,
+    bad_node_informer: <span class="prelude-ty">Option</span>&lt;BadNodeInformer&gt;,
+    cancellation_token: <span class="prelude-ty">Option</span>&lt;tokio_util::sync::CancellationToken&gt;,
 }
 
 <span class="attr">#[cfg(test)]
@@ -1190,8 +1282,19 @@
         .unwrap_or_else(uuid)
 }
 
+<span class="kw">impl </span>Drop <span class="kw">for </span>Config {
+    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(token) = <span class="kw-2">&amp;</span><span class="self">self</span>.cancellation_token {
+            token.cancel();
+        }
+    }
+}
+
 <span class="kw">impl </span>Config {
-    <span class="kw">pub fn </span>new(
+    <span class="doccomment">/// Creates and initializes a new Config
+    ///
+    /// This constructor is mainly intended for tests
+    </span><span class="kw">pub fn </span>new(
         id: <span class="prelude-ty">Option</span>&lt;String&gt;,
         icao_code: IcaoCode,
         providers: <span class="kw-2">&amp;</span><span class="kw">crate</span>::Providers,
@@ -1204,6 +1307,8 @@
                 icao_code: NotifyingIcaoCode::new(icao_code),
                 typemap: default_typemap(),
             },
+            bad_node_informer: <span class="prelude-val">None</span>,
+            cancellation_token: <span class="prelude-val">None</span>,
         };
         providers.init_config(<span class="kw-2">&amp;mut </span>config);
         service.init_config(<span class="kw-2">&amp;mut </span>config);
@@ -1211,8 +1316,75 @@
         config
     }
 
+    <span class="doccomment">/// Creates and initializes a new Arc&lt;Config&gt;
+    ///
+    /// Spawns a tokio task as a side effect that will be stopped when the cancellation token is
+    /// cancelled. The token _will_ be cancelled when Config is dropped, so make sure to pass in a
+    /// child token if the token is intended to live longer than the Config.
+    </span><span class="kw">pub fn </span>new_rc(
+        id: <span class="prelude-ty">Option</span>&lt;String&gt;,
+        icao_code: IcaoCode,
+        providers: <span class="kw-2">&amp;</span><span class="kw">crate</span>::Providers,
+        service: <span class="kw-2">&amp;</span><span class="kw">crate</span>::Service,
+        cancellation_token: tokio_util::sync::CancellationToken,
+    ) -&gt; Arc&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">let </span>(tx, rx) = tokio::sync::mpsc::unbounded_channel::&lt;std::net::SocketAddr&gt;();
+
+        <span class="kw">let </span><span class="kw-2">mut </span>config = <span class="self">Self</span>::new(id, icao_code, providers, service);
+        config.cancellation_token = <span class="prelude-val">Some</span>(cancellation_token);
+        config.bad_node_informer = <span class="prelude-val">Some</span>(tx);
+
+        <span class="kw">let </span>config = Arc::new(config);
+        config
+            .spawn_janitor(rx)
+            .expect(<span class="string">"spawn_janitor() from new_rc() should not fail"</span>);
+
+        config
+    }
+
+    <span class="doccomment">/// Spawns a janitor task to help out with cleaning stale Datacenter entries from the Config
+    </span><span class="kw">fn </span>spawn_janitor(
+        <span class="self">self</span>: <span class="kw-2">&amp;</span>Arc&lt;Config&gt;,
+        <span class="kw-2">mut </span>rx: tokio::sync::mpsc::UnboundedReceiver&lt;std::net::SocketAddr&gt;,
+    ) -&gt; eyre::Result&lt;()&gt; {
+        <span class="kw">let </span>cancellation_token = <span class="self">self
+            </span>.cancellation_token
+            .as_ref()
+            .ok_or_else(|| <span class="macro">eyre::eyre!</span>(<span class="string">"cancellation token not set"</span>))<span class="question-mark">?
+            </span>.clone();
+
+        <span class="comment">// Ensure that we don't keep an owning reference to Arc&lt;Config&gt; so that Drop can occurr
+        </span><span class="kw">let </span>janitor_config_ref = Arc::downgrade(<span class="self">self</span>);
+        tokio::spawn(<span class="kw">async move </span>{
+            <span class="kw">loop </span>{
+                <span class="macro">tokio::select!</span> {
+                    <span class="kw">_ </span>= cancellation_token.cancelled() =&gt; {
+                        <span class="kw">break</span>;
+                    }
+                    node = rx.recv() =&gt; {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(node) = node {
+                            <span class="kw">let </span>ip = node.ip();
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(config) = janitor_config_ref.upgrade() {
+                                <span class="kw">if let </span><span class="prelude-val">Some</span>(datacenters) = config.dyn_cfg.datacenters() {
+                                    datacenters.modify(|wg| {
+                                        <span class="macro">tracing::warn!</span>(%ip, <span class="string">"removing datacenter from local state"</span>);
+                                        wg.remove(ip);
+                                    });
+                                }
+                            } <span class="kw">else </span>{
+                                <span class="kw">break</span>;
+                            }
+                        }
+                    }
+                }
+            }
+            <span class="macro">tracing::trace!</span>(<span class="string">"Stopping janitor task"</span>);
+        });
+        <span class="prelude-val">Ok</span>(())
+    }
+
     <span class="kw">pub fn </span>read_config(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        <span class="self">self</span>: <span class="kw-2">&amp;</span>Arc&lt;<span class="self">Self</span>&gt;,
         config_path: <span class="kw-2">&amp;</span>std::path::Path,
         locality: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::net::endpoint::Locality&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), eyre::Error&gt; {
@@ -1241,6 +1413,10 @@
         <span class="self">self</span>.update_from_json(json, locality)<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">pub fn </span>bad_node_informer(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;BadNodeInformer&gt; {
+        <span class="self">self</span>.bad_node_informer.clone()
     }
 
     <span class="doccomment">/// Given a list of subscriptions and the current state of the calling client,
