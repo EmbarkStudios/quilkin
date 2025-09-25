@@ -117,7 +117,7 @@ proxy. To see a basic usage of the command-line interface run through the
 For more advanced usage, you might also be interested in:
 
 * Checking out the [installation guide](./installation.md)
-* Having a look at the [example projects](https://github.com/googleforgames/quilkin/blob/{{GITHUB_REF_NAME}}/examples) for basic configuration examples.
+* Having a look at the [example projects](https://github.com/EmbarkStudios/quilkin/blob/{{GITHUB_REF_NAME}}/examples) for basic configuration examples.
 * Checking out the [example deployment architecture](./deployment/examples.md)
   for deploying quilkin for your game network.
 
