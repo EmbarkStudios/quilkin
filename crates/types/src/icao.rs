@@ -30,12 +30,6 @@ impl AsRef<str> for IcaoCode {
     }
 }
 
-impl AsRef<[u8]> for IcaoCode {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
 impl Default for IcaoCode {
     fn default() -> Self {
         Self([b'X', b'X', b'X', b'X'])
