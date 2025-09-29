@@ -876,14 +876,7 @@
 <a href="#875" id="875">875</a>
 <a href="#876" id="876">876</a>
 <a href="#877" id="877">877</a>
-<a href="#878" id="878">878</a>
-<a href="#879" id="879">879</a>
-<a href="#880" id="880">880</a>
-<a href="#881" id="881">881</a>
-<a href="#882" id="882">882</a>
-<a href="#883" id="883">883</a>
-<a href="#884" id="884">884</a>
-<a href="#885" id="885">885</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#878" id="878">878</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -999,9 +992,6 @@
     <span class="kw">pub </span>token_map: TokenAddressMap,
     <span class="doccomment">/// The hash of all of the endpoints in this set
     </span>hash: u64,
-    <span class="doccomment">/// Version of this set of endpoints. Any mutatation of the endpoints
-    /// set monotonically increases this number
-    </span>version: u64,
 }
 
 <span class="kw">impl </span>EndpointSet {
@@ -1012,7 +1002,6 @@
             endpoints,
             token_map: &lt;<span class="kw">_</span>&gt;::default(),
             hash: <span class="number">0</span>,
-            version: <span class="number">0</span>,
         };
 
         this.update();
@@ -1030,7 +1019,6 @@
             endpoints,
             token_map: &lt;<span class="kw">_</span>&gt;::default(),
             hash: hash.number(),
-            version: <span class="number">1</span>,
         };
 
         this.build_token_map();
@@ -1080,7 +1068,6 @@
         }
 
         <span class="self">self</span>.hash = hasher.finish();
-        <span class="self">self</span>.version += <span class="number">1</span>;
         std::mem::replace(<span class="kw-2">&amp;mut </span><span class="self">self</span>.token_map, token_map)
     }
 
@@ -1117,7 +1104,6 @@
             <span class="self">self</span>.update()
         } <span class="kw">else </span>{
             <span class="self">self</span>.hash = replacement.hash;
-            <span class="self">self</span>.version += <span class="number">1</span>;
             <span class="self">self</span>.build_token_map()
         };
 
