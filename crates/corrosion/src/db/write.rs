@@ -74,7 +74,7 @@ impl ToSqlParam for TokenSet {
 
 impl ToSqlParam for IcaoCode {
     fn to_sql(&self) -> SqliteParam {
-        SqliteParam::Text(self.as_ref().into())
+        SqliteParam::Text(self.as_str().into())
     }
 }
 
