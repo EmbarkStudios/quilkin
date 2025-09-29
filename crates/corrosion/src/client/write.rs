@@ -322,14 +322,14 @@ impl<'s, const N: usize> Datacenter<'s, N> {
     pub fn remove(&mut self, peer: Peer, update_time: Option<time::UtcDateTime>) {
         let time = update_time.unwrap_or(time::UtcDateTime::now());
 
-        self.0.push(Statement::WithParams(format!(
+        self.0.push(Statement::Simple(format!(
             "WITH sj AS (SELECT server.key FROM dc JOIN json_each(dc.servers) AS server WHERE ip = '{0}' LIMIT 1)
             UPDATE servers SET
                 contributors = jsonb_patch(s.contributors,'{{\"{0}\":null}}'),
                 cont_update = {1}
             FROM servers s
             LEFT JOIN sj ON s.endpoint = sj.key", peer.ip(), time.unix_timestamp()
-        ), vec![]));
+        )));
 
         self.0.push(Statement::WithParams(
             "DELETE FROM dc WHERE rowid = (SELECT MIN(rowid) FROM dc WHERE ip = ?)".into(),
