@@ -71,6 +71,6 @@ and [RBAC] Rules, there is an [Agones, xDS and Xonotic example][example].
 [Deployments]: https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
 [Services]: https://kubernetes.io/docs/concepts/services-networking/service/
 [RBAC]: https://kubernetes.io/docs/reference/access-authn-authz/rbac/
-[example]: https://github.com/googleforgames/quilkin/tree/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds
+[example]: https://github.com/EmbarkStudios/quilkin/tree/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds
 [Filter]: ../../../services/proxy/filters.md
 [configuration]: ../../../services/proxy/configuration.md

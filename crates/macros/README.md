@@ -1,6 +1,6 @@
 # Quilkin Macros
 
-Macros for https://github.com/googleforgames/quilkin.
+Macros for https://github.com/EmbarkStudios/quilkin.
 
 ## Licence
 
