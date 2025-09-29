@@ -26,14 +26,12 @@ thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-uhlc = "0.7"
+uhlc.workspace = true
 
 corro-agent.workspace = true
 corro-api-types.workspace = true
 corro-client.workspace = true
 corro-types.workspace = true
-# spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-# tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 
 [dev-dependencies]
 corrosion-utils.workspace = true

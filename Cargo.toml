@@ -213,6 +213,7 @@ async-trait = "0.1.88"
 base64 = "0.22.1"
 bytes = { version = "1.10.1", features = ["serde"] }
 cached = { version = "0.54", default-features = false }
+corrosion = { path = "crates/corrosion" }
 corrosion-utils = { path = "crates/corrosion-utils" }
 eyre = "0.6.12"
 enum-map = "2.7.3"

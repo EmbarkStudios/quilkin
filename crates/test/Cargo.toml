@@ -30,6 +30,8 @@ insta = { version = "1.43", features = ["json"] }
 once_cell.workspace = true
 quilkin.workspace = true
 quilkin-xds.workspace = true
+corrosion.workspace = true
+corrosion-utils.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 socket2.workspace = true

@@ -64,6 +64,7 @@ name = "rustls-webpki"
 deny = ["aws-lc-rs"]
 
 [bans.workspace-dependencies]
+unused = 'allow'
 
 # This section is considered when running `cargo deny check licenses`
 # More documentation for the licenses section can be found here:
