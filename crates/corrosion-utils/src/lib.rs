@@ -1,7 +1,7 @@
-use crate::{
-    api::{self, Statement},
-    types::{self, pubsub, updates::Handle as _},
-};
+use corro_api_types::{self as api, Statement};
+use corro_types::{self as types, pubsub, updates::Handle as _};
+
+pub use prettytable::Cell;
 
 /// Corrosion uses a "tripwire" handle to signal to end async tasks, this just
 /// wraps it so it's easier to use, and removes boilerplate
@@ -35,7 +35,7 @@ impl Trip {
     }
 }
 
-pub struct TestDbPool {
+pub struct TestSubsDb {
     #[allow(dead_code)]
     temp: tempfile::TempDir,
     db_path: camino::Utf8PathBuf,
@@ -43,14 +43,13 @@ pub struct TestDbPool {
     subs: pubsub::SubsManager,
     schema: types::schema::Schema,
     pool: types::agent::SplitPool,
-    matcher_conns: std::collections::BTreeMap<uuid::Uuid, corro_types::sqlite::CrConn>,
+    matcher_conns: std::collections::BTreeMap<uuid::Uuid, types::sqlite::CrConn>,
     db_version: usize,
     trip: Trip,
 }
 
-impl TestDbPool {
+impl TestSubsDb {
     pub async fn new(schema: &str) -> Self {
-        let mut schema = types::schema::parse_sql(schema).expect("failed to parse schema");
         let temp = tempfile::TempDir::new().expect("failed to create temp dir");
 
         let root = camino::Utf8Path::from_path(temp.path()).expect("non-utf8 path");
@@ -62,20 +61,8 @@ impl TestDbPool {
         )
         .await
         .expect("failed to create DB pool");
-        let clock = std::sync::Arc::new(uhlc::HLC::default());
 
-        {
-            let mut conn = pool
-                .write_priority()
-                .await
-                .expect("failed to get DB connection");
-            types::sqlite::setup_conn(&conn).expect("failed to setup connection");
-            types::agent::migrate(clock, &mut conn).expect("failed to migrate");
-            let tx = conn.transaction().expect("failed to start transaction");
-            types::schema::apply_schema(&tx, &types::schema::Schema::default(), &mut schema)
-                .expect("failed to apply schema");
-            tx.commit().expect("failed to commit schema change");
-        }
+        let schema = setup(schema, &pool).await;
 
         Self {
             temp,
@@ -129,36 +116,7 @@ impl TestDbPool {
             .expect("failed to get connection");
         let tx = conn.transaction().expect("failed to get transaction");
 
-        for stmt in ops {
-            let mut prepped = tx
-                .prepare(stmt.query())
-                .expect("failed to pepare transaction");
-            match stmt {
-                Statement::Simple(_)
-                | Statement::Verbose {
-                    params: None,
-                    named_params: None,
-                    ..
-                } => prepped.execute([]),
-                Statement::WithParams(_, params)
-                | Statement::Verbose {
-                    params: Some(params),
-                    ..
-                } => prepped.execute(rusqlite::params_from_iter(params)),
-                Statement::WithNamedParams(_, params)
-                | Statement::Verbose {
-                    named_params: Some(params),
-                    ..
-                } => prepped.execute(
-                    params
-                        .iter()
-                        .map(|(k, v)| (k.as_str(), v as &dyn rusqlite::ToSql))
-                        .collect::<Vec<(&str, &dyn rusqlite::ToSql)>>()
-                        .as_slice(),
-                ),
-            }
-            .expect("failed to execute");
-        }
+        exec(&tx, ops).expect("failed to exec statement");
 
         tx.commit().expect("failed to commit transaction");
         self.db_version += 1;
@@ -202,4 +160,99 @@ impl TestDbPool {
         handle.cleanup().await;
         self.subs.remove(&handle.id());
     }
+}
+
+pub async fn setup(schema: &str, pool: &types::agent::SplitPool) -> types::schema::Schema {
+    let mut schema = types::schema::parse_sql(schema).expect("failed to parse schema");
+    let clock = std::sync::Arc::new(uhlc::HLC::default());
+
+    {
+        let mut conn = pool
+            .write_priority()
+            .await
+            .expect("failed to get DB connection");
+        types::sqlite::setup_conn(&conn).expect("failed to setup connection");
+        types::agent::migrate(clock, &mut conn).expect("failed to migrate");
+        let tx = conn.transaction().expect("failed to start transaction");
+        types::schema::apply_schema(&tx, &types::schema::Schema::default(), &mut schema)
+            .expect("failed to apply schema");
+        tx.commit().expect("failed to commit schema change");
+    }
+
+    schema
+}
+
+pub async fn new_split_pool(name: &str, schema: &str) -> corro_types::agent::SplitPool {
+    let sp = corro_types::agent::SplitPool::create_in_memory(
+        name,
+        std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+    )
+    .await
+    .expect("failed to create split pool");
+
+    setup(schema, &sp).await;
+    sp
+}
+
+pub fn exec<'t, 's>(
+    tx: &rusqlite::Transaction<'t>,
+    ops: impl Iterator<Item = &'s Statement>,
+) -> rusqlite::Result<usize> {
+    let mut rows = 0;
+    for stmt in ops {
+        let mut prepped = tx.prepare(stmt.query())?;
+        rows += match stmt {
+            Statement::Simple(_)
+            | Statement::Verbose {
+                params: None,
+                named_params: None,
+                ..
+            } => prepped.execute([]),
+            Statement::WithParams(_, params)
+            | Statement::Verbose {
+                params: Some(params),
+                ..
+            } => prepped.execute(rusqlite::params_from_iter(params)),
+            Statement::WithNamedParams(_, params)
+            | Statement::Verbose {
+                named_params: Some(params),
+                ..
+            } => prepped.execute(
+                params
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v as &dyn rusqlite::ToSql))
+                    .collect::<Vec<(&str, &dyn rusqlite::ToSql)>>()
+                    .as_slice(),
+            ),
+        }?;
+    }
+
+    Ok(rows)
+}
+
+use prettytable as pt;
+
+pub fn query_to_string(
+    mut statement: rusqlite::Statement<'_>,
+    conv: impl Fn(&rusqlite::Row<'_>, &mut pt::Row),
+) -> String {
+    let mut tab = pt::Table::new();
+    tab.set_titles(pt::Row::new(
+        statement
+            .column_names()
+            .into_iter()
+            .map(|name| pt::Cell::new(name))
+            .collect(),
+    ));
+
+    let mut rows = statement.query([]).unwrap();
+    while let Some(row) = rows.next().unwrap() {
+        let mut ptrow = pt::Row::empty();
+        conv(row, &mut ptrow);
+        tab.add_row(ptrow);
+    }
+
+    let mut out = Vec::new();
+    tab.print(&mut out).unwrap();
+    String::from_utf8(out).unwrap()
 }

@@ -84,9 +84,10 @@ quilkin-xds.workspace = true
 # Crates.io
 arc-swap.workspace = true
 async-stream.workspace = true
+async-trait.workspace = true
 base64.workspace = true
 base64-serde = "0.8.0"
-bytes = { version = "1.10.1", features = ["serde"] }
+bytes.workspace = true
 cached.workspace = true
 cfg-if = "1.0"
 crossbeam-utils = { version = "0.8", optional = true }
@@ -127,7 +128,7 @@ serde_yaml = "0.9.34"
 socket2.workspace = true
 stable-eyre = "0.2.2"
 thiserror.workspace = true
-time = { version = "0.3", default-features = false, features = ["std"] }
+time.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
@@ -147,7 +148,6 @@ hickory-resolver = { version = "0.25.2", features = [
     "https-ring",
     "system-config",
 ] }
-async-trait = "0.1.88"
 strum = "0.27"
 strum_macros = "0.27"
 libflate = "2.1.0"
@@ -190,6 +190,7 @@ members = [
     ".",
     "crates/agones",
     "crates/corrosion",
+    "crates/corrosion-utils",
     "crates/macros",
     #"crates/nmap-service-probes",
     "crates/proto-gen",
@@ -208,8 +209,11 @@ version = "0.10.0-dev"
 [workspace.dependencies]
 arc-swap = { version = "1.7.1", features = ["serde"] }
 async-stream = "0.3.6"
+async-trait = "0.1.88"
 base64 = "0.22.1"
+bytes = { version = "1.10.1", features = ["serde"] }
 cached = { version = "0.54", default-features = false }
+corrosion-utils = { path = "crates/corrosion-utils" }
 eyre = "0.6.12"
 enum-map = "2.7.3"
 futures = "0.3.31"
@@ -237,6 +241,7 @@ serde = { version = "1.0.219", features = ["derive", "rc"] }
 serde_json = "1.0.140"
 socket2 = { version = "0.6", features = ["all"] }
 tempfile = "3.20.0"
+time = { version = "0.3", default-features = false, features = ["std"] }
 thiserror = "2.0.12"
 tokio-stream = { version = "0.1.17", features = ["net", "sync"] }
 tokio = { version = "1.45.0", features = [
@@ -262,6 +267,18 @@ parking_lot = "0.12.3"
 schemars = { version = "0.8.22", features = ["bytes", "url"] }
 url = { version = "2.5.4", features = ["serde"] }
 xdp = "0.7.0"
+
+# Corrosion libraries. The libraries that corrosion transitively depends on that
+# we also need to depend on should be kept in line with the versions used by corrosion
+camino = "1.1"
+corro-agent = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+corro-client = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+corro-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+rusqlite = "0.33"
+spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+uhlc = "0.7"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"

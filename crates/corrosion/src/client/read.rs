@@ -1,6 +1,8 @@
+//! Deserialization of changes sent from a corrosion agent
+
 pub use corro_api_types::{QueryEvent, SqliteValue};
 use eyre::ContextCompat as _;
-use quilkin_types::{AddressKind, IcaoCode, TokenSet};
+use quilkin_types::{AddressKind, Endpoint, IcaoCode, TokenSet};
 use serde::{
     Deserialize,
     de::{self, SeqAccess},
@@ -11,11 +13,10 @@ pub trait FromSqlValue: Sized {
     fn from_sql(values: &[SqliteValue]) -> eyre::Result<Self>;
 }
 
+#[derive(Debug, PartialEq)]
 pub struct ServerRow {
-    pub address: AddressKind,
-    pub port: u16,
+    pub endpoint: Endpoint,
     pub icao: IcaoCode,
-    pub locality: Option<String>,
     pub tokens: TokenSet,
 }
 
@@ -54,14 +55,14 @@ pub fn deserialize_token_set(s: &str) -> eyre::Result<TokenSet> {
 }
 
 #[inline]
-fn parse_address(addr: &str) -> eyre::Result<(AddressKind, u16)> {
+pub fn parse_endpoint(addr: &str) -> eyre::Result<Endpoint> {
     let (addr, port) = addr.rsplit_once(':').context("missing ':'")?;
     let port = port.parse()?;
     if let Some(ip) = addr.strip_prefix('|') {
         let ip = ip.parse()?;
-        Ok((AddressKind::Ip(ip), port))
+        Ok(Endpoint::new(AddressKind::Ip(ip), port))
     } else {
-        Ok((AddressKind::Name(addr.to_owned()), port))
+        Ok(Endpoint::new(AddressKind::Name(addr.to_owned()), port))
     }
 }
 
@@ -85,16 +86,13 @@ macro_rules! get_json {
 
 impl FromSqlValue for ServerRow {
     fn from_sql(values: &[SqliteValue]) -> eyre::Result<Self> {
-        let (address, port) = parse_address(get_column!(0, "endpoint", values))?;
+        let endpoint = parse_endpoint(get_column!(0, "endpoint", values))?;
         let icao = get_column!(1, "icao", values).parse()?;
-        let locality = values.get(2).and_then(|s| s.as_str().map(String::from));
-        let tokens = deserialize_token_set(get_column!(3, "tokens", values))?;
+        let tokens = deserialize_token_set(get_column!(2, "tokens", values))?;
 
         Ok(Self {
-            address,
-            port,
+            endpoint,
             icao,
-            locality,
             tokens,
         })
     }
@@ -118,11 +116,8 @@ impl<'de> Deserialize<'de> for ServerRow {
             where
                 A: SeqAccess<'de>,
             {
-                let (address, port) = get_json!("endpoint", parse_address, seq);
+                let endpoint = get_json!("endpoint", parse_endpoint, seq);
                 let icao = get_json!("icao", IcaoCode::from_str, seq);
-                let locality = seq
-                    .next_element()?
-                    .ok_or(de::Error::missing_field("locality"))?;
                 let tokens = get_json!("tokens", deserialize_token_set, seq);
 
                 // Ignore the rest of the elements, if we don't we'll leave
@@ -130,10 +125,8 @@ impl<'de> Deserialize<'de> for ServerRow {
                 while let Some(Ignore) = seq.next_element()? {}
 
                 Ok(ServerRow {
-                    address,
-                    port,
+                    endpoint,
                     icao,
-                    locality,
                     tokens,
                 })
             }

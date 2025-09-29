@@ -42,7 +42,11 @@ impl serde::Serialize for TokenSet {
     where
         S: serde::Serializer,
     {
-        serializer.collect_seq(self.0.iter().map(|tok| data_encoding::BASE64.encode(tok)))
+        if serializer.is_human_readable() {
+            serializer.collect_seq(self.0.iter().map(|tok| data_encoding::BASE64.encode(tok)))
+        } else {
+            serializer.collect_seq(self.0.iter())
+        }
     }
 }
 
@@ -82,6 +86,10 @@ impl<'de> serde::Deserialize<'de> for TokenSet {
             }
         }
 
-        deserializer.deserialize_seq(TokenVisitor)
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_seq(TokenVisitor)
+        } else {
+            Ok(Self(BTreeSet::<Vec<u8>>::deserialize(deserializer)?))
+        }
     }
 }

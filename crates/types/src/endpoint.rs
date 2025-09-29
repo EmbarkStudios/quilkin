@@ -70,3 +70,24 @@ impl fmt::Display for AddressKind {
         }
     }
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, PartialOrd, Eq, Ord)]
+pub struct Endpoint {
+    #[serde(rename = "a")]
+    pub address: AddressKind,
+    #[serde(rename = "p")]
+    pub port: u16,
+}
+
+impl Endpoint {
+    #[inline]
+    pub fn new(address: AddressKind, port: u16) -> Self {
+        Self { address, port }
+    }
+}
+
+impl fmt::Display for Endpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.address, self.port)
+    }
+}

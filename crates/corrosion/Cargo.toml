@@ -8,41 +8,33 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-camino = "1.1"
+async-trait.workspace = true
+bytes.workspace = true
+camino.workspace = true
 compact_str = "0.7"
 data-encoding = "2.9"
 eyre.workspace = true
+parking_lot.workspace = true
 quilkin-types.workspace = true
-rusqlite = "0.33"
+quinn = "0.11"
+quinn-plaintext = "0.3"
+rusqlite.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 smallvec = "1.15"
-tempfile.workspace = true
+thiserror.workspace = true
+time.workspace = true
 tokio.workspace = true
-tokio-stream.workspace = true
 tracing.workspace = true
 uhlc = "0.7"
-uuid = "1.18"
 
-[dependencies.corro-agent]
-git = "https://github.com/EmbarkStudios/corrosion"
-branch = "misc"
+corro-agent.workspace = true
+corro-api-types.workspace = true
+corro-client.workspace = true
+corro-types.workspace = true
+# spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+# tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 
-[dependencies.corro-api-types]
-git = "https://github.com/EmbarkStudios/corrosion"
-branch = "misc"
-
-[dependencies.corro-client]
-git = "https://github.com/EmbarkStudios/corrosion"
-branch = "misc"
-
-[dependencies.corro-types]
-git = "https://github.com/EmbarkStudios/corrosion"
-branch = "misc"
-
-[dependencies.spawn]
-git = "https://github.com/EmbarkStudios/corrosion"
-branch = "misc"
-
-[dependencies.tripwire]
-git = "https://github.com/EmbarkStudios/corrosion"
-branch = "misc"
+[dev-dependencies]
+corrosion-utils.workspace = true
+insta = "1.43"

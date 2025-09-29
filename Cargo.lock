@@ -438,7 +438,7 @@ dependencies = [
 [[package]]
 name = "backoff"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "rand 0.9.2",
 ]
@@ -844,7 +844,7 @@ dependencies = [
 [[package]]
 name = "consul-client"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "camino",
  "http",
@@ -905,7 +905,7 @@ dependencies = [
 [[package]]
 name = "corro-agent"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "antithesis_sdk",
  "arc-swap",
@@ -972,7 +972,7 @@ dependencies = [
 [[package]]
 name = "corro-api-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "camino",
  "compact_str",
@@ -991,7 +991,7 @@ dependencies = [
 [[package]]
 name = "corro-base-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "camino",
  "compact_str",
@@ -1011,7 +1011,7 @@ dependencies = [
 [[package]]
 name = "corro-client"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "bytes",
  "corro-api-types",
@@ -1035,7 +1035,7 @@ dependencies = [
 [[package]]
 name = "corro-pg"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "bytes",
  "chrono",
@@ -1081,7 +1081,7 @@ dependencies = [
 [[package]]
 name = "corro-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "antithesis_sdk",
  "arc-swap",
@@ -1133,7 +1133,7 @@ dependencies = [
 [[package]]
 name = "corro-utils"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "eyre",
  "tokio",
@@ -1144,23 +1144,46 @@ dependencies = [
 name = "corrosion"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "bytes",
  "camino",
  "compact_str",
  "corro-agent",
  "corro-api-types",
  "corro-client",
  "corro-types",
+ "corrosion-utils",
  "data-encoding",
  "eyre",
+ "insta",
+ "parking_lot",
  "quilkin-types",
+ "quinn",
+ "quinn-plaintext",
  "rusqlite",
  "serde",
+ "serde_json",
  "smallvec",
+ "thiserror 2.0.16",
+ "time",
+ "tokio",
+ "tracing",
+ "uhlc",
+]
+
+[[package]]
+name = "corrosion-utils"
+version = "0.10.0-dev"
+dependencies = [
+ "camino",
+ "corro-api-types",
+ "corro-types",
+ "prettytable",
+ "rusqlite",
  "spawn",
  "tempfile",
  "tokio",
  "tokio-stream",
- "tracing",
  "tripwire",
  "uhlc",
  "uuid",
@@ -1436,6 +1459,27 @@ dependencies = [
  "block-buffer",
  "crypto-common",
  "subtle",
+]
+
+[[package]]
+name = "dirs-next"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b98cf8ebf19c3d1b223e151f99a4f9f0690dca41414773390fc824184ac833e1"
+dependencies = [
+ "cfg-if",
+ "dirs-sys-next",
+]
+
+[[package]]
+name = "dirs-sys-next"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
+dependencies = [
+ "libc",
+ "redox_users",
+ "winapi",
 ]
 
 [[package]]
@@ -2328,7 +2372,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -2336,9 +2380,9 @@ dependencies = [
 
 [[package]]
 name = "iana-time-zone"
-version = "0.1.63"
+version = "0.1.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0c919e5debc312ad217002b8048a17b7d83f80703865bbfcfebb0458b0b27d8"
+checksum = "33e57f83510bb73707521ebaffa789ec8caf86f9657cad665b092b581d40e9fb"
 dependencies = [
  "android_system_properties",
  "core-foundation-sys",
@@ -2576,6 +2620,17 @@ checksum = "dbc5ebe9c3a1a7a5127f920a418f7585e9e758e911d0466ed004f393b0e380b2"
 dependencies = [
  "memchr",
  "serde",
+]
+
+[[package]]
+name = "is-terminal"
+version = "0.4.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
+dependencies = [
+ "hermit-abi",
+ "libc",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2937,6 +2992,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "667f4fec20f29dfc6bc7357c582d91796c169ad7e2fce709468aefeb2c099870"
 dependencies = [
  "cc",
+ "libc",
+]
+
+[[package]]
+name = "libredox"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "416f7e718bdb06000964960ffa43b4335ad4012ae8b99060261aa4a8088d5ccb"
+dependencies = [
+ "bitflags 2.9.4",
  "libc",
 ]
 
@@ -3615,9 +3680,9 @@ checksum = "f84267b20a16ea918e43c6a88433c2d54fa145c92a811b5b047ccbe153674483"
 
 [[package]]
 name = "postgres-protocol"
-version = "0.6.8"
+version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76ff0abab4a9b844b93ef7b81f1efc0a366062aaef2cd702c76256b5dc075c54"
+checksum = "fbef655056b916eb868048276cfd5d6a7dea4f81560dfd047f97c8c6fe3fcfd4"
 dependencies = [
  "base64",
  "byteorder",
@@ -3633,9 +3698,9 @@ dependencies = [
 
 [[package]]
 name = "postgres-types"
-version = "0.2.9"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "613283563cd90e1dfc3518d548caee47e0e725455ed619881f5cf21f36de4b48"
+checksum = "77a120daaabfcb0e324d5bf6e411e9222994cb3795c79943a0ef28ed27ea76e4"
 dependencies = [
  "array-init",
  "bytes",
@@ -3710,10 +3775,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-crate"
-version = "3.3.0"
+name = "prettytable"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edce586971a4dfaa28950c6f18ed55e0406c1ab88bbce2c6f6293a7aaba73d35"
+checksum = "46480520d1b77c9a3482d39939fcf96831537a250ec62d4fd8fbdf8e0302e781"
+dependencies = [
+ "encode_unicode",
+ "is-terminal",
+ "lazy_static",
+ "term",
+ "unicode-width",
+]
+
+[[package]]
+name = "proc-macro-crate"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "219cb19e96be00ab2e37d6e299658a0cfa83e52429179969b0f0121b4ac46983"
 dependencies = [
  "toml_edit",
 ]
@@ -4042,7 +4120,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "thiserror 2.0.16",
  "tokio",
  "tracing",
@@ -4093,7 +4171,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -4204,9 +4282,9 @@ dependencies = [
 
 [[package]]
 name = "rcgen"
-version = "0.14.4"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c83367ba62b3f1dbd0f086ede4e5ebfb4713fb234dbbc5807772a31245ff46d"
+checksum = "5fae430c6b28f1ad601274e78b7dffa0546de0b73b4cd32f46723c0c2a16f7a5"
 dependencies = [
  "pem",
  "ring",
@@ -4243,6 +4321,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5407465600fb0548f1442edf71dd20683c6ed326200ace4b1ef0763521bb3b77"
 dependencies = [
  "bitflags 2.9.4",
+]
+
+[[package]]
+name = "redox_users"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
+dependencies = [
+ "getrandom 0.2.16",
+ "libredox",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -4403,9 +4492,9 @@ dependencies = [
 
 [[package]]
 name = "rust_decimal"
-version = "1.37.2"
+version = "1.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b203a6425500a03e0919c42d3c47caca51e79f1132046626d2c8871c5092035d"
+checksum = "c8975fc98059f365204d635119cf9c5a60ae67b841ed49b5422a9a7e56cdfac0"
 dependencies = [
  "arrayvec",
  "borsh",
@@ -4539,7 +4628,7 @@ dependencies = [
  "security-framework 3.4.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4702,10 +4791,11 @@ checksum = "56e6fa9c48d24d85fb3de5ad847117517440f6beceb7798af16b4a87d616b8d0"
 
 [[package]]
 name = "serde"
-version = "1.0.219"
+version = "1.0.226"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0e2c6ed6606019b4e29e69dbaba95b11854410e5347d525002456dbbb786b6"
+checksum = "0dca6411025b24b60bfa7ec1fe1f8e710ac09782dca409ee8237ba74b51295fd"
 dependencies = [
+ "serde_core",
  "serde_derive",
 ]
 
@@ -4720,10 +4810,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_derive"
-version = "1.0.219"
+name = "serde_core"
+version = "1.0.226"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b0276cf7f2c73365f7157c8123c21cd9a50fbbd844757af28ca1f5925fc2a00"
+checksum = "ba2ba63999edb9dac981fb34b3e5c0d111a69b0924e253ed29d83f7c99e966a4"
+dependencies = [
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.226"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8db53ae22f34573731bafa1db20f04027b2d25e02d8205921b569171699cdb33"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4743,24 +4842,26 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.143"
+version = "1.0.145"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d401abef1d108fbd9cbaebc3e46611f4b1021f714a0597a71f41ee463f5f4a5a"
+checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
 dependencies = [
  "itoa",
  "memchr",
  "ryu",
  "serde",
+ "serde_core",
 ]
 
 [[package]]
 name = "serde_path_to_error"
-version = "0.1.17"
+version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59fab13f937fa393d08645bf3a84bdfe86e296747b506ada67bb15f10f218b2a"
+checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
 dependencies = [
  "itoa",
  "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -4957,7 +5058,7 @@ dependencies = [
 [[package]]
 name = "spawn"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "futures",
  "parking_lot",
@@ -4997,7 +5098,7 @@ dependencies = [
 [[package]]
 name = "sqlite-functions"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -5006,7 +5107,7 @@ dependencies = [
 [[package]]
 name = "sqlite-pool"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "arc-swap",
  "deadpool",
@@ -5073,7 +5174,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5224,6 +5325,17 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.0",
+]
+
+[[package]]
+name = "term"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c59df8ac95d96ff9bede18eb7300b0fda5e5d8d90960e76f8e14ae765eedbf1f"
+dependencies = [
+ "dirs-next",
+ "rustversion",
+ "winapi",
 ]
 
 [[package]]
@@ -5431,18 +5543,31 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "0.6.11"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
+checksum = "32f1085dec27c2b6632b04c80b3bb1b4300d6495d1e129693bdda7d91e72eec1"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "toml_edit"
-version = "0.22.27"
+version = "0.23.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
+checksum = "c2ad0b7ae9cfeef5605163839cb9221f453399f15cfb5c10be9885fcf56611f9"
 dependencies = [
  "indexmap 2.11.1",
  "toml_datetime",
+ "toml_parser",
+ "winnow",
+]
+
+[[package]]
+name = "toml_parser"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cf893c33be71572e0e9aa6dd15e6677937abd686b066eac3f8cd3531688a627"
+dependencies = [
  "winnow",
 ]
 
@@ -5679,7 +5804,7 @@ dependencies = [
 [[package]]
 name = "tripwire"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b1bbd35f51bf51b888f67f93368d19fd9ac6ce4d"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#f118b85176ac3a987fe90766ccb9ba9b57a1e503"
 dependencies = [
  "futures",
  "futures-util",
@@ -5790,6 +5915,12 @@ name = "unicode-properties"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e70f2a8b45122e719eb623c01822704c4e0907e7e426a05927e1a1cfff5b75d0"
+
+[[package]]
+name = "unicode-width"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
 
 [[package]]
 name = "unsafe-libyaml"

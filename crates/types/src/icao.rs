@@ -3,18 +3,23 @@ use std::fmt;
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct IcaoCode([u8; 4]);
 
+const VALID_RANGE: std::ops::RangeInclusive<u8> = b'A'..=b'Z';
+
 impl IcaoCode {
     /// Creates a new Icao from raw bytes
     ///
     /// This is meant for testing, and asserts if any of the characters are not valid
     pub fn new_testing(code: [u8; 4]) -> Self {
-        const VALID_RANGE: std::ops::RangeInclusive<u8> = b'A'..=b'Z';
-
         for c in code {
             assert!(VALID_RANGE.contains(&c));
         }
 
         Self(code)
+    }
+
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        self.as_ref()
     }
 }
 
@@ -25,31 +30,90 @@ impl AsRef<str> for IcaoCode {
     }
 }
 
+impl AsRef<[u8]> for IcaoCode {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 impl Default for IcaoCode {
     fn default() -> Self {
         Self([b'X', b'X', b'X', b'X'])
     }
 }
 
+#[derive(Debug)]
+pub enum IcaoError {
+    InvalidLength { len: usize },
+    InvalidCharacter { character: char, index: usize },
+}
+
+impl fmt::Display for IcaoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidLength { len } => {
+                write!(f, "expected a length of 4 but got a length of {len}")
+            }
+            Self::InvalidCharacter { character, index } => write!(
+                f,
+                "invalid character '{character}' was found at index {index}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for IcaoError {
+    fn description(&self) -> &str {
+        match self {
+            Self::InvalidLength { .. } => "the length of the code was invalid",
+            Self::InvalidCharacter { .. } => "an invalid character was found",
+        }
+    }
+}
+
+impl<'s> TryFrom<&'s [u8]> for IcaoCode {
+    type Error = IcaoError;
+
+    fn try_from(value: &'s [u8]) -> Result<Self, Self::Error> {
+        if value.len() != 4 {
+            return Err(IcaoError::InvalidLength { len: value.len() });
+        }
+
+        for (index, c) in value.iter().enumerate() {
+            if !VALID_RANGE.contains(&c) {
+                return Err(IcaoError::InvalidCharacter {
+                    character: *c as char,
+                    index,
+                });
+            }
+        }
+
+        let mut c = [0u8; 4];
+        c.copy_from_slice(value);
+
+        Ok(Self(c))
+    }
+}
+
 impl std::str::FromStr for IcaoCode {
-    type Err = eyre::Error;
+    type Err = IcaoError;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         const VALID_RANGE: std::ops::RangeInclusive<char> = 'A'..='Z';
         let mut arr = [0; 4];
-        let mut i = 0;
 
-        for c in input.chars() {
-            eyre::ensure!(i < 4, "ICAO code is too long");
-            eyre::ensure!(
-                VALID_RANGE.contains(&c),
-                "ICAO code contained invalid character '{c}'"
-            );
-            arr[i] = c as u8;
-            i += 1;
+        if input.len() != 4 {
+            return Err(IcaoError::InvalidLength { len: input.len() });
         }
 
-        eyre::ensure!(i == 4, "ICAO code was not long enough");
+        for (index, character) in input.chars().enumerate() {
+            if !VALID_RANGE.contains(&character) {
+                return Err(IcaoError::InvalidCharacter { character, index });
+            }
+
+            arr[index] = character as u8;
+        }
+
         Ok(Self(arr))
     }
 }
