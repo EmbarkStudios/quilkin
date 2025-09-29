@@ -114,9 +114,6 @@ pub struct EndpointSet {
     pub token_map: TokenAddressMap,
     /// The hash of all of the endpoints in this set
     hash: u64,
-    /// Version of this set of endpoints. Any mutatation of the endpoints
-    /// set monotonically increases this number
-    version: u64,
 }
 
 impl EndpointSet {
@@ -127,7 +124,6 @@ impl EndpointSet {
             endpoints,
             token_map: <_>::default(),
             hash: 0,
-            version: 0,
         };
 
         this.update();
@@ -145,7 +141,6 @@ impl EndpointSet {
             endpoints,
             token_map: <_>::default(),
             hash: hash.number(),
-            version: 1,
         };
 
         this.build_token_map();
@@ -195,7 +190,6 @@ impl EndpointSet {
         }
 
         self.hash = hasher.finish();
-        self.version += 1;
         std::mem::replace(&mut self.token_map, token_map)
     }
 
@@ -232,7 +226,6 @@ impl EndpointSet {
             self.update()
         } else {
             self.hash = replacement.hash;
-            self.version += 1;
             self.build_token_map()
         };
 
