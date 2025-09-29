@@ -72,7 +72,7 @@ impl ToSqlParam for TokenSet {
 
 impl ToSqlParam for IcaoCode {
     fn to_sql(&self) -> SqliteParam {
-        SqliteParam::Text(self.as_str().into())
+        SqliteParam::Text(self.as_ref().into())
     }
 }
 
@@ -210,7 +210,7 @@ impl<'s, const N: usize> Server<'s, N> {
 
         if let Some(icao) = update.icao {
             query.push_str("icao = ?");
-            params.push(SqliteParam::Text(icao.as_str().into()));
+            params.push(SqliteParam::Text(icao.as_ref().into()));
         }
 
         if let Some(ts) = update.tokens {

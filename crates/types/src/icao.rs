@@ -18,8 +18,8 @@ impl IcaoCode {
     }
 
     #[inline]
-    pub fn as_str(&self) -> &str {
-        self.as_ref()
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
     }
 }
 
@@ -27,12 +27,6 @@ impl AsRef<str> for IcaoCode {
     fn as_ref(&self) -> &str {
         // SAFETY: We don't allow this to be constructed with an invalid utf-8 string
         unsafe { std::str::from_utf8_unchecked(&self.0) }
-    }
-}
-
-impl AsRef<[u8]> for IcaoCode {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
     }
 }
 
@@ -80,7 +74,7 @@ impl<'s> TryFrom<&'s [u8]> for IcaoCode {
         }
 
         for (index, c) in value.iter().enumerate() {
-            if !VALID_RANGE.contains(&c) {
+            if !VALID_RANGE.contains(c) {
                 return Err(IcaoError::InvalidCharacter {
                     character: *c as char,
                     index,

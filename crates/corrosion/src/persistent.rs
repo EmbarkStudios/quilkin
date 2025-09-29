@@ -64,7 +64,7 @@ impl ClientHandshakeRequestV1 {
         write_magic_and_version(&mut req, 1);
 
         req[6..8].copy_from_slice(&self.qcmp_port.to_ne_bytes());
-        req[8..12].copy_from_slice(self.icao.as_ref());
+        req[8..12].copy_from_slice(self.icao.as_bytes());
         req
     }
 
