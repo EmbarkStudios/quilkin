@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Proxy","Ready","ToTokens"]};
+window.SIDEBAR_ITEMS = {"struct":["IcaoCode","Proxy","Ready","ToTokens"]};

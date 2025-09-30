@@ -1048,15 +1048,15 @@
                 .iter()
                 .enumerate()
                 .map(|(ind, sa)| {
-                    <span class="kw">let </span><span class="kw-2">mut </span>tokens = std::collections::BTreeSet::new();
                     <span class="kw">let </span>start = ind <span class="kw">as </span>u64 * count;
-                    <span class="kw">for </span>i <span class="kw">in </span>start..(start + count) {
-                        tokens.insert(i.to_le_bytes()[..tt.length].to_vec());
-                    }
 
                     <span class="kw">crate</span>::net::endpoint::Endpoint::with_metadata(
                         (<span class="kw-2">*</span>sa).into(),
-                        <span class="kw">crate</span>::net::endpoint::Metadata { tokens },
+                        <span class="kw">crate</span>::net::endpoint::Metadata {
+                            tokens: (start..(start + count))
+                                .map(|i| i.to_le_bytes()[..tt.length].to_vec())
+                                .collect(),
+                        },
                     )
                 })
                 .collect()

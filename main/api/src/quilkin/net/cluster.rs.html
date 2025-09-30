@@ -1058,7 +1058,7 @@
         <span class="kw">for </span>ep <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.endpoints {
             ep.hash(<span class="kw-2">&amp;mut </span>hasher);
 
-            <span class="kw">for </span>tok <span class="kw">in </span><span class="kw-2">&amp;</span>ep.metadata.known.tokens {
+            <span class="kw">for </span>tok <span class="kw">in </span>ep.metadata.known.tokens.iter() {
                 <span class="kw">let </span>hash = gxhash::gxhash64(tok, HASH_SEED);
                 token_map
                     .entry(hash)
@@ -1078,7 +1078,7 @@
 
         <span class="comment">// This is only called on proxies, so calculate a token map
         </span><span class="kw">for </span>ep <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.endpoints {
-            <span class="kw">for </span>tok <span class="kw">in </span><span class="kw-2">&amp;</span>ep.metadata.known.tokens {
+            <span class="kw">for </span>tok <span class="kw">in </span>ep.metadata.known.tokens.iter() {
                 <span class="kw">let </span>hash = gxhash::gxhash64(tok, HASH_SEED);
                 token_map
                     .entry(hash)
