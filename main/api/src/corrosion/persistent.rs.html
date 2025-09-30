@@ -298,8 +298,7 @@
 <a href="#297" id="297">297</a>
 <a href="#298" id="298">298</a>
 <a href="#299" id="299">299</a>
-<a href="#300" id="300">300</a>
-<a href="#301" id="301">301</a></pre></div><pre class="rust"><code><span class="doccomment">//! Implementation for a persistent connection between a client (agent) and
+<a href="#300" id="300">300</a></pre></div><pre class="rust"><code><span class="doccomment">//! Implementation for a persistent connection between a client (agent) and
 //! server (relay).
 
 </span><span class="kw">pub mod </span>client;
@@ -323,7 +322,6 @@
     </span>UnsupportedVersion { ours: u16, theirs: u16 },
     <span class="attr">#[error(<span class="string">"expected length of {} but only received {}"</span>, expected, length)]
     </span>InsufficientLength { length: usize, expected: usize },
-
     <span class="attr">#[error(transparent)]
     </span>InvalidIcao(<span class="attr">#[from] </span>quilkin_types::IcaoError),
 }
