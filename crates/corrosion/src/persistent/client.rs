@@ -177,7 +177,11 @@ impl Client {
                             tracing::warn!("transaction response could not be sent to queuer");
                         }
                     },
-                    invalid => unimplemented!("support for version {invalid} is not implemented"),
+                    _invalid => {
+                        return Err(StreamError::Connect(
+                            quinn::ConnectionError::VersionMismatch,
+                        ));
+                    }
                 }
 
                 Ok(None)
