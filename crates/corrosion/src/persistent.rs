@@ -22,7 +22,6 @@ pub enum HandshakeError {
     UnsupportedVersion { ours: u16, theirs: u16 },
     #[error("expected length of {} but only received {}", expected, length)]
     InsufficientLength { length: usize, expected: usize },
-
     #[error(transparent)]
     InvalidIcao(#[from] quilkin_types::IcaoError),
 }
