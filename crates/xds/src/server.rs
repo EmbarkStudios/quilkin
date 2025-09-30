@@ -105,7 +105,6 @@ pub struct ControlPlane<C> {
     pub config: Arc<C>,
     pub idle_request_interval: Duration,
     tx: tokio::sync::broadcast::Sender<&'static str>,
-    pub is_relay: bool,
     pub shutdown: ShutdownSignal,
 }
 
@@ -115,7 +114,6 @@ impl<C> Clone for ControlPlane<C> {
             config: self.config.clone(),
             idle_request_interval: self.idle_request_interval,
             tx: self.tx.clone(),
-            is_relay: self.is_relay,
             shutdown: self.shutdown.clone(),
         }
     }
@@ -133,7 +131,6 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
             config,
             idle_request_interval,
             tx,
-            is_relay: false,
             shutdown,
         }
     }
@@ -145,11 +142,10 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
     }
 
     pub fn management_server(
-        mut self,
+        self,
         listener: TcpListener,
         tls: Option<TlsIdentity>,
     ) -> eyre::Result<impl std::future::Future<Output = crate::Result<()>>> {
-        self.is_relay = false;
         let srx = self.shutdown.clone();
         tokio::spawn({
             let this = self.clone();
@@ -177,11 +173,10 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
     }
 
     pub fn relay_server(
-        mut self,
+        self,
         listener: TcpListener,
         tls: Option<TlsIdentity>,
     ) -> eyre::Result<impl std::future::Future<Output = crate::Result<()>>> {
-        self.is_relay = true;
         let srx = self.shutdown.clone();
         tokio::spawn({
             let this = self.clone();
@@ -213,7 +208,6 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         tracing::debug!(
             %resource_type,
             id = self.config.identifier(),
-            is_relay = self.is_relay,
             "pushing update"
         );
         crate::metrics::actions_total(KIND_SERVER, "push").inc();
@@ -255,7 +249,6 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
             id,
             client = node_id,
             count = self.tx.receiver_count(),
-            is_relay = self.is_relay,
             "subscribed to config updates"
         );
 
@@ -678,7 +671,6 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
             return Err(tonic::Status::invalid_argument("Node identifier required"));
         };
 
-        let is_relay = self.is_relay;
         let mut rx = self.tx.subscribe();
         let id = self.config.identifier();
         let mut shutdown = self.shutdown.clone();
@@ -687,7 +679,6 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
             id,
             client = node_id,
             count = self.tx.receiver_count(),
-            is_relay,
             "subscribed to config updates"
         );
 
