@@ -943,16 +943,7 @@
 <a href="#942" id="942">942</a>
 <a href="#943" id="943">943</a>
 <a href="#944" id="944">944</a>
-<a href="#945" id="945">945</a>
-<a href="#946" id="946">946</a>
-<a href="#947" id="947">947</a>
-<a href="#948" id="948">948</a>
-<a href="#949" id="949">949</a>
-<a href="#950" id="950">950</a>
-<a href="#951" id="951">951</a>
-<a href="#952" id="952">952</a>
-<a href="#953" id="953">953</a>
-<a href="#954" id="954">954</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#945" id="945">945</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2022 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -1059,7 +1050,6 @@
     <span class="kw">pub </span>config: Arc&lt;C&gt;,
     <span class="kw">pub </span>idle_request_interval: Duration,
     tx: tokio::sync::broadcast::Sender&lt;<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str&gt;,
-    <span class="kw">pub </span>is_relay: bool,
     <span class="kw">pub </span>shutdown: ShutdownSignal,
 }
 
@@ -1069,7 +1059,6 @@
             config: <span class="self">self</span>.config.clone(),
             idle_request_interval: <span class="self">self</span>.idle_request_interval,
             tx: <span class="self">self</span>.tx.clone(),
-            is_relay: <span class="self">self</span>.is_relay,
             shutdown: <span class="self">self</span>.shutdown.clone(),
         }
     }
@@ -1087,7 +1076,6 @@
             config,
             idle_request_interval,
             tx,
-            is_relay: <span class="bool-val">false</span>,
             shutdown,
         }
     }
@@ -1099,11 +1087,10 @@
     }
 
     <span class="kw">pub fn </span>management_server(
-        <span class="kw-2">mut </span><span class="self">self</span>,
+        <span class="self">self</span>,
         listener: TcpListener,
         tls: <span class="prelude-ty">Option</span>&lt;TlsIdentity&gt;,
     ) -&gt; eyre::Result&lt;<span class="kw">impl </span>std::future::Future&lt;Output = <span class="kw">crate</span>::Result&lt;()&gt;&gt;&gt; {
-        <span class="self">self</span>.is_relay = <span class="bool-val">false</span>;
         <span class="kw">let </span>srx = <span class="self">self</span>.shutdown.clone();
         tokio::spawn({
             <span class="kw">let </span>this = <span class="self">self</span>.clone();
@@ -1131,11 +1118,10 @@
     }
 
     <span class="kw">pub fn </span>relay_server(
-        <span class="kw-2">mut </span><span class="self">self</span>,
+        <span class="self">self</span>,
         listener: TcpListener,
         tls: <span class="prelude-ty">Option</span>&lt;TlsIdentity&gt;,
     ) -&gt; eyre::Result&lt;<span class="kw">impl </span>std::future::Future&lt;Output = <span class="kw">crate</span>::Result&lt;()&gt;&gt;&gt; {
-        <span class="self">self</span>.is_relay = <span class="bool-val">true</span>;
         <span class="kw">let </span>srx = <span class="self">self</span>.shutdown.clone();
         tokio::spawn({
             <span class="kw">let </span>this = <span class="self">self</span>.clone();
@@ -1167,7 +1153,6 @@
         <span class="macro">tracing::debug!</span>(
             %resource_type,
             id = <span class="self">self</span>.config.identifier(),
-            is_relay = <span class="self">self</span>.is_relay,
             <span class="string">"pushing update"
         </span>);
         <span class="kw">crate</span>::metrics::actions_total(KIND_SERVER, <span class="string">"push"</span>).inc();
@@ -1209,7 +1194,6 @@
             id,
             client = node_id,
             count = <span class="self">self</span>.tx.receiver_count(),
-            is_relay = <span class="self">self</span>.is_relay,
             <span class="string">"subscribed to config updates"
         </span>);
 
@@ -1632,7 +1616,6 @@
             <span class="kw">return </span><span class="prelude-val">Err</span>(tonic::Status::invalid_argument(<span class="string">"Node identifier required"</span>));
         };
 
-        <span class="kw">let </span>is_relay = <span class="self">self</span>.is_relay;
         <span class="kw">let </span><span class="kw-2">mut </span>rx = <span class="self">self</span>.tx.subscribe();
         <span class="kw">let </span>id = <span class="self">self</span>.config.identifier();
         <span class="kw">let </span><span class="kw-2">mut </span>shutdown = <span class="self">self</span>.shutdown.clone();
@@ -1641,7 +1624,6 @@
             id,
             client = node_id,
             count = <span class="self">self</span>.tx.receiver_count(),
-            is_relay,
             <span class="string">"subscribed to config updates"
         </span>);
 
