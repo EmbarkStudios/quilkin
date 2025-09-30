@@ -359,7 +359,7 @@ impl<'s, const N: usize> Datacenter<'s, N> {
             params.push(icao.to_sql());
         }
 
-        query.push_str(" WHERE rowid = (SELECT MIN(rowid) FROM dc WHERE ip = ?");
+        query.push_str(" WHERE rowid = (SELECT MIN(rowid) FROM dc WHERE ip = ?)");
         params.push(peer.to_sql());
 
         self.0.push(Statement::WithParams(query, params));
