@@ -646,13 +646,15 @@ where
 pub(crate) struct EndpointWithLocality {
     pub endpoints: BTreeSet<Endpoint>,
     pub locality: Option<Locality>,
+    pub version: Option<u64>,
 }
 
-impl From<(Option<Locality>, BTreeSet<Endpoint>)> for EndpointWithLocality {
-    fn from((locality, endpoints): (Option<Locality>, BTreeSet<Endpoint>)) -> Self {
+impl From<(Option<Locality>, &EndpointSet)> for EndpointWithLocality {
+    fn from((locality, endpoint_set): (Option<Locality>, &EndpointSet)) -> Self {
         Self {
             locality,
-            endpoints,
+            endpoints: endpoint_set.endpoints.clone(),
+            version: Some(endpoint_set.version().number()),
         }
     }
 }
@@ -708,7 +710,19 @@ impl<'de> Deserialize<'de> for ClusterMap {
                 |EndpointWithLocality {
                      locality,
                      endpoints,
-                 }| { (locality, EndpointSet::new(endpoints)) },
+                     version,
+                 }| {
+                    let eps = if let Some(version) = version {
+                        EndpointSet::with_version(
+                            endpoints,
+                            EndpointSetVersion::from_number(version),
+                        )
+                    } else {
+                        EndpointSet::new(endpoints)
+                    };
+
+                    (locality, eps)
+                },
             )
             .collect::<DashMap<_, _, _>>();
         Ok(Self::from(map))
@@ -722,9 +736,7 @@ impl Serialize for ClusterMap {
     {
         self.map
             .iter()
-            .map(|entry| {
-                EndpointWithLocality::from((entry.key().clone(), entry.value().endpoints.clone()))
-            })
+            .map(|entry| EndpointWithLocality::from((entry.key().clone(), entry.value())))
             .collect::<Vec<_>>()
             .serialize(ser)
     }
