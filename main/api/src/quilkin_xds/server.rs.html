@@ -941,9 +941,7 @@
 <a href="#940" id="940">940</a>
 <a href="#941" id="941">941</a>
 <a href="#942" id="942">942</a>
-<a href="#943" id="943">943</a>
-<a href="#944" id="944">944</a>
-<a href="#945" id="945">945</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#943" id="943">943</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2022 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -1580,8 +1578,6 @@
                 <span class="kw">if </span>res.is_ok() {
                     <span class="macro">tracing::info!</span>(<span class="string">"xds stream terminated"</span>);
                 }
-
-                local.clear(<span class="kw-2">&amp;</span>config, <span class="prelude-val">Some</span>(remote_addr));
 
                 res
             }
