@@ -730,7 +730,18 @@
 <a href="#729" id="729">729</a>
 <a href="#730" id="730">730</a>
 <a href="#731" id="731">731</a>
-<a href="#732" id="732">732</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#732" id="732">732</a>
+<a href="#733" id="733">733</a>
+<a href="#734" id="734">734</a>
+<a href="#735" id="735">735</a>
+<a href="#736" id="736">736</a>
+<a href="#737" id="737">737</a>
+<a href="#738" id="738">738</a>
+<a href="#739" id="739">739</a>
+<a href="#740" id="740">740</a>
+<a href="#741" id="741">741</a>
+<a href="#742" id="742">742</a>
+<a href="#743" id="743">743</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2024 Google LLC All Rights Reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -805,6 +816,14 @@
         requires(<span class="string">"k8s_leader_election"</span>)
     )]
     </span>k8s_leader_id: <span class="prelude-ty">Option</span>&lt;String&gt;,
+
+    <span class="doccomment">/// The name of the k8s Lease resource used for leader election
+    </span><span class="attr">#[arg(
+        long = <span class="string">"provider.k8s.leader-election.lease-name"</span>,
+        env = <span class="string">"QUILKIN_PROVIDERS_K8S_LEADER_ELECTION_LEASE_NAME"</span>,
+        default_value_t = String::from(<span class="string">"quilkin"</span>),
+    )]
+    </span>k8s_leader_lease_name: String,
 
     <span class="attr">#[arg(
         long = <span class="string">"provider.k8s.agones"</span>,
@@ -1103,6 +1122,7 @@
         <span class="kw">let </span>k8s_enabled = <span class="self">self</span>.k8s_enabled;
         <span class="kw">let </span>k8s_leader_election = <span class="self">self</span>.k8s_leader_election;
         <span class="kw">let </span>k8s_leader_id = <span class="self">self</span>.k8s_leader_id.clone().unwrap_or_else(|| config.id());
+        <span class="kw">let </span>k8s_leader_lease_name = <span class="self">self</span>.k8s_leader_lease_name.clone();
         <span class="kw">let </span>k8s_namespace = <span class="self">self</span>.k8s_namespace.clone();
 
         <span class="kw">let </span>selector = <span class="self">self
@@ -1127,6 +1147,7 @@
                 <span class="kw">let </span>agones_namespaces = agones_namespaces.clone();
                 <span class="kw">let </span>k8s_namespace: String = k8s_namespace.clone();
                 <span class="kw">let </span>k8s_leader_id: String = k8s_leader_id.clone();
+                <span class="kw">let </span>k8s_leader_lease_name: String = k8s_leader_lease_name.clone();
                 <span class="kw">let </span>selector = selector.clone();
                 <span class="kw">let </span>locality = locality.clone();
                 <span class="kw">let </span>health_check = health_check.clone();
@@ -1157,6 +1178,7 @@
                         either::Left(tokio::spawn(k8s::update_leader_lock(
                             client.clone(),
                             k8s_namespace,
+                            k8s_leader_lease_name,
                             k8s_leader_id,
                             ll,
                         )))

@@ -349,16 +349,16 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">async fn </span>update_leader_lock(
     client: kube::Client,
     namespace: <span class="kw">impl </span>AsRef&lt;str&gt;,
+    lease_name: <span class="kw">impl </span>Into&lt;String&gt;,
     holder_id: <span class="kw">impl </span>Into&lt;String&gt;,
     leader_lock: config::LeaderLock,
 ) -&gt; <span class="kw">crate</span>::Result&lt;()&gt; {
-    <span class="kw">const </span>LEASE_NAME: <span class="kw-2">&amp;</span>str = <span class="string">"quilkin-mds-leader-lease"</span>;
     <span class="kw">let </span>leadership = LeaseLock::new(
         client,
         namespace.as_ref(),
         LeaseLockParams {
             holder_id: holder_id.into(),
-            lease_name: LEASE_NAME.into(),
+            lease_name: lease_name.into(),
             lease_ttl: std::time::Duration::from_millis(<span class="number">750</span>),
         },
     );
