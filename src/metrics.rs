@@ -29,6 +29,7 @@ pub const DIRECTION_LABEL: &str = "event";
 
 pub(crate) const READ: Direction = Direction::Read;
 pub(crate) const WRITE: Direction = Direction::Write;
+#[allow(dead_code)]
 pub(crate) const ASN_LABEL: &str = "asn";
 
 /// Label value for [`DIRECTION_LABEL`] for `read` events
@@ -523,74 +524,74 @@ pub(crate) fn processing_time(direction: Direction) -> Histogram {
     PROCESSING_TIME.with_label_values(&[direction.label()])
 }
 
-pub(crate) fn bytes_total(direction: Direction, asn: &AsnInfo<'_>) -> IntCounter {
+pub(crate) fn bytes_total(direction: Direction, _asn: &AsnInfo<'_>) -> IntCounter {
     static BYTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
                 "bytes_total",
                 "total number of bytes",
             },
-            &[Direction::LABEL, ASN_LABEL],
+            &[Direction::LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    BYTES_TOTAL.with_label_values(&[direction.label(), asn.asn])
+    BYTES_TOTAL.with_label_values(&[direction.label()])
 }
 
-pub(crate) fn errors_total(direction: Direction, display: &str, asn: &AsnInfo<'_>) -> IntCounter {
+pub(crate) fn errors_total(direction: Direction, display: &str, _asn: &AsnInfo<'_>) -> IntCounter {
     static ERRORS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
                 "errors_total",
                 "total number of errors sending packets",
             },
-            &[Direction::LABEL, "display", ASN_LABEL],
+            &[Direction::LABEL, "display"],
             registry(),
         }
         .unwrap()
     });
 
-    ERRORS_TOTAL.with_label_values(&[direction.label(), display, asn.asn])
+    ERRORS_TOTAL.with_label_values(&[direction.label(), display])
 }
 
-pub(crate) fn packet_jitter(direction: Direction, asn: &AsnInfo<'_>) -> IntGauge {
+pub(crate) fn packet_jitter(direction: Direction, _asn: &AsnInfo<'_>) -> IntGauge {
     static PACKET_JITTER: Lazy<IntGaugeVec> = Lazy::new(|| {
         prometheus::register_int_gauge_vec_with_registry! {
             prometheus::opts! {
                 "packet_jitter",
                 "The time between new packets",
             },
-            &[Direction::LABEL, ASN_LABEL],
+            &[Direction::LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    PACKET_JITTER.with_label_values(&[direction.label(), asn.asn])
+    PACKET_JITTER.with_label_values(&[direction.label()])
 }
 
-pub(crate) fn packets_total(direction: Direction, asn: &AsnInfo<'_>) -> IntCounter {
+pub(crate) fn packets_total(direction: Direction, _asn: &AsnInfo<'_>) -> IntCounter {
     static PACKETS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
                 "packets_total",
                 "Total number of packets",
             },
-            &[Direction::LABEL, ASN_LABEL],
+            &[Direction::LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    PACKETS_TOTAL.with_label_values(&[direction.label(), asn.asn])
+    PACKETS_TOTAL.with_label_values(&[direction.label()])
 }
 
 pub(crate) fn packets_dropped_total(
     direction: Direction,
     source: &str,
-    asn: &AsnInfo<'_>,
+    _asn: &AsnInfo<'_>,
 ) -> IntCounter {
     static PACKETS_DROPPED: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
@@ -598,13 +599,13 @@ pub(crate) fn packets_dropped_total(
                 "packets_dropped_total",
                 "Total number of dropped packets",
             },
-            &[Direction::LABEL, "source", ASN_LABEL],
+            &[Direction::LABEL, "source"],
             registry(),
         }
         .unwrap()
     });
 
-    PACKETS_DROPPED.with_label_values(&[direction.label(), source, asn.asn])
+    PACKETS_DROPPED.with_label_values(&[direction.label(), source])
 }
 
 pub(crate) fn provider_task_failures_total(provider_task: &str) -> IntCounter {

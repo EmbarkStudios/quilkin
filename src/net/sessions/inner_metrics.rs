@@ -20,36 +20,28 @@ use prometheus::{Histogram, IntCounter, IntGauge, IntGaugeVec, Opts};
 use crate::metrics::{histogram_opts, register};
 
 const SUBSYSTEM: &str = "session";
+#[allow(dead_code)]
 const AS_NAME_LABEL: &str = "organization";
 const COUNTRY_CODE_LABEL: &str = "country_code";
+#[allow(dead_code)]
 const PREFIX_ENTITY_LABEL: &str = "prefix_entity";
+#[allow(dead_code)]
 const PREFIX_NAME_LABEL: &str = "prefix_name";
-use crate::metrics::ASN_LABEL;
 
 pub(crate) fn active_sessions(asn: Option<&crate::net::maxmind_db::IpNetEntry>) -> IntGauge {
     static ACTIVE_SESSIONS: Lazy<IntGaugeVec> = Lazy::new(|| {
         prometheus::register_int_gauge_vec_with_registry! {
             Opts::new("active", "number of sessions currently active").subsystem(SUBSYSTEM),
-            &[ASN_LABEL, AS_NAME_LABEL, COUNTRY_CODE_LABEL, PREFIX_ENTITY_LABEL, PREFIX_NAME_LABEL],
+            &[COUNTRY_CODE_LABEL],
             crate::metrics::registry(),
         }
         .unwrap()
     });
 
     if let Some(asnfo) = asn {
-        let mut asn = [0u8; 10];
-        let len = crate::net::maxmind_db::itoa(asnfo.id, &mut asn);
-
-        ACTIVE_SESSIONS.with_label_values(&[
-            // SAFETY: itoa only writes ASCII
-            unsafe { std::str::from_utf8_unchecked(&asn[..len as _]) },
-            &asnfo.as_name,
-            &asnfo.as_cc,
-            &asnfo.prefix_entity,
-            &asnfo.prefix_name,
-        ])
+        ACTIVE_SESSIONS.with_label_values(&[&asnfo.as_cc])
     } else {
-        ACTIVE_SESSIONS.with_label_values(&["", "", "", "", ""])
+        ACTIVE_SESSIONS.with_label_values(&[""])
     }
 }
 
