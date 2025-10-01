@@ -17,7 +17,9 @@
 use arc_swap::ArcSwap;
 use once_cell::sync::Lazy;
 
-use crate::filters::{CreateFilterArgs, DynFilterFactory, Error, FilterInstance, FilterSet};
+use crate::filters::{
+    CreateFilterArgs, CreationError, DynFilterFactory, FilterInstance, FilterSet,
+};
 
 static REGISTRY: Lazy<ArcSwap<FilterSet>> =
     Lazy::new(|| ArcSwap::new(std::sync::Arc::new(FilterSet::default())));
@@ -44,9 +46,9 @@ impl FilterRegistry {
     /// Creates and returns a new dynamic instance of [`Filter`][crate::filters::Filter] for a given
     /// `key`. Errors if the filter cannot be found, or if there is a
     /// configuration issue.
-    pub fn get(key: &str, args: CreateFilterArgs) -> Result<FilterInstance, Error> {
+    pub fn get(key: &str, args: CreateFilterArgs) -> Result<FilterInstance, CreationError> {
         match REGISTRY.load().get(key).map(|p| p.create_filter(args)) {
-            None => Err(Error::NotFound(key.to_owned())),
+            None => Err(CreationError::NotFound(key.to_owned())),
             Some(filter) => filter,
         }
     }
@@ -62,54 +64,64 @@ impl FilterRegistry {
 mod tests {
     use std::net::Ipv4Addr;
 
-    use crate::test_utils::load_test_filters;
+    use crate::test::{alloc_buffer, load_test_filters};
 
     use super::*;
-    use crate::endpoint::{Endpoint, EndpointAddress};
-    use crate::filters::{Filter, FilterRegistry, ReadContext, WriteContext};
+    use crate::filters::{
+        Filter, FilterError, FilterRegistry, PacketMut, ReadContext, WriteContext,
+    };
+    use crate::net::endpoint::{Endpoint, EndpointAddress};
 
+    #[allow(dead_code)]
     struct TestFilter {}
 
     impl Filter for TestFilter {
-        fn read(&self, _: &mut ReadContext) -> Option<()> {
-            None
+        fn read<P: PacketMut>(&self, _: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
+            Err(FilterError::Custom("test error"))
         }
 
-        fn write(&self, _: &mut WriteContext) -> Option<()> {
-            None
+        fn write<P: PacketMut>(&self, _: &mut WriteContext<P>) -> Result<(), FilterError> {
+            Err(FilterError::Custom("test error"))
         }
     }
 
-    #[test]
-    fn insert_and_get() {
+    #[tokio::test]
+    async fn insert_and_get() {
         load_test_filters();
 
         match FilterRegistry::get(&String::from("not.found"), CreateFilterArgs::fixed(None)) {
             Ok(_) => unreachable!("should not be filter"),
-            Err(err) => assert_eq!(Error::NotFound("not.found".to_string()), err),
+            Err(err) => assert_eq!(CreationError::NotFound("not.found".to_string()), err),
         };
 
         assert!(
             FilterRegistry::get(&String::from("TestFilter"), CreateFilterArgs::fixed(None)).is_ok()
         );
 
-        let filter =
+        let instance =
             FilterRegistry::get(&String::from("TestFilter"), CreateFilterArgs::fixed(None))
-                .unwrap()
-                .filter;
+                .unwrap();
+        let filter = instance.filter();
 
         let addr: EndpointAddress = (Ipv4Addr::LOCALHOST, 8080).into();
         let endpoint = Endpoint::new(addr.clone());
 
-        assert!(filter
-            .read(&mut ReadContext::new(
-                vec![endpoint.clone()],
-                addr.clone(),
-                vec![]
-            ))
-            .is_some());
-        assert!(filter
-            .write(&mut WriteContext::new(endpoint, addr.clone(), addr, vec![],))
-            .is_some());
+        let endpoints = crate::net::cluster::ClusterMap::new_default([endpoint.clone()].into());
+        let mut dest = Vec::new();
+        assert!(
+            filter
+                .read(&mut ReadContext::new(
+                    &endpoints,
+                    addr.clone(),
+                    alloc_buffer([]),
+                    &mut dest,
+                ))
+                .is_ok()
+        );
+        assert!(
+            filter
+                .write(&mut WriteContext::new(addr.clone(), addr, alloc_buffer([])))
+                .is_ok()
+        );
     }
 }

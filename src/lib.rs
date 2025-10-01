@@ -16,44 +16,49 @@
 
 #![deny(unused_must_use)]
 
-mod admin;
-mod maxmind_db;
-mod proxy;
+// Above other modules for thr `uring_spawn` macro.
+#[macro_use]
+pub mod net;
 
-pub(crate) mod metrics;
-pub(crate) mod prost;
-pub(crate) mod ttl_map;
-pub(crate) mod utils;
-
+pub mod alloc;
 pub mod cli;
-pub mod cluster;
+pub mod codec;
+pub mod collections;
+pub mod components;
 pub mod config;
-pub mod endpoint;
 pub mod filters;
-pub mod metadata;
+pub mod metrics;
+pub mod providers;
+pub mod service;
+pub mod signal;
+pub mod time;
 pub mod xds;
 
 #[doc(hidden)]
-pub mod test_utils;
+pub mod test;
+
+pub use {providers::Providers, quilkin_proto as generated, service::Service};
 
 pub type Result<T, E = eyre::Error> = std::result::Result<T, E>;
 
 #[doc(inline)]
-pub use self::{
-    cli::{Cli, Proxy},
-    config::Config,
-};
+pub use self::{cli::Cli, config::Config};
 
 pub use quilkin_macros::include_proto;
 
-pub(crate) use self::maxmind_db::MaxmindDb;
+pub(crate) use self::net::maxmind_db::MaxmindDb;
+
+/// A type which can be logged, usually error types.
+pub(crate) trait Loggable {
+    /// Output a log.
+    fn log(&self);
+}
 
 #[cfg(doctest)]
 mod external_doc_tests {
     #![doc = include_str!("../docs/src/services/proxy/filters.md")]
     #![doc = include_str!("../docs/src/services/proxy/filters/capture.md")]
-    #![doc = include_str!("../docs/src/services/proxy/filters/compress.md")]
-    #![doc = include_str!("../docs/src/services/proxy/filters/concatenate_bytes.md")]
+    #![doc = include_str!("../docs/src/services/proxy/filters/concatenate.md")]
     #![doc = include_str!("../docs/src/services/proxy/filters/debug.md")]
     #![doc = include_str!("../docs/src/services/proxy/filters/firewall.md")]
     #![doc = include_str!("../docs/src/services/proxy/filters/load_balancer.md")]
@@ -61,6 +66,5 @@ mod external_doc_tests {
     #![doc = include_str!("../docs/src/services/proxy/filters/match.md")]
     #![doc = include_str!("../docs/src/services/proxy/filters/timestamp.md")]
     #![doc = include_str!("../docs/src/services/proxy/filters/token_router.md")]
-    #![doc = include_str!("../docs/src/services/proxy/filters/writing_custom_filters.md")]
     #![doc = include_str!("../docs/src/services/xds/providers/filesystem.md")]
 }

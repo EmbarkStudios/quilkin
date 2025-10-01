@@ -14,7 +14,6 @@
 > /kind cleanup
 > /kind documentation
 > /kind feature
-> /kind hotfix
 
 **What this PR does / Why we need it**:
 

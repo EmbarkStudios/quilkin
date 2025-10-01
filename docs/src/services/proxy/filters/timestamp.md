@@ -24,10 +24,8 @@ filters:
     config:
         metadataKey: example.com/session_duration
 clusters:
-  default:
-    localities:
-      - endpoints:
-        - address: 127.0.0.1:26000
+  - endpoints:
+    - address: 127.0.0.1:26000
 # ";
 # let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
 ```
@@ -40,6 +38,6 @@ clusters:
 
 ## Metrics
 
-* `quilkin_filter_timestamp_seconds{metadata_key, direction}`
+* `quilkin_filter_histogram{label="duration"}`
   A histogram of durations from `metadata_key` to now in the packet `direction`.
 

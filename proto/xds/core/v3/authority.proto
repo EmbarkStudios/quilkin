@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package xds.core.v3;
+
+import "xds/annotations/v3/status.proto";
+
+import "validate/validate.proto";
+
+option (xds.annotations.v3.file_status).work_in_progress = true;
+
+// xDS authority information.
+message Authority {
+  string name = 1 [ (validate.rules).string = {min_len : 1} ];
+
+  // .. space reserved for additional authority addressing information, e.g. for
+  // resource signing, items such as CA trust chain, cert pinning may be added.
+}

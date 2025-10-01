@@ -14,11 +14,9 @@
  * limitations under the License.
  */
 
-use std::convert::TryFrom;
-
 use bytes::Bytes;
 
-use crate::filters::Error;
+use crate::filters::CreationError;
 
 /// The configuration of a [`Filter`][crate::filters::Filter] from either a
 /// static or dynamic source.
@@ -36,13 +34,13 @@ impl ConfigType {
     /// Deserializes takes two type arguments `Static` and `Dynamic` representing
     /// the types of a static and dynamic configuration respectively.
     ///
-    /// If the configuration input is a [ConfigType::Static], then it is directly
+    /// If the configuration input is a [`ConfigType::Static`], then it is directly
     /// deserialized into the returned `Static` instance.
     ///
-    /// Otherwise if the input is a [ConfigType::Dynamic] then the contained Protobuf
+    /// Otherwise if the input is a [`ConfigType::Dynamic`] then the contained Protobuf
     /// data is decoded into a type `Dynamic` instance, after which the decoded
     /// value is converted into the returned `Static` instance.
-    /// As a result [TryFrom] must be implemented from the `Dynamic` to the `Static`
+    /// As a result `TryFrom` must be implemented from the `Dynamic` to the `Static`
     /// type.
     ///
     /// It returns both the deserialized, as well as, a JSON representation
@@ -51,12 +49,12 @@ impl ConfigType {
     pub fn deserialize<TextConfiguration, BinaryConfiguration>(
         self,
         filter_name: &str,
-    ) -> Result<(serde_json::Value, TextConfiguration), Error>
+    ) -> Result<(serde_json::Value, TextConfiguration), CreationError>
     where
         BinaryConfiguration: prost::Message + Default,
         TextConfiguration:
             serde::Serialize + for<'de> serde::Deserialize<'de> + TryFrom<BinaryConfiguration>,
-        Error: From<<BinaryConfiguration as TryInto<TextConfiguration>>::Error>,
+        CreationError: From<<BinaryConfiguration as TryInto<TextConfiguration>>::Error>,
     {
         match self {
             ConfigType::Static(ref config) => serde_yaml::to_string(config)
@@ -64,7 +62,7 @@ impl ConfigType {
                     serde_yaml::from_str::<TextConfiguration>(raw_config.as_str())
                 })
                 .map_err(|err| {
-                    Error::DeserializeFailed(format!(
+                    CreationError::DeserializeFailed(format!(
                         "filter `{filter_name}`: failed to YAML deserialize config: {err}",
                     ))
                 })
@@ -74,7 +72,7 @@ impl ConfigType {
                 }),
             ConfigType::Dynamic(config) => prost::Message::decode(Bytes::from(config.value))
                 .map_err(|err| {
-                    Error::DeserializeFailed(format!(
+                    CreationError::DeserializeFailed(format!(
                         "filter `{filter_name}`: config decode error: {err}",
                     ))
                 })
@@ -87,12 +85,12 @@ impl ConfigType {
     }
 
     // Returns an equivalent json value for the passed in config.
-    fn get_json_config<T>(filter_name: &str, config: &T) -> Result<serde_json::Value, Error>
+    fn get_json_config<T>(filter_name: &str, config: &T) -> Result<serde_json::Value, CreationError>
     where
         T: serde::Serialize + for<'de> serde::Deserialize<'de>,
     {
         serde_json::to_value(config).map_err(|err| {
-            Error::DeserializeFailed(format!(
+            CreationError::DeserializeFailed(format!(
                 "filter `{filter_name}`: failed to serialize config to json: {err}",
             ))
         })
@@ -152,6 +150,6 @@ mod tests {
                 "value": 98,
             }),
             config_json
-        )
+        );
     }
 }

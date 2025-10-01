@@ -1,0 +1,15 @@
+[package]
+name = "nmap-service-probes"
+version = "0.1.0"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+winnow = "0.6.22"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"

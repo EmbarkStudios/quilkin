@@ -41,23 +41,12 @@ steps:
       - 'make version > ../version'
     id: output-version
     waitFor: ['-']
-  - name: ferrarimarco/github-changelog-generator:1.15.2
-    id: changelog
-    entrypoint: sh
-    args:
-      - '-c'
-      - 'github_changelog_generator --user=googleforgames --project=quilkin --bug-labels=kind/bug --enhancement-labels=kind/feature --breaking-labels=kind/breaking --security-labels=area/security --exclude-labels=duplicate,question,invalid,wontfix,priority/wontfix --future-release "v$(cat ./version)" --release-branch=main --token $$GH_TOKEN'
-    secretEnv:
-      - GH_TOKEN
-    waitFor:
-      - output-version
 artifacts:
   objects:
     location: '$_STORAGE'
     paths:
       - '*.zip'
       - 'license.html'
-      - 'CHANGELOG.md'
   images:
     - ${_REPOSITORY}quilkin
 options:
@@ -71,8 +60,4 @@ substitutions:
   _BUILD_IMAGE_TAG: us-docker.pkg.dev/${PROJECT_ID}/ci/build-image
   _REPOSITORY: us-docker.pkg.dev/${PROJECT_ID}/release/
   _STORAGE: gs://${PROJECT_ID}-quilkin-releases
-availableSecrets:
-  secretManager:
-    - versionName: projects/${PROJECT_ID}/secrets/release-github-token/versions/latest
-      env: GH_TOKEN
 timeout: 1800s

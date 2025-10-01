@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-use prometheus::{exponential_buckets, Histogram};
+use prometheus::{Histogram, exponential_buckets};
 
 use crate::{
-    config::Filter as FilterConfig,
-    filters::{prelude::*, FilterRegistry},
-    metrics::{histogram_opts, CollectorExt},
+    config::filter::Filter as FilterConfig,
+    filters::{FilterRegistry, prelude::*},
+    metrics::{CollectorExt, histogram_opts},
 };
 
 const FILTER_LABEL: &str = "filter";
@@ -31,7 +31,7 @@ const BUCKET_START: f64 = 0.000125;
 
 const BUCKET_FACTOR: f64 = 2.5;
 
-/// At an exponential factor of 2.5 (BUCKET_FACTOR), 11 iterations gets us to just over half a
+/// At an exponential factor of 2.5 ([`BUCKET_FACTOR`]), 11 iterations gets us to just over half a
 /// second. Any processing that occurs over half a second is far too long, so we end
 /// the bucketing there as we don't care about granularity past this value.
 const BUCKET_COUNT: usize = 11;
@@ -50,7 +50,7 @@ pub struct FilterChain {
 }
 
 impl FilterChain {
-    pub fn new(filters: Vec<(String, FilterInstance)>) -> Result<Self, Error> {
+    pub fn new(filters: Vec<(String, FilterInstance)>) -> Result<Self, CreationError> {
         let subsystem = "filter";
 
         Ok(Self {
@@ -91,30 +91,73 @@ impl FilterChain {
         })
     }
 
-    /// Validates the filter configurations in the provided config and constructs
-    /// a FilterChain if all configurations are valid.
-    pub fn try_create(filter_configs: &[FilterConfig]) -> Result<Self, Error> {
-        Self::try_from(filter_configs)
+    pub fn testing<const N: usize>(filters: [FilterInstance; N]) -> Self {
+        let filters = filters.into_iter().map(|f| (String::new(), f)).collect();
+        Self::new(filters).unwrap()
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.filters.len()
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.filters.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = crate::config::Filter> + '_ {
-        self.filters
-            .iter()
-            .map(|(name, instance)| crate::config::Filter {
-                name: name.clone(),
-                config: match &*instance.config {
-                    serde_json::Value::Null => None,
-                    value => Some(value.clone()),
-                },
-            })
+    pub fn iter(&self) -> impl Iterator<Item = FilterConfig> + '_ {
+        self.filters.iter().map(|(name, instance)| FilterConfig {
+            name: name.clone(),
+            label: instance.label().map(String::from),
+            config: match instance.config() {
+                serde_json::Value::Null => None,
+                value => Some(value.clone()),
+            },
+        })
+    }
+
+    /// Validates the filter configurations in the provided config and constructs
+    /// a [`Self`] if all configurations are valid, including the conversion
+    /// into a [`Filter`]
+    pub fn try_create_fallible<Item>(
+        filter_configs: impl IntoIterator<Item = Item>,
+    ) -> Result<Self, CreationError>
+    where
+        Item: TryInto<FilterConfig, Error = CreationError>,
+    {
+        let mut filters = Vec::new();
+
+        for filter_config in filter_configs {
+            let filter_config = filter_config.try_into()?;
+            let filter = FilterRegistry::get(
+                &filter_config.name,
+                CreateFilterArgs::fixed(filter_config.config),
+            )?;
+
+            filters.push((filter_config.name, filter));
+        }
+
+        Self::new(filters)
+    }
+
+    /// Validates the filter configurations in the provided config and constructs
+    /// a [`Self`] if all configurations are valid.
+    pub fn try_create(
+        filter_configs: impl IntoIterator<Item = FilterConfig>,
+    ) -> Result<Self, CreationError> {
+        let mut filters = Vec::new();
+
+        for filter_config in filter_configs {
+            let filter = FilterRegistry::get(
+                &filter_config.name,
+                CreateFilterArgs::fixed(filter_config.config),
+            )?;
+
+            filters.push((filter_config.name, filter));
+        }
+
+        Self::new(filters)
     }
 }
 
@@ -123,7 +166,7 @@ impl std::fmt::Debug for FilterChain {
         let mut filters = f.debug_struct("Filters");
 
         for (id, instance) in &self.filters {
-            filters.field(id, &*instance.config);
+            filters.field(id, instance.config());
         }
 
         filters.finish()
@@ -138,73 +181,51 @@ impl PartialEq for FilterChain {
 
         self.filters.iter().zip(&rhs.filters).all(
             |((lhs_name, lhs_instance), (rhs_name, rhs_instance))| {
-                lhs_name == rhs_name && lhs_instance.config == rhs_instance.config
+                lhs_name == rhs_name
+                    && lhs_instance.config() == rhs_instance.config()
+                    && lhs_instance.label() == rhs_instance.label()
             },
         )
     }
 }
 
-impl<const N: usize> TryFrom<&[FilterConfig; N]> for FilterChain {
-    type Error = Error;
+use crate::generated::envoy::config::listener::v3::FilterChain as EnvoyFilterChain;
 
-    fn try_from(filter_configs: &[FilterConfig; N]) -> Result<Self, Error> {
-        Self::try_from(&filter_configs[..])
-    }
-}
+impl TryFrom<FilterChain> for EnvoyFilterChain {
+    type Error = CreationError;
 
-impl<const N: usize> TryFrom<[FilterConfig; N]> for FilterChain {
-    type Error = Error;
-
-    fn try_from(filter_configs: [FilterConfig; N]) -> Result<Self, Error> {
-        Self::try_from(&filter_configs[..])
-    }
-}
-
-impl TryFrom<Vec<FilterConfig>> for FilterChain {
-    type Error = Error;
-
-    fn try_from(filter_configs: Vec<FilterConfig>) -> Result<Self, Error> {
-        Self::try_from(&filter_configs[..])
-    }
-}
-
-impl TryFrom<&[FilterConfig]> for FilterChain {
-    type Error = Error;
-
-    fn try_from(filter_configs: &[FilterConfig]) -> Result<Self, Error> {
-        let mut filters = Vec::new();
-
-        for filter_config in filter_configs {
-            let filter = FilterRegistry::get(
-                &filter_config.name,
-                CreateFilterArgs::fixed(filter_config.config.clone()),
-            )?;
-
-            filters.push((filter_config.name.clone(), filter));
-        }
-
-        Self::new(filters)
-    }
-}
-
-impl TryFrom<FilterChain> for crate::xds::config::listener::v3::FilterChain {
-    type Error = Error;
-
-    fn try_from(chain: FilterChain) -> Result<Self, Error> {
+    fn try_from(chain: FilterChain) -> Result<Self, Self::Error> {
         Self::try_from(&chain)
     }
 }
 
-impl TryFrom<&'_ FilterChain> for crate::xds::config::listener::v3::FilterChain {
-    type Error = Error;
+impl TryFrom<&'_ FilterChain> for EnvoyFilterChain {
+    type Error = CreationError;
 
-    fn try_from(chain: &FilterChain) -> Result<Self, Error> {
+    fn try_from(chain: &FilterChain) -> Result<Self, Self::Error> {
         Ok(Self {
             filters: chain
                 .iter()
                 .map(TryFrom::try_from)
                 .collect::<Result<_, Self::Error>>()?,
             ..<_>::default()
+        })
+    }
+}
+
+impl TryFrom<&'_ FilterChain> for crate::net::cluster::proto::FilterChain {
+    type Error = CreationError;
+
+    fn try_from(value: &'_ FilterChain) -> Result<Self, Self::Error> {
+        Ok(Self {
+            filters: value
+                .iter()
+                .map(|filter| crate::net::cluster::proto::Filter {
+                    name: filter.name,
+                    label: filter.label,
+                    config: filter.config.map(|v| v.to_string()),
+                })
+                .collect(),
         })
     }
 }
@@ -221,7 +242,7 @@ impl<'de> serde::Deserialize<'de> for FilterChain {
     fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
         let filters = <Vec<FilterConfig>>::deserialize(de)?;
 
-        Self::try_from(filters).map_err(serde::de::Error::custom)
+        Self::try_create(filters).map_err(serde::de::Error::custom)
     }
 }
 
@@ -230,9 +251,10 @@ impl serde::Serialize for FilterChain {
         let filters = self
             .filters
             .iter()
-            .map(|(name, instance)| crate::config::Filter {
+            .map(|(name, instance)| FilterConfig {
                 name: name.clone(),
-                config: Some(serde_json::Value::clone(&instance.config)),
+                label: instance.label().map(String::from),
+                config: Some(serde_json::Value::clone(instance.config())),
             })
             .collect::<Vec<_>>();
 
@@ -244,8 +266,8 @@ impl schemars::JsonSchema for FilterChain {
     fn schema_name() -> String {
         <Vec<FilterConfig>>::schema_name()
     }
-    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        <Vec<FilterConfig>>::json_schema(gen)
+    fn json_schema(r#gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        <Vec<FilterConfig>>::json_schema(r#gen)
     }
 
     fn is_referenceable() -> bool {
@@ -254,58 +276,66 @@ impl schemars::JsonSchema for FilterChain {
 }
 
 impl Filter for FilterChain {
-    fn read(&self, ctx: &mut ReadContext) -> Option<()> {
-        self.filters
+    fn read<P: PacketMut>(&self, ctx: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
+        for ((id, instance), histogram) in self
+            .filters
             .iter()
             .zip(self.filter_read_duration_seconds.iter())
-            .try_fold((), |_, ((id, instance), histogram)| {
-                tracing::trace!(%id, "read filtering packet");
-                match histogram.observe_closure_duration(|| instance.filter.read(ctx)) {
-                    Some(()) => {
-                        tracing::trace!(%id, "read passing packet");
-                    }
-                    None => {
-                        tracing::trace!(%id, "read dropping packet");
-                        crate::metrics::packets_dropped_total(crate::metrics::READ, id).inc();
-                        return None;
-                    }
+        {
+            tracing::trace!(%id, "read filtering packet");
+            let timer = histogram.start_timer();
+            let result = instance.filter().read(ctx);
+            timer.stop_and_record();
+            match result {
+                Ok(()) => tracing::trace!(%id, "read passing packet"),
+                Err(error) => {
+                    tracing::trace!(%id, "read dropping packet");
+                    return Err(error);
                 }
+            }
+        }
 
-                Some(())
-            })
+        // Special case to handle to allow for pass-through, if no filter
+        // has rejected, and the destinations is empty, we passthrough to all.
+        // Which mimics the old behaviour while avoid clones in most cases.
+        if ctx.destinations.is_empty() {
+            ctx.destinations
+                .extend(ctx.endpoints.endpoints().into_iter().map(|ep| ep.address));
+        }
+
+        Ok(())
     }
 
-    fn write(&self, ctx: &mut WriteContext) -> Option<()> {
-        self.filters
+    fn write<P: PacketMut>(&self, ctx: &mut WriteContext<P>) -> Result<(), FilterError> {
+        for ((id, instance), histogram) in self
+            .filters
             .iter()
             .rev()
             .zip(self.filter_write_duration_seconds.iter().rev())
-            .try_fold((), |_, ((id, instance), histogram)| {
-                tracing::trace!(%id, "write filtering packet");
-                match histogram.observe_closure_duration(|| instance.filter.write(ctx)) {
-                    Some(()) => {
-                        tracing::trace!(%id, "write passing packet");
-                        Some(())
-                    }
-                    None => {
-                        tracing::trace!(%id, "write dropping packet");
-                        crate::metrics::packets_dropped_total(crate::metrics::WRITE, id).inc();
-                        None
-                    }
+        {
+            tracing::trace!(%id, "write filtering packet");
+            let timer = histogram.start_timer();
+            let result = instance.filter().write(ctx);
+            timer.stop_and_record();
+            match result {
+                Ok(()) => tracing::trace!(%id, "write passing packet"),
+                Err(error) => {
+                    tracing::trace!(%id, "write dropping packet");
+                    return Err(error);
                 }
-            })
+            }
+        }
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use crate::{
-        config,
-        endpoint::Endpoint,
         filters::Debug,
-        test_utils::{new_test_config, TestFilter},
+        net::endpoint::Endpoint,
+        test::{TestConfig, TestFilter, alloc_buffer},
     };
 
     use super::*;
@@ -315,8 +345,9 @@ mod tests {
         let provider = Debug::factory();
 
         // everything is fine
-        let filter_configs = &[config::Filter {
+        let filter_configs = [FilterConfig {
             name: provider.name().into(),
+            label: None,
             config: Some(serde_json::Map::default().into()),
         }];
 
@@ -324,47 +355,61 @@ mod tests {
         assert_eq!(1, chain.filters.len());
 
         // uh oh, something went wrong
-        let filter_configs = &[config::Filter {
+        let filter_configs = [FilterConfig {
             name: "this is so wrong".into(),
+            label: None,
             config: Default::default(),
         }];
         let result = FilterChain::try_create(filter_configs);
         assert!(result.is_err());
     }
 
-    fn endpoints() -> Vec<Endpoint> {
-        vec![
-            Endpoint::new("127.0.0.1:80".parse().unwrap()),
-            Endpoint::new("127.0.0.1:90".parse().unwrap()),
-        ]
+    fn endpoints() -> std::sync::Arc<crate::net::cluster::ClusterMap> {
+        crate::net::cluster::ClusterMap::new_default(
+            [
+                Endpoint::new("127.0.0.1:80".parse().unwrap()),
+                Endpoint::new("127.0.0.1:90".parse().unwrap()),
+            ]
+            .into(),
+        )
+        .into()
     }
 
-    #[test]
-    fn chain_single_test_filter() {
-        crate::test_utils::load_test_filters();
-        let config = new_test_config();
+    #[tokio::test]
+    async fn chain_single_test_filter() {
+        crate::test::load_test_filters();
+        let config = TestConfig::new();
         let endpoints_fixture = endpoints();
+        let mut dest = Vec::new();
         let mut context = ReadContext::new(
-            endpoints_fixture.clone(),
+            &endpoints_fixture,
             "127.0.0.1:70".parse().unwrap(),
-            b"hello".to_vec(),
+            alloc_buffer(b"hello"),
+            &mut dest,
         );
 
         config.filters.read(&mut context).unwrap();
         let expected = endpoints_fixture.clone();
 
-        assert_eq!(expected, &*context.endpoints);
-        assert_eq!(b"hello:odr:127.0.0.1:70", &*context.contents);
+        assert_eq!(&*expected.endpoints(), &*context.destinations);
+        assert_eq!(
+            "hello:odr:127.0.0.1:70",
+            std::str::from_utf8(&context.contents).unwrap()
+        );
         assert_eq!(
             "receive",
             context.metadata[&"downstream".into()].as_string().unwrap()
         );
 
         let mut context = WriteContext::new(
-            endpoints_fixture[0].clone(),
-            endpoints_fixture[0].address.clone(),
+            endpoints_fixture
+                .endpoints()
+                .first()
+                .unwrap()
+                .address
+                .clone(),
             "127.0.0.1:70".parse().unwrap(),
-            b"hello".to_vec(),
+            alloc_buffer(b"hello"),
         );
         config.filters.write(&mut context).unwrap();
 
@@ -375,56 +420,56 @@ mod tests {
         assert_eq!(b"hello:our:127.0.0.1:80:127.0.0.1:70", &*context.contents,);
     }
 
-    #[test]
-    fn chain_double_test_filter() {
+    #[tokio::test]
+    async fn chain_double_test_filter() {
         let chain = FilterChain::new(vec![
             (
                 TestFilter::NAME.into(),
-                FilterInstance {
-                    config: Arc::new(serde_json::json!(null)),
-                    filter: Arc::new(TestFilter),
-                },
+                FilterInstance::new(serde_json::json!(null), TestFilter.into()),
             ),
             (
                 TestFilter::NAME.into(),
-                FilterInstance {
-                    config: Arc::new(serde_json::json!(null)),
-                    filter: Arc::new(TestFilter),
-                },
+                FilterInstance::new(serde_json::json!(null), TestFilter.into()),
             ),
         ])
         .unwrap();
 
         let endpoints_fixture = endpoints();
-        let mut context = ReadContext::new(
-            endpoints_fixture.clone(),
-            "127.0.0.1:70".parse().unwrap(),
-            b"hello".to_vec(),
-        );
+        let mut dest = Vec::new();
 
-        chain.read(&mut context).unwrap();
+        let (contents, metadata) = {
+            let mut context = ReadContext::new(
+                &endpoints_fixture,
+                "127.0.0.1:70".parse().unwrap(),
+                alloc_buffer(b"hello"),
+                &mut dest,
+            );
+            chain.read(&mut context).unwrap();
+            (context.contents, context.metadata)
+        };
         let expected = endpoints_fixture.clone();
-        assert_eq!(expected, context.endpoints.to_vec());
-        assert_eq!(
-            b"hello:odr:127.0.0.1:70:odr:127.0.0.1:70",
-            &*context.contents
-        );
+        assert_eq!(expected.endpoints(), dest);
+        assert_eq!(b"hello:odr:127.0.0.1:70:odr:127.0.0.1:70", &*contents);
         assert_eq!(
             "receive:receive",
-            context.metadata[&"downstream".into()].as_string().unwrap()
+            metadata[&"downstream".into()].as_string().unwrap()
         );
 
         let mut context = WriteContext::new(
-            endpoints_fixture[0].clone(),
-            endpoints_fixture[0].address.clone(),
+            endpoints_fixture
+                .endpoints()
+                .first()
+                .unwrap()
+                .address
+                .clone(),
             "127.0.0.1:70".parse().unwrap(),
-            b"hello".to_vec(),
+            alloc_buffer(b"hello"),
         );
 
         chain.write(&mut context).unwrap();
         assert_eq!(
-            b"hello:our:127.0.0.1:80:127.0.0.1:70:our:127.0.0.1:80:127.0.0.1:70",
-            &*context.contents,
+            "hello:our:127.0.0.1:80:127.0.0.1:70:our:127.0.0.1:80:127.0.0.1:70",
+            std::str::from_utf8(&context.contents).unwrap(),
         );
         assert_eq!(
             "receive:receive",
@@ -434,46 +479,20 @@ mod tests {
 
     #[test]
     fn get_configs() {
-        struct TestFilter2;
-        impl Filter for TestFilter2 {}
-
-        let filter_chain = FilterChain::new(vec![
-            (
-                "TestFilter".into(),
-                FilterInstance {
-                    config: Arc::new(serde_json::json!(null)),
-                    filter: Arc::new(TestFilter),
-                },
-            ),
-            (
-                "TestFilter2".into(),
-                FilterInstance {
-                    config: Arc::new(serde_json::json!({
-                        "k1": "v1",
-                        "k2": 2
-                    })),
-                    filter: Arc::new(TestFilter2),
-                },
-            ),
-        ])
+        let filter_chain = FilterChain::new(vec![(
+            "TestFilter".into(),
+            FilterInstance::new(serde_json::json!(null), TestFilter.into()),
+        )])
         .unwrap();
 
         let configs = filter_chain.iter().collect::<Vec<_>>();
         assert_eq!(
-            vec![
-                crate::config::Filter {
-                    name: "TestFilter".into(),
-                    config: None,
-                },
-                crate::config::Filter {
-                    name: "TestFilter2".into(),
-                    config: Some(serde_json::json!({
-                        "k1": "v1",
-                        "k2": 2
-                    }))
-                },
-            ],
+            vec![FilterConfig {
+                name: "TestFilter".into(),
+                label: None,
+                config: None,
+            },],
             configs
-        )
+        );
     }
 }

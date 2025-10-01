@@ -103,25 +103,34 @@ spec:
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/path: /metrics
-        prometheus.io/port: "9091"
+        prometheus.io/port: "8000"
     spec:
       containers:
         - name: quilkin
           args:
-            - manage
-            - agones
+            - --service.xds
+            - --provider.k8s.agones
           env:
             - name: RUST_LOG
               value: info
-          image: us-docker.pkg.dev/quilkin/release/quilkin:0.4.0
+          image: us-docker.pkg.dev/quilkin/release/quilkin:0.9.0
           livenessProbe:
+            periodSeconds: 5
             failureThreshold: 3
             httpGet:
               path: /live
-              port: 9091
+              port: 8000
+              scheme: HTTP
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 900
+            successThreshold: 1
+            httpGet:
+              path: /ready
+              port: 8000
               scheme: HTTP
           ports:
-            - containerPort: 7000
+            - containerPort: 7800
               protocol: TCP
       serviceAccountName: quilkin-agones
 ---
@@ -133,6 +142,6 @@ spec:
   ports:
     - port: 80
       protocol: TCP
-      targetPort: 7000
+      targetPort: 7800
   selector:
     role: xds

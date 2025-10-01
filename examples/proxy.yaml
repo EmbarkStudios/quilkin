@@ -21,17 +21,15 @@
 version: v1alpha1
 id: my-proxy # An identifier for the proxy instance.
 clusters: # grouping of clusters
-  default:
-    localities: # grouping of endpoints within a cluster
-      - endpoints: # array of potential endpoints to send on traffic to
-          - address: 127.0.0.1:26000
-            metadata: # Metadata associated with the endpoint
-              quilkin.dev:
-                tokens:
-                  - MXg3aWp5Ng== # the connection byte array to route to, encoded as base64 (string value: 1x7ijy6)
-                  - OGdqM3YyaQ== # (string value: 8gj3v2i)
-          - address: 127.0.0.1:26001
-            metadata: # Metadata associated with the endpoint
-              quilkin.dev:
-                tokens:
-                  - bmt1eTcweA== # (string value: nkuy70x)
+  - endpoints: # array of potential endpoints to send on traffic to
+    - address: 127.0.0.1:26000
+      metadata: # Metadata associated with the endpoint
+        quilkin.dev:
+          tokens:
+            - MXg3aWp5Ng== # the connection byte array to route to, encoded as base64 (string value: 1x7ijy6)
+            - OGdqM3YyaQ== # (string value: 8gj3v2i)
+    - address: 127.0.0.1:26001
+      metadata: # Metadata associated with the endpoint
+        quilkin.dev:
+          tokens:
+            - bmt1eTcweA== # (string value: nkuy70x)

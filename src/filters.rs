@@ -19,21 +19,20 @@
 mod chain;
 mod error;
 mod factory;
-mod metadata;
 mod read;
 mod registry;
 mod set;
 mod write;
 
 pub mod capture;
-pub mod compress;
-pub mod concatenate_bytes;
+pub mod concatenate;
 pub mod debug;
 pub mod drop;
 pub mod firewall;
 pub mod load_balancer;
 pub mod local_rate_limit;
 pub mod r#match;
+pub mod metrics;
 pub mod pass;
 pub mod timestamp;
 pub mod token_router;
@@ -42,8 +41,8 @@ pub mod token_router;
 /// [`FilterFactory`].
 pub mod prelude {
     pub use super::{
-        ConvertProtoConfigError, CreateFilterArgs, Error, Filter, FilterInstance, ReadContext,
-        StaticFilter, WriteContext,
+        ConvertProtoConfigError, CreateFilterArgs, CreationError, Filter, FilterError,
+        FilterInstance, Packet, PacketMut, ReadContext, StaticFilter, WriteContext,
     };
 }
 
@@ -51,63 +50,59 @@ pub mod prelude {
 #[doc(inline)]
 pub use self::{
     capture::Capture,
-    compress::Compress,
-    concatenate_bytes::ConcatenateBytes,
+    chain::FilterChain,
+    concatenate::Concatenate,
     debug::Debug,
     drop::Drop,
-    error::{ConvertProtoConfigError, Error},
+    error::{ConvertProtoConfigError, CreationError, FilterError},
     factory::{CreateFilterArgs, DynFilterFactory, FilterFactory, FilterInstance},
     firewall::Firewall,
     load_balancer::LoadBalancer,
     local_rate_limit::LocalRateLimit,
-    pass::Pass,
     r#match::Match,
+    pass::Pass,
     read::ReadContext,
     registry::FilterRegistry,
     set::{FilterMap, FilterSet},
     timestamp::Timestamp,
-    token_router::TokenRouter,
+    token_router::{HashedTokenRouter, TokenRouter},
     write::WriteContext,
 };
 
-pub use self::chain::FilterChain;
+pub use crate::{
+    net::{Packet, PacketMut},
+    test::TestFilter,
+};
+
+use crate::config::filter::Filter as FilterConfig;
+
+#[enum_dispatch::enum_dispatch(Filter)]
+pub enum FilterKind {
+    Capture,
+    Concatenate,
+    Debug,
+    Drop,
+    Firewall,
+    LoadBalancer,
+    LocalRateLimit,
+    Pass,
+    Match,
+    Timestamp,
+    TokenRouter,
+    HashedTokenRouter,
+    TestFilter,
+}
 
 /// Statically safe version of [`Filter`], if you're writing a Rust filter, you
 /// should implement [`StaticFilter`] in addition to [`Filter`], as
 /// [`StaticFilter`] guarantees all of the required properties through the type
 /// system, allowing Quilkin take care of the virtual table boilerplate
 /// automatically at compile-time.
-/// ```
-/// use quilkin::filters::prelude::*;
-///
-/// struct Greet;
-///
-/// impl Filter for Greet {
-///     fn read(&self, ctx: &mut ReadContext) -> Option<()> {
-///         ctx.contents.splice(0..0, b"Hello ".into_iter().copied());
-///         Some(())
-///     }
-///     fn write(&self, ctx: &mut WriteContext) -> Option<()> {
-///         ctx.contents.splice(0..0, b"Goodbye ".into_iter().copied());
-///         Some(())
-///     }
-/// }
-///
-/// impl StaticFilter for Greet {
-///     const NAME: &'static str = "greet.v1";
-///     type Configuration = ();
-///     type BinaryConfiguration = ();
-///
-///     fn try_from_config(_: Option<Self::Configuration>) -> Result<Self, quilkin::filters::Error> {
-///         Ok(Self)
-///     }
-/// }
-/// ```
-pub trait StaticFilter: Filter + Sized
+pub trait StaticFilter: Filter + Sized + Into<FilterKind>
 // This where clause simply states that `Configuration`'s and
 // `BinaryConfiguration`'s `Error` types are compatible with `filters::Error`.
 where
-    Error: From<<Self::Configuration as TryFrom<Self::BinaryConfiguration>>::Error>
+    CreationError: From<<Self::Configuration as TryFrom<Self::BinaryConfiguration>>::Error>
         + From<<Self::BinaryConfiguration as TryFrom<Self::Configuration>>::Error>,
 {
     /// The globally unique name of the filter.
@@ -131,7 +126,7 @@ where
     /// Instantiates a new [`StaticFilter`] from the given configuration, if any.
     /// # Errors
     /// If the provided configuration is invalid.
-    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, Error>;
+    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, CreationError>;
 
     /// Instantiates a new [`StaticFilter`] from the given configuration, if any.
     /// # Panics
@@ -152,15 +147,31 @@ where
     /// which require a fully initialized [`Self::Configuration`].
     fn ensure_config_exists(
         config: Option<Self::Configuration>,
-    ) -> Result<Self::Configuration, Error> {
-        config.ok_or(Error::MissingConfig(Self::NAME))
+    ) -> Result<Self::Configuration, CreationError> {
+        config.ok_or(CreationError::MissingConfig(Self::NAME))
     }
 
     fn as_filter_config(
         config: impl Into<Option<Self::Configuration>>,
-    ) -> Result<crate::config::Filter, Error> {
-        Ok(crate::config::Filter {
+    ) -> Result<FilterConfig, CreationError> {
+        Ok(FilterConfig {
             name: Self::NAME.into(),
+            label: None,
+            config: config
+                .into()
+                .map(|config| serde_json::to_value(&config))
+                .transpose()?,
+        })
+    }
+
+    #[inline]
+    fn as_labeled_filter_config(
+        config: impl Into<Option<Self::Configuration>>,
+        label: String,
+    ) -> Result<FilterConfig, CreationError> {
+        Ok(FilterConfig {
+            name: Self::NAME.into(),
+            label: Some(label),
             config: config
                 .into()
                 .map(|config| serde_json::to_value(&config))
@@ -190,6 +201,7 @@ where
 ///   `write` implementation to execute.
 ///   * Labels
 ///     * `filter` The name of the filter being executed.
+#[enum_dispatch::enum_dispatch]
 pub trait Filter: Send + Sync {
     /// [`Filter::read`] is invoked when the proxy receives data from a
     /// downstream connection on the listening port.
@@ -197,8 +209,8 @@ pub trait Filter: Send + Sync {
     /// This function should return an `Some` if the packet processing should
     /// proceed. If the packet should be rejected, it will return [`None`]
     /// instead. By default, the context passes through unchanged.
-    fn read(&self, _: &mut ReadContext) -> Option<()> {
-        Some(())
+    fn read<P: PacketMut>(&self, _: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
+        Ok(())
     }
 
     /// [`Filter::write`] is invoked when the proxy is about to send data to a
@@ -207,7 +219,7 @@ pub trait Filter: Send + Sync {
     ///
     /// This function should return an `Some` if the packet processing should
     /// proceed. If the packet should be rejected, it will return [`None`]
-    fn write(&self, _: &mut WriteContext) -> Option<()> {
-        Some(())
+    fn write<P: PacketMut>(&self, _: &mut WriteContext<P>) -> Result<(), FilterError> {
+        Ok(())
     }
 }

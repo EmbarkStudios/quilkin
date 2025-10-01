@@ -15,9 +15,9 @@
  */
 use std::panic;
 
-use hyper::{Client, Uri};
+use hyper::Uri;
 
-use quilkin::{endpoint::Endpoint, test_utils::TestHelper};
+use quilkin::{net::endpoint::Endpoint, test::TestHelper};
 
 const LIVE_ADDRESS: &str = "http://localhost:9093/live";
 
@@ -26,34 +26,39 @@ async fn health_server() {
     let mut t = TestHelper::default();
 
     // create server configuration
-    let server_port = 12349;
-    let server_proxy = quilkin::cli::Proxy {
-        port: server_port,
-        ..<_>::default()
-    };
-    let server_config = std::sync::Arc::new(quilkin::Config::default());
-    server_config.clusters.modify(|clusters| {
-        clusters.insert_default(vec!["127.0.0.1:0".parse::<Endpoint>().unwrap()])
-    });
+    let server_config = TestHelper::new_config();
+    server_config
+        .dyn_cfg
+        .clusters()
+        .unwrap()
+        .modify(|clusters| {
+            clusters.insert_default(["127.0.0.1:0".parse::<Endpoint>().unwrap()].into());
+        });
     t.run_server(
         server_config,
-        server_proxy,
+        None,
         Some(Some((std::net::Ipv6Addr::UNSPECIFIED, 9093).into())),
-    );
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
-    let client = Client::new();
+    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .build_http::<http_body_util::Empty<bytes::Bytes>>();
+    use http_body_util::BodyExt;
     let resp = client
         .get(Uri::from_static(LIVE_ADDRESS))
         .await
-        .map(|resp| resp.into_body())
-        .map(hyper::body::to_bytes)
         .unwrap()
+        .into_body()
+        .collect()
         .await
-        .unwrap();
+        .unwrap()
+        .to_bytes()
+        .to_vec();
 
-    assert_eq!("ok", String::from_utf8(resp.to_vec()).unwrap());
+    assert_eq!("ok", String::from_utf8(resp).unwrap());
 
-    let _ = panic::catch_unwind(|| {
+    let _unused = panic::catch_unwind(|| {
         panic!("oh no!");
     });
 

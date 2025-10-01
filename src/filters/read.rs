@@ -16,37 +16,40 @@
 
 #[cfg(doc)]
 use crate::filters::Filter;
-use crate::{
-    endpoint::{Endpoint, EndpointAddress},
-    metadata::DynamicMetadata,
+use crate::net::{
+    ClusterMap,
+    endpoint::{EndpointAddress, metadata::DynamicMetadata},
 };
 
 /// The input arguments to [`Filter::read`].
-#[non_exhaustive]
-pub struct ReadContext {
+pub struct ReadContext<'ctx, P> {
     /// The upstream endpoints that the packet will be forwarded to.
-    pub endpoints: Vec<Endpoint>,
+    pub endpoints: &'ctx ClusterMap,
+    /// The upstream endpoints that the packet will be forwarded to.
+    pub destinations: &'ctx mut Vec<EndpointAddress>,
     /// The source of the received packet.
     pub source: EndpointAddress,
     /// Contents of the received packet.
-    pub contents: Vec<u8>,
+    pub contents: P,
     /// Arbitrary values that can be passed from one filter to another.
     pub metadata: DynamicMetadata,
 }
 
-impl ReadContext {
+impl<'ctx, P: super::PacketMut> ReadContext<'ctx, P> {
     /// Creates a new [`ReadContext`].
-    pub fn new(endpoints: Vec<Endpoint>, source: EndpointAddress, contents: Vec<u8>) -> Self {
+    #[inline]
+    pub fn new(
+        endpoints: &'ctx ClusterMap,
+        source: EndpointAddress,
+        contents: P,
+        destinations: &'ctx mut Vec<EndpointAddress>,
+    ) -> Self {
         Self {
             endpoints,
+            destinations,
             source,
             contents,
-            metadata: DynamicMetadata::new(),
+            metadata: <_>::default(),
         }
-    }
-
-    pub fn metadata(mut self, metadata: DynamicMetadata) -> Self {
-        self.metadata = metadata;
-        self
     }
 }

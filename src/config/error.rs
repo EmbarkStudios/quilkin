@@ -42,5 +42,5 @@ pub enum ValidationError {
     #[error(transparent)]
     ValueInvalid(#[from] ValueInvalidArgs),
     #[error(transparent)]
-    FilterInvalid(#[from] crate::filters::Error),
+    FilterInvalid(#[from] crate::filters::CreationError),
 }

@@ -16,13 +16,105 @@
 
 use prometheus::Error as MetricsError;
 
+use crate::filters;
+use std::fmt;
+
 #[cfg(doc)]
-use crate::filters::{Filter, FilterFactory};
+use filters::{Filter, FilterFactory};
+
+/// All possible errors that can be returned from [`Filter`] implementations
+#[derive(Debug)]
+pub enum FilterError {
+    NoValueCaptured,
+    TokenRouter(filters::token_router::RouterError),
+    Io(std::io::Error),
+    FirewallDenied,
+    MatchNoMetadata,
+    Dropped,
+    RateLimitExceeded,
+    Custom(&'static str),
+}
+
+impl FilterError {
+    pub fn discriminant(&self) -> &'static str {
+        match self {
+            Self::NoValueCaptured => "filter::capture::no value captured",
+            Self::TokenRouter(tr) => tr.discriminant(),
+            Self::Io(..) => "filter::io",
+            Self::FirewallDenied => "filter::firewall::denied",
+            Self::MatchNoMetadata => "filter::match::no metadata",
+            Self::Dropped => "filter::drop::dropped",
+            Self::RateLimitExceeded => "filter::rate_limit::dropped",
+            Self::Custom(custom) => custom,
+        }
+    }
+}
+
+impl std::error::Error for FilterError {}
+
+impl fmt::Display for FilterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoValueCaptured => f.write_str("no value captured"),
+            Self::TokenRouter(tr) => write!(f, "{tr}"),
+            Self::Io(io) => write!(f, "{io}"),
+            Self::FirewallDenied => f.write_str("packet denied by firewall"),
+            Self::MatchNoMetadata => f.write_str("expected metadata key for match not present"),
+            Self::Dropped => f.write_str("dropped"),
+            Self::RateLimitExceeded => f.write_str("rate limit exceeded"),
+            Self::Custom(custom) => f.write_str(custom),
+        }
+    }
+}
+
+impl From<std::io::Error> for FilterError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl Eq for FilterError {}
+
+impl PartialEq for FilterError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::FirewallDenied, Self::FirewallDenied)
+            | (Self::MatchNoMetadata, Self::MatchNoMetadata)
+            | (Self::Dropped, Self::Dropped)
+            | (Self::RateLimitExceeded, Self::RateLimitExceeded)
+            | (Self::NoValueCaptured, Self::NoValueCaptured) => true,
+            (Self::TokenRouter(tra), Self::TokenRouter(trb)) => tra.eq(trb),
+            (Self::Io(ia), Self::Io(ib)) => ia.kind().eq(&ib.kind()),
+            (Self::Custom(a), Self::Custom(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+use std::hash::Hash;
+
+impl Hash for FilterError {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let disc = std::mem::discriminant(self);
+        Hash::hash(&disc, state);
+
+        match self {
+            Self::TokenRouter(re) => Hash::hash(&re, state),
+            Self::Io(io) => Hash::hash(&io.kind(), state),
+            Self::Custom(ce) => state.write(ce.as_bytes()),
+            Self::NoValueCaptured
+            | Self::FirewallDenied
+            | Self::MatchNoMetadata
+            | Self::Dropped
+            | Self::RateLimitExceeded => {}
+        }
+    }
+}
 
 /// An error that occurred when attempting to create a [`Filter`] from
 /// a [`FilterFactory`].
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
-pub enum Error {
+pub enum CreationError {
     #[error("filter `{}` not found", .0)]
     NotFound(String),
     #[error("Expected <{}> message, received <{}> ", expected, actual)]
@@ -41,43 +133,43 @@ pub enum Error {
     Infallible,
 }
 
-impl From<std::convert::Infallible> for Error {
+impl From<std::convert::Infallible> for CreationError {
     fn from(_: std::convert::Infallible) -> Self {
         Self::Infallible
     }
 }
 
-impl From<MetricsError> for Error {
+impl From<MetricsError> for CreationError {
     fn from(error: MetricsError) -> Self {
-        Error::InitializeMetricsFailed(error.to_string())
+        Self::InitializeMetricsFailed(error.to_string())
     }
 }
 
-impl From<serde_yaml::Error> for Error {
+impl From<serde_yaml::Error> for CreationError {
     fn from(error: serde_yaml::Error) -> Self {
         Self::DeserializeFailed(error.to_string())
     }
 }
 
-impl From<serde_json::Error> for Error {
+impl From<serde_json::Error> for CreationError {
     fn from(error: serde_json::Error) -> Self {
         Self::DeserializeFailed(error.to_string())
     }
 }
 
-impl From<prost::EncodeError> for Error {
+impl From<prost::EncodeError> for CreationError {
     fn from(error: prost::EncodeError) -> Self {
         Self::ConvertProtoConfig(ConvertProtoConfigError::new(error, None))
     }
 }
 
-impl From<prost::DecodeError> for Error {
+impl From<prost::DecodeError> for CreationError {
     fn from(error: prost::DecodeError) -> Self {
         Self::ConvertProtoConfig(ConvertProtoConfigError::new(error, None))
     }
 }
 
-impl From<ConvertProtoConfigError> for Error {
+impl From<ConvertProtoConfigError> for CreationError {
     fn from(error: ConvertProtoConfigError) -> Self {
         Self::ConvertProtoConfig(error)
     }

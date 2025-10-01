@@ -12,33 +12,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM debian:bullseye
+FROM debian:bookworm
 
 ARG RUST_TOOLCHAIN
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
+    CARGO_TERM_COLOR=always \
     LC_ALL=C.UTF-8 \
     LANG=C.UTF-8
 
 # Install packages
 RUN set -eux && \
     apt-get update && \
-    apt-get install -y lsb-release jq curl wget zip build-essential software-properties-common \
-        libssl-dev pkg-config python3-pip bash-completion g++-x86-64-linux-gnu g++-mingw-w64-x86-64 && \
-    pip3 install live-server && \
+    apt-get install -y lsb-release jq curl wget zip git build-essential software-properties-common protobuf-compiler \
+        libssl-dev pkg-config bash-completion g++-x86-64-linux-gnu g++-mingw-w64-x86-64 && \
     echo "source /etc/bash_completion" >> /root/.bashrc
+
+# install protoc-gen-doc
+RUN cd /tmp && \
+    wget --quiet -O protoc-gen-doc.tar.gz https://github.com/pseudomuto/protoc-gen-doc/releases/download/v1.5.1/protoc-gen-doc_1.5.1_linux_amd64.tar.gz && \
+    tar -xf protoc-gen-doc.tar.gz && \
+    mv ./protoc-gen-doc /usr/local/bin/ && \
+    rm protoc-gen-doc.tar.gz
 
 # install gcloud
 # Credit: https://cloud.google.com/sdk/docs/install#deb
-RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg  add - && apt-get update -y && \
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg  add - && apt-get update -y && \
     apt-get install google-cloud-cli google-cloud-cli-gke-gcloud-auth-plugin kubectl -y && \
     echo "source /usr/share/google-cloud-sdk/completion.bash.inc" >> /root/.bashrc && \
     echo "source <(kubectl completion bash)" >> /root/.bashrc
 
 # install terraform. There is no apt support for arm64, so direct downloading instead.
-RUN wget --quiet -O terraform.zip "https://releases.hashicorp.com/terraform/1.3.1/terraform_1.3.1_linux_$(dpkg --print-architecture).zip" && \
+RUN wget --quiet -O terraform.zip "https://releases.hashicorp.com/terraform/1.5.4/terraform_1.5.4_linux_$(dpkg --print-architecture).zip" && \
     unzip terraform.zip && rm terraform.zip && mv terraform /usr/local/bin/
 
 # install helm
@@ -46,10 +53,8 @@ RUN wget --quiet -O terraform.zip "https://releases.hashicorp.com/terraform/1.3.
 RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash && \
     echo "source <(helm completion bash)" >> /root/.bashrc
 
-# Install htmltest
-WORKDIR /tmp
-RUN wget --quiet -O htmltest.tar.gz "https://github.com/wjdp/htmltest/releases/download/v0.16.0/htmltest_0.16.0_linux_$(dpkg --print-architecture).tar.gz" && \
-     tar -xf htmltest.tar.gz && mv ./htmltest /usr/local/bin/ && rm htmltest.tar.gz
+# Add /workspace as a git safe directory
+RUN git config --global --add safe.directory /workspace
 
 # Install Rust. Inspiration from: https://github.com/rust-lang/docker-rust/blob/master/1.64.0/bullseye/Dockerfile
 RUN set -eux; \
@@ -68,11 +73,7 @@ RUN set -eux; \
     chmod -R a+w $RUSTUP_HOME $CARGO_HOME && \
     rustup component add rustfmt clippy && \
     rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-gnu && \
-    cargo install cargo-watch mdbook && \
-    cargo install mdbook-variables --version=0.2.0 && \
-    cargo install cargo-about && \
-    cargo install --locked cargo-deny && \
+    cargo install --locked cargo-about proto-gen && \
     rustup --version && \
     cargo --version && \
     rustc --version
-

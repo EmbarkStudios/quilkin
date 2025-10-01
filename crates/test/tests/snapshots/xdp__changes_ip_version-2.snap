@@ -1,0 +1,93 @@
+---
+source: crates/test/tests/xdp.rs
+expression: "&packet_headers"
+---
+PacketHeaders {
+    link: Some(
+        Ethernet2(
+            Ethernet2Header {
+                source: [
+                    4,
+                    4,
+                    4,
+                    4,
+                    4,
+                    4,
+                ],
+                destination: [
+                    3,
+                    3,
+                    3,
+                    3,
+                    3,
+                    3,
+                ],
+                ether_type: 0x0800 (Internet Protocol version 4 (IPv4)),
+            },
+        ),
+    ),
+    vlan: None,
+    net: Some(
+        Ipv4(
+            Ipv4Header {
+                dscp: Ipv4Dscp(
+                    0,
+                ),
+                ecn: Ipv4Ecn(
+                    0,
+                ),
+                total_len: 39,
+                identification: 0,
+                dont_fragment: false,
+                more_fragments: false,
+                fragment_offset: IpFragOffset(
+                    0,
+                ),
+                time_to_live: 63,
+                protocol: 17 (UDP - User Datagram),
+                header_checksum: 28089,
+                source: [
+                    2,
+                    2,
+                    2,
+                    2,
+                ],
+                destination: [
+                    5,
+                    5,
+                    5,
+                    5,
+                ],
+                options: [],
+            },
+            Ipv4Extensions {
+                auth: None,
+            },
+        ),
+    ),
+    transport: Some(
+        Udp(
+            UdpHeader {
+                source_port: 7777,
+                destination_port: 8888,
+                length: 19,
+                checksum: 1511,
+            },
+        ),
+    ),
+    payload: Udp(
+        [
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+        ],
+    ),
+}

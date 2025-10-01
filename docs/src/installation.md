@@ -22,7 +22,7 @@ us-docker.pkg.dev/quilkin/release/quilkin:{{QUILKIN_VERSION}}
   <dd>Pre-built Quilkin binary with no preset arguments</dd>
 </dl>
 
-### [Cargo](https://lib.rs/crates/quilkin)
+### <a href="https://lib.rs/crates/quilkin" data-proofer-ignore>Cargo</a>
 
 <dl>
   <dt><strong>Source / Method</strong></dt>

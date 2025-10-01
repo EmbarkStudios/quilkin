@@ -14,45 +14,33 @@
  * limitations under the License.
  */
 
-use std::collections::HashMap;
-
-use crate::{
-    endpoint::{Endpoint, EndpointAddress},
-    metadata::DynamicMetadata,
-};
+use crate::net::endpoint::{DynamicMetadata, EndpointAddress};
 
 #[cfg(doc)]
 use crate::filters::Filter;
 
 /// The input arguments to [`Filter::write`].
 #[non_exhaustive]
-pub struct WriteContext {
-    /// The upstream endpoint that we're expecting packets from.
-    pub endpoint: Endpoint,
+pub struct WriteContext<P> {
     /// The source of the received packet.
     pub source: EndpointAddress,
     /// The destination of the received packet.
     pub dest: EndpointAddress,
     /// Contents of the received packet.
-    pub contents: Vec<u8>,
+    pub contents: P,
     /// Arbitrary values that can be passed from one filter to another
     pub metadata: DynamicMetadata,
 }
 
-impl WriteContext {
+impl<P: super::PacketMut> WriteContext<P> {
     /// Creates a new [`WriteContext`]
-    pub fn new(
-        endpoint: Endpoint,
-        source: EndpointAddress,
-        dest: EndpointAddress,
-        contents: Vec<u8>,
-    ) -> Self {
+    #[inline]
+    pub fn new(source: EndpointAddress, dest: EndpointAddress, contents: P) -> Self {
         Self {
-            endpoint,
             source,
             dest,
             contents,
-            metadata: HashMap::new(),
+            metadata: <_>::default(),
         }
     }
 }

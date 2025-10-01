@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 syntax = "proto3";
 
 package quilkin.relay.v1alpha1;
@@ -30,11 +31,19 @@ import "envoy/service/discovery/v3/discovery.proto";
 // xDS server without the relay needing to maintain a list
 // of xDS servers to connect to in the relay itself.
 service AggregatedControlPlaneDiscoveryService {
-  // The RPC protocol begins with a single empty DiscoveryResponse
-  // initiated by the management server, after that this behaves
-  // the same as the management server xDS protocol, except with
-  // DiscoveryRequests initiated by the server rather than the client.
-  rpc StreamAggregatedResources(stream envoy.service.discovery.v3.DiscoveryResponse)
-      returns (stream envoy.service.discovery.v3.DiscoveryRequest) {
-  }
+  // This RPC is not supported but remains here as part of the xDS standard,
+  // as Quilkin only uses a delta configuration transport for performance reasons.
+  rpc StreamAggregatedResources(
+      stream envoy.service.discovery.v3.DiscoveryResponse)
+      returns (stream envoy.service.discovery.v3.DiscoveryRequest) {}
+
+  // Delta (Incremental) xDS implementation, used by agents and/or management
+  // servers to update the relay with their configuration
+  rpc DeltaAggregatedResources(
+      stream envoy.service.discovery.v3.DeltaDiscoveryResponse)
+      returns (stream envoy.service.discovery.v3.DeltaDiscoveryRequest) {}
+
+  // Used by proxies to subscribe to changes from the relay
+  rpc SubscribeDeltaResources(stream envoy.service.discovery.v3.DeltaDiscoveryRequest)
+      returns (stream envoy.service.discovery.v3.DeltaDiscoveryResponse) {}
 }

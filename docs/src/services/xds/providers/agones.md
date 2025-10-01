@@ -1,6 +1,6 @@
-# Agones xDS Provider
+# Agones Provider
 
-The [Agones] xDS Provider is built to simplify Quilkin integration with Agones
+The [Agones] Provider is built to simplify Quilkin integration with Agones
 game server hosting on top of [Kubernetes](https://kubernetes.io).
 
 This provider watches for changes in Agones
@@ -38,11 +38,12 @@ annotations:
 
 ## Filter Configuration
 
-The Agones provider watches for a singular [`ConfigMap`](https://kubernetes.io/docs/concepts/configuration/configmap/)
-that has the label of `quilkin.dev/configmap: "true"`, and any changes that happen to it, and use its contents to
-send Filter configuration to any connected Quilkin proxies.
+The Agones provider watches for a singular [`ConfigMap`](https://kubernetes.io/docs/concepts/configuration/configmap/) 
+that has the label of `quilkin.dev/configmap: "true"`, and any changes that happen to it, and use its contents to 
+send [Filter] configuration to any connected Quilkin proxies.
 
-The `ConfigMap` contents should be a valid Quilkin [file configuration](../../../deployment/configuration.md), but with no Endpoint data.
+The `ConfigMap` contents should be a valid Quilkin [file configuration][configuration], but with no 
+Endpoint data.
 
 For example:
 
@@ -55,12 +56,11 @@ configured via the `--config-namespace` argument.
 
 ## Usage
 
-As an example, the following runs the server with subcommnad `manage agones` against a cluster (using default
-kubeconfig authentication) where Quilkin pods run in the `quilkin` namespace and `GameServer` pods run in the
-`gameservers` namespace:
+As an example, the following runs quilkin against a cluster (using default
+kubeconfig authentication) in the `default` namespace.
 
 ```sh
-quilkin manage agones --config-namespace quilkin --gameservers-namespace gameservers
+quilkin --provider.k8s.agones --provider.k8s.agones.namespace=default
 ```
 
 For a full referenmce of deploying this provider in a Kubernetes cluster, with appropriate [Deployments], [Services],
@@ -72,3 +72,5 @@ and [RBAC] Rules, there is an [Agones, xDS and Xonotic example][example].
 [Services]: https://kubernetes.io/docs/concepts/services-networking/service/
 [RBAC]: https://kubernetes.io/docs/reference/access-authn-authz/rbac/
 [example]: https://github.com/googleforgames/quilkin/tree/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds
+[Filter]: ../../../services/proxy/filters.md
+[configuration]: ../../../services/proxy/configuration.md

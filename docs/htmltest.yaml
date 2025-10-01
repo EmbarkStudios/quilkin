@@ -15,7 +15,7 @@
 TestFilesConcurrently: false
 IgnoreInternalEmptyHash: true
 IgnoreEmptyHref: true
-CheckExternal: true
+CheckExternal: false # this can be useful occasionally to find dead links, but generally it's not useful as any external link could give an error code and fail CI
 ExternalTimeout: 60
 IgnoreURLs:
   - "http://localhost:9091/"
@@ -26,6 +26,7 @@ IgnoreInternalURLs:
   - "../../print.html"
 IgnoreDirs:
   - "api"
+  - "book/services/xds/proto/"
 HTTPHeaders:
-  User-Agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36"
+  User-Agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
   Accept: "text/html"

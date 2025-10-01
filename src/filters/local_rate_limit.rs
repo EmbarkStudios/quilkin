@@ -14,37 +14,32 @@
  * limitations under the License.
  */
 
-mod metrics;
-
-use std::convert::TryFrom;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    endpoint::EndpointAddress,
+    collections::ttl::{Entry, TtlMap},
     filters::prelude::*,
-    ttl_map::{Entry, TtlMap},
+    net::endpoint::EndpointAddress,
 };
 
-use metrics::Metrics;
-
-crate::include_proto!("quilkin.filters.local_rate_limit.v1alpha1");
-use self::quilkin::filters::local_rate_limit::v1alpha1 as proto;
+use crate::generated::quilkin::filters::local_rate_limit::v1alpha1 as proto;
 
 // TODO: we should make these values configurable and transparent to the filter.
-/// SESSION_TIMEOUT_SECONDS is the default session timeout.
+/// The default session timeout.
 pub const SESSION_TIMEOUT_SECONDS: Duration = Duration::from_secs(60);
 
-/// SESSION_EXPIRY_POLL_INTERVAL is the default interval to check for expired sessions.
+/// The default interval to check for expired sessions.
 const SESSION_EXPIRY_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Bucket stores two atomics.
 /// - A counter that tracks how many packets we've processed within a time window.
 /// - A timestamp that stores the time we last reset the counter. It tracks
 ///   the start of the time window.
+///
 /// This allows us to have a simpler implementation for calculating token
 /// exhaustion without needing a write lock in the common case. The downside
 /// however is that since we're relying on two independent atomics, there is
@@ -60,25 +55,26 @@ struct Bucket {
 }
 
 /// A filter that implements rate limiting on packets based on the token-bucket
-/// algorithm.  Packets that violate the rate limit are dropped.  It only
-/// applies rate limiting on packets received from a downstream connection (processed
-/// through [`LocalRateLimit::read`]). Packets coming from upstream endpoints
-/// flow through the filter untouched.
+/// algorithm.
+///
+/// Packets that violate the rate limit are dropped. It only applies rate
+/// limiting on packets received from a downstream connection (processed
+/// through [`Self::read`]).
+///
+/// Packets coming from upstream endpoints flow through the filter untouched.
 pub struct LocalRateLimit {
     /// Tracks rate limiting state per source address.
     state: TtlMap<EndpointAddress, Bucket>,
     /// Filter configuration.
     config: Config,
-    /// metrics reporter for this filter.
-    metrics: Metrics,
 }
 
 impl LocalRateLimit {
-    /// new returns a new LocalRateLimit. It spawns a future in the background
+    /// new returns a new [`Self`]. It spawns a future in the background
     /// that periodically refills the rate limiter's tokens.
-    fn new(config: Config, metrics: Metrics) -> Result<Self, Error> {
+    fn new(config: Config) -> Result<Self, CreationError> {
         if config.period < 1 {
-            return Err(Error::FieldInvalid {
+            return Err(CreationError::FieldInvalid {
                 field: "period".into(),
                 reason: "value must be at least 1 second".into(),
             });
@@ -87,17 +83,22 @@ impl LocalRateLimit {
         Ok(LocalRateLimit {
             state: TtlMap::new(SESSION_TIMEOUT_SECONDS, SESSION_EXPIRY_POLL_INTERVAL),
             config,
-            metrics,
         })
     }
 
-    /// acquire_token is called on behalf of every packet that is eligible
-    /// for rate limiting. It returns whether there exists a token for the corresponding
-    /// address in the current period - determining whether or not the packet
-    /// should be forwarded or dropped.
-    fn acquire_token(&self, address: &EndpointAddress) -> Option<()> {
+    pub fn testing(config: Config) -> Self {
+        Self::new(config).unwrap()
+    }
+
+    /// This is called on behalf of every packet that is eligible
+    /// for rate limiting.
+    ///
+    /// It returns whether there exists a token for the corresponding address in
+    /// the current period - determining whether or not the packet should be
+    /// forwarded or dropped.
+    fn acquire_token(&self, address: &EndpointAddress) -> bool {
         if self.config.max_packets == 0 {
-            return None;
+            return false;
         }
 
         if let Some(bucket) = self.state.get(address) {
@@ -114,7 +115,7 @@ impl LocalRateLimit {
                 // If so, then we can only allow the packet if the current time
                 // window has ended.
                 if !start_new_window {
-                    return None;
+                    return false;
                 }
             }
 
@@ -128,7 +129,7 @@ impl LocalRateLimit {
                     .store(now_secs, Ordering::Relaxed);
             }
 
-            return Some(());
+            return true;
         }
 
         match self.state.entry(address.clone()) {
@@ -149,16 +150,17 @@ impl LocalRateLimit {
             }
         };
 
-        Some(())
+        true
     }
 }
 
 impl Filter for LocalRateLimit {
-    fn read(&self, ctx: &mut ReadContext) -> Option<()> {
-        self.acquire_token(&ctx.source).or_else(|| {
-            self.metrics.packets_dropped_total.inc();
-            None
-        })
+    fn read<P: PacketMut>(&self, ctx: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
+        if self.acquire_token(&ctx.source) {
+            Ok(())
+        } else {
+            Err(FilterError::RateLimitExceeded)
+        }
     }
 }
 
@@ -167,8 +169,8 @@ impl StaticFilter for LocalRateLimit {
     type Configuration = Config;
     type BinaryConfiguration = proto::LocalRateLimit;
 
-    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, Error> {
-        Self::new(Self::ensure_config_exists(config)?, Metrics::new()?)
+    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, CreationError> {
+        Self::new(Self::ensure_config_exists(config)?)
     }
 }
 
@@ -178,7 +180,7 @@ pub struct Config {
     /// The maximum number of packets allowed to be forwarded by the rate
     /// limiter in a given duration.
     pub max_packets: usize,
-    /// The duration in seconds during which max_packets applies. If none is provided, it
+    /// The duration in seconds during which `max_packets` applies. If none is provided, it
     /// defaults to one second.
     pub period: u32,
 }
@@ -215,10 +217,13 @@ mod tests {
     use tokio::time;
 
     use super::*;
-    use crate::{config::ConfigType, test_utils::assert_write_no_change};
+    use crate::{
+        config::ConfigType,
+        test::{alloc_buffer, assert_write_no_change},
+    };
 
     fn rate_limiter(config: Config) -> LocalRateLimit {
-        LocalRateLimit::new(config, Metrics::new().unwrap()).unwrap()
+        LocalRateLimit::new(config).unwrap()
     }
 
     fn address_pair() -> (EndpointAddress, EndpointAddress) {
@@ -230,18 +235,23 @@ mod tests {
 
     /// Send a packet to the filter and assert whether or not it was processed.
     fn read(r: &LocalRateLimit, address: &EndpointAddress, should_succeed: bool) {
-        let endpoints = vec![crate::endpoint::Endpoint::new(
-            (Ipv4Addr::LOCALHOST, 8089).into(),
-        )];
+        let endpoints = crate::net::cluster::ClusterMap::new_default(
+            [crate::net::endpoint::Endpoint::new(
+                (Ipv4Addr::LOCALHOST, 8089).into(),
+            )]
+            .into(),
+        );
 
-        let mut context = ReadContext::new(endpoints, address.clone(), vec![9]);
+        let mut dest = Vec::new();
+        let mut context =
+            ReadContext::new(&endpoints, address.clone(), alloc_buffer([9]), &mut dest);
         let result = r.read(&mut context);
 
         if should_succeed {
             result.unwrap();
-            assert_eq!(context.contents, vec![9]);
+            assert_eq!(&*context.contents, [9]);
         } else {
-            assert!(result.is_none());
+            assert!(result.is_err());
         }
     }
 

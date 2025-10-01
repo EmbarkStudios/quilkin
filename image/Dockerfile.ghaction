@@ -1,0 +1,17 @@
+FROM build-env AS builder
+ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/x86_64-linux-gnu-gcc
+COPY . /workspace
+WORKDIR /workspace
+RUN cargo about generate license.html.hbs > license.html
+RUN cargo run -p proto-gen -- generate
+RUN cargo build --profile=lto --target x86_64-unknown-linux-gnu
+RUN ./image/archive_dependencies.sh
+
+FROM gcr.io/distroless/cc-debian12:nonroot AS base
+WORKDIR /
+COPY --from=builder /workspace/license.html .
+COPY --from=builder /workspace/dependencies-src.zip .
+COPY --from=builder --chown=nonroot:nonroot /workspace/target/x86_64-unknown-linux-gnu/lto/quilkin .
+
+USER nonroot:nonroot
+ENTRYPOINT ["/quilkin"]

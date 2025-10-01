@@ -1,0 +1,111 @@
+---
+source: crates/test/tests/xdp.rs
+expression: "&packet_headers"
+---
+PacketHeaders {
+    link: Some(
+        Ethernet2(
+            Ethernet2Header {
+                source: [
+                    4,
+                    4,
+                    4,
+                    4,
+                    4,
+                    4,
+                ],
+                destination: [
+                    3,
+                    3,
+                    3,
+                    3,
+                    3,
+                    3,
+                ],
+                ether_type: 0x86DD (Internet Protocol Version 6 (IPV6)),
+            },
+        ),
+    ),
+    vlan: None,
+    net: Some(
+        Ipv6(
+            Ipv6Header {
+                traffic_class: 0,
+                flow_label: Ipv6FlowLabel(
+                    0,
+                ),
+                payload_length: 19,
+                next_header: 17 (UDP - User Datagram),
+                hop_limit: 63,
+                source: [
+                    0,
+                    2,
+                    0,
+                    2,
+                    0,
+                    2,
+                    0,
+                    2,
+                    0,
+                    2,
+                    0,
+                    2,
+                    0,
+                    2,
+                    0,
+                    2,
+                ],
+                destination: [
+                    0,
+                    1,
+                    0,
+                    1,
+                    0,
+                    1,
+                    0,
+                    1,
+                    0,
+                    1,
+                    0,
+                    1,
+                    0,
+                    1,
+                    0,
+                    1,
+                ],
+            },
+            Ipv6Extensions {
+                hop_by_hop_options: None,
+                destination_options: None,
+                routing: None,
+                fragment: None,
+                auth: None,
+            },
+        ),
+    ),
+    transport: Some(
+        Udp(
+            UdpHeader {
+                source_port: 61000,
+                destination_port: 1111,
+                length: 19,
+                checksum: 25174,
+            },
+        ),
+    ),
+    payload: Udp(
+        [
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+            241,
+        ],
+    ),
+}

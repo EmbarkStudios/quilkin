@@ -24,7 +24,6 @@ use super::proto;
 
 /// The configuration for [`load_balancer`][super].
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, JsonSchema)]
-#[non_exhaustive]
 pub struct Config {
     #[serde(default)]
     pub policy: Policy,
@@ -52,10 +51,11 @@ impl From<proto::LoadBalancer> for Config {
 
 /// Policy represents how a [`load_balancer`][super] distributes
 /// packets across endpoints.
-#[derive(Debug, Deserialize, Serialize, Eq, PartialEq, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, Eq, PartialEq, JsonSchema)]
 pub enum Policy {
     /// Send packets to endpoints in turns.
     #[serde(rename = "ROUND_ROBIN")]
+    #[default]
     RoundRobin,
     /// Send packets to endpoints chosen at random.
     #[serde(rename = "RANDOM")]
@@ -72,12 +72,6 @@ impl Policy {
             Policy::Random => Box::new(RandomEndpointChooser),
             Policy::Hash => Box::new(HashEndpointChooser),
         }
-    }
-}
-
-impl Default for Policy {
-    fn default() -> Self {
-        Policy::RoundRobin
     }
 }
 

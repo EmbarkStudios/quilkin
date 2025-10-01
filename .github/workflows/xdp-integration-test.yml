@@ -1,0 +1,46 @@
+name: xdp-integration-test
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  xdp-integration:
+    runs-on: ubuntu-24.04
+    # env:
+    #   CLUSTER_DESIRED: xdp-integ
+    #   CLUSTER: kind-xdp-integ
+    #   SERVER_PORT: "8078"
+    #   REGISTRY_PORT: "5001"
+    #   REGISTRY_NAME: registry
+    steps:
+      - uses: actions/checkout@v4
+      # - name: Create cluster
+      #   id: kind
+      #   uses: helm/kind-action@v1
+      #   with:
+      #     config: .ci/xdp/cluster-config.yaml
+      #     cluster_name: ${{ env.CLUSTER_DESIRED }}
+      #     registry: true
+      #     registry_name: ${{ env.REGISTRY_NAME }}
+      #     registry_port: ${{ env.REGISTRY_PORT }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch quilkin
+        run: cargo fetch --target x86_64-unknown-linux-gnu
+      - name: Build quilkin
+        run: cargo build -p quilkin --bin quilkin
+      - name: Install fortio
+        run: |
+          curl -L -o fortio.deb https://github.com/fortio/fortio/releases/download/v1.68.0/fortio_1.68.0_amd64.deb
+          sudo dpkg -i fortio.deb
+      - name: Run XDP integration test
+        run: sudo .ci/xdp/veth-integ-test.sh

@@ -14,13 +14,10 @@
  * limitations under the License.
  */
 
-use std::convert::TryFrom;
-
 use crate::filters::prelude::*;
 use serde::{Deserialize, Serialize};
 
-crate::include_proto!("quilkin.filters.drop.v1alpha1");
-use self::quilkin::filters::drop::v1alpha1 as proto;
+use crate::generated::quilkin::filters::drop::v1alpha1 as proto;
 
 pub const NAME: &str = Drop::NAME;
 
@@ -34,14 +31,14 @@ impl Drop {
 }
 
 impl Filter for Drop {
-    #[cfg_attr(feature = "instrument", tracing::instrument(skip(self, ctx)))]
-    fn read(&self, _: &mut ReadContext) -> Option<()> {
-        None
+    #[cfg_attr(feature = "instrument", tracing::instrument(skip_all))]
+    fn read<P: PacketMut>(&self, _: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
+        Err(FilterError::Dropped)
     }
 
-    #[cfg_attr(feature = "instrument", tracing::instrument(skip(self, ctx)))]
-    fn write(&self, _: &mut WriteContext) -> Option<()> {
-        None
+    #[cfg_attr(feature = "instrument", tracing::instrument(skip_all))]
+    fn write<P: PacketMut>(&self, _: &mut WriteContext<P>) -> Result<(), FilterError> {
+        Err(FilterError::Dropped)
     }
 }
 
@@ -50,7 +47,7 @@ impl StaticFilter for Drop {
     type Configuration = Config;
     type BinaryConfiguration = proto::Drop;
 
-    fn try_from_config(_: Option<Self::Configuration>) -> Result<Self, Error> {
+    fn try_from_config(_: Option<Self::Configuration>) -> Result<Self, CreationError> {
         Ok(Drop::new())
     }
 }

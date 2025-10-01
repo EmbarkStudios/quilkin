@@ -16,13 +16,11 @@
 
 version: v1alpha1
 filters:
-  - name: quilkin.filters.concatenate_bytes.v1alpha1.ConcatenateBytes
+  - name: quilkin.filters.concatenate.v1alpha1.Concatenate
     config:
       on_read: APPEND
       on_write: DO_NOTHING
       bytes: NDU2 # 456
 clusters:
-  default:
-    localities:
-      - endpoints:
-          - address: ${LOADBALANCER_IP}:7000
+  - endpoints:
+    - address: ${LOADBALANCER_IP}:7777

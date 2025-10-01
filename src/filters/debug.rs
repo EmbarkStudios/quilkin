@@ -14,15 +14,11 @@
  * limitations under the License.
  */
 
-crate::include_proto!("quilkin.filters.debug.v1alpha1");
-
-use std::convert::TryFrom;
+use crate::generated::quilkin::filters::debug::v1alpha1 as proto;
 
 use crate::filters::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::info;
-
-use self::quilkin::filters::debug::v1alpha1 as proto;
 
 /// Debug logs all incoming and outgoing packets
 #[derive(Debug)]
@@ -38,20 +34,28 @@ impl Debug {
             config: config.unwrap_or_default(),
         }
     }
+
+    pub fn testing(config: Option<Config>) -> Self {
+        Self::new(config)
+    }
 }
 
 impl Filter for Debug {
     #[cfg_attr(feature = "instrument", tracing::instrument(skip(self, ctx)))]
-    fn read(&self, ctx: &mut ReadContext) -> Option<()> {
-        info!(id = ?self.config.id, source = ?&ctx.source, contents = ?String::from_utf8_lossy(&ctx.contents), "Read filter event");
-        Some(())
+    fn read<P: PacketMut>(&self, ctx: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
+        info!(id = ?self.config.id, source = ?&ctx.source, contents = ?String::from_utf8_lossy(ctx.contents.as_slice()), "Read filter event");
+        Ok(())
     }
 
     #[cfg_attr(feature = "instrument", tracing::instrument(skip(self, ctx)))]
-    fn write(&self, ctx: &mut WriteContext) -> Option<()> {
-        info!(id = ?self.config.id, endpoint = ?ctx.endpoint.address, source = ?&ctx.source,
-            dest = ?&ctx.dest, contents = ?String::from_utf8_lossy(&ctx.contents), "Write filter event");
-        Some(())
+    fn write<P: PacketMut>(&self, ctx: &mut WriteContext<P>) -> Result<(), FilterError> {
+        info!(
+            id = ?self.config.id,
+            source = ?&ctx.source,
+            dest = ?&ctx.dest,
+            contents = ?String::from_utf8_lossy(ctx.contents.as_slice()), "Write filter event"
+        );
+        Ok(())
     }
 }
 
@@ -60,7 +64,7 @@ impl StaticFilter for Debug {
     type Configuration = Config;
     type BinaryConfiguration = proto::Debug;
 
-    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, Error> {
+    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, CreationError> {
         Ok(Debug::new(config))
     }
 }
@@ -88,22 +92,22 @@ impl TryFrom<proto::Debug> for Config {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::{assert_filter_read_no_change, assert_write_no_change};
+    use crate::test::{assert_filter_read_no_change, assert_write_no_change};
     use tracing_test::traced_test;
 
     use super::*;
 
     #[traced_test]
-    #[test]
-    fn read() {
+    #[tokio::test]
+    async fn read() {
         let df = Debug::new(None);
         assert_filter_read_no_change(&df);
         assert!(logs_contain("Read filter event"));
     }
 
     #[traced_test]
-    #[test]
-    fn write() {
+    #[tokio::test]
+    async fn write() {
         let df = Debug::new(None);
         assert_write_no_change(&df);
         assert!(logs_contain("Write filter event"));

@@ -14,33 +14,42 @@
  * limitations under the License.
  */
 
-use crate::metrics::{filter_opts, CollectorExt};
-use prometheus::{
-    core::{AtomicU64, GenericCounter},
-    IntCounter,
+use prometheus::IntCounter;
+
+use crate::{
+    filters::{StaticFilter, metrics},
+    metrics::Direction,
 };
+
+fn packets_matched_total(direction: Direction) -> IntCounter {
+    metrics::counter(
+        super::Match::NAME,
+        "packets_matched_total",
+        "Total number of packets where the dynamic metadata matches a branch value",
+        direction,
+    )
+}
+
+fn packets_fallthrough_total(direction: Direction) -> IntCounter {
+    metrics::counter(
+        super::Match::NAME,
+        "packets_fallthrough_total",
+        "Total number of packets that are processed by the fallthrough configuration",
+        direction,
+    )
+}
 
 /// Register and manage metrics for this filter
 pub struct Metrics {
-    pub packets_matched_total: GenericCounter<AtomicU64>,
-    pub packets_fallthrough_total: GenericCounter<AtomicU64>,
+    pub packets_matched_total: IntCounter,
+    pub packets_fallthrough_total: IntCounter,
 }
 
 impl Metrics {
-    pub(super) fn new() -> prometheus::Result<Self> {
-        Ok(Metrics {
-            packets_matched_total: IntCounter::with_opts(filter_opts(
-                "packets_matched_total",
-                "Match",
-                "Total number of packets where the dynamic metadata matches a branch value.",
-            ))?
-            .register_if_not_exists()?,
-            packets_fallthrough_total: IntCounter::with_opts(filter_opts(
-                "packets_fallthrough_total",
-                "Match",
-                "Total number of packets that are processed by the fallthrough configuration",
-            ))?
-            .register_if_not_exists()?,
-        })
+    pub(super) fn new() -> Self {
+        Metrics {
+            packets_matched_total: packets_matched_total(Direction::Read),
+            packets_fallthrough_total: packets_fallthrough_total(Direction::Read),
+        }
     }
 }

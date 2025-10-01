@@ -20,9 +20,6 @@
 
 version: v1alpha1
 id: iperf3
-port: 8000
 clusters:
-  default:
-    localities:
-      - endpoints:
-          - address: 127.0.0.1:8001
+  - endpoints:
+    - address: 127.0.0.1:8001

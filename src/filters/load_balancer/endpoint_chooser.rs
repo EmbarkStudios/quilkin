@@ -16,22 +16,27 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use rand::{thread_rng, Rng};
+use rand::Rng;
 
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
 };
 
-use crate::filters::ReadContext;
+use crate::net::{ClusterMap, EndpointAddress};
 
-/// EndpointChooser chooses from a set of endpoints that a proxy is connected to.
+/// Chooses from a set of endpoints that a proxy is connected to.
 pub trait EndpointChooser: Send + Sync {
-    /// choose_endpoints asks for the next endpoint(s) to use.
-    fn choose_endpoints(&self, endpoints: &mut ReadContext);
+    /// Asks for the next endpoint(s) to use.
+    fn choose_endpoints(
+        &self,
+        destinations: &mut Vec<EndpointAddress>,
+        endpoints: &ClusterMap,
+        src: &EndpointAddress,
+    );
 }
 
-/// RoundRobinEndpointChooser chooses endpoints in round-robin order.
+/// Chooses endpoints in round-robin order.
 pub struct RoundRobinEndpointChooser {
     next_endpoint: AtomicUsize,
 }
@@ -45,31 +50,58 @@ impl RoundRobinEndpointChooser {
 }
 
 impl EndpointChooser for RoundRobinEndpointChooser {
-    fn choose_endpoints(&self, ctx: &mut ReadContext) {
+    fn choose_endpoints(
+        &self,
+        destinations: &mut Vec<EndpointAddress>,
+        endpoints: &ClusterMap,
+        _src: &EndpointAddress,
+    ) {
         let count = self.next_endpoint.fetch_add(1, Ordering::Relaxed);
         // Note: The index is guaranteed to be in range.
-        ctx.endpoints = vec![ctx.endpoints[count % ctx.endpoints.len()].clone()];
+        destinations.push(
+            endpoints
+                .nth_endpoint(count % endpoints.num_of_endpoints())
+                .unwrap()
+                .address
+                .clone(),
+        );
     }
 }
 
-/// RandomEndpointChooser chooses endpoints in random order.
+/// Chooses endpoints in random order.
 pub struct RandomEndpointChooser;
 
 impl EndpointChooser for RandomEndpointChooser {
-    fn choose_endpoints(&self, ctx: &mut ReadContext) {
+    fn choose_endpoints(
+        &self,
+        destinations: &mut Vec<EndpointAddress>,
+        endpoints: &ClusterMap,
+        _src: &EndpointAddress,
+    ) {
         // The index is guaranteed to be in range.
-        let index = thread_rng().gen_range(0..ctx.endpoints.len());
-        ctx.endpoints = vec![ctx.endpoints[index].clone()];
+        let index = rand::rng().random_range(0..endpoints.num_of_endpoints());
+        destinations.push(endpoints.nth_endpoint(index).unwrap().address.clone());
     }
 }
 
-/// HashEndpointChooser chooses endpoints based on a hash of source IP and port.
+/// Chooses endpoints based on a hash of source IP and port.
 pub struct HashEndpointChooser;
 
 impl EndpointChooser for HashEndpointChooser {
-    fn choose_endpoints(&self, ctx: &mut ReadContext) {
+    fn choose_endpoints(
+        &self,
+        destinations: &mut Vec<EndpointAddress>,
+        endpoints: &ClusterMap,
+        src: &EndpointAddress,
+    ) {
         let mut hasher = DefaultHasher::new();
-        ctx.source.hash(&mut hasher);
-        ctx.endpoints = vec![ctx.endpoints[hasher.finish() as usize % ctx.endpoints.len()].clone()];
+        src.hash(&mut hasher);
+        destinations.push(
+            endpoints
+                .nth_endpoint(hasher.finish() as usize % endpoints.num_of_endpoints())
+                .unwrap()
+                .address
+                .clone(),
+        );
     }
 }

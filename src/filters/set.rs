@@ -25,39 +25,31 @@ use crate::filters::{FilterFactory, FilterRegistry};
 pub type FilterMap = std::collections::HashMap<&'static str, Arc<DynFilterFactory>>;
 
 /// A set of filters to be registered with a [`FilterRegistry`].
-#[derive(Default, Clone)]
+///
+/// Current default filters:
+/// - [`debug`][filters::debug]
+/// - [`local_rate_limit`][filters::local_rate_limit]
+/// - [`concatenate`][filters::concatenate]
+/// - [`load_balancer`][filters::load_balancer]
+/// - [`capture`][filters::capture]
+/// - [`token_router`][filters::token_router]
+/// - [`hashed_token_router`][filters::token_router]
+#[derive(Clone)]
 pub struct FilterSet(FilterMap);
 
 impl FilterSet {
-    /// Returns a default set of filters which are runtime configurable and used
-    /// with each endpoint.
-    ///
-    /// Current default filters:
-    /// - [`debug`][filters::debug]
-    /// - [`local_rate_limit`][filters::local_rate_limit]
-    /// - [`concatenate_bytes`][filters::concatenate_bytes]
-    /// - [`load_balancer`][filters::load_balancer]
-    /// - [`capture`][filters::capture]
-    /// - [`token_router`][filters::token_router]
-    /// - [`compress`][filters::compress]
-    pub fn default() -> Self {
-        Self::default_with(Option::into_iter(None))
-    }
-
     /// Returns a `FilterSet` with the filters provided through `filters` in
     /// addition to the defaults. Any filter factories provided by `filters`
     /// will override any defaults with a matching name.
-    ///
-    /// See [`FilterSet::default`] for a list of the current defaults.
     pub fn default_with(filters: impl IntoIterator<Item = DynFilterFactory>) -> Self {
         Self::with(
             [
                 filters::Capture::factory(),
-                filters::Compress::factory(),
-                filters::ConcatenateBytes::factory(),
+                filters::Concatenate::factory(),
                 filters::Debug::factory(),
                 filters::Drop::factory(),
                 filters::Firewall::factory(),
+                filters::HashedTokenRouter::factory(),
                 filters::LoadBalancer::factory(),
                 filters::LocalRateLimit::factory(),
                 filters::Match::factory(),
@@ -89,10 +81,16 @@ impl FilterSet {
     }
 
     /// Returns a by reference iterator over the set of filters.
-    pub fn iter(&self) -> Iter {
+    pub fn iter(&self) -> Iter<'_> {
         Iter {
             inner: self.0.iter(),
         }
+    }
+}
+
+impl Default for FilterSet {
+    fn default() -> Self {
+        Self::default_with(Option::into_iter(None))
     }
 }
 

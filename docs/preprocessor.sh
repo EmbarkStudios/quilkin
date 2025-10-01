@@ -20,9 +20,6 @@ cargo run -q --manifest-path ../Cargo.toml -- -q generate-config-schema -o ../ta
 
 # Output all the command line help
 cargo run -q --manifest-path ../Cargo.toml &> ../target/quilkin.commands || true
-cargo run -q --manifest-path ../Cargo.toml -- proxy --help &> ../target/quilkin.proxy.commands || true
-cargo run -q --manifest-path ../Cargo.toml -- manage --help &> ../target/quilkin.manage.commands || true
-cargo run -q --manifest-path ../Cargo.toml -- relay --help &> ../target/quilkin.relay.commands || true
 
 # Credit: https://github.com/rust-lang/mdBook/issues/1462#issuecomment-778650045
 jq -M -c .[1] <&0

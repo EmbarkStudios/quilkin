@@ -18,10 +18,8 @@ filters:
     config:
       id: debug-1
 clusters:
-  default:
-    localities:
-        - endpoints:
-            - address: 127.0.0.1:7001
+  - endpoints:
+      - address: 127.0.0.1:7001
 # ";
 # let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
 # assert_eq!(config.filters.load().len(), 1);
@@ -32,8 +30,3 @@ clusters:
 ```yaml
 {{#include ../../../../../target/quilkin.filters.debug.v1alpha1.yaml}}
 ```
-
-
-## Metrics
-
-This filter currently exports no metrics.

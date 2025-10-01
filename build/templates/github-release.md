@@ -4,7 +4,7 @@ This is the {version} release of Quilkin.
 
 { write description of release }
 
-Check the [documentation](https://github.com/googleforgames/quilkin#usage) for details on features, installation and
+Check the [documentation](https://github.com/googleforgames/quilkin#documentation) for details on features, installation and
 usage.
 
 **Implemented enhancements:**

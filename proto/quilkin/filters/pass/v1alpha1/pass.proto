@@ -18,8 +18,6 @@ syntax = "proto3";
 
 package quilkin.filters.pass.v1alpha1;
 
-import "google/protobuf/wrappers.proto";
-
 message Pass {
 }
 

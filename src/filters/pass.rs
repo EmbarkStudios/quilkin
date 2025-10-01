@@ -14,13 +14,10 @@
  * limitations under the License.
  */
 
-use std::convert::TryFrom;
-
 use crate::filters::prelude::*;
 use serde::{Deserialize, Serialize};
 
-crate::include_proto!("quilkin.filters.pass.v1alpha1");
-use self::quilkin::filters::pass::v1alpha1 as proto;
+use crate::generated::quilkin::filters::pass::v1alpha1 as proto;
 
 /// Allows a packet to pass through, mostly useful in combination with
 /// other filters.
@@ -33,14 +30,14 @@ impl Pass {
 }
 
 impl Filter for Pass {
-    #[cfg_attr(feature = "instrument", tracing::instrument(skip(self, ctx)))]
-    fn read(&self, _: &mut ReadContext) -> Option<()> {
-        Some(())
+    #[cfg_attr(feature = "instrument", tracing::instrument(skip_all))]
+    fn read<P: PacketMut>(&self, _: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
+        Ok(())
     }
 
-    #[cfg_attr(feature = "instrument", tracing::instrument(skip(self, ctx)))]
-    fn write(&self, _: &mut WriteContext) -> Option<()> {
-        Some(())
+    #[cfg_attr(feature = "instrument", tracing::instrument(skip_all))]
+    fn write<P: PacketMut>(&self, _: &mut WriteContext<P>) -> Result<(), FilterError> {
+        Ok(())
     }
 }
 
@@ -49,7 +46,7 @@ impl StaticFilter for Pass {
     type Configuration = Config;
     type BinaryConfiguration = proto::Pass;
 
-    fn try_from_config(_config: Option<Self::Configuration>) -> Result<Self, Error> {
+    fn try_from_config(_config: Option<Self::Configuration>) -> Result<Self, CreationError> {
         Ok(Pass::new())
     }
 }

@@ -1,19 +1,13 @@
-# Filesystem xDS Provider
+# Filesystem Provider
 
 The filesystem provider watches a configuration file on disk and sends updates to proxies whenever that file changes.
 
-It can be started with using subcommand `manage file` as the following:
+For example:
 ```sh
-quilkin manage file quilkin.yaml
+quilkin --provider.fs.path quilkin.yaml
 ```
 
-We run this on port 1800, in this example, in case you are running this locally, and the
-default port is taken up by an existing Quilkin proxy.
-
-After running this command, any proxy that connects to port 18000 will receive updates as configured in `config.yaml`
-file.
-
-You can find the configuration file schema in [Configuration][configuration].
+You can find the configuration file schema in [Configuration File][configuration].
 
 Example:
 
@@ -25,17 +19,15 @@ filters:
     config:
       id: hello
 clusters:
-  cluster-a:
-    localities:
-      - endpoints:
-          - address: 123.0.0.1:29
-            metadata:
-              'quilkin.dev':
-                tokens:
-                  - 'MXg3aWp5Ng=='
+  - endpoints:
+     - address: 123.0.0.1:29
+       metadata:
+         'quilkin.dev':
+           tokens:
+             - 'MXg3aWp5Ng=='
 # ";
 # let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
 # assert_eq!(config.filters.load().len(), 1);
 ```
 
-[configuration]: ../../../deployment/configuration.md
+[configuration]: ../../../services/proxy/configuration.md

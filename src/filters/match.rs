@@ -14,19 +14,15 @@
  * limitations under the License.
  */
 
-use crate::xds as envoy;
-
-crate::include_proto!("quilkin.filters.matches.v1alpha1");
-
 mod config;
 mod metrics;
 
-use crate::{filters::prelude::*, metadata};
+use crate::{filters::prelude::*, net::endpoint::metadata};
 
-use self::quilkin::filters::matches::v1alpha1 as proto;
-use crate::filters::r#match::metrics::Metrics;
+use self::metrics::Metrics;
 
 pub use self::config::{Branch, Config, DirectionalConfig, Fallthrough};
+use crate::generated::quilkin::filters::matches::v1alpha1 as proto;
 
 struct ConfigInstance {
     metadata_key: metadata::Key,
@@ -35,9 +31,9 @@ struct ConfigInstance {
 }
 
 impl ConfigInstance {
-    fn new(config: config::DirectionalConfig) -> Result<Self, Error> {
+    fn new(config: config::DirectionalConfig) -> Result<Self, CreationError> {
         let map_to_instance =
-            |filter: String, config_type: Option<serde_json::Value>| -> Result<_, Error> {
+            |filter: String, config_type: Option<serde_json::Value>| -> Result<_, CreationError> {
                 let instance = crate::filters::FilterRegistry::get(
                     &filter,
                     CreateFilterArgs::new(config_type.map(From::from)),
@@ -69,12 +65,12 @@ pub struct Match {
 }
 
 impl Match {
-    fn new(config: Config, metrics: Metrics) -> Result<Self, Error> {
+    fn new(config: Config, metrics: Metrics) -> Result<Self, CreationError> {
         let on_read_filters = config.on_read.map(ConfigInstance::new).transpose()?;
         let on_write_filters = config.on_write.map(ConfigInstance::new).transpose()?;
 
         if on_read_filters.is_none() && on_write_filters.is_none() {
-            return Err(Error::MissingConfig(Self::NAME));
+            return Err(CreationError::MissingConfig(Self::NAME));
         }
 
         Ok(Self {
@@ -82,6 +78,10 @@ impl Match {
             on_read_filters,
             on_write_filters,
         })
+    }
+
+    pub fn testing(config: Config) -> Self {
+        Self::new(config, Metrics::new()).unwrap()
     }
 }
 
@@ -93,56 +93,52 @@ fn match_filter<'config, 'ctx, Ctx>(
         &'value Ctx,
         &'config metadata::Key,
     ) -> Option<&'value metadata::Value>,
-    and_then: impl Fn(&'ctx mut Ctx, &'config FilterInstance) -> Option<()>,
-) -> Option<()>
-where
-{
+    and_then: impl Fn(&'ctx mut Ctx, &'config FilterInstance) -> Result<(), FilterError>,
+) -> Result<(), FilterError> {
     match config {
         Some(config) => {
-            let value = (get_metadata)(ctx, &config.metadata_key)?;
+            let value =
+                (get_metadata)(ctx, &config.metadata_key).ok_or(FilterError::MatchNoMetadata)?;
 
-            match config.branches.iter().find(|(key, _)| key == value) {
-                Some((value, instance)) => {
-                    tracing::trace!(key=%config.metadata_key, %value, filter=%instance.0, "Matched against branch");
-                    metrics.packets_matched_total.inc();
-                    (and_then)(ctx, &instance.1)
-                }
-                None => {
-                    tracing::trace!(
-                        key = %config.metadata_key,
-                        fallthrough = %config.fallthrough.0,
-                        "No match found, calling fallthrough"
-                    );
-                    metrics.packets_fallthrough_total.inc();
-                    (and_then)(ctx, &config.fallthrough.1)
-                }
+            if let Some((value, instance)) = config.branches.iter().find(|(key, _)| key == value) {
+                tracing::trace!(key=%config.metadata_key, %value, filter=%instance.0, "Matched against branch");
+                metrics.packets_matched_total.inc();
+                (and_then)(ctx, &instance.1)
+            } else {
+                tracing::trace!(
+                    key = %config.metadata_key,
+                    fallthrough = %config.fallthrough.0,
+                    "No match found, calling fallthrough"
+                );
+                metrics.packets_fallthrough_total.inc();
+                (and_then)(ctx, &config.fallthrough.1)
             }
         }
-        None => Some(()),
+        None => Ok(()),
     }
 }
 
 impl Filter for Match {
     #[cfg_attr(feature = "instrument", tracing::instrument(skip(self, ctx)))]
-    fn read(&self, ctx: &mut ReadContext) -> Option<()> {
+    fn read<P: PacketMut>(&self, ctx: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
         tracing::trace!(metadata=?ctx.metadata);
         match_filter(
             &self.on_read_filters,
             &self.metrics,
             ctx,
             |ctx, metadata_key| ctx.metadata.get(metadata_key),
-            |ctx, instance| instance.filter.read(ctx),
+            |ctx, instance| instance.filter().read(ctx),
         )
     }
 
     #[cfg_attr(feature = "instrument", tracing::instrument(skip(self, ctx)))]
-    fn write(&self, ctx: &mut WriteContext) -> Option<()> {
+    fn write<P: PacketMut>(&self, ctx: &mut WriteContext<P>) -> Result<(), FilterError> {
         match_filter(
             &self.on_write_filters,
             &self.metrics,
             ctx,
             |ctx, metadata_key| ctx.metadata.get(metadata_key),
-            |ctx, instance| instance.filter.write(ctx),
+            |ctx, instance| instance.filter().write(ctx),
         )
     }
 }
@@ -152,8 +148,8 @@ impl StaticFilter for Match {
     type Configuration = Config;
     type BinaryConfiguration = proto::Match;
 
-    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, Error> {
-        Self::new(Self::ensure_config_exists(config)?, Metrics::new()?)
+    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, CreationError> {
+        Self::new(Self::ensure_config_exists(config)?, Metrics::new())
     }
 }
 
@@ -161,12 +157,16 @@ impl StaticFilter for Match {
 mod tests {
     use super::*;
 
-    use crate::{endpoint::Endpoint, filters::*};
+    use crate::{
+        filters::*,
+        net::endpoint::{Endpoint, metadata},
+        test::alloc_buffer,
+    };
 
-    #[test]
-    fn metrics() {
-        let metrics = Metrics::new().unwrap();
-        let key = crate::metadata::Key::from_static("myapp.com/token");
+    #[tokio::test]
+    async fn metrics() {
+        let metrics = Metrics::new();
+        let key = metadata::Key::from_static("myapp.com/token");
         let config = Config {
             on_read: Some(DirectionalConfig {
                 metadata_key: key,
@@ -180,15 +180,14 @@ mod tests {
         };
         let filter = Match::new(config, metrics).unwrap();
         let endpoint: Endpoint = Default::default();
-        let contents = "hello".to_string().into_bytes();
+        let contents = b"hello";
 
         // no config, so should make no change.
         filter
             .write(&mut WriteContext::new(
-                endpoint.clone(),
                 endpoint.address,
                 "127.0.0.1:70".parse().unwrap(),
-                contents.clone(),
+                alloc_buffer(contents),
             ))
             .unwrap();
 
@@ -196,10 +195,15 @@ mod tests {
         assert_eq!(0, filter.metrics.packets_matched_total.get());
 
         // config so we can test match and fallthrough.
+        let endpoints = crate::net::cluster::ClusterMap::new_default(
+            [Endpoint::new("127.0.0.1:81".parse().unwrap())].into(),
+        );
+        let mut dest = Vec::new();
         let mut ctx = ReadContext::new(
-            vec![Default::default()],
+            &endpoints,
             ([127, 0, 0, 1], 7000).into(),
-            contents.clone(),
+            alloc_buffer(contents),
+            &mut dest,
         );
         ctx.metadata.insert(key, "abc".into());
 
@@ -207,15 +211,20 @@ mod tests {
         assert_eq!(1, filter.metrics.packets_matched_total.get());
         assert_eq!(0, filter.metrics.packets_fallthrough_total.get());
 
+        let endpoints = crate::net::cluster::ClusterMap::new_default(
+            [Endpoint::new("127.0.0.1:81".parse().unwrap())].into(),
+        );
+        let mut dest = Vec::new();
         let mut ctx = ReadContext::new(
-            vec![Default::default()],
+            &endpoints,
             ([127, 0, 0, 1], 7000).into(),
-            contents,
+            alloc_buffer(contents),
+            &mut dest,
         );
         ctx.metadata.insert(key, "xyz".into());
 
         let result = filter.read(&mut ctx);
-        assert!(result.is_none());
+        assert!(result.is_err());
         assert_eq!(1, filter.metrics.packets_matched_total.get());
         assert_eq!(1, filter.metrics.packets_fallthrough_total.get());
     }

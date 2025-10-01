@@ -38,6 +38,75 @@ Quilkin incorporates these abilities:
 * Integration with Game Server hosting platforms such as [Agones](https://agones.dev).
 * Can be integrated with C/C++ code bases via FFI.
 
+## Quilkin Architecture
+
+Quilkin is broken up into three main components
+
+* **Providers** are data collection sources to enable quilkin to see its environment.
+* **Services** provide the the core business logic for handling UDP traffic as well meta control-plane functionality.
+* **Configuration** controls what a given instance is able to do, what services it runs, and providers it pulls from.
+
+```mermaid
+architecture-beta
+    group services(cloud)[Services]
+    group public(cloud)[Public Client API] in services
+    group private(cloud)[Internal Service API] in services
+    group providers(cloud)[Providers]
+    group config(cloud)[Configuration]
+
+    service udp(internet)[UDP] in public
+    service qcmp(internet)[QCMP UDP] in public
+    junction sp1 in services
+    junction sp3 in services
+
+    service metrics(internet)[Administration] in private
+    service grpc(internet)[gRPC] in private
+    service http(internet)[HTTP] in private
+    junction sp2 in services
+    junction sp4 in services
+
+    service k8s(cloud)[Kubernetes] in providers
+    service fs(disk)[Filesystem] in providers
+    service xds(cloud)[gRPC] in providers
+    service cli(disk)[CLI] in providers
+    junction p1 in providers
+    junction p2 in providers
+
+    service filters(disk)[Filterchains] in config
+    service endpoints(disk)[Endpoints] in config
+    service gameservers(server)[Game Servers] in config
+    service mmdb(server)[Maxmind DB] in config
+    junction c1 in config
+    junction c2 in config
+
+    service quilkin(server)[Quilkin]
+
+    sp1:T -- R:udp
+    sp1:L -- R:qcmp
+    sp1:B -- T:sp3
+
+    sp2:T -- B:sp3
+    sp2:L -- R:grpc
+    sp2:B -- R:metrics
+    sp4:L -- R:metrics
+    sp4:B -- R:http
+    sp4:T -- B:sp2
+    sp3:R -- L:quilkin
+
+    quilkin:R -- L:p1
+    p1:T -- L:fs
+    p1:R -- L:k8s
+    p1:B -- T:p2
+    p2:R -- L:xds
+    p2:B -- L:cli
+    c2:L -- R:mmdb
+    c2:R -- L:gameservers
+    c1:T -- B:c2
+    c1:R -- L:endpoints
+    c1:L -- R:filters
+    c1:B -- T:quilkin
+```
+
 ## What Next?
 
 Quilkin provides a variety of different services depending on your use-case.

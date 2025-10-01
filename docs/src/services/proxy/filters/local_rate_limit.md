@@ -22,10 +22,8 @@ filters:
       max_packets: 1000
       period: 1
 clusters:
-  default:
-    localities:
-      - endpoints:
-        - address: 127.0.0.1:7001
+  - endpoints:
+    - address: 127.0.0.1:7001
 # ";
 #   let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
 # assert_eq!(config.filters.load().len(), 1);
@@ -45,9 +43,3 @@ To configure a rate limiter, we specify the maximum rate at which the proxy is a
 ```yaml
 {{#include ../../../../../target/quilkin.filters.local_rate_limit.v1alpha1.yaml}}
 ```
-
-
-## Metrics
-
-* `quilkin_filter_LocalRateLimit_packets_dropped_total`
-  A counter over the total number of packets that have exceeded the configured maximum rate limit and have been dropped as a result.

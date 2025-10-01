@@ -4,7 +4,7 @@
 
 * A \*nix terminal
 * A binary release of Quilkin from the [Github releases page](https://github.com/googleforgames/quilkin/releases) or by running `cargo install quilkin`
-* [ncat](https://nmap.org/ncat/guide/)
+* [ncat](https://www.google.com/search?q=ncat)
 * [netcat](http://netcat.sourceforge.net/)
 
 ## 1. Start an udp echo service
@@ -43,7 +43,7 @@ s":"0.0.0.0:8000"},"target":"quilkin::admin","filename":"src/admin.rs"}
 {"timestamp":"2023-01-19T10:16:23.401192Z","level":"INFO","fields":{"message":"Quilkin is ready"},"target":"qui
 ```
 
-## 3. Send a packet!
+## 3. Send a packet
 
 In (yet 😃) another shell, let's use netcat to send an udp packet.
 

@@ -1,20 +1,26 @@
-use crate::metadata::Value;
+/*
+ * Copyright 2024 Google LLC All Rights Reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 
-use super::Metrics;
+use crate::net::endpoint::metadata::Value;
+use bytes::Bytes;
 
-fn is_valid_size(contents: &[u8], size: u32, metrics: &Metrics) -> bool {
-    // if the capture size is bigger than the packet size, then we drop the packet,
-    // and occasionally warn
-    if contents.len() < size as usize {
-        if metrics.packets_dropped_total.get() % 1000 == 0 {
-            tracing::warn!(count = ?metrics.packets_dropped_total.get(), "Packets are being dropped due to their length being less than {} bytes", size);
-        }
-        metrics.packets_dropped_total.inc();
-
-        false
-    } else {
-        true
-    }
+/// Returns whether the capture size is bigger than the packet size.
+#[inline]
+fn is_valid_size(contents: &[u8], size: u32) -> bool {
+    contents.len() >= size as usize
 }
 
 /// Capture from the start of the packet.
@@ -28,13 +34,18 @@ pub struct Prefix {
 }
 
 impl super::CaptureStrategy for Prefix {
-    fn capture(&self, contents: &mut Vec<u8>, metrics: &Metrics) -> Option<Value> {
-        is_valid_size(contents, self.size, metrics).then(|| {
-            if self.remove {
-                Value::Bytes(contents.drain(..self.size as usize).collect())
-            } else {
-                Value::Bytes(contents.iter().take(self.size as usize).copied().collect())
-            }
+    fn capture(&self, contents: &[u8]) -> Option<(Value, isize)> {
+        is_valid_size(contents, self.size).then(|| {
+            let value = Value::Bytes(Bytes::copy_from_slice(&contents[..self.size as _]));
+
+            (
+                value,
+                if self.remove {
+                    -(self.size as isize)
+                } else {
+                    0
+                },
+            )
         })
     }
 }
@@ -50,15 +61,12 @@ pub struct Suffix {
 }
 
 impl super::CaptureStrategy for Suffix {
-    fn capture(&self, contents: &mut Vec<u8>, metrics: &Metrics) -> Option<Value> {
-        is_valid_size(contents, self.size, metrics).then(|| {
+    fn capture(&self, contents: &[u8]) -> Option<(Value, isize)> {
+        is_valid_size(contents, self.size).then(|| {
             let index = contents.len() - self.size as usize;
+            let value = Value::Bytes(Bytes::copy_from_slice(&contents[index..]));
 
-            if self.remove {
-                Value::Bytes(contents.split_off(index).into())
-            } else {
-                Value::Bytes(contents.iter().skip(index).copied().collect())
-            }
+            (value, if self.remove { self.size as isize } else { 0 })
         })
     }
 }

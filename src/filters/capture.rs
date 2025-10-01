@@ -16,14 +16,16 @@
 
 mod affix;
 mod config;
-mod metrics;
 mod regex;
 
-crate::include_proto!("quilkin.filters.capture.v1alpha1");
+use crate::generated::quilkin::filters::capture::v1alpha1 as proto;
 
-use crate::{filters::prelude::*, metadata};
+use crate::{filters::prelude::*, net::endpoint::metadata};
 
-use self::{metrics::Metrics, quilkin::filters::capture::v1alpha1 as proto};
+/// The default key under which the [`Capture`] filter puts the
+/// byte slices it extracts from each packet.
+/// - **Type** `Vec<u8>`
+pub const CAPTURED_BYTES: &str = "quilkin.dev/capture";
 
 pub use self::{
     affix::{Prefix, Suffix},
@@ -35,44 +37,54 @@ pub use self::{
 pub trait CaptureStrategy {
     /// Capture packet data from the contents, and optionally returns a value if
     /// anything was captured.
-    fn capture(&self, contents: &mut Vec<u8>, metrics: &Metrics) -> Option<metadata::Value>;
+    fn capture(&self, contents: &[u8]) -> Option<(metadata::Value, isize)>;
 }
 
 pub struct Capture {
     capture: Box<dyn CaptureStrategy + Sync + Send>,
-    /// metrics reporter for this filter.
-    metrics: Metrics,
     metadata_key: metadata::Key,
     is_present_key: metadata::Key,
 }
 
 impl Capture {
-    fn new(config: Config, metrics: Metrics) -> Self {
+    fn new(config: Config) -> Self {
         Self {
             capture: config.strategy.into_capture(),
-            metrics,
-            is_present_key: (config.metadata_key.to_string() + "/is_present").into(),
+            is_present_key: format!("{}/is_present", config.metadata_key).into(),
             metadata_key: config.metadata_key,
         }
+    }
+
+    pub fn testing(config: Config) -> Self {
+        Self::new(config)
     }
 }
 
 impl Filter for Capture {
     #[cfg_attr(feature = "instrument", tracing::instrument(skip(self, ctx)))]
-    fn read(&self, ctx: &mut ReadContext) -> Option<()> {
-        let capture = self.capture.capture(&mut ctx.contents, &self.metrics);
+    fn read<P: PacketMut>(&self, ctx: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
+        let capture = self.capture.capture(ctx.contents.as_slice());
         ctx.metadata.insert(
             self.is_present_key,
             metadata::Value::Bool(capture.is_some()),
         );
 
-        if let Some(value) = capture {
+        if let Some((value, remove)) = capture {
             tracing::trace!(key=%self.metadata_key, %value, "captured value");
             ctx.metadata.insert(self.metadata_key, value);
-            Some(())
+
+            if remove != 0 {
+                if remove < 0 {
+                    ctx.contents.remove_head(remove.unsigned_abs());
+                } else {
+                    ctx.contents.remove_tail(remove as _);
+                }
+            }
+
+            Ok(())
         } else {
             tracing::trace!(key = %self.metadata_key, "No value captured");
-            None
+            Err(FilterError::NoValueCaptured)
         }
     }
 }
@@ -82,27 +94,25 @@ impl StaticFilter for Capture {
     type Configuration = Config;
     type BinaryConfiguration = proto::Capture;
 
-    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, Error> {
-        Ok(Capture::new(
-            Self::ensure_config_exists(config)?,
-            Metrics::new()?,
-        ))
+    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, CreationError> {
+        Ok(Capture::new(Self::ensure_config_exists(config)?))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::CAPTURED_BYTES;
     use crate::{
-        endpoint::Endpoint, filters::metadata::CAPTURED_BYTES, metadata::Value,
-        test_utils::assert_write_no_change,
+        net::endpoint::{Endpoint, metadata::Value},
+        test::{alloc_buffer, assert_write_no_change},
     };
 
     use super::*;
 
     const TOKEN_KEY: &str = "TOKEN";
 
-    #[test]
-    fn factory_valid_config_all() {
+    #[tokio::test]
+    async fn factory_valid_config_all() {
         let config = serde_json::json!({
             "metadataKey": TOKEN_KEY.to_string(),
             "suffix": {
@@ -114,8 +124,8 @@ mod tests {
         assert_end_strategy(&filter, TOKEN_KEY.into(), true);
     }
 
-    #[test]
-    fn factory_valid_config_defaults() {
+    #[tokio::test]
+    async fn factory_valid_config_defaults() {
         let config = serde_json::json!({
             "suffix": {
                 "size": 3_i64,
@@ -136,8 +146,8 @@ mod tests {
         assert!(serde_json::from_value::<Config>(config).is_err());
     }
 
-    #[test]
-    fn read() {
+    #[tokio::test]
+    async fn read() {
         let config = Config {
             metadata_key: TOKEN_KEY.into(),
             strategy: Strategy::Suffix(Suffix {
@@ -150,8 +160,8 @@ mod tests {
         assert_end_strategy(&filter, TOKEN_KEY.into(), true);
     }
 
-    #[test]
-    fn read_overflow_capture_size() {
+    #[tokio::test]
+    async fn read_overflow_capture_size() {
         let config = Config {
             metadata_key: TOKEN_KEY.into(),
             strategy: Strategy::Suffix(Suffix {
@@ -160,21 +170,24 @@ mod tests {
             }),
         };
         let filter = Capture::from_config(config.into());
-        let endpoints = vec![Endpoint::new("127.0.0.1:81".parse().unwrap())];
-        assert!(filter
-            .read(&mut ReadContext::new(
-                endpoints,
-                (std::net::Ipv4Addr::LOCALHOST, 80).into(),
-                "abc".to_string().into_bytes(),
-            ))
-            .is_none());
-
-        let count = filter.metrics.packets_dropped_total.get();
-        assert_eq!(1, count);
+        let endpoints = crate::net::cluster::ClusterMap::new_default(
+            [Endpoint::new("127.0.0.1:81".parse().unwrap())].into(),
+        );
+        let mut dest = Vec::new();
+        assert!(
+            filter
+                .read(&mut ReadContext::new(
+                    &endpoints,
+                    (std::net::Ipv4Addr::LOCALHOST, 80).into(),
+                    alloc_buffer(b"abc"),
+                    &mut dest,
+                ))
+                .is_err()
+        );
     }
 
-    #[test]
-    fn write() {
+    #[tokio::test]
+    async fn write() {
         let config = Config {
             strategy: Strategy::Suffix(Suffix {
                 size: 0,
@@ -188,64 +201,71 @@ mod tests {
 
     #[test]
     fn regex_capture() {
-        let metrics = Metrics::new().unwrap();
         let end = Regex {
             pattern: ::regex::bytes::Regex::new(".{3}$").unwrap(),
         };
-        let mut contents = b"helloabc".to_vec();
-        let result = end.capture(&mut contents, &metrics).unwrap();
+        let contents = alloc_buffer(b"helloabc");
+        let result = end.capture(&contents).unwrap().0;
         assert_eq!(Value::Bytes(b"abc".to_vec().into()), result);
-        assert_eq!(b"helloabc".to_vec(), contents);
+        assert_eq!(b"helloabc", &*contents);
     }
 
     #[test]
     fn end_capture() {
-        let metrics = Metrics::new().unwrap();
         let mut end = Suffix {
             size: 3,
             remove: false,
         };
-        let mut contents = b"helloabc".to_vec();
-        let result = end.capture(&mut contents, &metrics).unwrap();
+        let mut contents = alloc_buffer(b"helloabc");
+        let (result, remove) = end.capture(&contents).unwrap();
         assert_eq!(Value::Bytes(b"abc".to_vec().into()), result);
-        assert_eq!(b"helloabc".to_vec(), contents);
+        assert_eq!(remove, 0);
+        assert_eq!(b"helloabc", &*contents);
 
         end.remove = true;
 
-        let result = end.capture(&mut contents, &metrics).unwrap();
+        let (result, remove) = end.capture(&contents).unwrap();
         assert_eq!(Value::Bytes(b"abc".to_vec().into()), result);
-        assert_eq!(b"hello".to_vec(), contents);
+        assert_eq!(remove, 3);
+        contents.remove_tail(remove as _);
+        assert_eq!(b"hello", &*contents);
     }
 
     #[test]
     fn beginning_capture() {
-        let metrics = Metrics::new().unwrap();
         let mut beg = Prefix {
             size: 3,
             remove: false,
         };
-        let mut contents = b"abchello".to_vec();
+        let mut contents = alloc_buffer(b"abchello");
 
-        let result = beg.capture(&mut contents, &metrics);
-        assert_eq!(Some(Value::Bytes(b"abc".to_vec().into())), result);
-        assert_eq!(b"abchello".to_vec(), contents);
+        let (result, remove) = beg.capture(&contents).unwrap();
+        assert_eq!(Value::Bytes(b"abc".to_vec().into()), result);
+        assert_eq!(remove, 0);
+        assert_eq!(b"abchello", &*contents);
 
         beg.remove = true;
 
-        let result = beg.capture(&mut contents, &metrics);
-        assert_eq!(Some(Value::Bytes(b"abc".to_vec().into())), result);
-        assert_eq!(b"hello".to_vec(), contents);
+        let (result, remove) = beg.capture(&contents).unwrap();
+        assert_eq!(Value::Bytes(b"abc".to_vec().into()), result);
+        assert_eq!(remove, -3);
+        contents.remove_head(remove.unsigned_abs());
+        assert_eq!(b"hello", &*contents);
     }
 
     fn assert_end_strategy<F>(filter: &F, key: metadata::Key, remove: bool)
     where
         F: Filter + ?Sized,
     {
-        let endpoints = vec![Endpoint::new("127.0.0.1:81".parse().unwrap())];
+        let endpoints = crate::net::cluster::ClusterMap::new_default(
+            [Endpoint::new("127.0.0.1:81".parse().unwrap())].into(),
+        );
+        let mut dest = Vec::new();
         let mut context = ReadContext::new(
-            endpoints,
+            &endpoints,
             "127.0.0.1:80".parse().unwrap(),
-            "helloabc".to_string().into_bytes(),
+            alloc_buffer(b"helloabc"),
+            &mut dest,
         );
 
         filter.read(&mut context).unwrap();

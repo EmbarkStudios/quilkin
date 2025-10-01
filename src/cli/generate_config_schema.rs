@@ -37,7 +37,7 @@ impl GenerateConfigSchema {
                 Box::new(
                     set.iter()
                         .map(|factory| (factory.name(), factory.config_schema())),
-                ) as SchemaIterator
+                ) as SchemaIterator<'_>
             })
             .unwrap_or_else(|| {
                 Box::new(self.filter_ids.iter().filter_map(|id| {
@@ -48,7 +48,7 @@ impl GenerateConfigSchema {
                     }
 
                     item.map(|item| (item.name(), item.config_schema()))
-                })) as SchemaIterator
+                })) as SchemaIterator<'_>
             });
 
         for (id, schema) in schemas {

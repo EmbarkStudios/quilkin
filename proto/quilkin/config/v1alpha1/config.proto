@@ -1,0 +1,68 @@
+/*
+ * Copyright 2023 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+syntax = "proto3";
+
+import "google/protobuf/struct.proto";
+
+package quilkin.config.v1alpha1;
+
+message ClusterMap { repeated Cluster clusters = 1; }
+
+message Cluster {
+  Locality locality = 1;
+  repeated Endpoint endpoints = 2;
+}
+
+message Locality {
+  string region = 1;
+  string zone = 2;
+  string sub_zone = 3;
+}
+
+message Ipv6 {
+  fixed64 first = 1;
+  fixed64 second = 2;
+}
+
+message Host {
+  oneof inner {
+    string name = 1;
+    fixed32 ipv4 = 2;
+    Ipv6 ipv6 = 3;
+  }
+}
+
+message Endpoint {
+  string host = 1;
+  uint32 port = 2;
+  google.protobuf.Struct metadata = 3;
+  Host host2 = 4;
+}
+
+message Datacenter {
+  string host = 1;
+  uint32 qcmp_port = 2;
+  string icao_code = 3;
+}
+
+message Filter {
+  string name = 1;
+  optional string label = 2;
+  optional string config = 3;
+}
+
+message FilterChain { repeated Filter filters = 1; }

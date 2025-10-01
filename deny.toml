@@ -13,29 +13,68 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-unknown-linux-musl",
+]
+all-features = true
 
 [advisories]
+unmaintained = 'workspace'
+yanked = 'deny'
 ignore = [
-    # time 0.1 vulnerability, we don't use any affected APIs
-    "RUSTSEC-2020-0071"
 ]
+
+[bans]
+deny = [
+    { crate = "openssl-sys", use-instead = "rustls" },
+    { crate = "openssl", use-instead = "rustls" },
+    { crate = "aws-lc-sys", use-instead = "ring" },
+    { crate = "cmake", use-instead = "cc" },
+    { crate = "chrono", use-instead = "time", wrappers = [
+        "k8s-openapi",
+        "kube-client",
+        "kube-core",
+        "kube-leader-election",
+    ] },
+]
+multiple-versions = "deny"
+skip = [
+    { crate = "object@0.32.2", reason = "transitive dependency due to backtrace, backtrace is updated, but stable-eyre using a feature that doesn't exist any longer, and can't update, sigh" },
+    { crate = "hashbrown@0.14.5", reason = "many crates use this old version" },
+    { crate = "getrandom@0.2.16", reason = "ring" },
+]
+skip-tree = [
+    { crate = "thiserror@1.0.69", reason = "many crates use this old version" },
+]
+
+[[bans.features]]
+name = "rustls"
+deny = ["aws_lc_rs", "aws-lc-rs"]
+
+[[bans.features]]
+name = "tokio-rustls"
+deny = ["aws-lc-rs"]
+
+[[bans.features]]
+name = "rustls-webpki"
+deny = ["aws-lc-rs"]
+
+[bans.workspace-dependencies]
+unused = 'allow'
 
 # This section is considered when running `cargo deny check licenses`
 # More documentation for the licenses section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
-unlicensed = "deny"
-copyleft = "deny"
-default = "allow"
+allow = ["Apache-2.0", "MIT", "ISC", "BSD-3-Clause", "Unicode-3.0"]
 exceptions = [
-    # Each entry is the crate and version constraint, and its specific allow
-    # list
-    { name ="webpki-roots", version = "0.22.5", allow = ["MPL-2.0"] },
-]
-
-[[licenses.clarify]]
-name = "ring"
-expression = "MIT AND ISC AND OpenSSL"
-license-files = [
-    { path = "LICENSE", hash = 0xbd0eed23 }
+    { crate = "adler32", allow = ["Zlib"] },
+    { crate = "foldhash", allow = ["Zlib"] },
+    # This license should not really be used for code, but here we are
+    { crate = "notify", allow = ["CC0-1.0"] },
+    { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
 ]

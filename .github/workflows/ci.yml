@@ -1,0 +1,108 @@
+# Copyright 2023 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GitHub action that runs https://github.com/adRise/update-pr-branch on each push to
+# `main`. `update-pr-branch` will pick the oldest PR (by creation date) that is approved
+# with auto-merge enabled and update it to the latest `main`, forming a best-effort queue
+# of approved PRs.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: "clippy, rustfmt"
+      - uses: Swatinem/rust-cache@v2
+
+      # make sure all code has been formatted with rustfmt and linted with clippy
+      - name: rustfmt
+        run: cargo fmt -- --check --color always
+
+      # run clippy to verify we have no warnings
+      - run: cargo fetch
+      - name: cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  validate-proto-bufs:
+    name: Validate proto bufs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+            submodules: true
+      - run: cargo run -p proto-gen -- validate
+
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    env:
+      RUST_BACKTRACE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install nextest
+        run: curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+      - name: Build
+        run: cargo build -p qt -p quilkin -p quilkin-xds --tests
+      - run: cargo nextest run --no-tests=pass -p qt -p quilkin -p quilkin-xds -p corrosion
+      - name: Validate Quilkin's clap arguments
+        run: |
+          set +e # don't fail on error, we expect the command to fail since we aren't providing arguments
+          cargo run -p quilkin
+          if [ $? -ne 255 ]; then
+            echo "::error ::clap arguments seem to have an error"
+            exit 1
+          fi
+          exit 0
+
+  build:
+    name: Build
+    strategy:
+      matrix:
+        os: [windows-2022, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fetch
+      - run: cargo build
+
+  deny-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: deny check
+        uses: EmbarkStudios/cargo-deny-action@v2

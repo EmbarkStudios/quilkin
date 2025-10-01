@@ -14,7 +14,3 @@ quilkin.filters.pass.v1alpha1.Pass
 ## Configuration
 
 No defined configuration options.
-
-## Metrics
-
-This filter currently exports no metrics.

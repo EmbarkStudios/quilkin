@@ -1,0 +1,14 @@
+[package]
+name = "quilkin-types"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+data-encoding = "2.9"
+eyre.workspace = true
+schemars.workspace = true
+serde.workspace = true

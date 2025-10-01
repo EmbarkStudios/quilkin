@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use super::proto;
 use crate::{
-    config::Filter,
+    config::filter::Filter,
     filters::{ConvertProtoConfigError, StaticFilter},
 };
 
@@ -33,7 +33,7 @@ pub struct Config {
 }
 
 impl TryFrom<Config> for proto::Match {
-    type Error = crate::filters::Error;
+    type Error = crate::filters::CreationError;
 
     fn try_from(config: Config) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -71,7 +71,7 @@ impl TryFrom<proto::Match> for Config {
 pub struct DirectionalConfig {
     /// The key for the metadata to compare against.
     #[serde(rename = "metadataKey")]
-    pub metadata_key: crate::metadata::Key,
+    pub metadata_key: crate::net::endpoint::metadata::Key,
     /// List of filters to compare and potentially run if any match.
     pub branches: Vec<Branch>,
     /// The behaviour for when none of the `branches` match.
@@ -80,7 +80,7 @@ pub struct DirectionalConfig {
 }
 
 impl TryFrom<DirectionalConfig> for proto::r#match::Config {
-    type Error = crate::filters::Error;
+    type Error = crate::filters::CreationError;
 
     fn try_from(config: DirectionalConfig) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -122,14 +122,14 @@ impl TryFrom<proto::r#match::Config> for DirectionalConfig {
 #[derive(Debug, Deserialize, Serialize, Eq, PartialEq, schemars::JsonSchema)]
 pub struct Branch {
     /// The value to compare against the dynamic metadata.
-    pub value: crate::metadata::Value,
+    pub value: crate::net::endpoint::metadata::Value,
     /// The filter to run on successful matches.
     #[serde(flatten)]
     pub filter: Filter,
 }
 
 impl TryFrom<Branch> for proto::r#match::Branch {
-    type Error = crate::filters::Error;
+    type Error = crate::filters::CreationError;
 
     fn try_from(branch: Branch) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -168,8 +168,8 @@ impl Default for Fallthrough {
     }
 }
 
-impl TryFrom<Fallthrough> for crate::xds::config::listener::v3::Filter {
-    type Error = crate::filters::Error;
+impl TryFrom<Fallthrough> for crate::generated::envoy::config::listener::v3::Filter {
+    type Error = crate::filters::CreationError;
     fn try_from(fallthrough: Fallthrough) -> Result<Self, Self::Error> {
         fallthrough.0.try_into()
     }
@@ -204,6 +204,6 @@ on_read:
                 }),
                 on_write: None,
             }
-        )
+        );
     }
 }

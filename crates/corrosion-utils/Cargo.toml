@@ -1,0 +1,23 @@
+[package]
+name = "corrosion-utils"
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+camino.workspace = true
+corro-api-types.workspace = true
+corro-types.workspace = true
+prettytable = { version = "0.10", default-features = false }
+rusqlite.workspace = true
+spawn.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tripwire.workspace = true
+uhlc.workspace = true
+uuid = "1.18"
+
+[lints]
+workspace = true

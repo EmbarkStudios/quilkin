@@ -1,0 +1,15 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  # Proxy
+  - role: worker
+  # Client
+  - role: worker
+  # Server
+  - role: worker
+# https://github.com/helm/kind-action?tab=readme-ov-file#configuring-local-registry
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry]
+    config_path = "/etc/containerd/certs.d"

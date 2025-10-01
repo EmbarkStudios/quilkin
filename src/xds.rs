@@ -1,371 +1,100 @@
 /*
- * Copyright 2020 Google LLC
+ * Copyright 2024 Google LLC All Rights Reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
-// We don't control the codegen, so disable any code warnings in the
-// proto modules.
-#[allow(warnings)]
-mod xds {
-    pub mod core {
-        pub mod v3 {
-            #![doc(hidden)]
-            tonic::include_proto!("xds.core.v3");
-        }
+use ::quilkin_xds::generated::quilkin::config::v1alpha1 as proto;
+use prost::Message;
+use prost_types::Any;
+
+pub const CLUSTER_TYPE: &str = "type.googleapis.com/quilkin.config.v1alpha1.Cluster";
+pub const DATACENTER_TYPE: &str = "type.googleapis.com/quilkin.config.v1alpha1.Datacenter";
+pub const FILTER_CHAIN_TYPE: &str = "type.googleapis.com/quilkin.config.v1alpha1.FilterChain";
+const PREFIX: &str = "type.googleapis.com/quilkin.config.v1alpha1.";
+
+pub enum Resource {
+    Cluster(proto::Cluster),
+    Datacenter(proto::Datacenter),
+    FilterChain(proto::FilterChain),
+}
+
+impl Resource {
+    #[inline]
+    pub fn try_decode(any: Any) -> Result<Self, eyre::Error> {
+        let Some(suffix) = any.type_url.strip_prefix(PREFIX) else {
+            eyre::bail!("unknown resource type '{}'", any.type_url);
+        };
+
+        Ok(match suffix {
+            "Cluster" => Self::Cluster(proto::Cluster::decode(&*any.value)?),
+            "Datacenter" => Self::Datacenter(proto::Datacenter::decode(&*any.value)?),
+            "FilterChain" => Self::FilterChain(proto::FilterChain::decode(&*any.value)?),
+            _ => eyre::bail!("unknown resource type '{}'", any.type_url),
+        })
     }
 
-    pub mod r#type {
-        pub mod matcher {
-            pub mod v3 {
-                pub use super::super::super::config::common::matcher::v3::*;
-                tonic::include_proto!("envoy.r#type.matcher.v3");
+    #[inline]
+    pub fn try_encode(&self) -> Result<Any, prost::EncodeError> {
+        let (value, type_url) = match self {
+            Self::Cluster(c) => {
+                let mut value = Vec::with_capacity(c.encoded_len());
+                c.encode(&mut value)?;
+                (value, CLUSTER_TYPE)
             }
-        }
-        pub mod metadata {
-            pub mod v3 {
-                tonic::include_proto!("envoy.r#type.metadata.v3");
+            Self::Datacenter(d) => {
+                let mut value = Vec::with_capacity(d.encoded_len());
+                d.encode(&mut value)?;
+                (value, DATACENTER_TYPE)
             }
-        }
-        pub mod tracing {
-            pub mod v3 {
-                tonic::include_proto!("envoy.r#type.tracing.v3");
+            Self::FilterChain(f) => {
+                let mut value = Vec::with_capacity(f.encoded_len());
+                f.encode(&mut value)?;
+                (value, FILTER_CHAIN_TYPE)
             }
-        }
-        pub mod v3 {
-            tonic::include_proto!("envoy.r#type.v3");
-        }
-    }
-    pub mod config {
-        pub mod accesslog {
-            pub mod v3 {
-                tonic::include_proto!("envoy.config.accesslog.v3");
-            }
-        }
-        pub mod cluster {
-            pub mod v3 {
-                tonic::include_proto!("envoy.config.cluster.v3");
-            }
-        }
-        pub mod common {
-            pub mod matcher {
-                pub mod v3 {
-                    tonic::include_proto!("envoy.config.common.matcher.v3");
-                }
-            }
-        }
-        pub mod core {
-            pub mod v3 {
-                tonic::include_proto!("envoy.config.core.v3");
-            }
-        }
-        pub mod endpoint {
-            pub mod v3 {
-                tonic::include_proto!("envoy.config.endpoint.v3");
-            }
-        }
-        pub mod listener {
-            pub mod v3 {
-                tonic::include_proto!("envoy.config.listener.v3");
-            }
-        }
-        pub mod route {
-            pub mod v3 {
-                tonic::include_proto!("envoy.config.route.v3");
-            }
-        }
-    }
-    pub mod service {
-        pub mod discovery {
-            pub mod v3 {
-                tonic::include_proto!("envoy.service.discovery.v3");
+        };
 
-                impl TryFrom<DiscoveryResponse> for DiscoveryRequest {
-                    type Error = eyre::Error;
+        Ok(Any {
+            type_url: type_url.into(),
+            value,
+        })
+    }
 
-                    fn try_from(response: DiscoveryResponse) -> Result<Self, Self::Error> {
-                        Ok(Self {
-                            version_info: response.version_info,
-                            resource_names: response
-                                .resources
-                                .into_iter()
-                                .map(crate::xds::Resource::try_from)
-                                .map(|result| result.map(|resource| resource.name().to_owned()))
-                                .collect::<Result<Vec<_>, _>>()?,
-                            type_url: response.type_url,
-                            response_nonce: response.nonce,
-                            ..<_>::default()
-                        })
-                    }
-                }
-            }
-        }
-        pub mod cluster {
-            pub mod v3 {
-                tonic::include_proto!("envoy.service.cluster.v3");
-            }
+    #[inline]
+    pub fn type_url(&self) -> &'static str {
+        match self {
+            Self::Cluster(_) => CLUSTER_TYPE,
+            Self::Datacenter(_) => DATACENTER_TYPE,
+            Self::FilterChain(_) => FILTER_CHAIN_TYPE,
         }
     }
 }
 
-#[allow(warnings)]
-mod google {
-    pub mod rpc {
-        tonic::include_proto!("google.rpc");
-    }
+#[derive(Copy, Clone)]
+pub enum ResourceType {
+    Cluster,
+    Datacenter,
+    FilterChain,
 }
 
-crate::include_proto!("quilkin.relay.v1alpha1");
-
-pub(crate) mod client;
-mod metrics;
-mod resource;
-pub(crate) mod server;
-
-pub(crate) use self::quilkin::relay::v1alpha1 as relay;
-use self::xds as envoy;
-
-pub use self::{
-    client::{AdsClient, Client},
-    resource::{Resource, ResourceType},
-    server::ControlPlane,
-    service::discovery::v3::aggregated_discovery_service_client::AggregatedDiscoveryServiceClient,
-    xds::*,
-};
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use std::sync::Arc;
-
-    use crate::{config::Config, endpoint::Endpoint, filters::*};
-
-    #[tokio::test]
-    async fn token_routing() {
-        let mut helper = crate::test_utils::TestHelper::default();
-        let token = uuid::Uuid::new_v4().into_bytes();
-        let address = {
-            let mut addr = Endpoint::new(helper.run_echo_server().await);
-            addr.metadata.known.tokens.insert(token.into());
-            addr
-        };
-        let localities = crate::endpoint::LocalityEndpoints::from(address.clone());
-
-        let xds_port = crate::test_utils::available_addr().await.port();
-        let xds_config: Arc<Config> = serde_json::from_value(serde_json::json!({
-            "version": "v1alpha1",
-            "id": "test-proxy",
-            "clusters": {
-                "default": {
-                    "localities": [localities]
-                }
-            },
-        }))
-        .map(Arc::new)
-        .unwrap();
-
-        let client_addr = crate::test_utils::available_addr().await;
-        let client_config = serde_json::from_value(serde_json::json!({
-            "version": "v1alpha1",
-            "id": "test-proxy",
-        }))
-        .map(Arc::new)
-        .unwrap();
-
-        // Test that the client can handle the manager dropping out.
-        let handle = tokio::spawn(server::spawn(xds_port, xds_config.clone()));
-
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(());
-        tokio::spawn(server::spawn(xds_port, xds_config.clone()));
-        let client_proxy = crate::cli::Proxy {
-            port: client_addr.port(),
-            management_server: vec![format!("http://0.0.0.0:{}", xds_port).parse().unwrap()],
-            ..<_>::default()
-        };
-
-        tokio::spawn(async move { client_proxy.run(client_config, shutdown_rx).await });
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        handle.abort();
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        tokio::spawn(server::spawn(xds_port, xds_config.clone()));
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        const VERSION_KEY: &str = "quilkin.dev/load_balancer/version";
-        const TOKEN_KEY: &str = "quilkin.dev/load_balancer/token";
-
-        xds_config.filters.store(Arc::new(
-            [
-                Capture::as_filter_config(capture::Config {
-                    metadata_key: VERSION_KEY.into(),
-                    strategy: capture::Suffix {
-                        size: 1,
-                        remove: true,
-                    }
-                    .into(),
-                })
-                .unwrap(),
-                Match::as_filter_config(r#match::Config {
-                    on_write: None,
-                    on_read: Some(r#match::DirectionalConfig {
-                        metadata_key: VERSION_KEY.into(),
-                        branches: vec![r#match::Branch {
-                            value: 1.into(),
-                            filter: Capture::as_filter_config(capture::Config {
-                                metadata_key: TOKEN_KEY.into(),
-                                strategy: capture::Suffix {
-                                    size: 16,
-                                    remove: true,
-                                }
-                                .into(),
-                            })
-                            .unwrap(),
-                        }],
-                        fallthrough: <_>::default(),
-                    }),
-                })
-                .unwrap(),
-                Match::as_filter_config(r#match::Config {
-                    on_write: None,
-                    on_read: Some(r#match::DirectionalConfig {
-                        metadata_key: VERSION_KEY.into(),
-                        branches: vec![r#match::Branch {
-                            value: 1.into(),
-                            filter: TokenRouter::as_filter_config(token_router::Config {
-                                metadata_key: TOKEN_KEY.into(),
-                            })
-                            .unwrap(),
-                        }],
-                        fallthrough: <_>::default(),
-                    }),
-                })
-                .unwrap(),
-            ]
-            .try_into()
-            .unwrap(),
-        ));
-
-        let client = tokio::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0))
-            .await
-            .unwrap();
-
-        let data = "Hello World!".as_bytes();
-        let mut packet = data.to_vec();
-        packet.extend(token);
-        packet.push(1);
-
-        client
-            .send_to(
-                &packet,
-                (std::net::Ipv4Addr::UNSPECIFIED, client_addr.port()),
-            )
-            .await
-            .unwrap();
-        let mut buf = vec![0; 12];
-        tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            client.recv_from(&mut buf),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-
-        assert_eq!(data, buf);
-    }
-
-    #[tokio::test]
-    async fn basic() {
-        let config: Arc<Config> = serde_json::from_value(serde_json::json!({
-            "version": "v1alpha1",
-            "id": "test-proxy",
-        }))
-        .map(Arc::new)
-        .unwrap();
-
-        tokio::spawn(server::spawn(23456, config.clone()));
-        let client = Client::connect(
-            "test-client".into(),
-            vec!["http://127.0.0.1:23456".try_into().unwrap()],
-        )
-        .await
-        .unwrap();
-        let mut stream = client.xds_client_stream(config.clone());
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-        // Each time, we create a new upstream endpoint and send a cluster update for it.
-        let concat_bytes = vec![("b", "c,"), ("d", "e")];
-        for (b1, b2) in concat_bytes.into_iter() {
-            let socket = std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)).unwrap();
-            let local_addr: crate::endpoint::EndpointAddress = socket.local_addr().unwrap().into();
-
-            config.clusters.modify(|clusters| {
-                let mut cluster = clusters.default_cluster_mut();
-                cluster.localities.clear();
-                cluster.insert(Endpoint::new(local_addr.clone()));
-            });
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-            let filters = crate::filters::FilterChain::try_from(vec![
-                ConcatenateBytes::as_filter_config(concatenate_bytes::Config {
-                    on_read: concatenate_bytes::Strategy::Append,
-                    on_write: <_>::default(),
-                    bytes: b1.as_bytes().to_vec(),
-                })
-                .unwrap(),
-                ConcatenateBytes::as_filter_config(concatenate_bytes::Config {
-                    on_read: concatenate_bytes::Strategy::Append,
-                    on_write: <_>::default(),
-                    bytes: b2.as_bytes().to_vec(),
-                })
-                .unwrap(),
-            ])
-            .unwrap();
-
-            config.filters.modify(|chain| *chain = filters.clone());
-
-            stream
-                .discovery_request(ResourceType::Cluster, &[])
-                .await
-                .unwrap();
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            assert_eq!(
-                local_addr,
-                config
-                    .clusters
-                    .value()
-                    .get_default()
-                    .unwrap()
-                    .endpoints()
-                    .next()
-                    .unwrap()
-                    .address
-            );
-
-            stream
-                .discovery_request(ResourceType::Listener, &[])
-                .await
-                .unwrap();
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            let changed_filters = config.filters.load();
-
-            assert_eq!(changed_filters.len(), 2);
-
-            let mut iter = changed_filters.iter();
-            assert_eq!(iter.next().unwrap(), filters[0].clone().into());
-            assert_eq!(iter.next().unwrap(), filters[1].clone().into());
-        }
+impl std::str::FromStr for ResourceType {
+    type Err = eyre::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.strip_prefix(PREFIX) {
+            Some("Cluster") => Self::Cluster,
+            Some("Datacenter") => Self::Datacenter,
+            Some("FilterChain") => Self::FilterChain,
+            _ => eyre::bail!("unknown resource type '{s}'"),
+        })
     }
 }

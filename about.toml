@@ -17,6 +17,7 @@
 accepted = [
     "Apache-2.0",
     "BSD-2-Clause",
+    "BSD-2-Clause",
     "BSD-3-Clause",
     "CC0-1.0",
     "ISC",
@@ -24,8 +25,14 @@ accepted = [
     "MPL-2.0",
     "NOASSERTION",
     "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "CDLA-Permissive-2.0",
 ]
-workarounds = ["ring"]
+workarounds = ["ring", "xxhash-rust"]
 
 [ring]
 accepted = ["ISC", "OpenSSL"]
+
+[xxhash-rust]
+accepted = ["BSL-1.0"]

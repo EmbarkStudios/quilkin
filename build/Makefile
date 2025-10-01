@@ -38,6 +38,7 @@ endif
 # Set this value if you want to use an external registry
 REPOSITORY ?= ""
 IMAGE_TAG ?= ${REPOSITORY}quilkin:$(package_version)
+PREV_IMAGE_TAG ?= us-docker.pkg.dev/quilkin/release/quilkin:0.8.0
 MINIKUBE_PROFILE ?= quilkin
 CARGO_TARGET_DIR ?= /workspace/target/build-image
 common_rust_args := -v $(project_path):/workspace -w /workspace \
@@ -53,8 +54,9 @@ kube_mount_args := -v $(kubeconfig_path):/root/.kube -v $(helm_config):/root/.co
 minikube_args := --network=host -v ~/.minikube:$(HOME)/.minikube
 gcloud_mount_args := -v $(build_path)/.config/gcloud:/root/.config/gcloud
 
-cargo_build_x86_64_linux := build --release --target x86_64-unknown-linux-gnu
+cargo_build_x86_64_linux := build --profile=lto --target x86_64-unknown-linux-gnu
 cargo_build_x86_64_apple := build --release --target x86_64-apple-darwin
+cargo_build_aarch64-apple := build --release --target aarch64-apple-darwin
 cargo_build_x86_64_windows := build --release --target x86_64-pc-windows-gnu
 
 #   _____                    _
@@ -75,41 +77,15 @@ version:
 	@echo $(package_version)
 
 # Run all tests
-test: ensure-build-image test-quilkin test-examples test-docs
+test: ensure-build-image
 
-# test only the quilkin crate
-test-quilkin: ensure-build-image
-	docker run --rm $(common_rust_args) \
-			--entrypoint=cargo $(BUILD_IMAGE_TAG) deny check
-	docker run --rm $(common_rust_args) \
-		--entrypoint=cargo $(BUILD_IMAGE_TAG) clippy --tests -- -D warnings
-	docker run --rm $(common_rust_args) \
-		--entrypoint=cargo $(BUILD_IMAGE_TAG) fmt -- --check
-	docker run --rm $(common_rust_args) \
-			--entrypoint=cargo $(BUILD_IMAGE_TAG) test
-
-# Run tests against the examples
-test-examples: ensure-build-image
-	docker run --rm $(common_rust_args) -w /workspace/examples/quilkin-filter-example \
-		--entrypoint=cargo $(BUILD_IMAGE_TAG) clippy --tests -- -D warnings
-	docker run --rm $(common_rust_args) -w /workspace/examples/quilkin-filter-example \
-		--entrypoint=cargo $(BUILD_IMAGE_TAG) fmt -- --check
-
-# Run tests against documentation
-test-docs: ensure-build-image
-test-docs: GITHUB_REF_NAME ?= main
-test-docs: QUILKIN_VERSION ?= $(shell $(MAKE) version)
-test-docs:
-	docker run --rm $(common_rust_args) \
-		-e GITHUB_REF_NAME=$(GITHUB_REF_NAME) -e QUILKIN_VERSION=$(QUILKIN_VERSION) \
-		--entrypoint=bash $(BUILD_IMAGE_TAG) -c \
-			'export RUSTDOCFLAGS="-Dwarnings" && mkdir /tmp/docs && \
-			mkdir -p "$(CARGO_TARGET_DIR)/doc"; \
-			cargo doc --workspace --no-deps && cd docs && mdbook build --dest-dir /tmp/docs/book && \
-			cp -r "$(CARGO_TARGET_DIR)/doc" /tmp/docs/api && \
-			rm /tmp/docs/book/print.html && \
-			echo "<!doctype html>" > /tmp/docs/book/print.html && \
-			htmltest -c /workspace/docs/htmltest.yaml /tmp/docs'
+# In CI with split jobs that both fetch they will fail if run in parallel since
+# cargo will be fighting with itself for some the same host directory that is
+# mapped into the container, so instead just split it out to its own job
+fetch-quilkin: ensure-build-image
+	docker run --rm $(common_rust_args)  \
+			--network=host \
+			-e RUST_BACKTRACE=1 --entrypoint=cargo $(BUILD_IMAGE_TAG) fetch
 
 # Build all binaries, images and related artifacts
 build: binary-archive build-image
@@ -117,14 +93,19 @@ build: binary-archive build-image
 # Build all binaries
 build-all-binaries: ensure-build-image build-linux-binary build-macos-binary build-windows-binary
 
+# Checks for changes to protobuf definitions and generates rust code and reference documentation if there is any.
+gen-protobuf: ensure-build-image
+	docker run --rm $(DOCKER_RUN_ARGS) $(common_rust_args) \
+		--entrypoint=cargo $(BUILD_IMAGE_TAG) run -p proto-gen -- generate
+
 # Build an archive all binaries
-binary-archive: ensure-build-image build-all-binaries
+binary-archive: ensure-build-image build-licence-report build-all-binaries
 	docker run --rm $(common_rust_args) -w $(CARGO_TARGET_DIR) \
-			--entrypoint=bash $(BUILD_IMAGE_TAG) -c 'zip ../../quilkin-$(package_version).zip ./*/release/quilkin ./*/release/quilkin.exe'
+			--entrypoint=bash $(BUILD_IMAGE_TAG) -c 'cp ../../license.html . && zip ../../quilkin-$(package_version).zip ./*/lto/quilkin ./*/lto/quilkin.exe ./license.html'
 
 # Build binary for x86_64-unknown-linux-gnu.
 # Use BUILD_LOCAL=1 to build through local cargo rather than through the build container.
-build-linux-binary: ensure-build-image
+build-linux-binary: ensure-build-image gen-protobuf
 ifdef BUILD_LOCAL
 	cargo $(cargo_build_x86_64_linux)
 else
@@ -134,7 +115,7 @@ endif
 
 # Build binary for x86_64-pc-windows-gnu
 # Use BUILD_LOCAL=1 to build through local cargo rather than through the build container.
-build-windows-binary: ensure-build-image
+build-windows-binary: ensure-build-image gen-protobuf
 ifdef BUILD_LOCAL
 	cargo $(cargo_build_x86_64_windows)
 else
@@ -142,38 +123,45 @@ else
 		--entrypoint=cargo $(BUILD_IMAGE_TAG) $(cargo_build_x86_64_windows)
 endif
 
-# Build binary for x86_64-apple-darwin
+# Build binary for x86_64-apple-darwin and aarch64-apple-darwin
 # Use BUILD_LOCAL=1 to build through local cargo rather than through the build container.
-build-macos-binary:
+build-macos-binary: gen-protobuf
 ifdef BUILD_LOCAL
 	cargo $(cargo_build_x86_64_apple)
+	cargo $(cargo_build_aarch64-apple)
 else
 	docker run --rm -v $(project_path):/workspace -w /workspace \
 		-v $(CARGO_HOME)/registry:/root/.cargo/registry \
 		-e "CARGO_TARGET_DIR=$(CARGO_TARGET_DIR)" \
 		-e "CC=o64-clang" -e "CXX=o64-clang++" \
 		-e "PROTOC=/opt/protoc/bin/protoc" \
-		us-docker.pkg.dev/quilkin/ci/rust-linux-darwin-builder:$(rust_toolchain) \
-			sh -c "/workspace/build/darwin-builder/setup.sh && cargo $(cargo_build_x86_64_apple) --no-default-features"
+		joseluisq/rust-linux-darwin-builder:$(rust_toolchain) \
+			sh -c "rustup target add x86_64-apple-darwin aarch64-apple-darwin && \
+			cargo $(cargo_build_x86_64_apple) --no-default-features && \
+			CC=oa64-clang CXX=oa64-clang++ LIBZ_SYS_STATIC=1 cargo $(cargo_build_aarch64-apple) --no-default-features"
 endif
 
 # Build container image.
 # Use either `REPOSITORY` to specify a container repository (defaults to blank/none), or use `IMAGE_TAG` argument to specify
 # the entire image name and tag. Defaults to `quilkin:${version}-${git-sha}`.
 # Use BUILD_LOCAL=1 to build the binary through local cargo rather than through the build container.
-build-image: ensure-build-image build-linux-binary
+build-image: ensure-build-image build-licence-report build-linux-binary
 build-image:
 	-mkdir -p "$(project_path)/target/image/"
 ifdef BUILD_LOCAL
-	cp "$(project_path)/target/x86_64-unknown-linux-gnu/release/quilkin" "$(project_path)/target/image/"
+	cp "$(project_path)/target/x86_64-unknown-linux-gnu/lto/quilkin" "$(project_path)/target/image/"
 else
-	cp "$(project_path)/target/build-image/x86_64-unknown-linux-gnu/release/quilkin" "$(project_path)/target/image/"
+	cp "$(project_path)/target/build-image/x86_64-unknown-linux-gnu/lto/quilkin" "$(project_path)/target/image/"
 endif
-	docker run --rm $(common_rust_args) \
-		--entrypoint=bash $(BUILD_IMAGE_TAG) -c 'cargo about generate license.html.hbs > license.html'
 	docker run --rm $(common_rust_args) \
 		--entrypoint=bash $(BUILD_IMAGE_TAG) -c './image/archive_dependencies.sh'
 	docker build --platform=linux/amd64 -t $(IMAGE_TAG) -f $(project_path)/image/Dockerfile $(project_path)
+
+# Generates the HTML report of all open source licence dependencies
+build-licence-report: ensure-build-image
+build-licence-report:
+	docker run --rm $(common_rust_args) \
+		--entrypoint=bash $(BUILD_IMAGE_TAG) -c 'cargo about generate license.html.hbs > license.html'
 
 # Builds Quilkin, pushes it to a repository (use REPOSITORY arg to set value)
 # and then runs the Agones integration tests. See targets `build-images` and `push` for more options and details.
@@ -188,15 +176,16 @@ test-agones:
 
 run-test-agones: ensure-kube-dirs
 run-test-agones:
-	docker run --rm $(DOCKER_RUN_ARGS) $(common_rust_args) -w /workspace/agones  \
+	docker image pull ${PREV_IMAGE_TAG}
+	docker run --rm $(DOCKER_RUN_ARGS) $(common_rust_args) -w /workspace/crates/agones  \
 			--entrypoint=cargo $(BUILD_IMAGE_TAG) clippy --tests -- -D warnings
-	docker run --rm $(DOCKER_RUN_ARGS) $(common_rust_args) -w /workspace/agones \
+	docker run --rm $(DOCKER_RUN_ARGS) $(common_rust_args) -w /workspace/crates/agones \
 		--entrypoint=cargo $(BUILD_IMAGE_TAG) fmt -- --check
 	# Confirm access to K8s, and force refresh of the auth token for the kube context
-	docker run --rm $(DOCKER_RUN_ARGS) $(common_rust_args) $(kube_mount_args) -w /workspace/agones \
+	docker run --rm $(DOCKER_RUN_ARGS) $(common_rust_args) $(kube_mount_args) -w /workspace/crates/agones \
 		--entrypoint=kubectl $(BUILD_IMAGE_TAG) get ns
-	docker run --rm $(DOCKER_RUN_ARGS) $(common_rust_args) $(kube_mount_args) -w /workspace/agones \
-			-e "RUST_BACKTRACE=1" -e "IMAGE_TAG=${IMAGE_TAG}" --entrypoint=cargo $(BUILD_IMAGE_TAG) test $(ARGS)
+	docker run --rm $(DOCKER_RUN_ARGS) $(common_rust_args) $(kube_mount_args) -w /workspace/crates/agones \
+			-e "RUST_BACKTRACE=1" -e "IMAGE_TAG=${IMAGE_TAG}" -e "PREV_IMAGE_TAG=${PREV_IMAGE_TAG}" --entrypoint=cargo $(BUILD_IMAGE_TAG) test $(ARGS)
 
 # Convenience target to build and push quilkin images to a repository.
 # Use `REPOSITORY` arg to specify the repository to push to.
@@ -221,32 +210,17 @@ minikube-push: build-image
 minikube-test-agones: minikube-push
 	$(MAKE) DOCKER_RUN_ARGS="$(minikube_args)" run-test-agones
 
-# Runs mdbook and cargo doc in the same directory structure as what is hosted on Github pages.
-# Open http://localhost:3000/book/index.html or http://localhost:3000/api/quilkin/index.html after running. Pages will live reload on change.
-# (the .html extension is required for hot reload, but pages will display without it)
-# Use `GITHUB_REF_NAME` (default: `main`) to specify the branch or tag to point Github links to and `QUILKIN_VERSION`
-# (default `$(make version)) to specify which Quilkin version the documentation uses for examples.
-docs: ensure-build-image
-docs: GITHUB_REF_NAME ?= main
-docs: QUILKIN_VERSION ?= $(shell $(MAKE) version)
-docs:
-	@echo "📭 Open browser to http://localhost:3000/book/index.html or http://localhost:3000/api/quilkin/index.html (the .html extension is required for hot reload)"
-	docker run -it --rm $(common_rust_args) -p 3000:3000 \
-		-e GITHUB_REF_NAME=$(GITHUB_REF_NAME) -e QUILKIN_VERSION=$(QUILKIN_VERSION) \
-		--entrypoint=bash $(BUILD_IMAGE_TAG) -c \
-			'mkdir /tmp/docs && (live-server -p 3000 /tmp/docs &) && \
-			mkdir -p "$(CARGO_TARGET_DIR)/doc"; ln -s "$(CARGO_TARGET_DIR)/doc" /tmp/docs/api && \
-			cargo watch -s "cargo doc --workspace --no-deps && cd docs && mdbook build --dest-dir /tmp/docs/book"'
-
 # Start an interactive shell inside the build image
-# Useful for testing, or adhoc cargo, gcloud, kubectl or terraform commands
+# Useful for testing, or adhoc cargo, gcloud, kubectl or other commands
 shell: ensure-gcloud-dirs ensure-kube-dirs ensure-build-image
+	# we --network=host because docker containers are not great at ipv6.
 	docker run --rm -it $(DOCKER_RUN_ARGS) $(common_rust_args) \
 		$(gcloud_mount_args) $(kube_mount_args) \
+		 --network=host \
 		 --entrypoint=bash $(BUILD_IMAGE_TAG)
 
 ensure-build-image: ensure-cargo-registry
-	docker build $(BUILD_IMAGE_ARG) --build-arg RUST_TOOLCHAIN=$(rust_toolchain) --tag=$(BUILD_IMAGE_TAG) $(build_path)/build-image/
+	docker buildx build $(BUILD_IMAGE_ARG) --cache-to type=inline --cache-from type=registry,ref=$(BUILD_IMAGE_TAG) --build-arg RUST_TOOLCHAIN=$(rust_toolchain) --tag=$(BUILD_IMAGE_TAG) $(build_path)/build-image/
 
 ensure-cargo-registry:
 	-mkdir -p $(CARGO_HOME)/registry

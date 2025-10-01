@@ -1,0 +1,2 @@
+# This file exists purely to ignore the root .dockerignore otherwise it will ignore
+# target/debug/quilkin when copying it into the image

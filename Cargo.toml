@@ -14,107 +14,272 @@
 # limitations under the License.
 #
 
-[workspace]
-members = [".", "./macros", "./agones"]
-
-[workspace.dependencies]
-kube = { version = "0.77.0", features = ["derive", "runtime", "rustls-tls", "client"], default-features = false }
-k8s-openapi = { version = "0.16.0", features = ["v1_22", "schemars"] }
-tokio = { version = "1.24.0", features = ["rt-multi-thread", "fs", "signal", "test-util", "parking_lot", "tracing"] }
-base64 = "0.13.1"
-
 [package]
 name = "quilkin"
-version = "0.6.0-dev"
-authors = ["Mark Mandel <markmandel@google.com>", "Ifeanyi Ubah <ifeanyi.ubah@embark-studios.com>", "Erin Power <erin.power@embark-studios.com>"]
-license = "Apache-2.0"
+version.workspace = true
+authors = [
+    "Mark Mandel <markmandel@google.com>",
+    "Ifeanyi Ubah <ifeanyi.ubah@embark-studios.com>",
+    "Erin Power <erin.power@embark-studios.com>",
+]
+license.workspace = true
 description = "Quilkin is a non-transparent UDP proxy specifically designed for use with large scale multiplayer dedicated game server deployments, to ensure security, access control, telemetry data, metrics and more."
 homepage = "https://github.com/googleforgames/quilkin"
 repository = "https://github.com/googleforgames/quilkin"
 readme = "README.md"
-keywords = ["proxy", "game-server", "game-development", "networking", "multiplayer"]
+keywords = [
+    "proxy",
+    "game-server",
+    "game-development",
+    "networking",
+    "multiplayer",
+]
 categories = ["game-development", "network-programming"]
-edition = "2021"
+edition.workspace = true
 exclude = ["docs", "build", "examples", "image"]
 
+[profile.lto]
+inherits = "release"
+opt-level = 3
+codegen-units = 1
+lto = "fat"
+
+[features]
+default = []
+instrument = []
+mimalloc = ["dep:mimalloc"]
+heap-stats = ["dep:crossbeam-utils"]
+
+
+[lints]
+workspace = true
+
 [[bench]]
-name = "throughput"
+name = "read_write"
 harness = false
-test = true
+test = false
+
+# [[bench]]
+# name = "cluster_map"
+# harness = false
+# test = false
+
+# [[bench]]
+# name = "misc"
+# harness = false
+# test = false
+
+[[bench]]
+name = "token_router"
+harness = false
+test = false
 
 [dependencies]
 # Local
-quilkin-macros = { version = "0.6.0-dev", path = "./macros" }
+quilkin-macros = { version = "0.10.0-dev", path = "./crates/macros" }
+quilkin-proto.workspace = true
+quilkin-types.workspace = true
+quilkin-xds.workspace = true
 
 # Crates.io
-arc-swap = { version = "1.6.0", features = ["serde"] }
-async-stream = "0.3.3"
+arc-swap.workspace = true
+async-stream.workspace = true
+async-trait.workspace = true
 base64.workspace = true
-base64-serde = "0.6.1"
-bytes = { version = "1.3.0", features = ["serde"] }
-cached = "0.41.0"
-chrono = "0.4.23"
-clap = { version = "4.0.32", features = ["cargo", "derive", "env"] }
-dashmap = {version = "5.4.0", features = ["serde"] }
-dirs2 = "3.0.1"
-either = "1.8.0"
-enum-map = "2.4.2"
-eyre = "0.6.8"
-futures = "0.3.25"
-hyper = { version = "0.14.23", features = ["http2"] }
-hyper-rustls = { version = "0.23.2", features = ["http2", "webpki-roots"] }
-ipnetwork = "0.20.0"
+base64-serde = "0.8.0"
+bytes.workspace = true
+cached.workspace = true
+cfg-if = "1.0"
+crossbeam-utils = { version = "0.8", optional = true }
+clap = { version = "4.5.38", features = ["cargo", "derive", "env"] }
+dashmap = { version = "6.1", features = ["serde"] }
+either = "1.15.0"
+enum-map.workspace = true
+eyre.workspace = true
+fixedstr.workspace = true
+futures.workspace = true
+http-body-util = "0.1"
+hyper = { version = "1.7", features = ["http2", "http1", "server"] }
+hyper-rustls = { version = "0.27", default-features = false, features = [
+    "http2",
+    "webpki-roots",
+    "ring",
+] }
+ipnetwork = "0.20.0" # keep in sync with maxmind
 k8s-openapi.workspace = true
-maxminddb = "0.23.0"
-notify = "5.0.0"
-num_cpus = "1.15.0"
-once_cell = "1.17.0"
-parking_lot = "0.12.1"
-prometheus = { version = "0.13.3", default-features = false }
-prost = "0.11.5"
-prost-types = "0.11.5"
-rand = "0.8.5"
-regex = "1.7.0"
-schemars = { version = "0.8.11", features = ["chrono", "bytes", "url"] }
-serde = { version = "1.0.152", features = ["derive", "rc"] }
-serde_json = "1.0.91"
+maxminddb = "0.24.0"
+notify = "8.0"
+num_cpus = "1.16.0"
+mimalloc = { version = "0.1.46", optional = true }
+once_cell.workspace = true
+parking_lot.workspace = true
+prometheus.workspace = true
+prost.workspace = true
+prost-types.workspace = true
+rand.workspace = true
+regex.workspace = true
+schemars.workspace = true
+seahash = "4.1"
+serde.workspace = true
+serde_json.workspace = true
 serde_regex = "1.1.0"
-serde_stacker = "0.1.7"
-serde_yaml = "0.9.16"
-snap = "1.1.0"
-socket2 = "0.4.7"
+serde_stacker = "0.1.12"
+serde_yaml = "0.9.34"
+socket2.workspace = true
 stable-eyre = "0.2.2"
-thiserror = "1.0.38"
+thiserror.workspace = true
+time.workspace = true
 tokio.workspace = true
-tokio-stream = { version = "0.1.11", features = ["sync"] }
-tonic = "0.8.3"
-tracing = "0.1.37"
-tracing-futures = { version = "0.2.5", features = ["futures-03"] }
-tracing-subscriber = { version = "0.3.16", features = ["json", "env-filter"] }
-tryhard = "0.5.0"
-url = { version = "2.3.1", features = ["serde"] }
-uuid = { version = "1.2.2", default-features = false, features = ["v4"] }
-lasso = { version = "0.6.0", features = ["multi-threaded"] }
+tokio-stream.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+tower.workspace = true
+tracing.workspace = true
+tracing-futures.workspace = true
+tracing-subscriber = { workspace = true, features = ["json", "env-filter"] }
+tryhard.workspace = true
+typemap_rev = "0.3.0"
+url.workspace = true
+uuid.workspace = true
+lasso = { version = "0.7.3", features = ["multi-threaded"] }
 kube.workspace = true
+kube-core.workspace = true
+hickory-resolver = { version = "0.25.2", features = [
+    "https-ring",
+    "system-config",
+] }
+strum = "0.27"
+strum_macros = "0.27"
+libflate = "2.1.0"
+form_urlencoded = "1.2.1"
+enum_dispatch = "0.3.13"
+gxhash = "3.5.0"
+kube-leader-election = "0.41.0"
+rustls = { version = "0.23", default-features = false }
+tracing-appender.workspace = true
+
+[dependencies.hyper-util]
+version = "0.1"
+features = ["client", "client-legacy"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
+io-uring = { version = "0.7", default-features = false }
+libc.workspace = true
+pprof = { version = "0.13.1", package = "pprof2" }
+quilkin-xdp = { version = "0.1.0", path = "crates/xdp" }
+slab = "0.4"
 sys-info = "0.9.1"
 
 [dev-dependencies]
-regex = "1.7.0"
-criterion = { version = "0.4.0", features = ["html_reports"] }
-once_cell = "1.17.0"
-tracing-test = "0.2.3"
-pretty_assertions = "1.3.0"
-tempfile = "3.3.0"
+divan = "0.1.21"
+once_cell.workspace = true
+pretty_assertions = "1.4.1"
+rand.workspace = true
+regex.workspace = true
+tracing-test = "0.2.5"
+tempfile.workspace = true
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
-[build-dependencies]
-tonic-build = { version = "0.8.4", default_features = false, features = ["transport", "prost"] }
-prost-build = "0.11.5"
-built = { version = "0.5.2", features = ["git2"] }
-protobuf-src = { version = "1.1.0", optional = true }
+# We want debug information when doing benchmarks for debugging purposes as well
+# as better (correct) callstacks in perf
+[profile.bench]
+debug = true
 
-[features]
-default = ["vendor-protoc"]
-instrument = []
-vendor-protoc = ["dep:protobuf-src"]
+[workspace]
+members = [
+    ".",
+    "crates/agones",
+    "crates/corrosion",
+    "crates/corrosion-utils",
+    "crates/macros",
+    #"crates/nmap-service-probes",
+    "crates/proto-gen",
+    "crates/quilkin-proto",
+    "crates/test",
+    "crates/types",
+    "crates/xdp",
+    "crates/xds",
+]
+
+[workspace.package]
+license = "Apache-2.0"
+edition = "2024"
+version = "0.10.0-dev"
+
+[workspace.dependencies]
+arc-swap = { version = "1.7.1", features = ["serde"] }
+async-stream = "0.3.6"
+async-trait = "0.1.88"
+base64 = "0.22.1"
+bytes = { version = "1.10.1", features = ["serde"] }
+cached = { version = "0.54", default-features = false }
+corrosion = { path = "crates/corrosion" }
+corrosion-utils = { path = "crates/corrosion-utils" }
+eyre = "0.6.12"
+enum-map = "2.7.3"
+futures = "0.3.31"
+kube = { version = "1.1", features = [
+    "runtime",
+    "rustls-tls",
+    "client",
+], default-features = false }
+kube-core = { version = "1.1", default-features = false, features = [
+    "schema",
+] }
+k8s-openapi = { version = "=0.25.0", features = ["v1_33", "schemars"] }
+libc = "0.2"
+once_cell = "1.21.3"
+prometheus = { version = "0.14", default-features = false }
+prost = "0.14"
+prost-types = "0.14"
+quilkin = { path = "." }
+quilkin-proto = {version = "0.10.0-dev", path = "crates/quilkin-proto" }
+quilkin-types = { version = "0.10.0-dev", path = "crates/types" }
+quilkin-xds = {version = "0.10.0-dev", path = "crates/xds" }
+rand = "0.9"
+regex = "1.11.1"
+serde = { version = "1.0.219", features = ["derive", "rc"] }
+serde_json = "1.0.140"
+socket2 = { version = "0.6", features = ["all"] }
+tempfile = "3.20.0"
+time = { version = "0.3", default-features = false, features = ["std"] }
+thiserror = "2.0.12"
+tokio-stream = { version = "0.1.17", features = ["net", "sync"] }
+tokio = { version = "1.45.0", features = [
+    "rt-multi-thread",
+    "fs",
+    "signal",
+    "test-util",
+    "parking_lot",
+    "tracing",
+] }
+tokio-util = "0.7.16"
+tonic = { version = "0.14", default-features = false, features = ["codegen", "router", "tls-ring", "transport"] }
+tonic-prost = "0.14"
+tower = "0.5"
+tracing = "0.1.41"
+tracing-appender = "0.2.3"
+tracing-futures = { version = "0.2.5", features = ["futures-03"] }
+tracing-subscriber = "0.3"
+tryhard = "0.5.1"
+uuid = { version = "1.16.0", default-features = false, features = ["v4"] }
+fixedstr = { version = "0.5", features = ["flex-str"] }
+parking_lot = "0.12.3"
+schemars = { version = "0.8.22", features = ["bytes", "url"] }
+url = { version = "2.5.4", features = ["serde"] }
+xdp = "0.7.0"
+
+# Corrosion libraries. The libraries that corrosion transitively depends on that
+# we also need to depend on should be kept in line with the versions used by corrosion
+camino = "1.1"
+corro-agent = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+corro-client = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+corro-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+rusqlite = "0.33"
+spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+uhlc = "0.7"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"

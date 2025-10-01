@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package envoy.config.core.v3;
+
+import "envoy/config/core/v3/grpc_service.proto";
+
+import "validate/validate.proto";
+
+// [#not-implemented-hide:]
+// Configuration of the event reporting service endpoint.
+message EventServiceConfig {
+  oneof config_source_specifier {
+    option (validate.required) = true;
+
+    // Specifies the gRPC service that hosts the event reporting service.
+    GrpcService grpc_service = 1;
+  }
+}

@@ -35,18 +35,20 @@ spec:
           annotations:
             prometheus.io/scrape: "true"
             prometheus.io/path: /metrics
-            prometheus.io/port: "9091"
+            prometheus.io/port: "8000"
         spec:
           containers:
             - name: xonotic
-              image: gcr.io/agones-images/xonotic-example:0.8
+              image: us-docker.pkg.dev/agones-images/examples/xonotic-example:1.2
             - name: quilkin
-              image: us-docker.pkg.dev/quilkin/release/quilkin:0.5.0
-              args: ["proxy", "--port", "26001", "--to", "127.0.0.1:26000"]
+              image: us-docker.pkg.dev/quilkin/release/quilkin:0.9.0
+              args:
+                - --service.udp
+                - --service.udp.port=26001
+                - --provider.static.endpoints=127.0.0.1:26000
               livenessProbe:
                 httpGet:
                   path: /live
-                  port: 9091
+                  port: 8000
                 initialDelaySeconds: 3
                 periodSeconds: 2
-

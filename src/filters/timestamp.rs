@@ -16,37 +16,13 @@
 
 use std::sync::Arc;
 
-use chrono::prelude::*;
-use once_cell::sync::Lazy;
-use prometheus::HistogramVec;
-
 use crate::{
     filters::prelude::*,
-    metadata::Value,
-    metrics::{
-        histogram_opts, registry, BUCKET_COUNT, BUCKET_FACTOR, BUCKET_START, DIRECTION_LABEL,
-        METADATA_KEY_LABEL, READ_DIRECTION_LABEL, WRITE_DIRECTION_LABEL,
-    },
+    metrics::Direction,
+    net::endpoint::metadata::{self, Value},
 };
 
-crate::include_proto!("quilkin.filters.timestamp.v1alpha1");
-use self::quilkin::filters::timestamp::v1alpha1 as proto;
-
-pub(crate) static METRIC: Lazy<HistogramVec> = Lazy::new(|| {
-    prometheus::register_histogram_vec_with_registry! {
-        histogram_opts(
-            "seconds",
-            SUBSYSTEM,
-            "The duration of seconds of the `metadata_key` metric",
-            prometheus::exponential_buckets(BUCKET_START, BUCKET_FACTOR, BUCKET_COUNT).unwrap(),
-        ),
-        &[METADATA_KEY_LABEL, DIRECTION_LABEL],
-        registry(),
-    }
-    .unwrap()
-});
-
-const SUBSYSTEM: &str = "filters_timestamp";
+use crate::generated::quilkin::filters::timestamp::v1alpha1 as proto;
 
 /// A filter that reads a metadata value as a timestamp to be observed in
 /// a histogram.
@@ -58,51 +34,44 @@ pub struct Timestamp {
 impl Timestamp {
     /// Observes the duration since a timestamp stored in `metadata` and now,
     /// if present.
-    pub fn observe(
-        &self,
-        metadata: &crate::metadata::DynamicMetadata,
-        direction_label: &'static str,
-    ) {
-        let value = metadata
+    pub fn observe(&self, metadata: &metadata::DynamicMetadata, direction: Direction) {
+        let Some(value) = metadata
             .get(&self.config.metadata_key)
             .and_then(|item| match item {
                 Value::Number(item) => Some(*item as i64),
                 Value::Bytes(vec) => Some(i64::from_be_bytes((**vec).try_into().ok()?)),
                 _ => None,
-            });
-
-        let value = match value {
-            Some(item) => item,
-            None => return,
+            })
+        else {
+            return;
         };
 
-        let naive = match NaiveDateTime::from_timestamp_opt(value, 0) {
-            Some(datetime) => datetime,
-            None => {
-                tracing::warn!(
-                    timestamp = value,
-                    metadata_key = %self.config.metadata_key,
-                    "invalid unix timestamp"
-                );
-                return;
-            }
+        let Ok(datetime) = time::OffsetDateTime::from_unix_timestamp(value) else {
+            tracing::warn!(
+                timestamp = value,
+                metadata_key = %self.config.metadata_key,
+                "invalid unix timestamp"
+            );
+            return;
         };
 
-        // Create a normal DateTime from the NaiveDateTime
-        let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
-
-        let now = Utc::now();
-        let seconds = now.signed_duration_since(datetime).num_seconds();
-        self.metric(direction_label).observe(seconds as f64);
+        let seconds = (time::OffsetDateTime::now_utc() - datetime).as_seconds_f64();
+        self.metric(direction).observe(seconds);
     }
 
-    fn metric(&self, direction_label: &'static str) -> prometheus::Histogram {
-        METRIC.with_label_values(&[&self.config.metadata_key.to_string(), direction_label])
+    fn metric(&self, direction: Direction) -> prometheus::Histogram {
+        crate::filters::metrics::histogram(
+            Timestamp::NAME,
+            "duration",
+            "duration in seconds of time since the timestamp in metadata compared to now",
+            direction,
+            &[&*self.config.metadata_key.to_string()],
+        )
     }
 }
 
 impl Timestamp {
-    fn new(config: Config) -> Result<Self, Error> {
+    fn new(config: Config) -> Result<Self, CreationError> {
         Ok(Self {
             config: Arc::new(config),
         })
@@ -110,7 +79,7 @@ impl Timestamp {
 }
 
 impl TryFrom<Config> for Timestamp {
-    type Error = Error;
+    type Error = CreationError;
 
     fn try_from(config: Config) -> Result<Self, Self::Error> {
         Self::new(config)
@@ -118,14 +87,14 @@ impl TryFrom<Config> for Timestamp {
 }
 
 impl Filter for Timestamp {
-    fn read(&self, ctx: &mut ReadContext) -> Option<()> {
-        self.observe(&ctx.metadata, READ_DIRECTION_LABEL);
-        Some(())
+    fn read<P: PacketMut>(&self, ctx: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
+        self.observe(&ctx.metadata, Direction::Read);
+        Ok(())
     }
 
-    fn write(&self, ctx: &mut WriteContext) -> Option<()> {
-        self.observe(&ctx.metadata, WRITE_DIRECTION_LABEL);
-        Some(())
+    fn write<P: PacketMut>(&self, ctx: &mut WriteContext<P>) -> Result<(), FilterError> {
+        self.observe(&ctx.metadata, Direction::Write);
+        Ok(())
     }
 }
 
@@ -134,7 +103,7 @@ impl StaticFilter for Timestamp {
     type Configuration = Config;
     type BinaryConfiguration = proto::Timestamp;
 
-    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, Error> {
+    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, CreationError> {
         Self::new(Self::ensure_config_exists(config)?)
     }
 }
@@ -146,7 +115,7 @@ impl StaticFilter for Timestamp {
 pub struct Config {
     /// The metadata key to read the UTC UNIX Timestamp from.
     #[serde(rename = "metadataKey")]
-    pub metadata_key: crate::metadata::Key,
+    pub metadata_key: metadata::Key,
 }
 
 impl Config {
@@ -179,29 +148,35 @@ impl TryFrom<proto::Timestamp> for Config {
 mod tests {
     use super::*;
 
-    use crate::filters::capture::{self, Capture};
+    use crate::{
+        filters::capture::{self, Capture},
+        test::alloc_buffer,
+    };
 
-    #[test]
-    fn basic() {
+    #[tokio::test]
+    async fn basic() {
         const TIMESTAMP_KEY: &str = "BASIC";
         let filter = Timestamp::from_config(Config::new(TIMESTAMP_KEY).into());
+        let mut dest = Vec::new();
+        let cm = Default::default();
         let mut ctx = ReadContext::new(
-            vec![],
+            &cm,
             (std::net::Ipv4Addr::UNSPECIFIED, 0).into(),
-            b"hello".to_vec(),
+            alloc_buffer(b"hello"),
+            &mut dest,
         );
         ctx.metadata.insert(
             TIMESTAMP_KEY.into(),
-            Value::Number(Utc::now().timestamp() as u64),
+            Value::Number(crate::time::UtcTimestamp::now().unix() as u64),
         );
 
         filter.read(&mut ctx).unwrap();
 
-        assert_eq!(1, filter.metric(READ_DIRECTION_LABEL).get_sample_count());
+        assert_eq!(1, filter.metric(Direction::Read).get_sample_count());
     }
 
-    #[test]
-    fn with_capture() {
+    #[tokio::test]
+    async fn with_capture() {
         const TIMESTAMP_KEY: &str = "WITH_CAPTURE";
         let capture = Capture::from_config(
             capture::Config {
@@ -216,15 +191,18 @@ mod tests {
         );
         let timestamp = Timestamp::from_config(Config::new(TIMESTAMP_KEY).into());
         let source = (std::net::Ipv4Addr::UNSPECIFIED, 0);
+        let mut dest = Vec::new();
+        let cm = Default::default();
         let mut ctx = ReadContext::new(
-            vec![],
+            &cm,
             source.into(),
-            [0, 0, 0, 0, 99, 81, 55, 181].to_vec(),
+            alloc_buffer([0, 0, 0, 0, 99, 81, 55, 181]),
+            &mut dest,
         );
 
         capture.read(&mut ctx).unwrap();
         timestamp.read(&mut ctx).unwrap();
 
-        assert_eq!(1, timestamp.metric(READ_DIRECTION_LABEL).get_sample_count());
+        assert_eq!(1, timestamp.metric(Direction::Read).get_sample_count());
     }
 }

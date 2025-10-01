@@ -14,57 +14,71 @@
  * limitations under the License.
  */
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 
-use quilkin::{endpoint::Endpoint, test_utils::TestHelper};
+use quilkin::{
+    net::endpoint::Endpoint,
+    test::{AddressType, TestHelper},
+};
 
 #[tokio::test]
+#[cfg_attr(target_os = "macos", ignore)]
 async fn metrics_server() {
     let mut t = TestHelper::default();
 
     // create an echo server as an endpoint.
-    let echo = t.run_echo_server().await;
-    let metrics_port = quilkin::test_utils::available_addr().await.port();
+    let echo = t.run_echo_server(AddressType::Random).await;
+    let metrics_port = quilkin::test::available_addr(AddressType::Random)
+        .await
+        .port();
 
     // create server configuration
-    let server_addr = quilkin::test_utils::available_addr().await;
-    let server_proxy = quilkin::cli::Proxy {
-        port: server_addr.port(),
-        ..<_>::default()
-    };
-    let server_config = std::sync::Arc::new(quilkin::Config::default());
+    let server_config = TestHelper::new_config();
     server_config
-        .clusters
-        .modify(|clusters| clusters.insert_default(vec![Endpoint::new(echo.clone())]));
-    t.run_server(
-        server_config,
-        server_proxy,
-        Some(Some((std::net::Ipv6Addr::UNSPECIFIED, metrics_port).into())),
-    );
+        .dyn_cfg
+        .clusters()
+        .unwrap()
+        .modify(|clusters| clusters.insert_default([Endpoint::new(echo.clone())].into()));
+    let server_port = t
+        .run_server(
+            server_config,
+            None,
+            Some(Some((std::net::Ipv4Addr::UNSPECIFIED, metrics_port).into())),
+        )
+        .await;
 
     // create a local client
-    let client_port = 12347;
-    let client_proxy = quilkin::cli::Proxy {
-        port: client_port,
-        ..<_>::default()
-    };
-    let client_config = std::sync::Arc::new(quilkin::Config::default());
+    let client_config = TestHelper::new_config();
     client_config
-        .clusters
-        .modify(|clusters| clusters.insert_default(vec![Endpoint::new(server_addr.into())]));
-    t.run_server(client_config, client_proxy, None);
+        .dyn_cfg
+        .clusters()
+        .unwrap()
+        .modify(|clusters| {
+            clusters.insert_default(
+                [Endpoint::new(
+                    (std::net::Ipv6Addr::LOCALHOST, server_port).into(),
+                )]
+                .into(),
+            );
+        });
+    let client_port = t.run_server(client_config, None, None).await;
 
     // let's send the packet
     let (mut recv_chan, socket) = t.open_socket_and_recv_multiple_packets().await;
 
     // game_client
-    let local_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), client_port);
+    let local_addr = SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, client_port));
     tracing::info!(address = %local_addr, "Sending hello");
     socket.send_to(b"hello", &local_addr).await.unwrap();
 
-    let _ = recv_chan.recv().await.unwrap();
-    let client = hyper::Client::new();
+    tokio::time::timeout(std::time::Duration::from_millis(100), recv_chan.recv())
+        .await
+        .unwrap()
+        .unwrap();
 
+    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .build_http::<http_body_util::Empty<bytes::Bytes>>();
+    use http_body_util::BodyExt;
     let resp = client
         .get(
             format!("http://localhost:{metrics_port}/metrics")
@@ -72,12 +86,16 @@ async fn metrics_server() {
                 .unwrap(),
         )
         .await
-        .map(|resp| resp.into_body())
-        .map(hyper::body::to_bytes)
         .unwrap()
+        .into_body()
+        .collect()
         .await
-        .unwrap();
+        .unwrap()
+        .to_bytes();
 
     let response = String::from_utf8(resp.to_vec()).unwrap();
-    assert!(response.contains(r#"quilkin_packets_total{event="read"} 2"#));
+    let read_regex = regex::Regex::new(r#"quilkin_packets_total\{.*event="read".*\} 2"#).unwrap();
+    let write_regex = regex::Regex::new(r#"quilkin_packets_total\{.*event="write".*\} 2"#).unwrap();
+    assert!(read_regex.is_match(&response));
+    assert!(write_regex.is_match(&response));
 }

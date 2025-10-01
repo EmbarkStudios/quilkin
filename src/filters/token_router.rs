@@ -14,33 +14,27 @@
  *  limitations under the License.
  */
 
-mod metrics;
-
-crate::include_proto!("quilkin.filters.token_router.v1alpha1");
-
-use std::convert::TryFrom;
-
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    filters::{metadata::CAPTURED_BYTES, prelude::*},
-    metadata,
+    filters::{capture::CAPTURED_BYTES, prelude::*},
+    net::endpoint::metadata,
 };
 
-use metrics::Metrics;
-
-use self::quilkin::filters::token_router::v1alpha1 as proto;
+use quilkin_xds::generated::quilkin::filters::token_router::v1alpha1 as proto;
 
 /// Filter that only allows packets to be passed to Endpoints that have a matching
-/// connection_id to the token stored in the Filter's dynamic metadata.
+/// `connection_id` to the token stored in the Filter's dynamic metadata.
+#[derive(Default)]
 pub struct TokenRouter {
     config: Config,
-    metrics: Metrics,
 }
 
 impl TokenRouter {
-    fn new(config: Config, metrics: Metrics) -> Self {
-        Self { config, metrics }
+    pub fn testing(config: Option<Config>) -> Self {
+        Self {
+            config: config.unwrap_or_default(),
+        }
     }
 }
 
@@ -49,57 +43,120 @@ impl StaticFilter for TokenRouter {
     type Configuration = Config;
     type BinaryConfiguration = proto::TokenRouter;
 
-    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, Error> {
-        Ok(TokenRouter::new(
-            config.unwrap_or_default(),
-            Metrics::new()?,
-        ))
+    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, CreationError> {
+        Ok(Self {
+            config: config.unwrap_or_default(),
+        })
     }
 }
 
 impl Filter for TokenRouter {
-    fn read(&self, ctx: &mut ReadContext) -> Option<()> {
+    fn read<P: PacketMut>(&self, ctx: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
         match ctx.metadata.get(&self.config.metadata_key) {
-            None => {
-                tracing::trace!(
-                    metadata_key = %self.config.metadata_key,
-                    "Dropping packet, no routing token was found"
-                );
-                self.metrics.packets_dropped_total_no_token_found.inc();
-                None
-            }
-            Some(value) => match value {
-                metadata::Value::Bytes(token) => {
-                    ctx.endpoints.retain(|endpoint| {
-                        if endpoint.metadata.known.tokens.contains(&**token) {
-                            tracing::trace!(%endpoint.address, token = &*base64::encode(token), "Endpoint matched");
-                            true
-                        } else {
-                            false
-                        }
-                    });
+            Some(metadata::Value::Bytes(token)) => {
+                let tok = crate::net::cluster::Token::new(token);
 
-                    if ctx.endpoints.is_empty() {
-                        tracing::trace!(
-                            token = &*base64::encode(token),
-                            "No endpoint matched token"
-                        );
-                        self.metrics.packets_dropped_total_no_endpoint_match.inc();
-                        None
-                    } else {
-                        Some(())
-                    }
+                ctx.endpoints.addresses_for_token(tok, ctx.destinations);
+
+                if ctx.destinations.is_empty() {
+                    Err(FilterError::TokenRouter(RouterError::NoEndpointMatch {
+                        token: token.clone(),
+                    }))
+                } else {
+                    Ok(())
                 }
-                _ => {
-                    tracing::trace!(
-                        count = ?self.metrics.packets_dropped_total_invalid_token.get(),
-                        metadata_key = %self.config.metadata_key,
-                        "Packets are being dropped as routing token has invalid type: expected Value::Bytes"
-                    );
-                    self.metrics.packets_dropped_total_invalid_token.inc();
-                    None
-                }
-            },
+            }
+            Some(_value) => unreachable!(
+                "this means the capture filter has regressed, it only ever captures byte slices"
+            ),
+            None => Err(FilterError::TokenRouter(RouterError::NoTokenFound)),
+        }
+    }
+}
+
+pub struct HashedTokenRouter(TokenRouter);
+
+impl StaticFilter for HashedTokenRouter {
+    const NAME: &'static str = "quilkin.filters.token_router.v1alpha1.HashedTokenRouter";
+    type Configuration = Config;
+    type BinaryConfiguration = proto::TokenRouter;
+
+    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, CreationError> {
+        Ok(Self(TokenRouter {
+            config: config.unwrap_or_default(),
+        }))
+    }
+}
+
+impl Filter for HashedTokenRouter {
+    fn read<P: PacketMut>(&self, ctx: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
+        self.0.read(ctx)
+    }
+}
+
+pub enum RouterError {
+    NoTokenFound,
+    NoEndpointMatch { token: bytes::Bytes },
+}
+
+impl RouterError {
+    #[inline]
+    pub fn discriminant(&self) -> &'static str {
+        match self {
+            Self::NoEndpointMatch { .. } => "filter::token_router::no endpoint match",
+            Self::NoTokenFound => "filter::token_router::no token found",
+        }
+    }
+}
+
+use std::fmt;
+
+impl fmt::Display for RouterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoEndpointMatch { token } => {
+                write!(
+                    f,
+                    "no endpoint matched token `{}`",
+                    base64::display::Base64Display::new(
+                        token,
+                        &base64::engine::general_purpose::STANDARD
+                    )
+                )
+            }
+            Self::NoTokenFound => f.write_str("routing token not captured"),
+        }
+    }
+}
+
+impl fmt::Debug for RouterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoEndpointMatch { .. } => f.write_str("no endpoint matched routing token"),
+            Self::NoTokenFound => f.write_str("routing token not captured"),
+        }
+    }
+}
+
+impl Eq for RouterError {}
+
+impl PartialEq for RouterError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::NoTokenFound, Self::NoTokenFound) => true,
+            (Self::NoEndpointMatch { token: a }, Self::NoEndpointMatch { token: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl std::hash::Hash for RouterError {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(&std::mem::discriminant(self), state);
+
+        match self {
+            Self::NoEndpointMatch { token } => state.write(token),
+            Self::NoTokenFound => {}
         }
     }
 }
@@ -140,8 +197,7 @@ impl TryFrom<proto::TokenRouter> for Config {
         Ok(Self {
             metadata_key: p
                 .metadata_key
-                .map(metadata::Key::new)
-                .unwrap_or_else(default_metadata_key),
+                .map_or_else(default_metadata_key, metadata::Key::new),
         })
     }
 }
@@ -149,9 +205,8 @@ impl TryFrom<proto::TokenRouter> for Config {
 #[cfg(test)]
 mod tests {
     use crate::{
-        endpoint::{Endpoint, Metadata},
-        metadata::Value,
-        test_utils::assert_write_no_change,
+        net::endpoint::{Endpoint, Metadata, metadata::Value},
+        test::assert_write_no_change,
     };
 
     use super::*;
@@ -187,73 +242,71 @@ mod tests {
                 name
             );
             if let Some(expected) = expected {
-                assert_eq!(expected, result.unwrap(), "{}", name);
+                assert_eq!(expected, result.unwrap(), "{name}");
             }
         }
     }
 
-    #[test]
-    fn factory_custom_tokens() {
+    #[tokio::test]
+    async fn factory_custom_tokens() {
         let filter = TokenRouter::from_config(
             Config {
                 metadata_key: TOKEN_KEY.into(),
             }
             .into(),
         );
-        let mut ctx = new_ctx();
-        ctx.metadata
-            .insert(TOKEN_KEY.into(), Value::Bytes(b"123".to_vec().into()));
-        assert_read(&filter, ctx);
+        let mut dest = Vec::new();
+        with_ctx(&mut dest, |mut ctx| {
+            ctx.metadata
+                .insert(TOKEN_KEY.into(), Value::Bytes(b"123".to_vec().into()));
+            assert_read(&filter, ctx);
+        });
     }
 
-    #[test]
-    fn factory_empty_config() {
+    #[tokio::test]
+    async fn factory_empty_config() {
         let filter = TokenRouter::from_config(None);
-        let mut ctx = new_ctx();
-        ctx.metadata
-            .insert(CAPTURED_BYTES.into(), Value::Bytes(b"123".to_vec().into()));
-        assert_read(&filter, ctx);
+        let mut dest = Vec::new();
+        with_ctx(&mut dest, |mut ctx| {
+            ctx.metadata
+                .insert(CAPTURED_BYTES.into(), Value::Bytes(b"123".to_vec().into()));
+            assert_read(&filter, ctx);
+        });
     }
 
-    #[test]
-    fn downstream_receive() {
+    #[tokio::test]
+    async fn downstream_receive() {
         // valid key
         let config = Config {
             metadata_key: CAPTURED_BYTES.into(),
         };
         let filter = TokenRouter::from_config(config.into());
+        let mut dest = Vec::new();
 
-        let mut ctx = new_ctx();
-        ctx.metadata
-            .insert(CAPTURED_BYTES.into(), Value::Bytes(b"123".to_vec().into()));
-        assert_read(&filter, ctx);
+        with_ctx(&mut dest, |mut ctx| {
+            ctx.metadata
+                .insert(CAPTURED_BYTES.into(), Value::Bytes(b"123".to_vec().into()));
+            assert_read(&filter, ctx);
+        });
+        dest.clear();
 
         // invalid key
-        let mut ctx = new_ctx();
-        ctx.metadata
-            .insert(CAPTURED_BYTES.into(), Value::Bytes(b"567".to_vec().into()));
+        with_ctx(&mut dest, |mut ctx| {
+            ctx.metadata
+                .insert(CAPTURED_BYTES.into(), Value::Bytes(b"567".to_vec().into()));
 
-        assert!(filter.read(&mut ctx).is_none());
-        assert_eq!(
-            1,
-            filter.metrics.packets_dropped_total_no_endpoint_match.get()
-        );
+            assert!(filter.read(&mut ctx).is_err());
+        });
+        dest.clear();
 
         // no key
-        let mut ctx = new_ctx();
-        assert!(filter.read(&mut ctx).is_none());
-        assert_eq!(1, filter.metrics.packets_dropped_total_no_token_found.get());
-
-        // wrong type key
-        let mut ctx = new_ctx();
-        ctx.metadata
-            .insert(CAPTURED_BYTES.into(), Value::String(String::from("wrong")));
-        assert!(filter.read(&mut ctx).is_none());
-        assert_eq!(1, filter.metrics.packets_dropped_total_invalid_token.get());
+        with_ctx(&mut dest, |mut ctx| {
+            assert!(filter.read(&mut ctx).is_err());
+        });
     }
 
-    #[test]
-    fn write() {
+    #[tokio::test]
+    async fn write() {
         let config = Config {
             metadata_key: CAPTURED_BYTES.into(),
         };
@@ -261,7 +314,10 @@ mod tests {
         assert_write_no_change(&filter);
     }
 
-    fn new_ctx() -> ReadContext {
+    fn with_ctx(
+        dest: &mut Vec<crate::net::EndpointAddress>,
+        test: impl FnOnce(ReadContext<'_, crate::collections::PoolBuffer>),
+    ) {
         let endpoint1 = Endpoint::with_metadata(
             "127.0.0.1:80".parse().unwrap(),
             Metadata {
@@ -275,19 +331,24 @@ mod tests {
             },
         );
 
-        ReadContext::new(
-            vec![endpoint1, endpoint2],
+        let pool = std::sync::Arc::new(crate::collections::BufferPool::new(1, 5));
+
+        let endpoints = crate::net::cluster::ClusterMap::default();
+        endpoints.insert_default([endpoint1, endpoint2].into());
+        test(ReadContext::new(
+            &endpoints,
             "127.0.0.1:100".parse().unwrap(),
-            b"hello".to_vec(),
-        )
+            pool.alloc_slice(b"hello"),
+            dest,
+        ));
     }
 
-    fn assert_read<F>(filter: &F, mut ctx: ReadContext)
+    fn assert_read<F, P>(filter: &F, mut ctx: ReadContext<'_, P>)
     where
         F: Filter + ?Sized,
+        P: PacketMut,
     {
         filter.read(&mut ctx).unwrap();
-
-        assert_eq!(b"hello", &*ctx.contents);
+        assert_eq!(b"hello", ctx.contents.as_slice());
     }
 }

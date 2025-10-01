@@ -37,7 +37,7 @@ Usually with Agones you would
 Choose one of the listed `GameServer`s from the previous step, and connect to the IP and port of the Xonotic
 server via the "Multiplayer > Address" field in the Xonotic client in the format of {IP}:{PORT}.
 
-![xonotic-address.png](xonotic-address.png)
+![xonotic-address.png](xonotic-address-v6.png)
 
 You should now be playing a game of Xonotic against 4 bots!
 
@@ -49,10 +49,10 @@ Grab the name of the GameServer you connected to before, and replace the `${game
 command. This will forward the [admin](../admin.md) interface to localhost.
 
 ```shell
-kubectl port-forward ${gameserver} 9091
+kubectl port-forward ${gameserver} 8000
 ```
 
-Then open a browser to [http://localhost:9091/metrics](http://localhost:9091/metrics) to see the
+Then open a browser to [http://localhost:8000/metrics](http://localhost:9091/metrics) to see the
 [Prometheus](https://prometheus.io/) metrics that Quilkin exports.
 
 ## 5. Cleanup
@@ -63,33 +63,9 @@ Run the following to delete the Fleet and the accompanying ConfigMap:
 kubectl delete -f  https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-sidecar/sidecar.yaml
 ```
 
-## 6. Agones Fleet, but with Compression
+## 6. Play Xonotic, through Quilkin
 
-Let's take this one step further and compress the data between the Xonotic client and the server, without having to
-change either of them!
-
-Let's create a new Xonotic Fleet on our Agones cluster, but this time configured such that Quilkin will decompress
-packets that are incoming.
-
-Run the following:
-
-```shell
-kubectl apply -f https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-sidecar/sidecar-compress.yaml
-```
-
-This will implement the [Compress](../../services/proxy/filters/compress.md) filter in our Quilkin sidecar proxy in our new
-Fleet.
-
-Now you can run `kubectl get gameservers` until all your Agones `GameServers` are marked as `Ready` like so:
-
-```shell
-$ kubectl get gameservers
-NAME                                   STATE   ADDRESS         PORT   NODE                                    AGE
-xonotic-sidecar-compress-htc2x-84mzm   Ready   34.94.107.201   7534   gke-agones-default-pool-0f7d8adc-7w3c   7m25s
-xonotic-sidecar-compress-htc2x-sdp4k   Ready   34.94.107.201   7592   gke-agones-default-pool-0f7d8adc-7w3c   7m25s
-```
-
-## 4. Play Xonotic, through Quilkin
+Note: compression has been removed.
 
 What we will do in this step, is run Quilkin locally as a client-side proxy to compress the UDP data before it is
 sent up to our Xonotic servers that are expecting compressed data.

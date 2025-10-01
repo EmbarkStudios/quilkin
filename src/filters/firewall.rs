@@ -14,31 +14,32 @@
  * limitations under the License.
  */
 
+mod config;
+
 use tracing::debug;
 
-use crate::filters::firewall::metrics::Metrics;
 use crate::filters::prelude::*;
+use crate::generated::quilkin::filters::firewall::v1alpha1 as proto;
 
-use self::quilkin::filters::firewall::v1alpha1 as proto;
-
-crate::include_proto!("quilkin.filters.firewall.v1alpha1");
-
-mod config;
-mod metrics;
-
-pub use config::{Action, Config, PortRange, PortRangeError, Rule};
+pub use config::{Action, Cidr, Config, PortRange, PortRangeError, Rule};
+pub use ipnetwork::IpNetwork;
 
 /// Filter for allowing/blocking traffic by IP and port.
 pub struct Firewall {
-    metrics: Metrics,
     on_read: Vec<Rule>,
     on_write: Vec<Rule>,
 }
 
 impl Firewall {
-    fn new(config: Config, metrics: Metrics) -> Self {
+    fn new(config: Config) -> Self {
         Self {
-            metrics,
+            on_read: config.on_read,
+            on_write: config.on_write,
+        }
+    }
+
+    pub fn testing(config: Config) -> Self {
+        Self {
             on_read: config.on_read,
             on_write: config.on_write,
         }
@@ -50,19 +51,16 @@ impl StaticFilter for Firewall {
     type Configuration = Config;
     type BinaryConfiguration = proto::Firewall;
 
-    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, Error> {
-        Ok(Firewall::new(
-            Self::ensure_config_exists(config)?,
-            Metrics::new()?,
-        ))
+    fn try_from_config(config: Option<Self::Configuration>) -> Result<Self, CreationError> {
+        Self::ensure_config_exists(config).map(Firewall::new)
     }
 }
 
 impl Filter for Firewall {
     #[cfg_attr(feature = "instrument", tracing::instrument(skip(self, ctx)))]
-    fn read(&self, ctx: &mut ReadContext) -> Option<()> {
+    fn read<P: PacketMut>(&self, ctx: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
         for rule in &self.on_read {
-            if rule.contains(ctx.source.to_socket_addr().ok()?) {
+            if rule.contains(ctx.source.to_socket_addr()?) {
                 return match rule.action {
                     Action::Allow => {
                         debug!(
@@ -70,13 +68,11 @@ impl Filter for Firewall {
                             event = "read",
                             source = ?ctx.source.to_string()
                         );
-                        self.metrics.packets_allowed_read.inc();
-                        Some(())
+                        Ok(())
                     }
                     Action::Deny => {
                         debug!(action = "Deny", event = "read", source = ?ctx.source);
-                        self.metrics.packets_denied_read.inc();
-                        None
+                        Err(FilterError::FirewallDenied)
                     }
                 };
             }
@@ -86,14 +82,13 @@ impl Filter for Firewall {
             event = "read",
             source = ?ctx.source.to_string()
         );
-        self.metrics.packets_denied_read.inc();
-        None
+        Err(FilterError::FirewallDenied)
     }
 
     #[cfg_attr(feature = "instrument", tracing::instrument(skip(self, ctx)))]
-    fn write(&self, ctx: &mut WriteContext) -> Option<()> {
+    fn write<P: PacketMut>(&self, ctx: &mut WriteContext<P>) -> Result<(), FilterError> {
         for rule in &self.on_write {
-            if rule.contains(ctx.source.to_socket_addr().ok()?) {
+            if rule.contains(ctx.source.to_socket_addr()?) {
                 return match rule.action {
                     Action::Allow => {
                         debug!(
@@ -101,13 +96,11 @@ impl Filter for Firewall {
                             event = "write",
                             source = ?ctx.source.to_string()
                         );
-                        self.metrics.packets_allowed_write.inc();
-                        Some(())
+                        Ok(())
                     }
                     Action::Deny => {
                         debug!(action = "Deny", event = "write", source = ?ctx.source);
-                        self.metrics.packets_denied_write.inc();
-                        None
+                        Err(FilterError::FirewallDenied)
                     }
                 };
             }
@@ -118,8 +111,7 @@ impl Filter for Firewall {
             event = "write",
             source = ?ctx.source.to_string()
         );
-        self.metrics.packets_denied_write.inc();
-        None
+        Err(FilterError::FirewallDenied)
     }
 }
 
@@ -127,87 +119,79 @@ impl Filter for Firewall {
 mod tests {
     use std::net::Ipv4Addr;
 
-    use crate::endpoint::Endpoint;
     use crate::filters::firewall::config::PortRange;
+    use crate::net::endpoint::Endpoint;
+    use crate::test::alloc_buffer;
     use tracing_test::traced_test;
 
     use super::*;
 
-    #[test]
+    #[tokio::test]
     #[traced_test]
-    fn read() {
+    async fn read() {
         let firewall = Firewall {
-            metrics: Metrics::new().unwrap(),
             on_read: vec![Rule {
                 action: Action::Allow,
-                source: "192.168.75.0/24".parse().unwrap(),
+                sources: vec!["192.168.75.0/24".parse().unwrap()],
                 ports: vec![PortRange::new(10, 100).unwrap()],
             }],
             on_write: vec![],
         };
 
         let local_ip = [192, 168, 75, 20];
-        let mut ctx = ReadContext::new(
-            vec![Endpoint::new((Ipv4Addr::LOCALHOST, 8080).into())],
-            (local_ip, 80).into(),
-            vec![],
+        let endpoints = crate::net::cluster::ClusterMap::new_default(
+            [Endpoint::new((Ipv4Addr::LOCALHOST, 8080).into())].into(),
         );
-        assert!(firewall.read(&mut ctx).is_some());
-        assert_eq!(1, firewall.metrics.packets_allowed_read.get());
-        assert_eq!(0, firewall.metrics.packets_denied_read.get());
-
+        let mut dest = Vec::new();
         let mut ctx = ReadContext::new(
-            vec![Endpoint::new((Ipv4Addr::LOCALHOST, 8080).into())],
+            &endpoints,
+            (local_ip, 80).into(),
+            alloc_buffer([]),
+            &mut dest,
+        );
+        assert!(firewall.read(&mut ctx).is_ok());
+
+        let endpoints = crate::net::cluster::ClusterMap::new_default(
+            [Endpoint::new((Ipv4Addr::LOCALHOST, 8080).into())].into(),
+        );
+        let mut dest = Vec::new();
+        let mut ctx = ReadContext::new(
+            &endpoints,
             (local_ip, 2000).into(),
-            vec![],
+            alloc_buffer([]),
+            &mut dest,
         );
         assert!(logs_contain("quilkin::filters::firewall")); // the given name to the the logger by tracing
         assert!(logs_contain("Allow"));
 
-        assert!(firewall.read(&mut ctx).is_none());
-        assert_eq!(1, firewall.metrics.packets_allowed_read.get());
-        assert_eq!(1, firewall.metrics.packets_denied_read.get());
-
-        assert_eq!(0, firewall.metrics.packets_allowed_write.get());
-        assert_eq!(0, firewall.metrics.packets_denied_write.get());
+        assert!(firewall.read(&mut ctx).is_err());
     }
 
-    #[test]
-    fn write() {
+    #[tokio::test]
+    async fn write() {
         let firewall = Firewall {
-            metrics: Metrics::new().unwrap(),
             on_read: vec![],
             on_write: vec![Rule {
                 action: Action::Allow,
-                source: "192.168.75.0/24".parse().unwrap(),
+                sources: vec!["192.168.75.0/24".parse().unwrap()],
                 ports: vec![PortRange::new(10, 100).unwrap()],
             }],
         };
 
-        let endpoint = Endpoint::new((Ipv4Addr::LOCALHOST, 80).into());
-        let local_addr: crate::endpoint::EndpointAddress = (Ipv4Addr::LOCALHOST, 8081).into();
+        let local_addr: crate::net::endpoint::EndpointAddress = (Ipv4Addr::LOCALHOST, 8081).into();
 
         let mut ctx = WriteContext::new(
-            endpoint.clone(),
             ([192, 168, 75, 20], 80).into(),
             local_addr.clone(),
-            vec![],
+            alloc_buffer([]),
         );
-        assert!(firewall.write(&mut ctx).is_some());
-        assert_eq!(1, firewall.metrics.packets_allowed_write.get());
-        assert_eq!(0, firewall.metrics.packets_denied_write.get());
+        assert!(firewall.write(&mut ctx).is_ok());
 
         let mut ctx = WriteContext::new(
-            endpoint,
             ([192, 168, 77, 20], 80).into(),
             local_addr,
-            vec![],
+            alloc_buffer([]),
         );
-        assert!(firewall.write(&mut ctx).is_none());
-        assert_eq!(1, firewall.metrics.packets_allowed_write.get());
-        assert_eq!(1, firewall.metrics.packets_denied_write.get());
-
-        assert_eq!(0, firewall.metrics.packets_allowed_read.get());
-        assert_eq!(0, firewall.metrics.packets_denied_read.get());
+        assert!(firewall.write(&mut ctx).is_err());
     }
 }

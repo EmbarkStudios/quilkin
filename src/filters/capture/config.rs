@@ -14,12 +14,10 @@
  * limitations under the License.
  */
 
-use std::convert::TryFrom;
-
 use serde::{Deserialize, Serialize};
 
-use super::{proto, Prefix, Regex, Suffix};
-use crate::filters::{metadata::CAPTURED_BYTES, ConvertProtoConfigError};
+use super::{CAPTURED_BYTES, Prefix, Regex, Suffix, proto};
+use crate::filters::ConvertProtoConfigError;
 
 /// Strategy to apply for acquiring a set of bytes in the UDP packet
 #[derive(Serialize, Deserialize, Debug, PartialEq, schemars::JsonSchema)]
@@ -69,9 +67,18 @@ pub struct Config {
     /// The key to use when storing the captured value in the filter context.
     /// If a match was found it is available
     /// under `{{metadata_key}}/is_present`.
-    pub metadata_key: crate::metadata::Key,
+    pub metadata_key: crate::net::endpoint::metadata::Key,
     /// The capture strategy.
     pub strategy: Strategy,
+}
+
+impl Config {
+    pub fn with_strategy(strategy: impl Into<Strategy>) -> Self {
+        Self {
+            metadata_key: crate::net::endpoint::metadata::Key::from_static(CAPTURED_BYTES),
+            strategy: strategy.into(),
+        }
+    }
 }
 
 impl Serialize for Config {
@@ -113,7 +120,7 @@ impl<'de> serde::Deserialize<'de> for Config {
         impl<'de> serde::de::Visitor<'de> for ConfigVisitor {
             type Value = Config;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 formatter.write_str("Capture config")
             }
 
@@ -165,8 +172,9 @@ impl<'de> serde::Deserialize<'de> for Config {
                     }
                 }
 
-                let metadata_key = metadata_key
-                    .unwrap_or_else(|| crate::metadata::Key::from_static(CAPTURED_BYTES));
+                let metadata_key = metadata_key.unwrap_or_else(|| {
+                    crate::net::endpoint::metadata::Key::from_static(CAPTURED_BYTES)
+                });
                 let strategy = strategy.ok_or_else(|| {
                     serde::de::Error::custom(
                         "Capture strategy of `regex`, `suffix`, or `prefix` is required",
@@ -204,7 +212,7 @@ impl TryFrom<proto::Capture> for Config {
         Ok(Self {
             metadata_key: p
                 .metadata_key
-                .map(crate::metadata::Key::from)
+                .map(crate::net::endpoint::metadata::Key::from)
                 .ok_or_else(|| {
                     ConvertProtoConfigError::new("Missing", Some("metadata_key".into()))
                 })?,
@@ -263,7 +271,6 @@ impl TryFrom<proto::capture::Strategy> for Strategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::convert::TryFrom;
 
     #[test]
     fn convert_proto_config() {

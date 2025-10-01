@@ -5,7 +5,7 @@ The `Capture` filter's job is to find a series of bytes within a packet, and cap
 down the chain.
 
 This is often used as a way of retrieving authentication tokens from a packet, and used in combination with
-[ConcatenateBytes](concatenate_bytes.md) and
+[Concatenate](concatenate.md) and
 [TokenRouter](token_router.md) filter to provide common packet routing utilities.
 
 ## Capture strategies
@@ -41,10 +41,8 @@ filters:
         size: 3
         remove: false
 clusters:
-  default:
-    localities:
-        - endpoints:
-            - address: 127.0.0.1:7001
+  - endpoints:
+      - address: 127.0.0.1:7001
 # ";
 # let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
 # assert_eq!(config.filters.load().len(), 1);
@@ -55,11 +53,5 @@ clusters:
 ```yaml
 {{#include ../../../../../target/quilkin.filters.capture.v1alpha1.yaml}}
 ```
-
-## Metrics
-
-* `quilkin_filter_Capture_packets_dropped_total`
-  A counter of the total number of packets that have been dropped due to their length being less than the configured
-  `size`.
 
 [filter-dynamic-metadata]: ../filters.md#filter-dynamic-metadata

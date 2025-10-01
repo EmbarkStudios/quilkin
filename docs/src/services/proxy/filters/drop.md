@@ -14,7 +14,3 @@ quilkin.filters.drop.v1alpha1.Drop
 ## Configuration
 
 No defined configuration options.
-
-## Metrics
-
-This filter currently exports no metrics.

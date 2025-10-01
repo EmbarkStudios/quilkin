@@ -14,9 +14,11 @@
  * limitations under the License.
  */
 
-use std::{convert::TryFrom, fmt, fmt::Formatter, net::SocketAddr, ops::Range};
+use std::net::IpAddr;
+use std::str::FromStr;
+use std::{convert::TryFrom, fmt, fmt::Formatter, net::SocketAddr, ops::Range, vec};
 
-use ipnetwork::IpNetwork;
+use ipnetwork::{IpNetwork, IpNetworkError};
 use schemars::JsonSchema;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -28,7 +30,6 @@ use super::proto;
 /// Represents how a Firewall filter is configured for read and write
 /// operations.
 #[derive(Clone, Deserialize, Debug, Eq, PartialEq, Serialize, JsonSchema)]
-#[non_exhaustive]
 pub struct Config {
     pub on_read: Vec<Rule>,
     pub on_write: Vec<Rule>,
@@ -63,18 +64,55 @@ impl From<proto::firewall::Action> for Action {
     }
 }
 
+impl From<bool> for Action {
+    fn from(value: bool) -> Self {
+        if value { Self::Allow } else { Self::Deny }
+    }
+}
+
+/// Cidr notation for an ipv6 or ipv4 netmask
+#[derive(Clone, Deserialize, Debug, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct Cidr(#[schemars(with = "String")] pub IpNetwork);
+
+impl FromStr for Cidr {
+    type Err = IpNetworkError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let ip = IpNetwork::from_str(s)?;
+        Ok(Self(ip))
+    }
+}
+
+impl Cidr {
+    /// Does this Address match the netmask?
+    /// If the mask is ipv4 and the address is ipv6, this will attempt to see if it's a
+    /// compatible or mapped ipv4->ipv6 address and match that.
+    pub fn contains(&self, ip: IpAddr) -> bool {
+        // if we have a v4 mask, but a v6 address, let's see if it's a compatible or mapped
+        // ipv4->ipv6 address
+        if let IpNetwork::V4(v4network) = self.0 {
+            if let IpAddr::V6(v6) = ip {
+                if let Some(ipv4) = v6.to_ipv4() {
+                    return v4network.contains(ipv4);
+                }
+            }
+        }
+
+        self.0.contains(ip)
+    }
+}
+
 /// Combination of CIDR range, port range and action to take.
 #[derive(Clone, Deserialize, Debug, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Rule {
     pub action: Action,
     /// ipv4 or ipv6 CIDR address.
-    #[schemars(with = "String")]
-    pub source: IpNetwork,
+    pub sources: Vec<Cidr>,
     pub ports: Vec<PortRange>,
 }
 
 impl Rule {
-    /// Returns `true` if `address` matches the provided CIDR address as well
+    /// Returns `true` if any `address` matches the provided CIDR addresses as well
     /// as at least one of the port ranges in the [Rule].
     ///
     /// # Examples
@@ -83,7 +121,7 @@ impl Rule {
     ///
     /// let rule = quilkin::filters::firewall::Rule {
     ///    action: Action::Allow,
-    ///    source: "192.168.75.0/24".parse().unwrap(),
+    ///    sources: vec!["192.168.75.0/24".parse().unwrap()],
     ///    ports: vec![PortRange::new(10, 100).unwrap()],
     /// };
     ///
@@ -97,13 +135,17 @@ impl Rule {
     /// assert!(!rule.contains(([192, 168, 76, 10], 40).into()));
     /// ```
     pub fn contains(&self, address: SocketAddr) -> bool {
-        if !self.source.contains(address.ip()) {
-            return false;
-        }
-
-        self.ports
+        if self
+            .sources
             .iter()
-            .any(|range| range.contains(&address.port()))
+            .any(|source| source.contains(address.ip()))
+        {
+            return self
+                .ports
+                .iter()
+                .any(|range| range.contains(&address.port()));
+        }
+        false
     }
 }
 
@@ -111,13 +153,17 @@ impl From<Rule> for proto::firewall::Rule {
     fn from(rule: Rule) -> Self {
         Self {
             action: proto::firewall::Action::from(rule.action) as i32,
-            source: rule.source.to_string(),
+            sources: rule
+                .sources
+                .into_iter()
+                .map(|cidr| cidr.0.to_string())
+                .collect(),
             ports: rule.ports.into_iter().map(From::from).collect(),
         }
     }
 }
 
-/// Invalid min and max values for a [PortRange].
+/// Invalid min and max values for a [`PortRange`].
 #[derive(Debug, thiserror::Error)]
 pub enum PortRangeError {
     #[error("invalid port range: min {min:?} is greater than or equal to max {max:?}")]
@@ -129,8 +175,9 @@ pub enum PortRangeError {
 pub struct PortRange(Range<u16>);
 
 impl PortRange {
-    /// Creates a new [PortRange], where min is inclusive, max is exclusive.
-    /// [Result] will be a [PortRangeError] if `min >= max`.
+    /// Creates a new [`Self`], where min is inclusive, max is exclusive.
+    ///
+    /// Result will be a [`PortRangeError`] if `min >= max`.
     pub fn new(min: u16, max: u16) -> Result<Self, PortRangeError> {
         if min >= max {
             return Err(PortRangeError::InvalidRange { min, max });
@@ -157,8 +204,15 @@ impl From<PortRange> for proto::firewall::PortRange {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
+impl From<u16> for PortRange {
+    fn from(value: u16) -> Self {
+        Self::new(value, value + 1).unwrap()
+    }
+}
+
 impl Serialize for PortRange {
-    /// Serialise the [PortRange] into a single digit if min and max are the same
+    /// Serialise the [`Self`] into a single digit if min and max are the same
     /// otherwise, serialise it to "min-max".
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -176,17 +230,18 @@ impl Serialize for PortRange {
 impl<'de> Deserialize<'de> for PortRange {
     /// Port ranges can be specified in yaml as either "10" as as single value
     /// or as "10-20" as a range, between a minimum and a maximum.
-    /// This deserializes either format into a [PortRange].
+    ///
+    /// This deserializes either format into a [`Self`].
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         struct PortRangeVisitor;
 
-        impl<'de> Visitor<'de> for PortRangeVisitor {
+        impl Visitor<'_> for PortRangeVisitor {
             type Value = PortRange;
 
-            fn expecting(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+            fn expecting(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
                 f.write_str("A port range in the format of '10' or '10-20'")
             }
 
@@ -246,14 +301,24 @@ impl TryFrom<proto::Firewall> for Config {
                 .map_err(|err| ConvertProtoConfigError::new(format!("{err}"), Some("ports".into())))
         }
 
-        fn convert_rule(rule: &proto::firewall::Rule) -> Result<Rule, ConvertProtoConfigError> {
-            let action = Action::from(rule.action());
-            let source = IpNetwork::try_from(rule.source.as_str()).map_err(|err| {
+        fn convert_source(s: &str) -> Result<Cidr, ConvertProtoConfigError> {
+            let i = IpNetwork::try_from(s).map_err(|err| {
                 ConvertProtoConfigError::new(
                     format!("invalid source: {err:?}"),
                     Some("source".into()),
                 )
             })?;
+            Ok(Cidr(i))
+        }
+
+        fn convert_rule(rule: &proto::firewall::Rule) -> Result<Rule, ConvertProtoConfigError> {
+            let action = Action::from(rule.action());
+
+            let sources = rule
+                .sources
+                .iter()
+                .map(|s| convert_source(s.as_str()))
+                .collect::<Result<Vec<Cidr>, ConvertProtoConfigError>>()?;
 
             let ports = rule
                 .ports
@@ -263,7 +328,7 @@ impl TryFrom<proto::Firewall> for Config {
 
             Ok(Rule {
                 action,
-                source,
+                sources,
                 ports,
             })
         }
@@ -286,19 +351,22 @@ impl TryFrom<proto::Firewall> for Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::IpAddr;
 
     #[test]
     fn deserialize_yaml() {
         let yaml = "
 on_read:
   - action: ALLOW
-    source: 192.168.51.0/24
+    sources:
+       - 192.168.51.0/24
     ports:
        - 10
        - 1000-7000
 on_write:
   - action: DENY
-    source: 192.168.75.0/24
+    sources:
+       - 192.168.75.0/24
     ports:
        - 7000
         ";
@@ -307,7 +375,7 @@ on_write:
 
         let rule1 = config.on_read[0].clone();
         assert_eq!(rule1.action, Action::Allow);
-        assert_eq!(rule1.source, "192.168.51.0/24".parse().unwrap());
+        assert_eq!(rule1.sources[0].0, "192.168.51.0/24".parse().unwrap());
         assert_eq!(2, rule1.ports.len());
         assert_eq!(10, rule1.ports[0].0.start);
         assert_eq!(11, rule1.ports[0].0.end);
@@ -316,7 +384,7 @@ on_write:
 
         let rule2 = config.on_write[0].clone();
         assert_eq!(rule2.action, Action::Deny);
-        assert_eq!(rule2.source, "192.168.75.0/24".parse().unwrap());
+        assert_eq!(rule2.sources[0].0, "192.168.75.0/24".parse().unwrap());
         assert_eq!(1, rule2.ports.len());
         assert_eq!(7000, rule2.ports[0].0.start);
         assert_eq!(7001, rule2.ports[0].0.end);
@@ -342,12 +410,12 @@ on_write:
         let proto_config = proto::Firewall {
             on_read: vec![proto::firewall::Rule {
                 action: proto::firewall::Action::Allow as i32,
-                source: "192.168.75.0/24".into(),
+                sources: vec!["192.168.75.0/24".into()],
                 ports: vec![proto::firewall::PortRange { min: 10, max: 100 }],
             }],
             on_write: vec![proto::firewall::Rule {
                 action: proto::firewall::Action::Deny as i32,
-                source: "192.168.124.0/24".into(),
+                sources: vec!["192.168.124.0/24".into()],
                 ports: vec![proto::firewall::PortRange { min: 50, max: 51 }],
             }],
         };
@@ -356,14 +424,14 @@ on_write:
 
         let rule1 = config.on_read[0].clone();
         assert_eq!(rule1.action, Action::Allow);
-        assert_eq!(rule1.source, "192.168.75.0/24".parse().unwrap());
+        assert_eq!(rule1.sources[0].0, "192.168.75.0/24".parse().unwrap());
         assert_eq!(1, rule1.ports.len());
         assert_eq!(10, rule1.ports[0].0.start);
         assert_eq!(100, rule1.ports[0].0.end);
 
         let rule2 = config.on_write[0].clone();
         assert_eq!(rule2.action, Action::Deny);
-        assert_eq!(rule2.source, "192.168.124.0/24".parse().unwrap());
+        assert_eq!(rule2.sources[0].0, "192.168.124.0/24".parse().unwrap());
         assert_eq!(1, rule2.ports.len());
         assert_eq!(50, rule2.ports[0].0.start);
         assert_eq!(51, rule2.ports[0].0.end);
@@ -371,19 +439,47 @@ on_write:
 
     #[test]
     fn rule_contains() {
+        fn ipv4_test(rule: &Rule) {
+            let ip = [192, 168, 75, 10];
+            assert!(rule.contains((ip, 50).into()));
+            assert!(rule.contains((ip, 99).into()));
+            assert!(rule.contains((ip, 10).into()));
+
+            assert!(!rule.contains((ip, 5).into()));
+            assert!(!rule.contains((ip, 1000).into()));
+            assert!(!rule.contains(([192, 168, 76, 10], 40).into()));
+        }
+
+        // test with a single mask
         let rule = Rule {
             action: Action::Allow,
-            source: "192.168.75.0/24".parse().unwrap(),
+            sources: vec!["192.168.75.0/24".parse().unwrap()],
             ports: vec![PortRange::new(10, 100).unwrap()],
         };
+        ipv4_test(&rule);
 
-        let ip = [192, 168, 75, 10];
+        // test with multiple masks.
+        let rule = Rule {
+            action: Action::Allow,
+            sources: vec![
+                "192.168.75.0/24".parse().unwrap(),
+                "198.168.75.0/24".parse().unwrap(),
+            ],
+            ports: vec![PortRange::new(10, 100).unwrap()],
+        };
+        ipv4_test(&rule);
+
+        // test ipv4 to ipv6 compatible
+        let ip = "::ffff:192.168.75.10".parse::<IpAddr>().unwrap();
         assert!(rule.contains((ip, 50).into()));
-        assert!(rule.contains((ip, 99).into()));
-        assert!(rule.contains((ip, 10).into()));
+        let ip = "::ffff:197.168.75.10".parse::<IpAddr>().unwrap();
+        assert!(!rule.contains((ip, 50).into()));
 
-        assert!(!rule.contains((ip, 5).into()));
-        assert!(!rule.contains((ip, 1000).into()));
-        assert!(!rule.contains(([192, 168, 76, 10], 40).into()));
+        // test ipv4 to ipv6 mapped
+        let ip = "::ffff:c0a8:4b0a".parse::<IpAddr>().unwrap();
+        assert!(rule.contains((ip, 50).into()));
+
+        let ip = "::ffff:c5a8:4b0a".parse::<IpAddr>().unwrap();
+        assert!(!rule.contains((ip, 50).into()));
     }
 }

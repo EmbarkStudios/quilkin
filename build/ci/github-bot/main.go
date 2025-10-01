@@ -25,7 +25,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/cloud-build-notifiers/lib/notifiers"
 	log "github.com/golang/glog"
-	"github.com/google/go-github/v48/github"
+	"github.com/google/go-github/v57/github"
 	"golang.org/x/oauth2"
 	"google.golang.org/genproto/googleapis/devtools/cloudbuild/v1"
 )

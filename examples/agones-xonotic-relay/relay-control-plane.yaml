@@ -1,0 +1,203 @@
+#
+# Copyright 2023 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+#
+# Everything to setup the relay and agent Agones control plane
+#
+
+---
+# ANCHOR: config-map
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quilkin-relay-filter-config
+  labels:
+    quilkin.dev/configmap: "true"
+data:
+  quilkin.yaml: |
+    version: v1alpha1
+    filters:
+      - name: quilkin.filters.capture.v1alpha1.Capture
+        config:
+          suffix:
+            size: 3
+            remove: true
+      - name: quilkin.filters.token_router.v1alpha1.TokenRouter
+# ANCHOR_END: config-map
+
+---
+
+# RBAC Setup for Agones Relay Control Plane
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: quilkin-agones
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: quilkin-agones
+rules:
+  - apiGroups:
+      - agones.dev
+    resources:
+      - gameservers
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: quilkin-agones
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: quilkin-agones
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: system:serviceaccount:default:quilkin-agones
+---
+
+# Quilkin Relay server
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    role: xds
+  name: quilkin-relay-agones
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      role: xds
+  template:
+    metadata:
+      labels:
+        role: xds
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
+    spec:
+      containers:
+        - name: quilkin
+          args:
+            - relay
+            - agones
+          env:
+            - name: RUST_LOG
+              value: info
+          image: us-docker.pkg.dev/quilkin/release/quilkin:0.9.0
+          livenessProbe:
+            periodSeconds: 5
+            failureThreshold: 3
+            httpGet:
+              path: /live
+              port: 8000
+              scheme: HTTP
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 900
+            successThreshold: 1
+            httpGet:
+              path: /ready
+              port: 8000
+              scheme: HTTP
+          ports:
+            - containerPort: 7800
+              protocol: TCP
+      serviceAccountName: quilkin-agones
+---
+
+# Quilkin Agones Agent
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    role: xds
+  name: quilkin-agones-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      role: xds
+  template:
+    metadata:
+      labels:
+        role: xds
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
+    spec:
+      containers:
+        - name: quilkin
+          args:
+            - agent
+            - --relay
+            - http://quilkin-relay-agones:7900
+            - agones
+          env:
+            - name: RUST_LOG
+              value: info
+          image: us-docker.pkg.dev/quilkin/release/quilkin:0.9.0
+          livenessProbe:
+            periodSeconds: 5
+            failureThreshold: 3
+            httpGet:
+              path: /live
+              port: 8000
+              scheme: HTTP
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 900
+            successThreshold: 1
+            httpGet:
+              path: /ready
+              port: 8000
+              scheme: HTTP
+      serviceAccountName: quilkin-agones
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quilkin-relay-agones
+spec:
+  ports:
+    - name: ads
+      port: 7800
+      protocol: TCP
+      targetPort: 7800
+    - name: cpds
+      port: 7900
+      protocol: TCP
+      targetPort: 7900
+  selector:
+    role: xds

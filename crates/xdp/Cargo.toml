@@ -1,0 +1,20 @@
+[package]
+name = "quilkin-xdp"
+version = "0.1.0"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+xdp.workspace = true
+# Used to load and attach eBPF programs
+aya = "0.13.1"
+# Allows forwarding trace messages from eBPF programs to a global logger
+aya-log = "0.2.1"
+libc.workspace = true
+
+[lints]
+workspace = true

@@ -31,7 +31,7 @@ message Firewall {
 
   message Rule {
     Action action = 1;
-    string source = 2;
+    repeated string sources = 2;
     repeated PortRange ports = 3;
   }
 
