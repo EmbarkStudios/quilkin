@@ -58,9 +58,7 @@ pub struct Providers {
     )]
     k8s_namespace: String,
 
-    /// When enabled, Quilkin will watch for `agones.dev/v1/GameServer` CRD
-    /// objects in the environment and allow them to be available for routing
-    /// and metrics through Quilkin.
+    /// Enable leader election via k8s lease
     #[arg(
         long = "provider.k8s.leader-election",
         env = "QUILKIN_PROVIDERS_K8S_LEADER_ELECTION",
@@ -68,8 +66,13 @@ pub struct Providers {
     )]
     k8s_leader_election: bool,
 
-    #[arg(env = "HOSTNAME", default_value_t = uuid::Uuid::new_v4().to_string())]
-    k8s_leader_id: String,
+    /// Override the ID used for k8s leader election (defaults to service.id)
+    #[arg(
+        long = "provider.k8s.leader-election.id",
+        env = "QUILKIN_PROVIDERS_K8S_LEADER_ELECTION_ID",
+        requires("k8s_leader_election")
+    )]
+    k8s_leader_id: Option<String>,
 
     #[arg(
         long = "provider.k8s.agones",
@@ -367,11 +370,7 @@ impl Providers {
         let agones_enabled = self.agones_enabled;
         let k8s_enabled = self.k8s_enabled;
         let k8s_leader_election = self.k8s_leader_election;
-        let k8s_leader_id = self
-            .k8s_leader_id
-            .is_empty()
-            .then(|| uuid::Uuid::new_v4().to_string())
-            .unwrap_or_else(|| self.k8s_leader_id.clone());
+        let k8s_leader_id = self.k8s_leader_id.clone().unwrap_or_else(|| config.id());
         let k8s_namespace = self.k8s_namespace.clone();
 
         let selector = self

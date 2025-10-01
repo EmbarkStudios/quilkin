@@ -6,7 +6,8 @@ use crate::{components::proxy::SessionPool, config::Config, signal::ShutdownHand
 #[derive(Debug, clap::Parser)]
 #[command(next_help_heading = "Service Options")]
 pub struct Service {
-    /// The identifier for an instance.
+    /// The identifier for an instance. Defaults to $HOSTNAME if unset, or a UUID4 if $HOSTNAME is
+    /// empty.
     #[arg(long = "service.id", env = "QUILKIN_SERVICE_ID")]
     pub id: Option<String>,
     /// Whether to serve mDS requests.
