@@ -31,7 +31,7 @@ jobs:
         id: info
         run: |
           echo "toolchain_version=$(yq '.toolchain.channel' --output-format=yaml rust-toolchain.toml)" >> $GITHUB_OUTPUT
-          echo "crate_version=$(yq '.package.version' --output-format=yaml Cargo.toml)" >> $GITHUB_OUTPUT
+          echo "crate_version=$(yq '.workspace.package.version' --output-format=yaml Cargo.toml)" >> $GITHUB_OUTPUT
           echo "git_timestamp=$(git log -1 --pretty=%ct)" >> $GITHUB_OUTPUT
 
           echo "## Build information" >> $GITHUB_STEP_SUMMARY
