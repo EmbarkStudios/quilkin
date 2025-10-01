@@ -74,6 +74,14 @@ pub struct Providers {
     )]
     k8s_leader_id: Option<String>,
 
+    /// The name of the k8s Lease resource used for leader election
+    #[arg(
+        long = "provider.k8s.leader-election.lease-name",
+        env = "QUILKIN_PROVIDERS_K8S_LEADER_ELECTION_LEASE_NAME",
+        default_value_t = String::from("quilkin"),
+    )]
+    k8s_leader_lease_name: String,
+
     #[arg(
         long = "provider.k8s.agones",
         env = "QUILKIN_PROVIDERS_K8S_AGONES",
@@ -371,6 +379,7 @@ impl Providers {
         let k8s_enabled = self.k8s_enabled;
         let k8s_leader_election = self.k8s_leader_election;
         let k8s_leader_id = self.k8s_leader_id.clone().unwrap_or_else(|| config.id());
+        let k8s_leader_lease_name = self.k8s_leader_lease_name.clone();
         let k8s_namespace = self.k8s_namespace.clone();
 
         let selector = self
@@ -395,6 +404,7 @@ impl Providers {
                 let agones_namespaces = agones_namespaces.clone();
                 let k8s_namespace: String = k8s_namespace.clone();
                 let k8s_leader_id: String = k8s_leader_id.clone();
+                let k8s_leader_lease_name: String = k8s_leader_lease_name.clone();
                 let selector = selector.clone();
                 let locality = locality.clone();
                 let health_check = health_check.clone();
@@ -425,6 +435,7 @@ impl Providers {
                         either::Left(tokio::spawn(k8s::update_leader_lock(
                             client.clone(),
                             k8s_namespace,
+                            k8s_leader_lease_name,
                             k8s_leader_id,
                             ll,
                         )))

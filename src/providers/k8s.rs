@@ -49,16 +49,16 @@ fn track_event<T>(kind: &'static str, event: Event<T>) -> Event<T> {
 pub(crate) async fn update_leader_lock(
     client: kube::Client,
     namespace: impl AsRef<str>,
+    lease_name: impl Into<String>,
     holder_id: impl Into<String>,
     leader_lock: config::LeaderLock,
 ) -> crate::Result<()> {
-    const LEASE_NAME: &str = "quilkin-mds-leader-lease";
     let leadership = LeaseLock::new(
         client,
         namespace.as_ref(),
         LeaseLockParams {
             holder_id: holder_id.into(),
-            lease_name: LEASE_NAME.into(),
+            lease_name: lease_name.into(),
             lease_ttl: std::time::Duration::from_millis(750),
         },
     );
