@@ -1363,6 +1363,7 @@
             <span class="kw">let </span><span class="kw-2">mut </span>stream = stream;
             <span class="kw">let </span><span class="kw-2">mut </span>resource_subscriptions = resource_subscriptions;
 
+            is_healthy.store(<span class="bool-val">true</span>, Ordering::SeqCst);
             <span class="kw">loop </span>{
                 <span class="macro">tracing::info!</span>(%control_plane, <span class="string">"creating discovery response handler"</span>);
                 <span class="kw">let </span><span class="kw-2">mut </span>response_stream = <span class="kw">crate</span>::config::handle_delta_discovery_responses(
@@ -1381,8 +1382,6 @@
 
                     <span class="kw">match </span>next_response.<span class="kw">await </span>{
                         <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(response))) =&gt; {
-                            is_healthy.store(<span class="bool-val">true</span>, Ordering::SeqCst);
-
                             <span class="kw">let </span>node_id = <span class="kw">if let </span><span class="prelude-val">Some</span>(node) = <span class="kw-2">&amp;</span>response.node {
                                 node.id.clone()
                             } <span class="kw">else </span>{
@@ -1464,6 +1463,7 @@
                     <span class="kw">return </span><span class="prelude-val">Err</span>(error.wrap_err(<span class="string">"refresh failed"</span>));
                 }
                 <span class="macro">tracing::info!</span>(%control_plane, <span class="string">"xDS connection refreshed"</span>);
+                is_healthy.store(<span class="bool-val">true</span>, Ordering::SeqCst);
             }
         }
         .instrument(<span class="macro">tracing::trace_span!</span>(<span class="string">"xds_client_stream"</span>, client_id)),
