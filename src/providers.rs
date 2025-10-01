@@ -102,14 +102,14 @@ pub struct Providers {
     /// If specified, filters the available gameserver addresses to the one that
     /// matches the specified type
     #[arg(
-        long = "provider.k8s.agones.address_type",
+        long = "provider.k8s.agones.address-type",
         env = "QUILKIN_PROVIDERS_K8S_AGONES_ADDRESS_TYPE",
         requires("agones_enabled")
     )]
     pub address_type: Option<String>,
     /// If specified, additionally filters the gameserver address by its ip kind
     #[arg(
-        long = "provider.k8s.agones.ip_kind",
+        long = "provider.k8s.agones.ip-kind",
         env = "QUILKIN_PROVIDERS_K8S_AGONES_IP_KIND",
         requires("address_type"),
         value_enum
@@ -153,7 +153,7 @@ pub struct Providers {
     ///
     /// Format is `<number of unique tokens>:<length of token suffix for each packet>`
     #[clap(
-        long = "provider.static.endpoint_tokens",
+        long = "provider.static.endpoint-tokens",
         env = "QUILKIN_PROVIDERS_STATIC_ENDPOINT_TOKENS",
         requires("endpoints")
     )]

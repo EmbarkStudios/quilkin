@@ -63,7 +63,7 @@ pub struct LocalityCli {
     /// The `sub_zone` in the `zone` in the `region` to set in the cluster map
     /// for any provider endpoints discovered.
     #[clap(
-        long = "locality.region.sub_zone",
+        long = "locality.region.sub-zone",
         requires("zone"),
         env = "QUILKIN_LOCALITY_SUB_ZONE"
     )]
