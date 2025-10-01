@@ -685,7 +685,8 @@
 <a href="#684" id="684">684</a>
 <a href="#685" id="685">685</a>
 <a href="#686" id="686">686</a>
-<a href="#687" id="687">687</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#687" id="687">687</a>
+<a href="#688" id="688">688</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -716,7 +717,8 @@
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>READ: Direction = Direction::Read;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>WRITE: Direction = Direction::Write;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>ASN_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"asn"</span>;
+<span class="attr">#[allow(dead_code)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>ASN_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"asn"</span>;
 
 <span class="doccomment">/// Label value for [`DIRECTION_LABEL`] for `read` events
 </span><span class="kw">pub const </span>READ_DIRECTION_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"read"</span>;
@@ -1210,74 +1212,74 @@
     PROCESSING_TIME.with_label_values(<span class="kw-2">&amp;</span>[direction.label()])
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>bytes_total(direction: Direction, asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;) -&gt; IntCounter {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>bytes_total(direction: Direction, _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;) -&gt; IntCounter {
     <span class="kw">static </span>BYTES_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
         <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
             <span class="macro">prometheus::opts!</span> {
                 <span class="string">"bytes_total"</span>,
                 <span class="string">"total number of bytes"</span>,
             },
-            <span class="kw-2">&amp;</span>[Direction::LABEL, ASN_LABEL],
+            <span class="kw-2">&amp;</span>[Direction::LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    BYTES_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), asn.asn])
+    BYTES_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label()])
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>errors_total(direction: Direction, display: <span class="kw-2">&amp;</span>str, asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;) -&gt; IntCounter {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>errors_total(direction: Direction, display: <span class="kw-2">&amp;</span>str, _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;) -&gt; IntCounter {
     <span class="kw">static </span>ERRORS_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
         <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
             <span class="macro">prometheus::opts!</span> {
                 <span class="string">"errors_total"</span>,
                 <span class="string">"total number of errors sending packets"</span>,
             },
-            <span class="kw-2">&amp;</span>[Direction::LABEL, <span class="string">"display"</span>, ASN_LABEL],
+            <span class="kw-2">&amp;</span>[Direction::LABEL, <span class="string">"display"</span>],
             registry(),
         }
         .unwrap()
     });
 
-    ERRORS_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), display, asn.asn])
+    ERRORS_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), display])
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packet_jitter(direction: Direction, asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;) -&gt; IntGauge {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packet_jitter(direction: Direction, _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;) -&gt; IntGauge {
     <span class="kw">static </span>PACKET_JITTER: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
         <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
             <span class="macro">prometheus::opts!</span> {
                 <span class="string">"packet_jitter"</span>,
                 <span class="string">"The time between new packets"</span>,
             },
-            <span class="kw-2">&amp;</span>[Direction::LABEL, ASN_LABEL],
+            <span class="kw-2">&amp;</span>[Direction::LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    PACKET_JITTER.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), asn.asn])
+    PACKET_JITTER.with_label_values(<span class="kw-2">&amp;</span>[direction.label()])
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packets_total(direction: Direction, asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;) -&gt; IntCounter {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packets_total(direction: Direction, _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;) -&gt; IntCounter {
     <span class="kw">static </span>PACKETS_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
         <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
             <span class="macro">prometheus::opts!</span> {
                 <span class="string">"packets_total"</span>,
                 <span class="string">"Total number of packets"</span>,
             },
-            <span class="kw-2">&amp;</span>[Direction::LABEL, ASN_LABEL],
+            <span class="kw-2">&amp;</span>[Direction::LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    PACKETS_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), asn.asn])
+    PACKETS_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label()])
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packets_dropped_total(
     direction: Direction,
     source: <span class="kw-2">&amp;</span>str,
-    asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;,
+    _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;,
 ) -&gt; IntCounter {
     <span class="kw">static </span>PACKETS_DROPPED: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
         <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
@@ -1285,13 +1287,13 @@
                 <span class="string">"packets_dropped_total"</span>,
                 <span class="string">"Total number of dropped packets"</span>,
             },
-            <span class="kw-2">&amp;</span>[Direction::LABEL, <span class="string">"source"</span>, ASN_LABEL],
+            <span class="kw-2">&amp;</span>[Direction::LABEL, <span class="string">"source"</span>],
             registry(),
         }
         .unwrap()
     });
 
-    PACKETS_DROPPED.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), source, asn.asn])
+    PACKETS_DROPPED.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), source])
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>provider_task_failures_total(provider_task: <span class="kw-2">&amp;</span>str) -&gt; IntCounter {

@@ -75,15 +75,7 @@
 <a href="#74" id="74">74</a>
 <a href="#75" id="75">75</a>
 <a href="#76" id="76">76</a>
-<a href="#77" id="77">77</a>
-<a href="#78" id="78">78</a>
-<a href="#79" id="79">79</a>
-<a href="#80" id="80">80</a>
-<a href="#81" id="81">81</a>
-<a href="#82" id="82">82</a>
-<a href="#83" id="83">83</a>
-<a href="#84" id="84">84</a>
-<a href="#85" id="85">85</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#77" id="77">77</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -105,36 +97,28 @@
 <span class="kw">use </span><span class="kw">crate</span>::metrics::{histogram_opts, register};
 
 <span class="kw">const </span>SUBSYSTEM: <span class="kw-2">&amp;</span>str = <span class="string">"session"</span>;
-<span class="kw">const </span>AS_NAME_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"organization"</span>;
+<span class="attr">#[allow(dead_code)]
+</span><span class="kw">const </span>AS_NAME_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"organization"</span>;
 <span class="kw">const </span>COUNTRY_CODE_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"country_code"</span>;
-<span class="kw">const </span>PREFIX_ENTITY_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"prefix_entity"</span>;
-<span class="kw">const </span>PREFIX_NAME_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"prefix_name"</span>;
-<span class="kw">use </span><span class="kw">crate</span>::metrics::ASN_LABEL;
+<span class="attr">#[allow(dead_code)]
+</span><span class="kw">const </span>PREFIX_ENTITY_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"prefix_entity"</span>;
+<span class="attr">#[allow(dead_code)]
+</span><span class="kw">const </span>PREFIX_NAME_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"prefix_name"</span>;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>active_sessions(asn: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="kw">crate</span>::net::maxmind_db::IpNetEntry&gt;) -&gt; IntGauge {
     <span class="kw">static </span>ACTIVE_SESSIONS: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
         <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
             Opts::new(<span class="string">"active"</span>, <span class="string">"number of sessions currently active"</span>).subsystem(SUBSYSTEM),
-            <span class="kw-2">&amp;</span>[ASN_LABEL, AS_NAME_LABEL, COUNTRY_CODE_LABEL, PREFIX_ENTITY_LABEL, PREFIX_NAME_LABEL],
+            <span class="kw-2">&amp;</span>[COUNTRY_CODE_LABEL],
             <span class="kw">crate</span>::metrics::registry(),
         }
         .unwrap()
     });
 
     <span class="kw">if let </span><span class="prelude-val">Some</span>(asnfo) = asn {
-        <span class="kw">let </span><span class="kw-2">mut </span>asn = [<span class="number">0u8</span>; <span class="number">10</span>];
-        <span class="kw">let </span>len = <span class="kw">crate</span>::net::maxmind_db::itoa(asnfo.id, <span class="kw-2">&amp;mut </span>asn);
-
-        ACTIVE_SESSIONS.with_label_values(<span class="kw-2">&amp;</span>[
-            <span class="comment">// SAFETY: itoa only writes ASCII
-            </span><span class="kw">unsafe </span>{ std::str::from_utf8_unchecked(<span class="kw-2">&amp;</span>asn[..len <span class="kw">as _</span>]) },
-            <span class="kw-2">&amp;</span>asnfo.as_name,
-            <span class="kw-2">&amp;</span>asnfo.as_cc,
-            <span class="kw-2">&amp;</span>asnfo.prefix_entity,
-            <span class="kw-2">&amp;</span>asnfo.prefix_name,
-        ])
+        ACTIVE_SESSIONS.with_label_values(<span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>asnfo.as_cc])
     } <span class="kw">else </span>{
-        ACTIVE_SESSIONS.with_label_values(<span class="kw-2">&amp;</span>[<span class="string">""</span>, <span class="string">""</span>, <span class="string">""</span>, <span class="string">""</span>, <span class="string">""</span>])
+        ACTIVE_SESSIONS.with_label_values(<span class="kw-2">&amp;</span>[<span class="string">""</span>])
     }
 }
 
