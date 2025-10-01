@@ -743,7 +743,8 @@
 <a href="#742" id="742">742</a>
 <a href="#743" id="743">743</a>
 <a href="#744" id="744">744</a>
-<a href="#745" id="745">745</a></pre></div><pre class="rust"><code><span class="kw">use </span>eyre::ContextCompat;
+<a href="#745" id="745">745</a>
+<a href="#746" id="746">746</a></pre></div><pre class="rust"><code><span class="kw">use </span>eyre::ContextCompat;
 <span class="kw">use </span>std::sync::Arc;
 
 <span class="kw">use crate</span>::{components::proxy::SessionPool, config::Config, signal::ShutdownHandler};
@@ -751,7 +752,8 @@
 <span class="attr">#[derive(Debug, clap::Parser)]
 #[command(next_help_heading = <span class="string">"Service Options"</span>)]
 </span><span class="kw">pub struct </span>Service {
-    <span class="doccomment">/// The identifier for an instance.
+    <span class="doccomment">/// The identifier for an instance. Defaults to $HOSTNAME if unset, or a UUID4 if $HOSTNAME is
+    /// empty.
     </span><span class="attr">#[arg(long = <span class="string">"service.id"</span>, env = <span class="string">"QUILKIN_SERVICE_ID"</span>)]
     </span><span class="kw">pub </span>id: <span class="prelude-ty">Option</span>&lt;String&gt;,
     <span class="doccomment">/// Whether to serve mDS requests.

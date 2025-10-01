@@ -730,8 +730,7 @@
 <a href="#729" id="729">729</a>
 <a href="#730" id="730">730</a>
 <a href="#731" id="731">731</a>
-<a href="#732" id="732">732</a>
-<a href="#733" id="733">733</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#732" id="732">732</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2024 Google LLC All Rights Reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -791,9 +790,7 @@
     )]
     </span>k8s_namespace: String,
 
-    <span class="doccomment">/// When enabled, Quilkin will watch for `agones.dev/v1/GameServer` CRD
-    /// objects in the environment and allow them to be available for routing
-    /// and metrics through Quilkin.
+    <span class="doccomment">/// Enable leader election via k8s lease
     </span><span class="attr">#[arg(
         long = <span class="string">"provider.k8s.leader-election"</span>,
         env = <span class="string">"QUILKIN_PROVIDERS_K8S_LEADER_ELECTION"</span>,
@@ -801,8 +798,13 @@
     </span>)]
     </span>k8s_leader_election: bool,
 
-    <span class="attr">#[arg(env = <span class="string">"HOSTNAME"</span>, default_value_t = uuid::Uuid::new_v4().to_string())]
-    </span>k8s_leader_id: String,
+    <span class="doccomment">/// Override the ID used for k8s leader election (defaults to service.id)
+    </span><span class="attr">#[arg(
+        long = <span class="string">"provider.k8s.leader-election.id"</span>,
+        env = <span class="string">"QUILKIN_PROVIDERS_K8S_LEADER_ELECTION_ID"</span>,
+        requires(<span class="string">"k8s_leader_election"</span>)
+    )]
+    </span>k8s_leader_id: <span class="prelude-ty">Option</span>&lt;String&gt;,
 
     <span class="attr">#[arg(
         long = <span class="string">"provider.k8s.agones"</span>,
@@ -832,14 +834,14 @@
     <span class="doccomment">/// If specified, filters the available gameserver addresses to the one that
     /// matches the specified type
     </span><span class="attr">#[arg(
-        long = <span class="string">"provider.k8s.agones.address_type"</span>,
+        long = <span class="string">"provider.k8s.agones.address-type"</span>,
         env = <span class="string">"QUILKIN_PROVIDERS_K8S_AGONES_ADDRESS_TYPE"</span>,
         requires(<span class="string">"agones_enabled"</span>)
     )]
     </span><span class="kw">pub </span>address_type: <span class="prelude-ty">Option</span>&lt;String&gt;,
     <span class="doccomment">/// If specified, additionally filters the gameserver address by its ip kind
     </span><span class="attr">#[arg(
-        long = <span class="string">"provider.k8s.agones.ip_kind"</span>,
+        long = <span class="string">"provider.k8s.agones.ip-kind"</span>,
         env = <span class="string">"QUILKIN_PROVIDERS_K8S_AGONES_IP_KIND"</span>,
         requires(<span class="string">"address_type"</span>),
         value_enum
@@ -883,7 +885,7 @@
     ///
     /// Format is `&lt;number of unique tokens&gt;:&lt;length of token suffix for each packet&gt;`
     </span><span class="attr">#[clap(
-        long = <span class="string">"provider.static.endpoint_tokens"</span>,
+        long = <span class="string">"provider.static.endpoint-tokens"</span>,
         env = <span class="string">"QUILKIN_PROVIDERS_STATIC_ENDPOINT_TOKENS"</span>,
         requires(<span class="string">"endpoints"</span>)
     )]
@@ -1100,11 +1102,7 @@
         <span class="kw">let </span>agones_enabled = <span class="self">self</span>.agones_enabled;
         <span class="kw">let </span>k8s_enabled = <span class="self">self</span>.k8s_enabled;
         <span class="kw">let </span>k8s_leader_election = <span class="self">self</span>.k8s_leader_election;
-        <span class="kw">let </span>k8s_leader_id = <span class="self">self
-            </span>.k8s_leader_id
-            .is_empty()
-            .then(|| uuid::Uuid::new_v4().to_string())
-            .unwrap_or_else(|| <span class="self">self</span>.k8s_leader_id.clone());
+        <span class="kw">let </span>k8s_leader_id = <span class="self">self</span>.k8s_leader_id.clone().unwrap_or_else(|| config.id());
         <span class="kw">let </span>k8s_namespace = <span class="self">self</span>.k8s_namespace.clone();
 
         <span class="kw">let </span>selector = <span class="self">self
