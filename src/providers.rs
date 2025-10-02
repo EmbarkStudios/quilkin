@@ -520,21 +520,25 @@ impl Providers {
         &self,
         config: Arc<config::Config>,
         health_check: Arc<AtomicBool>,
+        locality: Option<crate::net::endpoint::Locality>,
         shutdown: tokio::sync::watch::Receiver<()>,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let config = config.clone();
         let endpoints = self.relay.clone();
+        let control_plane_id = locality.map_or_else(|| config.id(), |l| l.region().to_string());
         Self::task("mds_provider".into(), health_check.clone(), move || {
             let config = config.clone();
             let endpoints = endpoints.clone();
+            let control_plane_id = control_plane_id.clone();
             let health_check = health_check.clone();
             let shutdown = shutdown.clone();
             async move {
-                let stream = crate::net::xds::client::MdsClient::connect(config.id(), endpoints)
-                    .await?
-                    .delta_stream(config.clone(), health_check.clone(), shutdown)
-                    .await
-                    .map_err(|_err| eyre::eyre!("failed to acquire delta stream"))?;
+                let stream =
+                    crate::net::xds::client::MdsClient::connect(control_plane_id, endpoints)
+                        .await?
+                        .delta_stream(config.clone(), health_check.clone(), shutdown)
+                        .await
+                        .map_err(|_err| eyre::eyre!("failed to acquire delta stream"))?;
 
                 health_check.store(true, Ordering::SeqCst);
 
@@ -656,6 +660,7 @@ impl Providers {
             providers.spawn(self.spawn_mds_provider(
                 config.clone(),
                 health_check.clone(),
+                locality.clone(),
                 shutdown,
             ));
         }
