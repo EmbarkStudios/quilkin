@@ -950,7 +950,11 @@
 <a href="#949" id="949">949</a>
 <a href="#950" id="950">950</a>
 <a href="#951" id="951">951</a>
-<a href="#952" id="952">952</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#952" id="952">952</a>
+<a href="#953" id="953">953</a>
+<a href="#954" id="954">954</a>
+<a href="#955" id="955">955</a>
+<a href="#956" id="956">956</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -1075,7 +1079,10 @@
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>init_leader_lock(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; LeaderLock {
-        <span class="self">self</span>.typemap.get::&lt;LeaderLock&gt;().unwrap().clone()
+        <span class="self">self</span>.typemap
+            .get::&lt;LeaderLock&gt;()
+            .expect(<span class="string">"LeaderLock not in typemap"</span>)
+            .clone()
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>leader_lock(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>LeaderLock&gt; {
@@ -1347,6 +1354,7 @@
             bad_node_informer: <span class="prelude-val">None</span>,
             cancellation_token: <span class="prelude-val">None</span>,
         };
+        insert_default::&lt;<span class="kw">crate</span>::config::LeaderLock&gt;(<span class="kw-2">&amp;mut </span>config.dyn_cfg.typemap);
         providers.init_config(<span class="kw-2">&amp;mut </span>config);
         service.init_config(<span class="kw-2">&amp;mut </span>config);
 
