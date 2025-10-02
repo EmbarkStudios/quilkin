@@ -741,7 +741,11 @@
 <a href="#740" id="740">740</a>
 <a href="#741" id="741">741</a>
 <a href="#742" id="742">742</a>
-<a href="#743" id="743">743</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#743" id="743">743</a>
+<a href="#744" id="744">744</a>
+<a href="#745" id="745">745</a>
+<a href="#746" id="746">746</a>
+<a href="#747" id="747">747</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2024 Google LLC All Rights Reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -845,6 +849,7 @@
         long = <span class="string">"provider.k8s.agones.namespaces"</span>,
         env = <span class="string">"QUILKIN_PROVIDERS_K8S_AGONES_NAMESPACES"</span>,
         default_values_t = [String::from(<span class="string">"default"</span>)]</span>,
+        value_delimiter = <span class="string">','</span>,
         requires(<span class="string">"agones_enabled"</span>),
         conflicts_with(<span class="string">"agones_namespace"</span>),
     )]
@@ -885,7 +890,8 @@
     <span class="doccomment">/// One or more `quilkin relay` endpoints to push configuration changes to.
     </span><span class="attr">#[clap(
         long = <span class="string">"provider.mds.endpoints"</span>,
-        env = <span class="string">"QUILKIN_PROVIDERS_MDS_ENDPOINTS"
+        env = <span class="string">"QUILKIN_PROVIDERS_MDS_ENDPOINTS"</span>,
+        value_delimiter = <span class="string">','
     </span>)]
     </span>relay: Vec&lt;tonic::transport::Endpoint&gt;,
     <span class="doccomment">/// The remote URL or local file path to retrieve the Maxmind database.
@@ -897,7 +903,8 @@
     <span class="doccomment">/// One or more socket addresses to forward packets to.
     </span><span class="attr">#[clap(
         long = <span class="string">"provider.static.endpoints"</span>,
-        env = <span class="string">"QUILKIN_PROVIDERS_STATIC_ENDPOINTS"
+        env = <span class="string">"QUILKIN_PROVIDERS_STATIC_ENDPOINTS"</span>,
+        value_delimiter = <span class="string">','
     </span>)]
     </span>endpoints: Vec&lt;SocketAddr&gt;,
     <span class="doccomment">/// Assigns dynamic tokens to each address in the `--to` argument
@@ -912,7 +919,8 @@
     <span class="doccomment">/// One or more xDS service endpoints to listen for config changes.
     </span><span class="attr">#[clap(
         long = <span class="string">"provider.xds.endpoints"</span>,
-        env = <span class="string">"QUILKIN_PROVIDERS_XDS_ENDPOINTS"
+        env = <span class="string">"QUILKIN_PROVIDERS_XDS_ENDPOINTS"</span>,
+        value_delimiter = <span class="string">','
     </span>)]
     </span>xds_endpoints: Vec&lt;tonic::transport::Endpoint&gt;,
 }
