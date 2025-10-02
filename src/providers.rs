@@ -102,6 +102,7 @@ pub struct Providers {
         long = "provider.k8s.agones.namespaces",
         env = "QUILKIN_PROVIDERS_K8S_AGONES_NAMESPACES",
         default_values_t = [String::from("default")],
+        value_delimiter = ',',
         requires("agones_enabled"),
         conflicts_with("agones_namespace"),
     )]
@@ -142,7 +143,8 @@ pub struct Providers {
     /// One or more `quilkin relay` endpoints to push configuration changes to.
     #[clap(
         long = "provider.mds.endpoints",
-        env = "QUILKIN_PROVIDERS_MDS_ENDPOINTS"
+        env = "QUILKIN_PROVIDERS_MDS_ENDPOINTS",
+        value_delimiter = ','
     )]
     relay: Vec<tonic::transport::Endpoint>,
     /// The remote URL or local file path to retrieve the Maxmind database.
@@ -154,7 +156,8 @@ pub struct Providers {
     /// One or more socket addresses to forward packets to.
     #[clap(
         long = "provider.static.endpoints",
-        env = "QUILKIN_PROVIDERS_STATIC_ENDPOINTS"
+        env = "QUILKIN_PROVIDERS_STATIC_ENDPOINTS",
+        value_delimiter = ','
     )]
     endpoints: Vec<SocketAddr>,
     /// Assigns dynamic tokens to each address in the `--to` argument
@@ -169,7 +172,8 @@ pub struct Providers {
     /// One or more xDS service endpoints to listen for config changes.
     #[clap(
         long = "provider.xds.endpoints",
-        env = "QUILKIN_PROVIDERS_XDS_ENDPOINTS"
+        env = "QUILKIN_PROVIDERS_XDS_ENDPOINTS",
+        value_delimiter = ','
     )]
     xds_endpoints: Vec<tonic::transport::Endpoint>,
 }
