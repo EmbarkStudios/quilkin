@@ -40,6 +40,7 @@
 *.exe
 *.rlib
 
-!target/image/quilkin
+!target/image/linux/arm64/quilkin
+!target/image/linux/amd64/quilkin
 !dependencies-src.zip
 !image/quilkin.yaml
