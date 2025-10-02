@@ -123,7 +123,10 @@ impl DynamicConfig {
     }
 
     pub(crate) fn init_leader_lock(&self) -> LeaderLock {
-        self.typemap.get::<LeaderLock>().unwrap().clone()
+        self.typemap
+            .get::<LeaderLock>()
+            .expect("LeaderLock not in typemap")
+            .clone()
     }
 
     pub(crate) fn leader_lock(&self) -> Option<&LeaderLock> {
@@ -395,6 +398,7 @@ impl Config {
             bad_node_informer: None,
             cancellation_token: None,
         };
+        insert_default::<crate::config::LeaderLock>(&mut config.dyn_cfg.typemap);
         providers.init_config(&mut config);
         service.init_config(&mut config);
 

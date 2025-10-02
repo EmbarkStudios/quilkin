@@ -59,7 +59,7 @@ pub(crate) async fn update_leader_lock(
         LeaseLockParams {
             holder_id: holder_id.into(),
             lease_name: lease_name.into(),
-            lease_ttl: std::time::Duration::from_millis(750),
+            lease_ttl: std::time::Duration::from_secs(1),
         },
     );
 
