@@ -745,7 +745,12 @@
 <a href="#744" id="744">744</a>
 <a href="#745" id="745">745</a>
 <a href="#746" id="746">746</a>
-<a href="#747" id="747">747</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#747" id="747">747</a>
+<a href="#748" id="748">748</a>
+<a href="#749" id="749">749</a>
+<a href="#750" id="750">750</a>
+<a href="#751" id="751">751</a>
+<a href="#752" id="752">752</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2024 Google LLC All Rights Reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -1267,21 +1272,25 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         config: Arc&lt;config::Config&gt;,
         health_check: Arc&lt;AtomicBool&gt;,
+        locality: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::net::endpoint::Locality&gt;,
         shutdown: tokio::sync::watch::Receiver&lt;()&gt;,
     ) -&gt; <span class="kw">impl </span>Future&lt;Output = <span class="kw">crate</span>::Result&lt;()&gt;&gt; + <span class="lifetime">'static </span>{
         <span class="kw">let </span>config = config.clone();
         <span class="kw">let </span>endpoints = <span class="self">self</span>.relay.clone();
+        <span class="kw">let </span>control_plane_id = locality.map_or_else(|| config.id(), |l| l.region().to_string());
         <span class="self">Self</span>::task(<span class="string">"mds_provider"</span>.into(), health_check.clone(), <span class="kw">move </span>|| {
             <span class="kw">let </span>config = config.clone();
             <span class="kw">let </span>endpoints = endpoints.clone();
+            <span class="kw">let </span>control_plane_id = control_plane_id.clone();
             <span class="kw">let </span>health_check = health_check.clone();
             <span class="kw">let </span>shutdown = shutdown.clone();
             <span class="kw">async move </span>{
-                <span class="kw">let </span>stream = <span class="kw">crate</span>::net::xds::client::MdsClient::connect(config.id(), endpoints)
-                    .<span class="kw">await</span><span class="question-mark">?
-                    </span>.delta_stream(config.clone(), health_check.clone(), shutdown)
-                    .<span class="kw">await
-                    </span>.map_err(|_err| <span class="macro">eyre::eyre!</span>(<span class="string">"failed to acquire delta stream"</span>))<span class="question-mark">?</span>;
+                <span class="kw">let </span>stream =
+                    <span class="kw">crate</span>::net::xds::client::MdsClient::connect(control_plane_id, endpoints)
+                        .<span class="kw">await</span><span class="question-mark">?
+                        </span>.delta_stream(config.clone(), health_check.clone(), shutdown)
+                        .<span class="kw">await
+                        </span>.map_err(|_err| <span class="macro">eyre::eyre!</span>(<span class="string">"failed to acquire delta stream"</span>))<span class="question-mark">?</span>;
 
                 health_check.store(<span class="bool-val">true</span>, Ordering::SeqCst);
 
@@ -1403,6 +1412,7 @@
             providers.spawn(<span class="self">self</span>.spawn_mds_provider(
                 config.clone(),
                 health_check.clone(),
+                locality.clone(),
                 shutdown,
             ));
         }
