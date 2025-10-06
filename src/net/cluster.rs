@@ -53,7 +53,7 @@ pub(crate) fn active_endpoints(cluster: &str) -> prometheus::IntGauge {
                 "active_endpoints",
                 "Number of currently available endpoints across clusters",
             },
-            &["cluster"],
+            &["quilkin_cluster"],
             crate::metrics::registry(),
         }
         .unwrap()
