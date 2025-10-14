@@ -157,6 +157,7 @@ gxhash = "3.5.0"
 kube-leader-election = "0.41.0"
 rustls = { version = "0.23", default-features = false }
 tracing-appender.workspace = true
+axum = { version = "0.8.4", features = ["macros"] }
 
 [dependencies.hyper-util]
 version = "0.1"

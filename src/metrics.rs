@@ -491,6 +491,7 @@ pub(crate) fn phoenix_task_closed() -> &'static IntGauge {
     &PHOENIX_TASK_CLOSED
 }
 
+#[allow(dead_code)]
 pub(crate) fn phoenix_server_errors(error: &str) -> IntCounter {
     static PHOENIX_SERVER_ERRORS: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {

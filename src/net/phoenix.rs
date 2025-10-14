@@ -39,19 +39,21 @@ use std::{collections::HashMap, net::SocketAddr, ops::Range, sync::Arc, time::Du
 use async_trait::async_trait;
 use dashmap::DashMap;
 
-use crate::config::{self, IcaoCode};
+use crate::{
+    config::{self, IcaoCode},
+    time::DurationNanos,
+};
 
 /// The number of consecutive ping failures after which we will inform that this is a bad node
 const BAD_NODE_THRESHOLD: u64 = 10;
 
-pub fn spawn<M: Clone + Measurement + Sync + Send + 'static>(
+pub fn spawn(
     listener: crate::net::TcpListener,
     datacenters: config::Watch<config::DatacenterMap>,
-    phoenix: Phoenix<M>,
+    phoenix: Phoenix<crate::codec::qcmp::QcmpTransceiver>,
     mut shutdown_rx: crate::signal::ShutdownRx,
 ) -> crate::Result<crate::service::Finalizer> {
     use eyre::WrapErr as _;
-    use hyper::{Response, StatusCode};
 
     phoenix.add_nodes_from_config(&datacenters);
 
@@ -85,67 +87,21 @@ pub fn spawn<M: Clone + Measurement + Sync + Send + 'static>(
 
                     tracing::info!(addr=%listener.local_addr(), "starting phoenix HTTP service");
                     let (stx, mut srx) = tokio::sync::oneshot::channel::<()>();
-                    let accept_stream = listener.into_stream()?.into_inner();
                     let handler_json = json.clone();
 
-                    let http_task: tokio::task::JoinHandle<eyre::Result<()>> =
+                    let http_task: tokio::task::JoinHandle<eyre::Result<()>> = {
+                        let phoenix = phoenix.clone();
                         tokio::spawn(async move {
-                            loop {
-                                tokio::select! {
-                                    res = accept_stream.accept() => {
-                                        let (conn, _) = res?;
-                                        let conn = hyper_util::rt::TokioIo::new(conn);
-
-                                        let hj = handler_json.clone();
-                                        tokio::spawn(async move {
-                                            let svc = hyper::service::service_fn(move |_req| {
-                                                let hj = hj.clone();
-                                                async move {
-                                                    #[allow(clippy::declare_interior_mutable_const)]
-                                                    const JSON: hyper::header::HeaderValue =
-                                                        hyper::header::HeaderValue::from_static(
-                                                            "application/json",
-                                                        );
-
-                                                    crate::metrics::phoenix_requests().inc();
-                                                    tracing::trace!("serving phoenix request");
-                                                    Ok::<_, std::convert::Infallible>(
-                                                        Response::builder()
-                                                            .status(StatusCode::OK)
-                                                            .header(hyper::header::CONTENT_TYPE, JSON)
-                                                            .body(http_body_util::Full::new(
-                                                                bytes::Bytes::from(
-                                                                    serde_json::to_string(&hj).unwrap(),
-                                                                ),
-                                                            ))
-                                                            .unwrap(),
-                                                    )
-                                                }
-                                            });
-
-                                            let svc = tower::ServiceBuilder::new().service(svc);
-                                            if let Err(err) = hyper::server::conn::http1::Builder::new()
-                                                .serve_connection(conn, svc)
-                                                .await
-                                            {
-                                                let error_display = err.to_string();
-                                                crate::metrics::phoenix_server_errors(&error_display).inc();
-                                                tracing::debug!(
-                                                    "failed to respond to phoenix request: {error_display}"
-                                                );
-                                            }
-                                        });
-                                    }
-                                    _ = &mut srx => {
-                                        crate::metrics::phoenix_task_closed().set(true as _);
-                                        tracing::info!("shutting down phoenix HTTP service");
-                                        break;
-                                    }
+                            let router = http_router(phoenix, handler_json);
+                            tokio::select! {
+                                result = async move { axum::serve(listener.into_tokio()?, router).await } => result.map_err(From::from),
+                                _ = &mut srx => {
+                                    crate::metrics::phoenix_task_closed().set(true as _);
+                                    Ok(())
                                 }
                             }
-
-                            Ok(())
-                        });
+                        })
+                    };
 
                     let res = loop {
                         use eyre::WrapErr as _;
@@ -226,7 +182,28 @@ pub fn spawn<M: Clone + Measurement + Sync + Send + 'static>(
     Ok(finalizer)
 }
 
-use crate::time::DurationNanos;
+fn http_router(
+    phoenix: Phoenix<crate::codec::qcmp::QcmpTransceiver>,
+    hj: Arc<arc_swap::ArcSwap<serde_json::Map<String, serde_json::Value>>>,
+) -> axum::Router {
+    axum::Router::new()
+        .route(
+            "/",
+            axum::routing::get(|| async move {
+                crate::metrics::phoenix_requests().inc();
+                tracing::trace!("serving phoenix request");
+                axum::response::Json(hj)
+            }),
+        )
+        .route(
+            "/network-coordinates",
+            axum::routing::get(|| async move {
+                crate::metrics::phoenix_requests().inc();
+                tracing::trace!("serving phoenix request");
+                axum::response::Json(phoenix.coordinate_map())
+            }),
+        )
+}
 
 #[derive(Copy, Clone)]
 #[cfg_attr(test, derive(Debug))]
@@ -276,9 +253,17 @@ pub trait Measurement {
 /// distributed system to estimate their network latencies. It uses the provided
 /// `Measurement` trait to periodically measure and update each node's
 /// coordinates, allowing for latency estimation between any two nodes.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Phoenix<M> {
     inner: Arc<Inner<M>>,
+}
+
+impl<M> Clone for Phoenix<M> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -294,6 +279,120 @@ pub struct Inner<M> {
         tokio::sync::watch::Receiver<()>,
     ),
     bad_node_informer: Option<crate::config::BadNodeInformer>,
+}
+
+impl<M> Phoenix<M> {
+    fn update_watcher(&self) -> tokio::sync::watch::Receiver<()> {
+        self.update_watcher.1.clone()
+    }
+
+    #[allow(dead_code)]
+    fn all_nodes(&self) -> Vec<SocketAddr> {
+        self.nodes
+            .iter()
+            .map(|entry| *entry.key())
+            .collect::<Vec<_>>()
+    }
+
+    /// Returns a set of node addresses to probe.
+    ///
+    /// - Always returns at least 1 node unless the list of nodes is empty
+    /// - Always returns all of the nodes that have not been mapped yet
+    /// - Returns a randomly selected subset of nodes that have been mapped
+    fn select_nodes_to_probe(&self) -> Vec<SocketAddr> {
+        use rand::seq::SliceRandom;
+
+        let (unmapped, mut mapped): (Vec<_>, Vec<_>) = self
+            .nodes
+            .iter()
+            .partition(|entry| entry.coordinates.is_none());
+
+        mapped.shuffle(&mut rand::rng());
+
+        // Select a subset of the already mapped nodes, but always at least one node
+        let subset_size = (mapped.len() as f64 * self.subset_percentage)
+            .abs()
+            .max(1.0) as usize;
+
+        mapped
+            .iter()
+            .map(|entry| *entry.key())
+            .take(subset_size)
+            .chain(unmapped.iter().map(|entry| *entry.key())) // Always include all unmapped nodes
+            .collect()
+    }
+
+    pub fn get_coordinates(&self, address: &SocketAddr) -> Option<Coordinates> {
+        self.nodes.get(address).and_then(|node| node.coordinates)
+    }
+
+    pub fn ordered_nodes_by_latency(&self) -> Vec<(IcaoCode, f64)> {
+        use std::collections::hash_map::Entry;
+
+        let origin = Coordinates::ORIGIN;
+        let mut icao_map = HashMap::new();
+
+        for entry in self.nodes.iter() {
+            let Some(coordinates) = entry.value().coordinates else {
+                continue;
+            };
+            let distance = origin.distance_to(&coordinates);
+            let icao = entry.value().icao_code;
+
+            match icao_map.entry(icao) {
+                Entry::Vacant(entry) => {
+                    entry.insert(distance);
+                }
+                Entry::Occupied(entry) => {
+                    let old_distance = entry.into_mut();
+                    if *old_distance > distance {
+                        *old_distance = distance;
+                    }
+                }
+            }
+        }
+
+        let mut vec = icao_map.into_iter().collect::<Vec<_>>();
+        vec.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        vec
+    }
+
+    pub fn coordinate_map(&self) -> HashMap<IcaoCode, Coordinates> {
+        let mut icao_map = HashMap::new();
+
+        for entry in self.nodes.iter() {
+            let Some(coordinates) = entry.value().coordinates else {
+                continue;
+            };
+            let icao = entry.value().icao_code;
+            icao_map.insert(icao, coordinates);
+        }
+
+        icao_map
+    }
+
+    pub fn add_node(&self, address: SocketAddr, icao_code: IcaoCode) {
+        self.nodes.insert(address, Node::new(icao_code));
+    }
+
+    pub fn add_node_if_not_exists(&self, address: SocketAddr, icao_code: IcaoCode) {
+        self.nodes
+            .entry(address)
+            .or_insert_with(|| Node::new(icao_code));
+    }
+
+    pub fn add_nodes_from_config(&self, datacenters: &config::Watch<config::DatacenterMap>) {
+        let dcs = datacenters.write();
+
+        for removed in dcs.removed() {
+            self.nodes.remove(&removed);
+        }
+
+        for entry in dcs.iter() {
+            let addr = (*entry.key(), entry.value().qcmp_port).into();
+            self.add_node_if_not_exists(addr, entry.value().icao_code);
+        }
+    }
 }
 
 impl<M: Measurement + 'static> Phoenix<M> {
@@ -341,46 +440,6 @@ impl<M: Measurement + 'static> Phoenix<M> {
         }
     }
 
-    fn update_watcher(&self) -> tokio::sync::watch::Receiver<()> {
-        self.update_watcher.1.clone()
-    }
-
-    #[allow(dead_code)]
-    fn all_nodes(&self) -> Vec<SocketAddr> {
-        self.nodes
-            .iter()
-            .map(|entry| *entry.key())
-            .collect::<Vec<_>>()
-    }
-
-    /// Returns a set of node addresses to probe.
-    ///
-    /// - Always returns at least 1 node unless the list of nodes is empty
-    /// - Always returns all of the nodes that have not been mapped yet
-    /// - Returns a randomly selected subset of nodes that have been mapped
-    fn select_nodes_to_probe(&self) -> Vec<SocketAddr> {
-        use rand::seq::SliceRandom;
-
-        let (unmapped, mut mapped): (Vec<_>, Vec<_>) = self
-            .nodes
-            .iter()
-            .partition(|entry| entry.coordinates.is_none());
-
-        mapped.shuffle(&mut rand::rng());
-
-        // Select a subset of the already mapped nodes, but always at least one node
-        let subset_size = (mapped.len() as f64 * self.subset_percentage)
-            .abs()
-            .max(1.0) as usize;
-
-        mapped
-            .iter()
-            .map(|entry| *entry.key())
-            .take(subset_size)
-            .chain(unmapped.iter().map(|entry| *entry.key())) // Always include all unmapped nodes
-            .collect()
-    }
-
     async fn measure_nodes(&self, nodes: Vec<SocketAddr>) -> (i64, i64) {
         let mut total_difference = 0;
         let mut count = 0;
@@ -425,64 +484,6 @@ impl<M: Measurement + 'static> Phoenix<M> {
             .map(|entry| *entry.key())
             .collect::<Vec<_>>();
         let _ = self.measure_nodes(nodes).await;
-    }
-
-    pub fn get_coordinates(&self, address: &SocketAddr) -> Option<Coordinates> {
-        self.nodes.get(address).and_then(|node| node.coordinates)
-    }
-
-    pub fn ordered_nodes_by_latency(&self) -> Vec<(IcaoCode, f64)> {
-        use std::collections::hash_map::Entry;
-
-        let origin = Coordinates::ORIGIN;
-        let mut icao_map = HashMap::new();
-
-        for entry in self.nodes.iter() {
-            let Some(coordinates) = entry.value().coordinates else {
-                continue;
-            };
-            let distance = origin.distance_to(&coordinates);
-            let icao = entry.value().icao_code;
-
-            match icao_map.entry(icao) {
-                Entry::Vacant(entry) => {
-                    entry.insert(distance);
-                }
-                Entry::Occupied(entry) => {
-                    let old_distance = entry.into_mut();
-                    if *old_distance > distance {
-                        *old_distance = distance;
-                    }
-                }
-            }
-        }
-
-        let mut vec = icao_map.into_iter().collect::<Vec<_>>();
-        vec.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-        vec
-    }
-
-    pub fn add_node(&self, address: SocketAddr, icao_code: IcaoCode) {
-        self.nodes.insert(address, Node::new(icao_code));
-    }
-
-    pub fn add_node_if_not_exists(&self, address: SocketAddr, icao_code: IcaoCode) {
-        self.nodes
-            .entry(address)
-            .or_insert_with(|| Node::new(icao_code));
-    }
-
-    pub fn add_nodes_from_config(&self, datacenters: &config::Watch<config::DatacenterMap>) {
-        let dcs = datacenters.write();
-
-        for removed in dcs.removed() {
-            self.nodes.remove(&removed);
-        }
-
-        for entry in dcs.iter() {
-            let addr = (*entry.key(), entry.value().qcmp_port).into();
-            self.add_node_if_not_exists(addr, entry.value().icao_code);
-        }
     }
 }
 
@@ -583,18 +584,21 @@ impl<M: Measurement> Builder<M> {
 }
 
 /// The network coordinates of a node in the phoenix system.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct Coordinates {
-    x: f64,
-    y: f64,
+    incoming: f64,
+    outgoing: f64,
 }
 
 impl Coordinates {
-    const ORIGIN: Self = Self { x: 0.0, y: 0.0 };
+    const ORIGIN: Self = Self {
+        incoming: 0.0,
+        outgoing: 0.0,
+    };
 
     fn distance_to(&self, other: &Coordinates) -> f64 {
-        let x_diff = self.x - other.x;
-        let y_diff = self.y - other.y;
+        let x_diff = self.incoming - other.incoming;
+        let y_diff = self.outgoing - other.outgoing;
         #[allow(clippy::imprecise_flops)]
         (x_diff.powi(2) + y_diff.powi(2)).sqrt()
     }
@@ -648,12 +652,9 @@ impl Node {
             .observe(distance.outgoing.duration().as_secs_f64());
 
         let Some(coordinates) = &mut self.coordinates else {
-            let coordinates = Coordinates {
-                x: incoming,
-                y: outgoing,
-            };
-            crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coordinates.x);
-            crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coordinates.y);
+            let coordinates = Coordinates { incoming, outgoing };
+            crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coordinates.incoming);
+            crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coordinates.outgoing);
             crate::metrics::phoenix_distance(self.icao_code)
                 .set(Coordinates::ORIGIN.distance_to(&coordinates));
             self.coordinates = Some(coordinates);
@@ -661,13 +662,13 @@ impl Node {
         };
 
         // Exponentially weighted moving average
-        coordinates.x = self.alpha * incoming + (1.0 - self.alpha) * coordinates.x;
-        coordinates.y = self.alpha * outgoing + (1.0 - self.alpha) * coordinates.y;
+        coordinates.incoming = self.alpha * incoming + (1.0 - self.alpha) * coordinates.incoming;
+        coordinates.outgoing = self.alpha * outgoing + (1.0 - self.alpha) * coordinates.outgoing;
         self.alpha = (self.alpha + 0.05).clamp(0.2, 1.0);
         crate::metrics::phoenix_coordinates_alpha(self.icao_code).set(self.alpha);
 
-        crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coordinates.x);
-        crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coordinates.y);
+        crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coordinates.incoming);
+        crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coordinates.outgoing);
         crate::metrics::phoenix_distance(self.icao_code)
             .set(Coordinates::ORIGIN.distance_to(coordinates));
     }
@@ -844,7 +845,7 @@ mod tests {
             .get_coordinates(&"127.0.0.1:8081".parse().unwrap())
             .unwrap();
         assert!(
-            coords.x != 0.0 || coords.y != 0.0,
+            coords.incoming != 0.0 || coords.outgoing != 0.0,
             "Coordinates were not adjusted."
         );
     }
@@ -1066,8 +1067,8 @@ mod tests {
             let map = serde_json::from_slice::<serde_json::Map<_, _>>(&resp).unwrap();
 
             let coords = Coordinates {
-                x: std::time::Duration::from_millis(50).as_nanos() as f64 / 2.0,
-                y: std::time::Duration::from_millis(1).as_nanos() as f64 / 2.0,
+                incoming: std::time::Duration::from_millis(50).as_nanos() as f64 / 2.0,
+                outgoing: std::time::Duration::from_millis(1).as_nanos() as f64 / 2.0,
             };
 
             let min = Coordinates::ORIGIN.distance_to(&coords);
@@ -1078,6 +1079,73 @@ mod tests {
                 distance > min && distance < max,
                 "expected distance {distance} to be > {min} and < {max}",
             );
+        }
+
+        let _ = tx.send(());
+        end();
+    }
+
+    #[tokio::test]
+    #[cfg_attr(target_os = "macos", ignore)]
+    async fn get_network_coordinates() {
+        let qcmp_listener = crate::net::TcpListener::bind(None).expect("failed to bind listener");
+        let qcmp_port = qcmp_listener.port();
+
+        let icao_code = "ABCD".parse().unwrap();
+
+        let datacenters =
+            crate::config::Watch::<crate::config::DatacenterMap>::new(Default::default());
+
+        datacenters.write().insert(
+            std::net::Ipv4Addr::LOCALHOST.into(),
+            crate::config::Datacenter {
+                qcmp_port,
+                icao_code,
+            },
+        );
+
+        let (tx, rx) = crate::signal::channel();
+        let socket = raw_socket_with_reuse(qcmp_port).unwrap();
+        let pc = crate::codec::qcmp::port_channel();
+        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let measurement =
+            crate::codec::qcmp::QcmpTransceiver::with_artificial_delay(Duration::from_millis(50))
+                .unwrap();
+
+        let phoenix = Phoenix::builder(measurement)
+            .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
+            .build();
+
+        let end = super::spawn(qcmp_listener, datacenters, phoenix, rx).unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .build_http::<http_body_util::Empty<bytes::Bytes>>();
+        use http_body_util::BodyExt;
+        for _ in 0..10 {
+            let resp = tokio::time::timeout(
+                Duration::from_millis(100),
+                client
+                    .get(
+                        format!("http://localhost:{qcmp_port}/network-coordinates")
+                            .parse()
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap()
+                    .into_body()
+                    .collect(),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .to_bytes();
+
+            let map = serde_json::from_slice::<HashMap<IcaoCode, Coordinates>>(&resp).unwrap();
+            assert!(map.contains_key(&icao_code));
         }
 
         let _ = tx.send(());
