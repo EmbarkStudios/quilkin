@@ -446,7 +446,7 @@ impl DeltaClientStream {
     ) -> Result<()> {
         crate::metrics::actions_total(KIND_CLIENT, "refresh").inc();
         for (rt, names) in subs {
-            let initial_resource_versions = local.get(rt).clone();
+            let initial_resource_versions = local.get_versions(rt);
             self.req_tx
                 .send(DeltaDiscoveryRequest {
                     node: Some(Node {
