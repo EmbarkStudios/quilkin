@@ -9,18 +9,22 @@ fn token_router(b: Bencher<'_, '_>, token_kind: &str) {
     let filter = TokenRouter::default();
     let gc = shared::gen_cluster_map::<42>(token_kind.parse().unwrap());
 
-    let mut tokens = Vec::new();
-
     let cm = std::sync::Arc::new(gc.cm);
 
     // Calculate the amount of bytes for all the tokens
-    for eps in cm.iter() {
-        for ep in &eps.value().endpoints {
-            for tok in ep.metadata.known.tokens.iter() {
-                tokens.push(tok.clone());
+    let tokens: Vec<Vec<u8>> = cm
+        .iter_with(|_locality, endpoint_set| {
+            let mut tokens: Vec<Vec<u8>> = Vec::new();
+            for ep in &endpoint_set.endpoints {
+                for tok in ep.metadata.known.tokens.iter() {
+                    tokens.push(tok.clone());
+                }
             }
-        }
-    }
+            tokens
+        })
+        .into_iter()
+        .flatten()
+        .collect();
 
     let total_token_size: usize = tokens.iter().map(|t| t.len()).sum();
     let pool = std::sync::Arc::new(quilkin::collections::BufferPool::new(1, 1));

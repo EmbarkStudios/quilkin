@@ -690,7 +690,7 @@ pub fn gen_cluster_map<const S: u64>(token_kind: TokenKind) -> GenCluster {
 
     // Now actually insert the endpoints, now that the order of keys is established,
     // annoying, but note we split out iteration versus insertion, otherwise we deadlock
-    let keys: Vec<_> = cm.iter().map(|kv| kv.key().clone()).collect();
+    let keys = cm.iter_with(|locality, _endpoint_set| locality.clone());
     let mut sets = std::collections::BTreeMap::new();
 
     let mut token_generator = match token_kind {
