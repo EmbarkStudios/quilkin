@@ -388,10 +388,10 @@ impl<M> Phoenix<M> {
             self.nodes.remove(&removed);
         }
 
-        for entry in dcs.iter() {
-            let addr = (*entry.key(), entry.value().qcmp_port).into();
-            self.add_node_if_not_exists(addr, entry.value().icao_code);
-        }
+        drop(dcs.iter_with(|ip_addr, dc| {
+            let socket_addr = (*ip_addr, dc.qcmp_port).into();
+            self.add_node_if_not_exists(socket_addr, dc.icao_code);
+        }));
     }
 }
 

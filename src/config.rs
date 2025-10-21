@@ -594,32 +594,40 @@ impl Config {
                     }
 
                     if let Some(datacenters) = self.dyn_cfg.datacenters() {
-                        for entry in datacenters.read().iter() {
-                            let host = entry.key().to_string();
-                            let qcmp_port = entry.qcmp_port;
-                            let version =
-                                resource_version(entry.icao_code.to_string().as_str(), qcmp_port);
+                        let dc_resource_transformer =
+                            |ip_addr: &std::net::IpAddr,
+                             dc: &Datacenter|
+                             -> eyre::Result<Option<XdsResource>> {
+                                let host = ip_addr.to_string();
+                                let qcmp_port = dc.qcmp_port;
+                                let version =
+                                    resource_version(dc.icao_code.to_string().as_str(), qcmp_port);
 
-                            if client_state.version_matches(&host, &version) {
-                                continue;
-                            }
+                                if client_state.version_matches(&host, &version) {
+                                    return Ok(None);
+                                }
 
-                            let resource = crate::xds::Resource::Datacenter(
-                                crate::net::cluster::proto::Datacenter {
-                                    qcmp_port: qcmp_port as _,
-                                    icao_code: entry.icao_code.to_string(),
-                                    host: host.clone(),
-                                },
-                            );
+                                let resource = crate::xds::Resource::Datacenter(
+                                    crate::net::cluster::proto::Datacenter {
+                                        qcmp_port: qcmp_port as _,
+                                        icao_code: dc.icao_code.to_string(),
+                                        host: host.clone(),
+                                    },
+                                );
 
-                            resources.push(XdsResource {
-                                name: host,
-                                version,
-                                resource: Some(resource.try_encode()?),
-                                aliases: Vec::new(),
-                                ttl: None,
-                                cache_control: None,
-                            });
+                                Ok(Some(XdsResource {
+                                    name: host,
+                                    version,
+                                    resource: Some(resource.try_encode()?),
+                                    aliases: Vec::new(),
+                                    ttl: None,
+                                    cache_control: None,
+                                }))
+                            };
+
+                        for resource in datacenters.read().iter_with(dc_resource_transformer) {
+                            let Some(resource) = resource? else { continue };
+                            resources.push(resource);
                         }
 
                         {
@@ -628,7 +636,7 @@ impl Config {
                                 let Ok(addr) = key.parse() else {
                                     continue;
                                 };
-                                if dc.get(&addr).is_none() {
+                                if !dc.exists(&addr) {
                                     removed.insert(key.clone());
                                 }
                             }
