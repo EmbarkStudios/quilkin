@@ -676,14 +676,13 @@ pub(crate) fn apply_clusters(clusters: &crate::config::Watch<crate::net::Cluster
     let clusters = clusters.read();
     crate::net::cluster::active_clusters().set(clusters.len() as i64);
 
-    for entry in clusters.iter() {
+    clusters.iter_with(|locality, endpoint_set| {
         crate::net::cluster::active_endpoints(
-            &entry
-                .key()
+            &locality
                 .clone()
                 .map(|key| key.to_string())
                 .unwrap_or_default(),
         )
-        .set(entry.value().len() as i64);
-    }
+        .set(endpoint_set.len() as i64);
+    });
 }

@@ -263,8 +263,6 @@ pub struct ClusterMap<S = gxhash::GxBuildHasher> {
     version: AtomicU64,
 }
 
-type DashMapRef<'inner> = dashmap::mapref::one::Ref<'inner, Option<Locality>, EndpointSet>;
-
 impl ClusterMap {
     pub fn new() -> Self {
         Self::default()
@@ -367,13 +365,37 @@ where
     }
 
     #[inline]
-    pub fn get(&self, key: &Option<Locality>) -> Option<DashMapRef<'_>> {
-        self.map.get(key)
+    pub fn exists(&self, key: &Option<Locality>) -> bool {
+        self.map.get(key).is_some()
+    }
+
+    #[inline]
+    pub fn with_value<F, T>(&self, key: &Option<Locality>, func: F) -> Option<T>
+    where
+        F: FnOnce(dashmap::mapref::one::Ref<'_, Option<Locality>, EndpointSet>) -> T,
+    {
+        self.map.get(key).map(func)
     }
 
     #[inline]
     pub fn insert_default(&self, endpoints: BTreeSet<Endpoint>) {
         self.insert(None, None, endpoints);
+    }
+
+    /// Iterates over the entries in the `ClusterMap` with the given func
+    ///
+    /// This ensures that the dashmap entry references are never held across await boundaries as
+    /// the func cannot be async.
+    #[inline]
+    pub fn iter_with<F, T>(&self, func: F) -> Vec<T>
+    where
+        F: for<'a> Fn(&'a Option<Locality>, &'a EndpointSet) -> T,
+    {
+        let mut results: Vec<T> = Vec::new();
+        for entry in self.map.iter() {
+            results.push(func(entry.key(), entry.value()));
+        }
+        results
     }
 
     #[inline]
@@ -431,11 +453,6 @@ where
     }
 
     #[inline]
-    pub fn iter(&self) -> dashmap::iter::Iter<'_, Option<Locality>, EndpointSet, S> {
-        self.map.iter()
-    }
-
-    #[inline]
     pub fn replace(
         &self,
         remote_addr: Option<std::net::IpAddr>,
@@ -477,7 +494,7 @@ where
     }
 
     pub fn nth_endpoint(&self, mut index: usize) -> Option<Endpoint> {
-        for set in self.iter() {
+        for set in self.map.iter() {
             let set = &set.value().endpoints;
             if index < set.len() {
                 return set.iter().nth(index).cloned();
@@ -492,7 +509,7 @@ where
     pub fn filter_endpoints(&self, f: impl Fn(&Endpoint) -> bool) -> Vec<Endpoint> {
         let mut endpoints = Vec::new();
 
-        for set in self.iter() {
+        for set in self.map.iter() {
             for endpoint in set.endpoints.iter().filter(|e| (f)(e)) {
                 endpoints.push(endpoint.clone());
             }
@@ -639,8 +656,9 @@ where
     S: Default + std::hash::BuildHasher + Clone,
 {
     fn eq(&self, rhs: &Self) -> bool {
-        for a in self.iter() {
+        for a in self.map.iter() {
             match rhs
+                .map
                 .get(a.key())
                 .filter(|b| a.value().endpoints == b.endpoints)
             {
@@ -808,16 +826,18 @@ mod tests {
         cluster1.insert(None, Some(nl1.clone()), [endpoint.clone()].into());
         cluster1.insert(None, Some(de1.clone()), [endpoint.clone()].into());
 
-        assert_eq!(cluster1.get(&Some(nl1.clone())).unwrap().len(), 1);
+        assert_eq!(cluster1.map.get(&Some(nl1.clone())).unwrap().len(), 1);
         assert!(
             cluster1
+                .map
                 .get(&Some(nl1.clone()))
                 .unwrap()
                 .contains(&endpoint)
         );
-        assert_eq!(cluster1.get(&Some(de1.clone())).unwrap().len(), 1);
+        assert_eq!(cluster1.map.get(&Some(de1.clone())).unwrap().len(), 1);
         assert!(
             cluster1
+                .map
                 .get(&Some(de1.clone()))
                 .unwrap()
                 .contains(&endpoint)
@@ -827,10 +847,11 @@ mod tests {
 
         cluster1.insert(None, Some(de1.clone()), [endpoint.clone()].into());
 
-        assert_eq!(cluster1.get(&Some(nl1.clone())).unwrap().len(), 1);
-        assert_eq!(cluster1.get(&Some(de1.clone())).unwrap().len(), 1);
+        assert_eq!(cluster1.map.get(&Some(nl1.clone())).unwrap().len(), 1);
+        assert_eq!(cluster1.map.get(&Some(de1.clone())).unwrap().len(), 1);
         assert!(
             cluster1
+                .map
                 .get(&Some(de1.clone()))
                 .unwrap()
                 .contains(&endpoint)
@@ -838,8 +859,8 @@ mod tests {
 
         cluster1.insert(None, Some(de1.clone()), <_>::default());
 
-        assert_eq!(cluster1.get(&Some(nl1.clone())).unwrap().len(), 1);
-        assert!(cluster1.get(&Some(de1.clone())).unwrap().is_empty());
+        assert_eq!(cluster1.map.get(&Some(nl1.clone())).unwrap().len(), 1);
+        assert!(cluster1.map.get(&Some(de1.clone())).unwrap().is_empty());
     }
 
     #[test]
@@ -862,12 +883,15 @@ mod tests {
             [Endpoint::new((Ipv4Addr::new(20, 20, 20, 20), 1234).into())].into();
 
         cluster.insert(Some(nl02.into()), Some(nl1.clone()), not_expected.clone());
-        assert_eq!(cluster.get(&Some(nl1.clone())).unwrap().endpoints, expected);
+        assert_eq!(
+            cluster.map.get(&Some(nl1.clone())).unwrap().endpoints,
+            expected
+        );
 
         cluster.remove_locality(Some(nl01.into()), &Some(nl1.clone()));
 
         cluster.insert(Some(nl02.into()), Some(nl1.clone()), not_expected.clone());
-        assert_eq!(cluster.get(&Some(nl1)).unwrap().endpoints, not_expected);
+        assert_eq!(cluster.map.get(&Some(nl1)).unwrap().endpoints, not_expected);
     }
 
     #[test]
@@ -886,7 +910,7 @@ mod tests {
                 assert!(cluster.remove_endpoint(ep));
             }
 
-            assert!(cluster.get(&None).is_none());
+            assert!(cluster.map.get(&None).is_none());
         }
 
         {
@@ -895,7 +919,7 @@ mod tests {
                 assert!(cluster.remove_endpoint_if(|_ep| true));
             }
 
-            assert!(cluster.get(&None).is_none());
+            assert!(cluster.map.get(&None).is_none());
         }
     }
 }

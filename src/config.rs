@@ -594,32 +594,40 @@ impl Config {
                     }
 
                     if let Some(datacenters) = self.dyn_cfg.datacenters() {
-                        for entry in datacenters.read().iter() {
-                            let host = entry.key().to_string();
-                            let qcmp_port = entry.qcmp_port;
-                            let version =
-                                resource_version(entry.icao_code.to_string().as_str(), qcmp_port);
+                        let dc_resource_transformer =
+                            |ip_addr: &std::net::IpAddr,
+                             dc: &Datacenter|
+                             -> eyre::Result<Option<XdsResource>> {
+                                let host = ip_addr.to_string();
+                                let qcmp_port = dc.qcmp_port;
+                                let version =
+                                    resource_version(dc.icao_code.to_string().as_str(), qcmp_port);
 
-                            if client_state.version_matches(&host, &version) {
-                                continue;
-                            }
+                                if client_state.version_matches(&host, &version) {
+                                    return Ok(None);
+                                }
 
-                            let resource = crate::xds::Resource::Datacenter(
-                                crate::net::cluster::proto::Datacenter {
-                                    qcmp_port: qcmp_port as _,
-                                    icao_code: entry.icao_code.to_string(),
-                                    host: host.clone(),
-                                },
-                            );
+                                let resource = crate::xds::Resource::Datacenter(
+                                    crate::net::cluster::proto::Datacenter {
+                                        qcmp_port: qcmp_port as _,
+                                        icao_code: dc.icao_code.to_string(),
+                                        host: host.clone(),
+                                    },
+                                );
 
-                            resources.push(XdsResource {
-                                name: host,
-                                version,
-                                resource: Some(resource.try_encode()?),
-                                aliases: Vec::new(),
-                                ttl: None,
-                                cache_control: None,
-                            });
+                                Ok(Some(XdsResource {
+                                    name: host,
+                                    version,
+                                    resource: Some(resource.try_encode()?),
+                                    aliases: Vec::new(),
+                                    ttl: None,
+                                    cache_control: None,
+                                }))
+                            };
+
+                        for resource in datacenters.read().iter_with(dc_resource_transformer) {
+                            let Some(resource) = resource? else { continue };
+                            resources.push(resource);
                         }
 
                         {
@@ -628,7 +636,7 @@ impl Config {
                                 let Ok(addr) = key.parse() else {
                                     continue;
                                 };
-                                if dc.get(&addr).is_none() {
+                                if !dc.exists(&addr) {
                                     removed.insert(key.clone());
                                 }
                             }
@@ -636,40 +644,43 @@ impl Config {
                     }
                 }
                 ResourceType::Cluster => {
-                    let mut push = |key: &Option<crate::net::endpoint::Locality>,
-                                    value: &crate::net::cluster::EndpointSet|
-                     -> crate::Result<()> {
-                        let version = value.version().to_string();
-                        let key_s = key.as_ref().map(|k| k.to_string()).unwrap_or_default();
+                    let cluster_resource_transformer =
+                        |key: &Option<crate::net::endpoint::Locality>,
+                         value: &crate::net::cluster::EndpointSet|
+                         -> crate::Result<Option<XdsResource>> {
+                            let version = value.version().to_string();
+                            let key_s = key.as_ref().map(|k| k.to_string()).unwrap_or_default();
 
-                        if client_state.version_matches(&key_s, &version) {
-                            return Ok(());
-                        }
+                            if client_state.version_matches(&key_s, &version) {
+                                return Ok(None);
+                            }
 
-                        let resource = crate::xds::Resource::Cluster(
-                            quilkin_xds::generated::quilkin::config::v1alpha1::Cluster {
-                                locality: key.clone().map(|l| l.into()),
-                                endpoints: value.endpoints.iter().map(|ep| ep.into()).collect(),
-                            },
-                        );
+                            let resource = crate::xds::Resource::Cluster(
+                                quilkin_xds::generated::quilkin::config::v1alpha1::Cluster {
+                                    locality: key.clone().map(|l| l.into()),
+                                    endpoints: value.endpoints.iter().map(|ep| ep.into()).collect(),
+                                },
+                            );
 
-                        resources.push(XdsResource {
-                            name: key_s,
-                            version,
-                            resource: Some(resource.try_encode()?),
-                            ..Default::default()
-                        });
-
-                        Ok(())
-                    };
+                            Ok(Some(XdsResource {
+                                name: key_s,
+                                version,
+                                resource: Some(resource.try_encode()?),
+                                ..Default::default()
+                            }))
+                        };
 
                     let Some(clusters) = self.dyn_cfg.clusters() else {
                         break 'append;
                     };
 
                     if client_state.subscribed.is_empty() {
-                        for cluster in clusters.read().iter() {
-                            push(cluster.key(), cluster.value())?;
+                        for cluster_resources in
+                            clusters.read().iter_with(cluster_resource_transformer)
+                        {
+                            if let Some(clr) = cluster_resources? {
+                                resources.push(clr);
+                            }
                         }
                     } else {
                         for locality in client_state.subscribed.iter().filter_map(|name| {
@@ -679,8 +690,14 @@ impl Config {
                                 name.parse().ok().map(Some)
                             }
                         }) {
-                            if let Some(cluster) = clusters.read().get(&locality) {
-                                push(cluster.key(), cluster.value())?;
+                            if let Some(cluster_resource) =
+                                clusters.read().with_value(&locality, |entry| {
+                                    cluster_resource_transformer(entry.key(), entry.value())
+                                })
+                            {
+                                if let Some(clr) = cluster_resource? {
+                                    resources.push(clr);
+                                }
                             }
                         }
                     };
@@ -688,9 +705,7 @@ impl Config {
                     // Currently, we have exactly _one_ special case for removed resources, which
                     // is when ClusterMap::update_unlocated_endpoints is called to move the None
                     // locality endpoints to another one, so we just detect that case manually
-                    if client_state.versions.contains_key("")
-                        && clusters.read().get(&None).is_none()
-                    {
+                    if client_state.versions.contains_key("") && !clusters.read().exists(&None) {
                         removed.insert("".into());
                     }
                 }

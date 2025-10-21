@@ -189,12 +189,17 @@ trace_test!(datacenter_discovery, {
     ) -> bool {
         let dcs = config.dyn_cfg.datacenters().unwrap().read();
 
-        for i in dcs.iter() {
-            dbg!(which, i.key(), i.value());
-        }
+        drop(dcs.iter_with(|key, value| {
+            dbg!(which, key, value);
+        }));
 
-        let ipv4_dc = dcs.get(&std::net::Ipv4Addr::LOCALHOST.into());
-        let ipv6_dc = dcs.get(&std::net::Ipv6Addr::LOCALHOST.into());
+        let entries = dcs
+            .iter_with(|ip_addr, dc| (ip_addr.clone(), dc.clone()))
+            .into_iter()
+            .collect::<std::collections::HashMap<std::net::IpAddr, quilkin::config::Datacenter>>();
+
+        let ipv4_dc = entries.get(&std::net::Ipv4Addr::LOCALHOST.into());
+        let ipv6_dc = entries.get(&std::net::Ipv6Addr::LOCALHOST.into());
 
         if counter > 0 {
             match (ipv4_dc, ipv6_dc) {

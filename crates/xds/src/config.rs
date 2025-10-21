@@ -40,7 +40,7 @@ impl LocalVersions {
     }
 
     #[inline]
-    pub fn get(&self, ty: &str) -> parking_lot::MutexGuard<'_, VersionMap> {
+    fn get_map_guard(&self, ty: &str) -> parking_lot::MutexGuard<'_, VersionMap> {
         let g = self
             .versions
             .iter()
@@ -52,6 +52,33 @@ impl LocalVersions {
             let versions = self.versions.iter().map(|(ty, _)| *ty).collect::<Vec<_>>();
             panic!("unable to retrieve `{ty}` versions, available versions are {versions:?}");
         }
+    }
+
+    #[inline]
+    pub fn update_versions(
+        &self,
+        type_url: &str,
+        removed_resources: &Vec<String>,
+        updated_resources: Vec<(String, String)>,
+    ) {
+        let mut guard = self.get_map_guard(type_url);
+
+        // Remove any resources the upstream server has removed/doesn't have,
+        // we do this before applying any new/updated resources in case a
+        // resource is in both lists, though really that would be a bug in
+        // the upstream server
+        for removed in removed_resources {
+            guard.remove(removed);
+        }
+
+        for (k, v) in updated_resources {
+            guard.insert(k, v);
+        }
+    }
+
+    #[inline]
+    pub fn get_versions(&self, type_url: &str) -> VersionMap {
+        self.get_map_guard(type_url).clone()
     }
 }
 
@@ -268,19 +295,7 @@ pub fn handle_delta_discovery_responses<C: Configuration>(
                 let res = config.apply_delta(&type_url, response.resources, &response.removed_resources, remote_addr);
 
                 if res.is_ok() {
-                    let mut lock = local.get(&type_url);
-
-                    // Remove any resources the upstream server has removed/doesn't have,
-                    // we do this before applying any new/updated resources in case a
-                    // resource is in both lists, though really that would be a bug in
-                    // the upstream server
-                    for removed in response.removed_resources {
-                        lock.remove(&removed);
-                    }
-
-                    for (k, v) in version_map {
-                        lock.insert(k, v);
-                    }
+                    local.update_versions(&type_url, &response.removed_resources, version_map);
                 }
 
                 res

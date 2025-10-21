@@ -37,13 +37,24 @@ impl DatacenterMap {
     }
 
     #[inline]
-    pub fn get(&self, key: &IpAddr) -> Option<dashmap::mapref::one::Ref<'_, IpAddr, Datacenter>> {
-        self.map.get(key)
+    pub fn exists(&self, key: &IpAddr) -> bool {
+        self.map.get(key).is_some()
     }
 
+    /// Iterates over the entries in the `DatacenterMap` with the given func
+    ///
+    /// This ensures that the dashmap entry references are never held across await boundaries as
+    /// the func cannot be async.
     #[inline]
-    pub fn iter(&self) -> dashmap::iter::Iter<'_, IpAddr, Datacenter> {
-        self.map.iter()
+    pub fn iter_with<F, T>(&self, func: F) -> Vec<T>
+    where
+        F: for<'a> Fn(&'a IpAddr, &'a Datacenter) -> T,
+    {
+        let mut results: Vec<T> = Vec::new();
+        for entry in self.map.iter() {
+            results.push(func(entry.key(), entry.value()));
+        }
+        results
     }
 
     #[inline]
@@ -113,8 +124,8 @@ impl PartialEq for DatacenterMap {
             return false;
         }
 
-        for a in self.iter() {
-            match rhs.get(a.key()).filter(|b| *a.value() == **b) {
+        for a in self.map.iter() {
+            match rhs.map.get(a.key()).filter(|b| *a.value() == **b) {
                 Some(_) => {}
                 None => return false,
             }
