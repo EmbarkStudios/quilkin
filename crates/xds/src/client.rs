@@ -372,6 +372,102 @@ pub(crate) struct DeltaClientStream {
     req_tx: tokio::sync::mpsc::Sender<DeltaDiscoveryRequest>,
 }
 
+/// TEMP custom receiver stream to be able to monitor receiver len
+#[derive(Debug)]
+pub struct ReceiverStream<T> {
+    inner: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<T>>>,
+}
+
+impl<T> ReceiverStream<T> {
+    pub fn new(recv: tokio::sync::mpsc::Receiver<T>) -> Self {
+        Self {
+            inner: Arc::new(tokio::sync::Mutex::new(recv)),
+        }
+    }
+
+    pub fn close(&mut self) {
+        let mut guard = self.inner.blocking_lock();
+        guard.close();
+    }
+}
+
+impl<T> ReceiverStream<T>
+where
+    T: Send + 'static,
+{
+    pub async fn publish_metric(&self, kind: &str) {
+        let weak_rc = Arc::downgrade(&self.inner);
+        let kind = kind.to_string();
+        // Temp
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Some(arc) = weak_rc.upgrade() {
+                            let guard = arc.lock().await;
+                            receiver_buffer_len(kind.as_str()).set(guard.len() as i64);
+                        } else {
+                            tracing::info!("receiver dropped");
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+impl<T> tokio_stream::Stream for ReceiverStream<T> {
+    type Item = T;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.inner.try_lock() {
+            Ok(mut guard) => guard.poll_recv(cx),
+            Err(_) => std::task::Poll::Pending,
+        }
+    }
+}
+
+// impl<T> AsRef<tokio::sync::mpsc::Receiver<T>> for ReceiverStream<T> {
+//     fn as_ref(&self) -> &tokio::sync::mpsc::Receiver<T> {
+//         &self.inner
+//     }
+// }
+//
+// impl<T> AsMut<tokio::sync::mpsc::Receiver<T>> for ReceiverStream<T> {
+//     fn as_mut(&mut self) -> &mut tokio::sync::mpsc::Receiver<T> {
+//         &mut self.inner
+//     }
+// }
+
+// impl<T> From<tokio::sync::mpsc::Receiver<T>> for ReceiverStream<T> {
+//     fn from(recv: tokio::sync::mpsc::Receiver<T>) -> Self {
+//         Self::new(recv)
+//     }
+// }
+
+pub(crate) fn receiver_buffer_len(kind: &str) -> prometheus::IntGauge {
+    use once_cell::sync::Lazy;
+    use prometheus::IntGaugeVec;
+    static RECEIVER_BUFFER_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| {
+        prometheus::register_int_gauge_vec_with_registry! {
+            prometheus::opts! {
+                "temp_xds_receiver_buffer_len",
+                "receiver channel buffer length",
+            },
+            &["kind"],
+            crate::metrics::registry(),
+        }
+        .unwrap()
+    });
+
+    RECEIVER_BUFFER_SIZE.with_label_values(&[kind])
+}
+
 impl DeltaClientStream {
     #[inline]
     async fn connect(
@@ -381,6 +477,9 @@ impl DeltaClientStream {
         crate::metrics::actions_total(KIND_CLIENT, "connect").inc();
         if let Ok((mut client, ep)) = MdsClient::connect_with_backoff(endpoints).await {
             let (dcs, requests_rx) = Self::new();
+
+            let receiver_stream = ReceiverStream::new(requests_rx);
+            receiver_stream.publish_metric("mds_client").await;
 
             // Since we are doing exploratory requests to see if the remote endpoint supports delta streams, we unfortunately
             // need to actually send something before the full roundtrip occurs. This can be removed once delta discovery
@@ -398,7 +497,7 @@ impl DeltaClientStream {
                 .await?;
 
             if let Ok(stream) = client
-                .subscribe_delta_resources(tokio_stream::wrappers::ReceiverStream::new(requests_rx))
+                .subscribe_delta_resources(receiver_stream)
                 .in_current_span()
                 .await
             {
@@ -409,6 +508,9 @@ impl DeltaClientStream {
         let (mut client, ep) = AdsClient::connect_with_backoff(endpoints).await?;
 
         let (dcs, requests_rx) = Self::new();
+
+        let receiver_stream = ReceiverStream::new(requests_rx);
+        receiver_stream.publish_metric("ads_client").await;
 
         // Since we are doing exploratory requests to see if the remote endpoint supports delta streams, we unfortunately
         // need to actually send something before the full roundtrip occurs. This can be removed once delta discovery
@@ -426,7 +528,7 @@ impl DeltaClientStream {
             .await?;
 
         let stream = client
-            .delta_aggregated_resources(tokio_stream::wrappers::ReceiverStream::new(requests_rx))
+            .delta_aggregated_resources(receiver_stream)
             .in_current_span()
             .await?;
         Ok((dcs, stream.into_inner(), ep))
