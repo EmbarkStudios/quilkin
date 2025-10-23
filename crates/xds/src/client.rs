@@ -305,7 +305,7 @@ impl MdsClient {
 
                                             const TIMEOUT_INTERVAL: Duration = Duration::from_secs(30);
                                             match tokio::time::timeout(TIMEOUT_INTERVAL, stream.next()).await {
-                                                Ok(Some(Ok(response))) => match ds.send_response(response).await {
+                                                Ok(Some(Ok(response))) => match ds.send_response(response) {
                                                     Ok(_) => {
                                                         tracing::trace!("ACK successfully sent");
                                                     }
@@ -367,7 +367,7 @@ impl MdsClient {
 }
 
 pub(crate) struct DeltaClientStream {
-    req_tx: tokio::sync::mpsc::Sender<DeltaDiscoveryRequest>,
+    req_tx: tokio::sync::mpsc::UnboundedSender<DeltaDiscoveryRequest>,
 }
 
 impl DeltaClientStream {
@@ -378,26 +378,25 @@ impl DeltaClientStream {
     ) -> Result<(Self, tonic::Streaming<DeltaDiscoveryResponse>, Endpoint)> {
         crate::metrics::actions_total(KIND_CLIENT, "connect").inc();
         if let Ok((mut client, ep)) = MdsClient::connect_with_backoff(endpoints).await {
-            let (req_tx, requests_rx) =
-                tokio::sync::mpsc::channel(100 /*ResourceType::VARIANTS.len()*/);
+            let (req_tx, requests_rx) = tokio::sync::mpsc::unbounded_channel();
 
             // Since we are doing exploratory requests to see if the remote endpoint supports delta streams, we unfortunately
             // need to actually send something before the full roundtrip occurs. This can be removed once delta discovery
             // is fully rolled out
-            req_tx
-                .send(DeltaDiscoveryRequest {
-                    node: Some(Node {
-                        id: identifier.clone(),
-                        user_agent_name: "quilkin".into(),
-                        ..Default::default()
-                    }),
-                    type_url: "ignore-me".to_owned(),
+            req_tx.send(DeltaDiscoveryRequest {
+                node: Some(Node {
+                    id: identifier.clone(),
+                    user_agent_name: "quilkin".into(),
                     ..Default::default()
-                })
-                .await?;
+                }),
+                type_url: "ignore-me".to_owned(),
+                ..Default::default()
+            })?;
 
             if let Ok(stream) = client
-                .subscribe_delta_resources(tokio_stream::wrappers::ReceiverStream::new(requests_rx))
+                .subscribe_delta_resources(tokio_stream::wrappers::UnboundedReceiverStream::new(
+                    requests_rx,
+                ))
                 .in_current_span()
                 .await
             {
@@ -407,38 +406,40 @@ impl DeltaClientStream {
 
         let (mut client, ep) = AdsClient::connect_with_backoff(endpoints).await?;
 
-        let (req_tx, requests_rx) =
-            tokio::sync::mpsc::channel(100 /*ResourceType::VARIANTS.len()*/);
+        let (req_tx, requests_rx) = tokio::sync::mpsc::unbounded_channel();
 
         // Since we are doing exploratory requests to see if the remote endpoint supports delta streams, we unfortunately
         // need to actually send something before the full roundtrip occurs. This can be removed once delta discovery
         // is fully rolled out
-        req_tx
-            .send(DeltaDiscoveryRequest {
-                node: Some(Node {
-                    id: identifier,
-                    user_agent_name: "quilkin".into(),
-                    ..Default::default()
-                }),
-                type_url: "ignore-me".to_owned(),
+        req_tx.send(DeltaDiscoveryRequest {
+            node: Some(Node {
+                id: identifier,
+                user_agent_name: "quilkin".into(),
                 ..Default::default()
-            })
-            .await?;
+            }),
+            type_url: "ignore-me".to_owned(),
+            ..Default::default()
+        })?;
 
         let stream = client
-            .delta_aggregated_resources(tokio_stream::wrappers::ReceiverStream::new(requests_rx))
+            .delta_aggregated_resources(tokio_stream::wrappers::UnboundedReceiverStream::new(
+                requests_rx,
+            ))
             .in_current_span()
             .await?;
         Ok((Self { req_tx }, stream.into_inner(), ep))
     }
 
-    pub(crate) fn new() -> (Self, tokio::sync::mpsc::Receiver<DeltaDiscoveryRequest>) {
-        let (req_tx, requests_rx) = tokio::sync::mpsc::channel(1);
+    pub(crate) fn new() -> (
+        Self,
+        tokio::sync::mpsc::UnboundedReceiver<DeltaDiscoveryRequest>,
+    ) {
+        let (req_tx, requests_rx) = tokio::sync::mpsc::unbounded_channel();
         (Self { req_tx }, requests_rx)
     }
 
     #[inline]
-    pub(crate) async fn refresh(
+    pub(crate) fn refresh(
         &self,
         identifier: &str,
         subs: Vec<(&'static str, Vec<String>)>,
@@ -447,23 +448,21 @@ impl DeltaClientStream {
         crate::metrics::actions_total(KIND_CLIENT, "refresh").inc();
         for (rt, names) in subs {
             let initial_resource_versions = local.get(rt).clone();
-            self.req_tx
-                .send(DeltaDiscoveryRequest {
-                    node: Some(Node {
-                        id: identifier.to_owned(),
-                        user_agent_name: "quilkin".into(),
-                        ..Node::default()
-                    }),
-                    type_url: (*rt).to_owned(),
-                    resource_names_subscribe: names.clone(),
-                    initial_resource_versions,
-                    // We (currently) never unsubscribe from resources, since we
-                    // never actually subscribe to particular ones in the first place
-                    resource_names_unsubscribe: Vec::new(),
-                    response_nonce: "".into(),
-                    error_detail: None,
-                })
-                .await?;
+            self.req_tx.send(DeltaDiscoveryRequest {
+                node: Some(Node {
+                    id: identifier.to_owned(),
+                    user_agent_name: "quilkin".into(),
+                    ..Node::default()
+                }),
+                type_url: (*rt).to_owned(),
+                resource_names_subscribe: names.clone(),
+                initial_resource_versions,
+                // We (currently) never unsubscribe from resources, since we
+                // never actually subscribe to particular ones in the first place
+                resource_names_unsubscribe: Vec::new(),
+                response_nonce: "".into(),
+                error_detail: None,
+            })?;
         }
 
         Ok(())
@@ -471,15 +470,15 @@ impl DeltaClientStream {
 
     /// Sends an n/ack "response" in response to the remote response
     #[inline]
-    pub(crate) async fn send_response(&self, response: DeltaDiscoveryRequest) -> Result<()> {
+    pub(crate) fn send_response(&self, response: DeltaDiscoveryRequest) -> Result<()> {
         crate::metrics::actions_total(KIND_CLIENT, "respond").inc();
-        self.req_tx.send(response).await?;
+        self.req_tx.send(response)?;
         Ok(())
     }
 }
 
 pub(crate) struct DeltaServerStream {
-    res_tx: tokio::sync::mpsc::Sender<DeltaDiscoveryResponse>,
+    res_tx: tokio::sync::mpsc::UnboundedSender<DeltaDiscoveryResponse>,
 }
 
 impl DeltaServerStream {
@@ -489,17 +488,17 @@ impl DeltaServerStream {
         identifier: String,
     ) -> Result<(Self, tonic::Streaming<DeltaDiscoveryRequest>)> {
         crate::metrics::actions_total(KIND_SERVER, "connect").inc();
-        let (res_tx, responses_rx) = tokio::sync::mpsc::channel(100);
+        let (res_tx, responses_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        res_tx
-            .send(DeltaDiscoveryResponse {
-                control_plane: Some(crate::core::ControlPlane { identifier }),
-                ..Default::default()
-            })
-            .await?;
+        res_tx.send(DeltaDiscoveryResponse {
+            control_plane: Some(crate::core::ControlPlane { identifier }),
+            ..Default::default()
+        })?;
 
         let stream = client
-            .delta_aggregated_resources(tokio_stream::wrappers::ReceiverStream::new(responses_rx))
+            .delta_aggregated_resources(tokio_stream::wrappers::UnboundedReceiverStream::new(
+                responses_rx,
+            ))
             .in_current_span()
             .await?
             .into_inner();
@@ -508,9 +507,9 @@ impl DeltaServerStream {
     }
 
     #[inline]
-    async fn send_response(&self, res: DeltaDiscoveryResponse) -> Result<()> {
+    fn send_response(&self, res: DeltaDiscoveryResponse) -> Result<()> {
         crate::metrics::actions_total(KIND_SERVER, "respond").inc();
-        self.res_tx.send(res).await?;
+        self.res_tx.send(res)?;
         Ok(())
     }
 }
@@ -604,10 +603,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
     let local = Arc::new(crate::config::LocalVersions::new(
         resource_subscriptions.iter().map(|(s, _)| *s),
     ));
-    if let Err(err) = ds
-        .refresh(&identifier, resource_subscriptions.to_vec(), &local)
-        .await
-    {
+    if let Err(err) = ds.refresh(&identifier, resource_subscriptions.to_vec(), &local) {
         crate::metrics::errors_total(KIND_CLIENT, "request_failed").inc();
         tracing::error!(error = ?err, "failed to send initial resource requests");
         return Err(err);
@@ -645,7 +641,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
                                 "unknown".into()
                             };
                             tracing::trace!(%node_id, "received delta response");
-                            if let Err(error) = ds.send_response(response).await {
+                            if let Err(error) = ds.send_response(response) {
                                 crate::metrics::errors_total(KIND_CLIENT, "ack_failed").inc();
                                 tracing::error!(%error, %node_id, "failed to ack delta response");
                             }
@@ -673,9 +669,8 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
                         }
                         Err(_) => {
                             tracing::debug!("exceeded idle request interval sending new requests");
-                            if let Err(error) = ds
-                                .refresh(&identifier, resource_subscriptions.to_vec(), &local)
-                                .await
+                            if let Err(error) =
+                                ds.refresh(&identifier, resource_subscriptions.to_vec(), &local)
                             {
                                 crate::metrics::errors_total(KIND_CLIENT, "refresh").inc();
                                 return Err(error.wrap_err("refresh failed"));
@@ -712,9 +707,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
                     }
                 }
 
-                if let Err(error) = ds
-                    .refresh(&identifier, resource_subscriptions.to_vec(), &local)
-                    .await
+                if let Err(error) = ds.refresh(&identifier, resource_subscriptions.to_vec(), &local)
                 {
                     crate::metrics::errors_total(KIND_CLIENT, "refresh").inc();
                     return Err(error.wrap_err("refresh failed"));

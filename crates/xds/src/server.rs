@@ -579,7 +579,6 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                     config.interested_resources(&server_version).collect(),
                     &local,
                 )
-                .await
                 .map_err(|error| tonic::Status::internal(error.to_string()))?;
 
                 let mut response_stream = crate::config::handle_delta_discovery_responses(
@@ -600,7 +599,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                             match nr {
                                 Ok(Some(Ok(ack))) => {
                                     tracing::trace!("sending ack request");
-                                    ds.send_response(ack).await.map_err(|_err| {
+                                    ds.send_response(ack).map_err(|_err| {
                                         tonic::Status::internal("this should not be reachable")
                                     })?;
                                 }
@@ -621,7 +620,6 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                                         config.interested_resources(&server_version).collect(),
                                         &local,
                                     )
-                                    .await
                                     .map_err(|error| tonic::Status::internal(error.to_string()))?;
                                 }
                             }
