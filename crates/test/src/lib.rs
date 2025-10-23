@@ -55,17 +55,17 @@ macro_rules! temp_file {
 
 pub use tracing::{Level, subscriber::DefaultGuard};
 
-pub fn init_logging(level: Level, test_pkg: &'static str) -> DefaultGuard {
+pub fn init_logging(level: Level, test_pkg: &'static str) {
     use tracing_subscriber::{Layer as _, layer::SubscriberExt as _};
     let layer = tracing_subscriber::fmt::layer()
         .with_test_writer()
         .with_filter(tracing_subscriber::filter::LevelFilter::from_level(level))
         .with_filter(tracing_subscriber::EnvFilter::new(format!(
-            "{test_pkg}=trace,qt=trace,quilkin=trace,xds=trace"
+            "{test_pkg}=trace,qt=trace,quilkin=trace,xds=trace,corrosion=trace"
         )));
     let sub = tracing_subscriber::Registry::default().with(layer);
     let disp = tracing::dispatcher::Dispatch::new(sub);
-    tracing::dispatcher::set_default(&disp)
+    tracing::dispatcher::set_global_default(disp).unwrap();
 }
 
 #[macro_export]

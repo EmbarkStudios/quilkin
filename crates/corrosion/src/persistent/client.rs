@@ -1,10 +1,10 @@
 use bytes::Bytes;
-use corro_api_types::ExecResult;
+use corro_api_types::ExecResponse;
 use quilkin_types::IcaoCode;
 use std::net::SocketAddr;
 use tokio::sync::{mpsc, oneshot};
 
-type ResponseTx = oneshot::Sender<Result<ExecResult, StreamError>>;
+type ResponseTx = oneshot::Sender<Result<ExecResponse, StreamError>>;
 
 #[derive(thiserror::Error, Debug)]
 pub enum StreamError {
@@ -165,7 +165,7 @@ impl Client {
                         };
 
                         send.write_chunk(msg).await?;
-                        let res = super::read_length_prefixed_jsonb::<ExecResult>(&mut recv)
+                        let res = super::read_length_prefixed_jsonb::<ExecResponse>(&mut recv)
                             .await
                             .map_err(StreamError::from);
 
@@ -209,7 +209,7 @@ impl Client {
     pub async fn transactions(
         &self,
         change: &[super::ServerChange],
-    ) -> Result<ExecResult, TransactionError> {
+    ) -> Result<ExecResponse, TransactionError> {
         let buf = super::write_length_prefixed_jsonb(&change)?;
 
         let (tx, rx) = oneshot::channel();

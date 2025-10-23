@@ -1,18 +1,28 @@
 [package]
-name = "corrosion-utils"
+name = "corrosion-tests"
 license.workspace = true
 edition.workspace = true
 version.workspace = true
 publish = false
 
 [dependencies]
+async-trait.workspace = true
+bytes.workspace = true
 camino.workspace = true
 corro-api-types.workspace = true
 corro-types.workspace = true
+corrosion.workspace = true
+insta = "1.43"
 prettytable = { version = "0.10", default-features = false }
+qt = { path = "../test" }
+quilkin-types.workspace = true
 rusqlite.workspace = true
+serde_json.workspace = true
+smallvec = "1.15"
 spawn.workspace = true
+sqlite-pool.workspace = true
 tempfile.workspace = true
+time.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tripwire.workspace = true

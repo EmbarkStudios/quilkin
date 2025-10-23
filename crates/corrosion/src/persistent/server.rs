@@ -19,7 +19,7 @@ pub trait AgentExecutor: Sync + Send + Clone {
         &self,
         peer: Peer,
         statements: &[super::ServerChange],
-    ) -> corro_types::api::ExecResult;
+    ) -> corro_types::api::ExecResponse;
     async fn disconnected(&self, peer: Peer);
 }
 

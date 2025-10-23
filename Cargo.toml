@@ -196,7 +196,7 @@ members = [
     ".",
     "crates/agones",
     "crates/corrosion",
-    "crates/corrosion-utils",
+    "crates/corrosion-tests",
     "crates/macros",
     #"crates/nmap-service-probes",
     "crates/proto-gen",
@@ -220,7 +220,6 @@ base64 = "0.22.1"
 bytes = { version = "1.10.1", features = ["serde"] }
 cached = { version = "0.54", default-features = false }
 corrosion = { path = "crates/corrosion" }
-corrosion-utils = { path = "crates/corrosion-utils" }
 eyre = "0.6.12"
 enum-map = "2.7.3"
 futures = "0.3.31"
@@ -286,6 +285,7 @@ corro-client = { git = "https://github.com/EmbarkStudios/corrosion", branch = "m
 corro-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 rusqlite = "0.33"
 spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+sqlite-pool = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 uhlc = "0.7"
 
