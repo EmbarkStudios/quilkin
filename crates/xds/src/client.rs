@@ -398,6 +398,7 @@ where
     pub async fn publish_metric(&self, kind: &str) {
         let weak_rc = Arc::downgrade(&self.inner);
         let kind = kind.to_string();
+        let receiver_id = format!("{}", rand::random::<u8>());
         // Temp
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
@@ -406,9 +407,10 @@ where
                     _ = interval.tick() => {
                         if let Some(arc) = weak_rc.upgrade() {
                             let guard = arc.lock().await;
-                            receiver_buffer_len(kind.as_str()).set(guard.len() as i64);
+                            receiver_buffer_len(kind.as_str(), receiver_id.as_str()).set(guard.len() as i64);
                         } else {
                             tracing::info!("receiver dropped");
+                            receiver_buffer_len(kind.as_str(), receiver_id.as_str()).set(0);
                             return;
                         }
                     }
@@ -450,7 +452,7 @@ impl<T> tokio_stream::Stream for ReceiverStream<T> {
 //     }
 // }
 
-pub(crate) fn receiver_buffer_len(kind: &str) -> prometheus::IntGauge {
+pub(crate) fn receiver_buffer_len(kind: &str, receiver_id: &str) -> prometheus::IntGauge {
     use once_cell::sync::Lazy;
     use prometheus::IntGaugeVec;
     static RECEIVER_BUFFER_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -459,13 +461,13 @@ pub(crate) fn receiver_buffer_len(kind: &str) -> prometheus::IntGauge {
                 "temp_xds_receiver_buffer_len",
                 "receiver channel buffer length",
             },
-            &["kind"],
+            &["kind", "receiver_id"],
             crate::metrics::registry(),
         }
         .unwrap()
     });
 
-    RECEIVER_BUFFER_SIZE.with_label_values(&[kind])
+    RECEIVER_BUFFER_SIZE.with_label_values(&[kind, receiver_id])
 }
 
 impl DeltaClientStream {
