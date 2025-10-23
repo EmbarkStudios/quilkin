@@ -646,7 +646,7 @@ async fn buffers() {
             .expect("didn't receive event in expected time")
             .expect("stream ended");
 
-        let mut ss = pubsub::SubscriptionStream::new(&mut buf).unwrap();
+        let mut ss = pubsub::SubscriptionStream::length_prefixed(&mut buf).unwrap();
         let mut ex = exp.iter();
 
         loop {
@@ -715,7 +715,7 @@ async fn buffers() {
         while count < 99 {
             let mut buf = bss.next().await.unwrap();
 
-            for schunk in pubsub::SubscriptionStream::new(&mut buf).unwrap() {
+            for schunk in pubsub::SubscriptionStream::length_prefixed(&mut buf).unwrap() {
                 assert_eq!(schunk.unwrap(), chunk);
                 count += 1;
             }
@@ -732,7 +732,7 @@ async fn buffers() {
     let mut last = bss.drain().await.unwrap();
     assert!(bss.drain().await.is_none());
 
-    let mut ss = pubsub::SubscriptionStream::new(&mut last).unwrap();
+    let mut ss = pubsub::SubscriptionStream::length_prefixed(&mut last).unwrap();
     assert_eq!(ss.next().unwrap().unwrap(), tiny);
     assert!(ss.next().is_none());
 }
