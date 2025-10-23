@@ -14,6 +14,8 @@ camino.workspace = true
 compact_str = "0.7"
 data-encoding = "2.9"
 eyre.workspace = true
+futures.workspace = true
+indexmap = "2.11"
 parking_lot.workspace = true
 quilkin-types.workspace = true
 quinn = "0.11"
@@ -25,14 +27,16 @@ smallvec = "1.15"
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 uhlc.workspace = true
+uuid.workspace = true
 
 corro-agent.workspace = true
 corro-api-types.workspace = true
 corro-client.workspace = true
 corro-types.workspace = true
+spawn.workspace = true
+sqlite-pool.workspace = true
+tripwire.workspace = true
 
-[dev-dependencies]
-corrosion-utils.workspace = true
-insta = "1.43"

@@ -1,8 +1,8 @@
 //! Tests for basic connection, operation, and disconnection between a UDP
 //! server and clients
 
-use corrosion::{Peer, client as c, persistent as p};
-use corrosion_utils as tu;
+use corrosion::{Peer, db, persistent as p};
+use corrosion_tests::{self as ct, Cell};
 use quilkin_types::{Endpoint, IcaoCode};
 
 #[derive(Clone)]
@@ -17,18 +17,18 @@ impl InstaPrinter {
         let statement = conn
             .prepare("SELECT endpoint,icao,json(contributors) FROM servers")
             .unwrap();
-        let mut servers = tu::query_to_string(statement, |srow, prow| {
-            prow.add_cell(tu::Cell::new(&srow.get::<_, String>(0).unwrap()));
-            prow.add_cell(tu::Cell::new(&srow.get::<_, String>(1).unwrap()));
-            prow.add_cell(tu::Cell::new(&srow.get::<_, String>(2).unwrap()));
+        let mut servers = ct::query_to_string(statement, |srow, prow| {
+            prow.add_cell(Cell::new(&srow.get::<_, String>(0).unwrap()));
+            prow.add_cell(Cell::new(&srow.get::<_, String>(1).unwrap()));
+            prow.add_cell(Cell::new(&srow.get::<_, String>(2).unwrap()));
         });
         let statement = conn
             .prepare("SELECT ip,icao,json(servers) FROM dc")
             .unwrap();
-        let dc = tu::query_to_string(statement, |srow, prow| {
-            prow.add_cell(tu::Cell::new(&srow.get::<_, String>(0).unwrap()));
-            prow.add_cell(tu::Cell::new(&srow.get::<_, String>(1).unwrap()));
-            prow.add_cell(tu::Cell::new(&srow.get::<_, String>(2).unwrap()));
+        let dc = ct::query_to_string(statement, |srow, prow| {
+            prow.add_cell(Cell::new(&srow.get::<_, String>(0).unwrap()));
+            prow.add_cell(Cell::new(&srow.get::<_, String>(1).unwrap()));
+            prow.add_cell(Cell::new(&srow.get::<_, String>(2).unwrap()));
         });
 
         servers.push('\n');
@@ -41,21 +41,21 @@ impl InstaPrinter {
 impl p::server::AgentExecutor for InstaPrinter {
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
         let mut dc = smallvec::SmallVec::<[_; 1]>::new();
-        let mut dc = c::write::Datacenter(&mut dc);
+        let mut dc = db::write::Datacenter(&mut dc);
         dc.insert(peer, qcmp_port, icao);
 
         {
             let mut conn = self.db.write_priority().await.unwrap();
             let tx = conn.transaction().unwrap();
-            tu::exec(&tx, dc.0.iter()).unwrap();
+            ct::exec(&tx, dc.0.iter()).unwrap();
             tx.commit().unwrap();
         }
     }
 
-    async fn execute(&self, peer: Peer, statements: &[p::ServerChange]) -> p::ExecResult {
+    async fn execute(&self, peer: Peer, statements: &[p::ServerChange]) -> p::ExecResponse {
         let mut v = smallvec::SmallVec::<[_; 20]>::new();
         {
-            let mut srv = c::write::Server::for_peer(peer, &mut v);
+            let mut srv = db::write::Server::for_peer(peer, &mut v);
 
             for s in statements {
                 match s {
@@ -71,15 +71,7 @@ impl p::server::AgentExecutor for InstaPrinter {
                     }
                     p::ServerChange::Update(u) => {
                         for u in u {
-                            let mut ub = c::write::UpdateBuilder::new(&u.endpoint);
-                            if let Some(icao) = u.icao {
-                                ub = ub.update_icao(icao);
-                            }
-
-                            if let Some(ts) = &u.tokens {
-                                ub = ub.update_tokens(ts);
-                            }
-                            srv.update(ub);
+                            srv.update(&u.endpoint, u.icao, u.tokens.as_ref());
                         }
                     }
                 }
@@ -89,26 +81,31 @@ impl p::server::AgentExecutor for InstaPrinter {
         let rows_affected = {
             let mut conn = self.db.write_normal().await.unwrap();
             let tx = conn.transaction().unwrap();
-            let rows = tu::exec(&tx, v.iter()).unwrap();
+            let rows = ct::exec(&tx, v.iter()).unwrap();
             tx.commit().unwrap();
             rows
         };
 
-        p::ExecResult::Execute {
-            rows_affected,
+        p::ExecResponse {
+            results: vec![p::ExecResult::Execute {
+                rows_affected,
+                time: 0.,
+            }],
             time: 0.,
+            version: None,
+            actor_id: None,
         }
     }
 
     async fn disconnected(&self, peer: Peer) {
         let mut dc = smallvec::SmallVec::<[_; 1]>::new();
-        let mut dc = c::write::Datacenter(&mut dc);
+        let mut dc = db::write::Datacenter(&mut dc);
         dc.remove(peer, None);
 
         {
             let mut conn = self.db.write_priority().await.unwrap();
             let tx = conn.transaction().unwrap();
-            tu::exec(&tx, dc.0.iter()).unwrap();
+            ct::exec(&tx, dc.0.iter()).unwrap();
             tx.commit().unwrap();
         }
     }
@@ -117,7 +114,7 @@ impl p::server::AgentExecutor for InstaPrinter {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_quic_stream() {
     let ip = InstaPrinter {
-        db: tu::new_split_pool("quic-basic", corrosion::schema::SCHEMA).await,
+        db: ct::new_split_pool("quic-basic", corrosion::schema::SCHEMA).await,
     };
 
     let server =

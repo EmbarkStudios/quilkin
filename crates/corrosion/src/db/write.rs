@@ -5,6 +5,8 @@ use crate::{
     api::{SqliteParam, Statement},
 };
 use quilkin_types::{AddressKind, Endpoint, IcaoCode, TokenSet};
+use rusqlite::Transaction;
+use sqlite_pool::InterruptibleTransaction;
 
 pub trait ToSqlParam {
     fn to_sql(&self) -> SqliteParam;
@@ -202,18 +204,28 @@ impl<'s, const N: usize> Server<'s, N> {
     }
 
     /// Create a statement to update one or more server columns
-    pub fn update(&mut self, update: UpdateBuilder<'_>) {
+    pub fn update(
+        &mut self,
+        endpoint: &Endpoint,
+        icao: Option<IcaoCode>,
+        tokens: Option<&TokenSet>,
+    ) {
+        if icao.is_none() && tokens.is_none() {
+            tracing::warn!("must update either icao or token set");
+            return;
+        }
+
         let mut query = String::with_capacity(128);
         query.push_str("UPDATE servers SET ");
 
-        let mut params = Vec::with_capacity(update.params() + 1);
+        let mut params = Vec::with_capacity(3);
 
-        if let Some(icao) = update.icao {
+        if let Some(icao) = icao {
             query.push_str("icao = ?");
             params.push(SqliteParam::Text(icao.as_ref().into()));
         }
 
-        if let Some(ts) = update.tokens {
+        if let Some(ts) = tokens {
             if !params.is_empty() {
                 query.push_str(", ");
             }
@@ -227,7 +239,7 @@ impl<'s, const N: usize> Server<'s, N> {
         // on UPDATE queries when built with `SQLITE_ENABLE_UPDATE_DELETE_LIMIT`
         // ...but that doesn't work https://github.com/rusqlite/rusqlite/issues/1111
         query.push_str(" WHERE rowid = (SELECT MIN(rowid) FROM servers WHERE endpoint = ?)");
-        params.push(update.ep.to_sql());
+        params.push(endpoint.to_sql());
 
         self.statements.push(Statement::WithParams(query, params));
     }
@@ -241,47 +253,6 @@ impl<'s, const N: usize> Server<'s, N> {
         self.statements.push(Statement::Simple(format!(
             "DELETE FROM servers WHERE length(contributors) <= 1 AND unixepoch('now') - cont_update > {}", max_age.as_secs()
         )));
-    }
-}
-
-pub struct UpdateBuilder<'s> {
-    ep: &'s Endpoint,
-    icao: Option<IcaoCode>,
-    tokens: Option<&'s TokenSet>,
-}
-
-impl<'s> UpdateBuilder<'s> {
-    #[inline]
-    pub fn new(ep: &'s Endpoint) -> Self {
-        Self {
-            ep,
-            icao: None,
-            tokens: None,
-        }
-    }
-
-    #[inline]
-    pub fn update_icao(mut self, icao: IcaoCode) -> Self {
-        self.icao = Some(icao);
-        self
-    }
-
-    #[inline]
-    pub fn update_tokens(mut self, ts: &'s TokenSet) -> Self {
-        self.tokens = Some(ts);
-        self
-    }
-
-    #[inline]
-    fn params(&self) -> usize {
-        let mut count = 0;
-        if self.icao.is_some() {
-            count += 1
-        }
-        if self.tokens.is_some() {
-            count += 1
-        }
-        count
     }
 }
 
@@ -375,5 +346,49 @@ impl<'s, const N: usize> Filter<'s, N> {
             "INSERT INTO filter (id,filter) VALUES (9999,?) ON CONFLICT(id) DO UPDATE SET filter = excluded.filter".into(),
             vec![SqliteParam::Text(filter.into())]
         ));
+    }
+}
+
+pub fn exec_interruptible<const N: usize>(
+    tx: &InterruptibleTransaction<Transaction<'_>>,
+    statements: smallvec::SmallVec<[Statement; N]>,
+) -> Result<usize, rusqlite::Error> {
+    let mut rows = 0;
+    for stmt in statements {
+        rows += exec_single_interruptible(tx, stmt)?;
+    }
+
+    Ok(rows)
+}
+
+#[inline]
+pub fn exec_single_interruptible(
+    tx: &InterruptibleTransaction<Transaction<'_>>,
+    statement: Statement,
+) -> Result<usize, rusqlite::Error> {
+    let mut prepped = tx.prepare(statement.query())?;
+    match statement {
+        Statement::Simple(_)
+        | Statement::Verbose {
+            params: None,
+            named_params: None,
+            ..
+        } => prepped.execute([]),
+        Statement::WithParams(_, params)
+        | Statement::Verbose {
+            params: Some(params),
+            ..
+        } => prepped.execute(rusqlite::params_from_iter(params)),
+        Statement::WithNamedParams(_, params)
+        | Statement::Verbose {
+            named_params: Some(params),
+            ..
+        } => prepped.execute(
+            params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v as &dyn rusqlite::ToSql))
+                .collect::<Vec<(&str, &dyn rusqlite::ToSql)>>()
+                .as_slice(),
+        ),
     }
 }

@@ -3,10 +3,11 @@
 
 pub mod client;
 mod error;
+pub mod executor;
 pub mod server;
 
 use bytes::{BufMut, BytesMut};
-pub use corro_api_types::ExecResult;
+pub use corro_api_types::{ExecResponse, ExecResult};
 use quilkin_types::{Endpoint, IcaoCode, TokenSet};
 use serde::{Deserialize, Serialize};
 
@@ -158,8 +159,11 @@ impl ServerHandshake {
     }
 }
 
+/// Writes the length of the buffer into the first 2 bytes
+///
+/// Asserts if the length of the buffer is > 64k
 #[inline]
-fn update_length_prefix(buf: &mut bytes::BytesMut) {
+pub fn update_length_prefix(buf: &mut bytes::BytesMut) {
     assert!(buf.len() - 2 <= u16::MAX as usize);
 
     let len = (buf.len() - 2) as u16;
