@@ -31,7 +31,7 @@ use uuid::Uuid;
 pub type BodySender = mpsc::Sender<Bytes>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SubParams {
+pub struct SubParamsv1 {
     /// The query being subscribed to
     #[serde(rename = "q")]
     pub query: Statement,
@@ -290,7 +290,7 @@ async fn forward_sub_to_sender(
 /// subscriber to the current state of the database
 pub async fn catch_up_sub(
     matcher: MatcherHandle,
-    params: SubParams,
+    params: SubParamsv1,
     mut sub_rx: broadcast::Receiver<SubscriptionEvent>,
     evt_tx: mpsc::Sender<SubscriptionEvent>,
 ) {
@@ -600,7 +600,7 @@ pub async fn upsert_sub(
     maybe_created: Option<MatcherCreated>,
     subs: &SubsManager,
     bcast_write: &mut MatcherCache,
-    params: SubParams,
+    params: SubParamsv1,
     tx: mpsc::Sender<SubscriptionEvent>,
 ) -> Result<Uuid, MatcherUpsertError> {
     if let Some(created) = maybe_created {
@@ -689,7 +689,7 @@ pub struct Subscription {
 /// Database mutations that match the query specified in the params will
 /// cause subscription events to be emitted to the receiver
 pub async fn subscribe(
-    params: SubParams,
+    params: SubParamsv1,
     ctx: &PubsubContext,
 ) -> Result<Subscription, MatcherUpsertError> {
     let query = expand_sql(&ctx.pool, &params.query).await?;

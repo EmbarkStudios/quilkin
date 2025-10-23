@@ -334,7 +334,7 @@ async fn single_sub() {
     let ctx = pool.pubsub_ctx();
 
     let sub = pubsub::subscribe(
-        pubsub::SubParams {
+        pubsub::SubParamsv1 {
             query: corro_api_types::Statement::Simple(NORMAL_QUERY.to_owned()),
             from: None,
             skip_rows: false,
@@ -478,7 +478,7 @@ async fn multiple_subs() {
     let ctx = pool.pubsub_ctx();
 
     let original = pubsub::subscribe(
-        pubsub::SubParams {
+        pubsub::SubParamsv1 {
             query: corro_api_types::Statement::Simple(NORMAL_QUERY.to_owned()),
             from: None,
             skip_rows: false,
@@ -498,7 +498,7 @@ async fn multiple_subs() {
 
         for _ in 0..3 {
             let ns = pubsub::subscribe(
-                pubsub::SubParams {
+                pubsub::SubParamsv1 {
                     query: corro_api_types::Statement::Simple(NORMAL_QUERY.to_owned()),
                     from: None,
                     skip_rows: false,
