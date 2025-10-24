@@ -49,6 +49,8 @@ pub type MdsClient = Client<MdsGrpcClient>;
 
 pub(crate) const IDLE_REQUEST_INTERVAL: Duration = Duration::from_secs(30);
 
+const REQUEST_BUFFER_SIZE: usize = 100;
+
 #[tonic::async_trait]
 pub trait ServiceClient: Clone + Sized + Send + 'static {
     type Request: Clone + Send + Sync + Sized + 'static + std::fmt::Debug;
@@ -378,8 +380,7 @@ impl DeltaClientStream {
     ) -> Result<(Self, tonic::Streaming<DeltaDiscoveryResponse>, Endpoint)> {
         crate::metrics::actions_total(KIND_CLIENT, "connect").inc();
         if let Ok((mut client, ep)) = MdsClient::connect_with_backoff(endpoints).await {
-            let (req_tx, requests_rx) =
-                tokio::sync::mpsc::channel(100 /*ResourceType::VARIANTS.len()*/);
+            let (req_tx, requests_rx) = tokio::sync::mpsc::channel(REQUEST_BUFFER_SIZE);
 
             // Since we are doing exploratory requests to see if the remote endpoint supports delta streams, we unfortunately
             // need to actually send something before the full roundtrip occurs. This can be removed once delta discovery
@@ -407,8 +408,7 @@ impl DeltaClientStream {
 
         let (mut client, ep) = AdsClient::connect_with_backoff(endpoints).await?;
 
-        let (req_tx, requests_rx) =
-            tokio::sync::mpsc::channel(100 /*ResourceType::VARIANTS.len()*/);
+        let (req_tx, requests_rx) = tokio::sync::mpsc::channel(REQUEST_BUFFER_SIZE);
 
         // Since we are doing exploratory requests to see if the remote endpoint supports delta streams, we unfortunately
         // need to actually send something before the full roundtrip occurs. This can be removed once delta discovery
@@ -433,7 +433,7 @@ impl DeltaClientStream {
     }
 
     pub(crate) fn new() -> (Self, tokio::sync::mpsc::Receiver<DeltaDiscoveryRequest>) {
-        let (req_tx, requests_rx) = tokio::sync::mpsc::channel(1);
+        let (req_tx, requests_rx) = tokio::sync::mpsc::channel(REQUEST_BUFFER_SIZE);
         (Self { req_tx }, requests_rx)
     }
 
@@ -489,7 +489,7 @@ impl DeltaServerStream {
         identifier: String,
     ) -> Result<(Self, tonic::Streaming<DeltaDiscoveryRequest>)> {
         crate::metrics::actions_total(KIND_SERVER, "connect").inc();
-        let (res_tx, responses_rx) = tokio::sync::mpsc::channel(100);
+        let (res_tx, responses_rx) = tokio::sync::mpsc::channel(REQUEST_BUFFER_SIZE);
 
         res_tx
             .send(DeltaDiscoveryResponse {
