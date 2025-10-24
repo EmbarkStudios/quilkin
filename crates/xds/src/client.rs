@@ -469,11 +469,11 @@ impl DeltaClientStream {
         Ok(())
     }
 
-    /// Sends an n/ack "response" in response to the remote response
+    /// Sends an n/ack "request" in response to the remote response
     #[inline]
-    pub(crate) async fn send_response(&self, response: DeltaDiscoveryRequest) -> Result<()> {
-        crate::metrics::actions_total(KIND_CLIENT, "respond").inc();
-        self.req_tx.send(response).await?;
+    pub(crate) fn send_request(&self, request: DeltaDiscoveryRequest) -> Result<()> {
+        crate::metrics::actions_total(KIND_CLIENT, "send_request").inc();
+        self.req_tx.try_send(request)?;
         Ok(())
     }
 }
@@ -526,19 +526,16 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
     notifier: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     resources: &'static [(&'static str, &'static [(&'static str, Vec<String>)])],
 ) -> eyre::Result<tokio::task::JoinHandle<Result<()>>> {
-    let (mut client, mut response_stream, mut connected_endpoint) = match DeltaClientStream::connect(
-        &endpoints,
-        identifier.clone(),
-    )
-    .await
-    {
-        Ok(ds) => ds,
-        Err(err) => {
-            crate::metrics::errors_total(KIND_CLIENT, "connect").inc();
-            tracing::error!(error = ?err, "failed to acquire aggregated delta stream from management server");
-            return Err(err);
-        }
-    };
+    let (mut client, mut response_stream, mut connected_endpoint) =
+        DeltaClientStream::connect(&endpoints, identifier.clone())
+            .await
+            .inspect_err(|error| {
+                crate::metrics::errors_total(KIND_CLIENT, "connect").inc();
+                tracing::error!(
+                    ?error,
+                    "failed to acquire aggregated delta stream from management server"
+                );
+            })?;
 
     async fn handle_first_response(
         stream: &mut tonic::Streaming<DeltaDiscoveryResponse>,
@@ -645,7 +642,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
                                 "unknown".into()
                             };
                             tracing::trace!(%node_id, "received delta response");
-                            if let Err(error) = client.send_response(ack_request).await {
+                            if let Err(error) = client.send_request(ack_request) {
                                 crate::metrics::errors_total(KIND_CLIENT, "ack_failed").inc();
                                 tracing::error!(%error, %node_id, "failed to ack delta response");
                             }

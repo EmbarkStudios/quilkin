@@ -649,7 +649,8 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                             match nr {
                                 Ok(Some(Ok(ack))) => {
                                     tracing::trace!("sending ack request");
-                                    ds.send_response(ack).await.map_err(|_err| {
+                                    ds.send_request(ack).map_err(|_err| {
+                                        crate::metrics::errors_total(KIND_SERVER, "ack_failed").inc();
                                         tonic::Status::internal("this should not be reachable")
                                     })?;
                                 }
