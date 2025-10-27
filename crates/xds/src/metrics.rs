@@ -17,7 +17,7 @@
 use once_cell::sync::Lazy;
 use prometheus::{IntCounterVec, IntGaugeVec, Registry};
 
-pub(crate) const NODE_LABEL: &str = "node";
+pub(crate) const CLIENT_ID_LABEL: &str = "client_id";
 pub(crate) const CONTROL_PLANE_LABEL: &str = "control_plane";
 pub(crate) const TYPE_LABEL: &str = "type";
 pub(crate) const KIND_CLIENT: &str = "client";
@@ -57,20 +57,20 @@ pub(crate) fn active_control_planes(control_plane: &str) -> prometheus::IntGauge
     ACTIVE_CONTROL_PLANES.with_label_values(&[control_plane])
 }
 
-pub(crate) fn delta_discovery_requests(node: &str, type_url: &str) -> prometheus::IntCounter {
+pub(crate) fn delta_discovery_requests(client_id: &str, type_url: &str) -> prometheus::IntCounter {
     static DELTA_DISCOVERY_REQUESTS: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
                 "delta_discovery_requests",
                 "Total number of xDS delta discovery requests",
             },
-            &[NODE_LABEL, TYPE_LABEL],
+            &[CLIENT_ID_LABEL, TYPE_LABEL],
             crate::metrics::registry(),
         }
         .unwrap()
     });
 
-    DELTA_DISCOVERY_REQUESTS.with_label_values(&[node, type_url])
+    DELTA_DISCOVERY_REQUESTS.with_label_values(&[client_id, type_url])
 }
 
 pub(crate) fn delta_discovery_responses(
