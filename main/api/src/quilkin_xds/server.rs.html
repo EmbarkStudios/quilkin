@@ -998,8 +998,7 @@
 <a href="#997" id="997">997</a>
 <a href="#998" id="998">998</a>
 <a href="#999" id="999">999</a>
-<a href="#1000" id="1000">1000</a>
-<a href="#1001" id="1001">1001</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#1000" id="1000">1000</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2022 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -1629,8 +1628,7 @@
                     config.interested_resources(<span class="kw-2">&amp;</span>server_version).collect(),
                     <span class="kw-2">&amp;</span>local,
                 )
-                .<span class="kw">await
-                </span>.map_err(|error| tonic::Status::internal(error.to_string()))<span class="question-mark">?</span>;
+                .map_err(|error| tonic::Status::internal(error.to_string()))<span class="question-mark">?</span>;
 
                 <span class="kw">let </span><span class="kw-2">mut </span>response_stream = <span class="kw">crate</span>::config::handle_delta_discovery_responses(
                     identifier.clone(),
@@ -1650,7 +1648,8 @@
                             <span class="kw">match </span>nr {
                                 <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(ack))) =&gt; {
                                     <span class="macro">tracing::trace!</span>(<span class="string">"sending ack request"</span>);
-                                    ds.send_response(ack).<span class="kw">await</span>.map_err(|_err| {
+                                    ds.ack_response(ack).map_err(|_err| {
+                                        <span class="kw">crate</span>::metrics::errors_total(KIND_SERVER, <span class="string">"ack_failed"</span>).inc();
                                         tonic::Status::internal(<span class="string">"this should not be reachable"</span>)
                                     })<span class="question-mark">?</span>;
                                 }
@@ -1671,8 +1670,7 @@
                                         config.interested_resources(<span class="kw-2">&amp;</span>server_version).collect(),
                                         <span class="kw-2">&amp;</span>local,
                                     )
-                                    .<span class="kw">await
-                                    </span>.map_err(|error| tonic::Status::internal(error.to_string()))<span class="question-mark">?</span>;
+                                    .map_err(|error| tonic::Status::internal(error.to_string()))<span class="question-mark">?</span>;
                                 }
                             }
                         }

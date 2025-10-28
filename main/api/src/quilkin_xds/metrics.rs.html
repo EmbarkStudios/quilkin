@@ -192,7 +192,7 @@
 </span><span class="kw">use </span>once_cell::sync::Lazy;
 <span class="kw">use </span>prometheus::{IntCounterVec, IntGaugeVec, Registry};
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>NODE_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"node"</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>CLIENT_ID_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"client_id"</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>CONTROL_PLANE_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"control_plane"</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>TYPE_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"type"</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>KIND_CLIENT: <span class="kw-2">&amp;</span>str = <span class="string">"client"</span>;
@@ -232,20 +232,20 @@
     ACTIVE_CONTROL_PLANES.with_label_values(<span class="kw-2">&amp;</span>[control_plane])
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>delta_discovery_requests(node: <span class="kw-2">&amp;</span>str, type_url: <span class="kw-2">&amp;</span>str) -&gt; prometheus::IntCounter {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>delta_discovery_requests(client_id: <span class="kw-2">&amp;</span>str, type_url: <span class="kw-2">&amp;</span>str) -&gt; prometheus::IntCounter {
     <span class="kw">static </span>DELTA_DISCOVERY_REQUESTS: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
         <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
             <span class="macro">prometheus::opts!</span> {
                 <span class="string">"delta_discovery_requests"</span>,
                 <span class="string">"Total number of xDS delta discovery requests"</span>,
             },
-            <span class="kw-2">&amp;</span>[NODE_LABEL, TYPE_LABEL],
+            <span class="kw-2">&amp;</span>[CLIENT_ID_LABEL, TYPE_LABEL],
             <span class="kw">crate</span>::metrics::registry(),
         }
         .unwrap()
     });
 
-    DELTA_DISCOVERY_REQUESTS.with_label_values(<span class="kw-2">&amp;</span>[node, type_url])
+    DELTA_DISCOVERY_REQUESTS.with_label_values(<span class="kw-2">&amp;</span>[client_id, type_url])
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>delta_discovery_responses(
