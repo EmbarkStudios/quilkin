@@ -761,6 +761,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                 cs
             } else {
                 let Some(cs) = client_tracker.get_state(type_url) else {
+                    tracing::trace!(type_url, "no client state");
                     return Ok(None);
                 };
 
@@ -773,6 +774,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                 .map_err(|error| tonic::Status::internal(error.to_string()))?;
 
             if req.resources.is_empty() && req.removed.is_empty() {
+                tracing::trace!(type_url, "no resources and nothing removed");
                 return Ok(None);
             }
 
@@ -897,6 +899,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                         };
 
                         if client_request.type_url == "ignore-me" {
+                            tracing::trace!("ignore-me received, continuing");
                             continue;
                         }
 
@@ -924,6 +927,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                         let type_url = client_request.type_url.clone();
 
                         let Some(response) = responder(Some(client_request), &type_url, &mut client_tracker).unwrap() else { continue; };
+                        tracing::trace!(kind = type_url, nonce = response.nonce, "yielding response");
                         yield response;
                     }
                     _ = shutdown.changed() => {

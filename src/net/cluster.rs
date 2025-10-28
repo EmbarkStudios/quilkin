@@ -302,6 +302,7 @@ where
         locality: Option<Locality>,
         cluster: BTreeSet<Endpoint>,
     ) {
+        tracing::trace!("ClusterMap::insert");
         let _res = self.apply(remote_addr, locality, EndpointSet::new(cluster));
     }
 
@@ -311,6 +312,7 @@ where
         locality: Option<Locality>,
         cluster: EndpointSet,
     ) -> crate::Result<()> {
+        tracing::trace!("ClusterMap::apply");
         if let Some(raddr) = self.localities.get(&locality) {
             if *raddr != remote_addr {
                 eyre::bail!(
@@ -358,26 +360,31 @@ where
 
     #[inline]
     pub fn len(&self) -> usize {
+        tracing::trace!("ClusterMap::len");
         self.map.len()
     }
 
     #[inline]
     pub fn is_empty(&self) -> bool {
+        tracing::trace!("ClusterMap::is_empty");
         self.map.is_empty()
     }
 
     #[inline]
     pub fn get(&self, key: &Option<Locality>) -> Option<DashMapRef<'_>> {
+        tracing::trace!("ClusterMap::get");
         self.map.get(key)
     }
 
     #[inline]
     pub fn insert_default(&self, endpoints: BTreeSet<Endpoint>) {
+        tracing::trace!("ClusterMap::insert_default");
         self.insert(None, None, endpoints);
     }
 
     #[inline]
     pub fn remove_endpoint(&self, needle: &Endpoint) -> bool {
+        tracing::trace!("ClusterMap::remove_endpoint");
         let locality = 'l: {
             for mut entry in self.map.iter_mut() {
                 let set = entry.value_mut();
@@ -403,6 +410,7 @@ where
 
     #[inline]
     pub fn remove_endpoint_if(&self, closure: impl Fn(&Endpoint) -> bool) -> bool {
+        tracing::trace!("ClusterMap::remove_endpoint_if");
         let locality = 'l: {
             for mut entry in self.map.iter_mut() {
                 let set = entry.value_mut();
@@ -432,6 +440,7 @@ where
 
     #[inline]
     pub fn iter(&self) -> dashmap::iter::Iter<'_, Option<Locality>, EndpointSet, S> {
+        tracing::trace!("ClusterMap::iter");
         self.map.iter()
     }
 
@@ -442,6 +451,7 @@ where
         locality: Option<Locality>,
         endpoint: Endpoint,
     ) -> Option<Endpoint> {
+        tracing::trace!("ClusterMap::replace");
         if let Some(raddr) = self.localities.get(&locality) {
             if *raddr != remote_addr {
                 tracing::trace!("not replacing locality endpoints");
@@ -467,6 +477,7 @@ where
 
     #[inline]
     pub fn endpoints(&self) -> Vec<Endpoint> {
+        tracing::trace!("ClusterMap::endpoints");
         let mut endpoints = Vec::with_capacity(self.num_of_endpoints());
 
         for set in self.map.iter() {
@@ -477,6 +488,7 @@ where
     }
 
     pub fn nth_endpoint(&self, mut index: usize) -> Option<Endpoint> {
+        tracing::trace!("ClusterMap::nth_endpoint");
         for set in self.iter() {
             let set = &set.value().endpoints;
             if index < set.len() {
@@ -490,6 +502,7 @@ where
     }
 
     pub fn filter_endpoints(&self, f: impl Fn(&Endpoint) -> bool) -> Vec<Endpoint> {
+        tracing::trace!("ClusterMap::filter_endpoints");
         let mut endpoints = Vec::new();
 
         for set in self.iter() {
@@ -517,6 +530,7 @@ where
         remote_addr: Option<std::net::IpAddr>,
         locality: Locality,
     ) {
+        tracing::trace!("ClusterMap::update_unlocated_endpoints");
         if let Some(raddr) = self.localities.get(&None) {
             if *raddr != remote_addr {
                 tracing::trace!("not updating locality");
@@ -537,6 +551,7 @@ where
 
     #[inline]
     fn do_remove_locality(&self, locality: &Option<Locality>) -> Option<EndpointSet> {
+        tracing::trace!("ClusterMap::do_remove_locality");
         self.localities.remove(locality);
 
         let ret = self.map.remove(locality).map(|(_k, v)| v);
@@ -549,6 +564,7 @@ where
 
     #[inline]
     pub fn remove_contributor(&self, remote_addr: Option<std::net::IpAddr>) {
+        tracing::trace!("ClusterMap::remove_contributor");
         self.localities.retain(|k, v| {
             let keep = *v != remote_addr;
             if !keep {
@@ -564,6 +580,7 @@ where
         remote_addr: Option<std::net::IpAddr>,
         locality: &Option<Locality>,
     ) -> Option<EndpointSet> {
+        tracing::trace!("ClusterMap::remove_locality");
         {
             if let Some(raddr) = self.localities.get(locality) {
                 if *raddr != remote_addr {
@@ -577,6 +594,7 @@ where
     }
 
     pub fn addresses_for_token(&self, token: Token, addrs: &mut Vec<EndpointAddress>) {
+        tracing::trace!("ClusterMap::addresses_for_token");
         if let Some(ma) = self.token_map.get(&token.0) {
             addrs.extend(ma.value().iter().cloned());
         }

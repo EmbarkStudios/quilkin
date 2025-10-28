@@ -41,6 +41,7 @@ impl LocalVersions {
 
     #[inline]
     pub fn get(&self, ty: &str) -> parking_lot::MutexGuard<'_, VersionMap> {
+        tracing::trace!("LocalVersions::get");
         let g = self
             .versions
             .iter()
@@ -304,6 +305,7 @@ pub fn handle_delta_discovery_responses<C: Configuration>(
                 None
             };
 
+            tracing::trace!(kind = type_url, nonce = %response.nonce, "yielding request");
             yield DeltaDiscoveryRequest {
                 type_url,
                 response_nonce: response.nonce,

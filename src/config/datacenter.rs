@@ -16,6 +16,7 @@ pub struct DatacenterMap {
 impl DatacenterMap {
     #[inline]
     pub fn insert(&self, ip: IpAddr, datacenter: Datacenter) -> Option<Datacenter> {
+        tracing::trace!("DatacenterMap::insert");
         let old = self.map.insert(ip, datacenter);
         self.version.fetch_add(1, Relaxed);
         old
@@ -23,11 +24,13 @@ impl DatacenterMap {
 
     #[inline]
     pub fn len(&self) -> usize {
+        tracing::trace!("DatacenterMap::len");
         self.map.len()
     }
 
     #[inline]
     pub fn is_empty(&self) -> bool {
+        tracing::trace!("DatacenterMap::is_empty");
         self.map.is_empty()
     }
 
@@ -38,16 +41,19 @@ impl DatacenterMap {
 
     #[inline]
     pub fn get(&self, key: &IpAddr) -> Option<dashmap::mapref::one::Ref<'_, IpAddr, Datacenter>> {
+        tracing::trace!("DatacenterMap::get");
         self.map.get(key)
     }
 
     #[inline]
     pub fn iter(&self) -> dashmap::iter::Iter<'_, IpAddr, Datacenter> {
+        tracing::trace!("DatacenterMap::iter");
         self.map.iter()
     }
 
     #[inline]
     pub fn remove(&self, ip: IpAddr) {
+        tracing::trace!("DatacenterMap::remove");
         let mut lock = self.removed.lock();
         let mut version = 0;
 
@@ -63,6 +69,7 @@ impl DatacenterMap {
 
     #[inline]
     pub fn removed(&self) -> Vec<SocketAddr> {
+        tracing::trace!("DatacenterMap::removed");
         std::mem::take(&mut self.removed.lock())
     }
 }
