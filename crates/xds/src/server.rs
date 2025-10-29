@@ -418,6 +418,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
             let buffer = ResponseBroadcastPropagationBuffer::default();
             let mut lag_amount: u64 = 0;
             let mut propagation_interval = tokio::time::interval(RESPONSE_PROPAGATION_INTERVAL);
+            propagation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
             loop {
                 tokio::select! {
@@ -850,6 +851,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
             let buffer = ResponseBroadcastPropagationBuffer::default();
             let mut lag_amount: u64 = 0;
             let mut propagation_interval = tokio::time::interval(RESPONSE_PROPAGATION_INTERVAL);
+            propagation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
             loop {
                 tokio::select! {
