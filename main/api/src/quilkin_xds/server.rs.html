@@ -998,7 +998,9 @@
 <a href="#997" id="997">997</a>
 <a href="#998" id="998">998</a>
 <a href="#999" id="999">999</a>
-<a href="#1000" id="1000">1000</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#1000" id="1000">1000</a>
+<a href="#1001" id="1001">1001</a>
+<a href="#1002" id="1002">1002</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2022 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -1418,6 +1420,7 @@
             </span><span class="kw">let </span>buffer = ResponseBroadcastPropagationBuffer::default();
             <span class="kw">let </span><span class="kw-2">mut </span>lag_amount: u64 = <span class="number">0</span>;
             <span class="kw">let </span><span class="kw-2">mut </span>propagation_interval = tokio::time::interval(RESPONSE_PROPAGATION_INTERVAL);
+            propagation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
             <span class="kw">loop </span>{
                 <span class="macro">tokio::select!</span> {
@@ -1850,6 +1853,7 @@
             </span><span class="kw">let </span>buffer = ResponseBroadcastPropagationBuffer::default();
             <span class="kw">let </span><span class="kw-2">mut </span>lag_amount: u64 = <span class="number">0</span>;
             <span class="kw">let </span><span class="kw-2">mut </span>propagation_interval = tokio::time::interval(RESPONSE_PROPAGATION_INTERVAL);
+            propagation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
             <span class="kw">loop </span>{
                 <span class="macro">tokio::select!</span> {
