@@ -369,7 +369,7 @@ impl MdsClient {
 }
 
 pub(crate) struct DeltaClientStream {
-    req_tx: tokio::sync::mpsc::Sender<DeltaDiscoveryRequest>,
+    req_tx: tokio::sync::mpsc::UnboundedSender<DeltaDiscoveryRequest>,
 }
 
 impl DeltaClientStream {
@@ -385,20 +385,20 @@ impl DeltaClientStream {
             // Since we are doing exploratory requests to see if the remote endpoint supports delta streams, we unfortunately
             // need to actually send something before the full roundtrip occurs. This can be removed once delta discovery
             // is fully rolled out
-            dcs.req_tx
-                .send(DeltaDiscoveryRequest {
-                    node: Some(Node {
-                        id: identifier.clone(),
-                        user_agent_name: "quilkin".into(),
-                        ..Default::default()
-                    }),
-                    type_url: "ignore-me".to_owned(),
+            dcs.req_tx.send(DeltaDiscoveryRequest {
+                node: Some(Node {
+                    id: identifier.clone(),
+                    user_agent_name: "quilkin".into(),
                     ..Default::default()
-                })
-                .await?;
+                }),
+                type_url: "ignore-me".to_owned(),
+                ..Default::default()
+            })?;
 
             if let Ok(stream) = client
-                .subscribe_delta_resources(tokio_stream::wrappers::ReceiverStream::new(requests_rx))
+                .subscribe_delta_resources(tokio_stream::wrappers::UnboundedReceiverStream::new(
+                    requests_rx,
+                ))
                 .in_current_span()
                 .await
             {
@@ -413,27 +413,30 @@ impl DeltaClientStream {
         // Since we are doing exploratory requests to see if the remote endpoint supports delta streams, we unfortunately
         // need to actually send something before the full roundtrip occurs. This can be removed once delta discovery
         // is fully rolled out
-        dcs.req_tx
-            .send(DeltaDiscoveryRequest {
-                node: Some(Node {
-                    id: identifier,
-                    user_agent_name: "quilkin".into(),
-                    ..Default::default()
-                }),
-                type_url: "ignore-me".to_owned(),
+        dcs.req_tx.send(DeltaDiscoveryRequest {
+            node: Some(Node {
+                id: identifier,
+                user_agent_name: "quilkin".into(),
                 ..Default::default()
-            })
-            .await?;
+            }),
+            type_url: "ignore-me".to_owned(),
+            ..Default::default()
+        })?;
 
         let stream = client
-            .delta_aggregated_resources(tokio_stream::wrappers::ReceiverStream::new(requests_rx))
+            .delta_aggregated_resources(tokio_stream::wrappers::UnboundedReceiverStream::new(
+                requests_rx,
+            ))
             .in_current_span()
             .await?;
         Ok((dcs, stream.into_inner(), ep))
     }
 
-    pub(crate) fn new() -> (Self, tokio::sync::mpsc::Receiver<DeltaDiscoveryRequest>) {
-        let (req_tx, requests_rx) = tokio::sync::mpsc::channel(REQUEST_BUFFER_SIZE);
+    pub(crate) fn new() -> (
+        Self,
+        tokio::sync::mpsc::UnboundedReceiver<DeltaDiscoveryRequest>,
+    ) {
+        let (req_tx, requests_rx) = tokio::sync::mpsc::unbounded_channel();
         (Self { req_tx }, requests_rx)
     }
 
@@ -471,18 +474,13 @@ impl DeltaClientStream {
     /// Sends an n/ack "request" in response to the remote response
     #[inline]
     pub(crate) fn ack_response(&self, ack_request: DeltaDiscoveryRequest) -> Result<()> {
-        // Save 10% or at least 10 spots of the request buffer for refresh requests
-        if self.req_tx.capacity() < (REQUEST_BUFFER_SIZE / 10).max(10) {
-            Err(eyre::eyre!("request buffer congested, dropping ACK/NACK"))
-        } else {
-            self.send_request(ack_request)
-        }
+        self.send_request(ack_request)
     }
 
     #[inline]
     fn send_request(&self, request: DeltaDiscoveryRequest) -> Result<()> {
         crate::metrics::actions_total(KIND_CLIENT, "send_request").inc();
-        self.req_tx.try_send(request)?;
+        self.req_tx.send(request)?;
         Ok(())
     }
 }
