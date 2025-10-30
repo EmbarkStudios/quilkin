@@ -2,18 +2,18 @@
 
 use corro_api_types::SqliteValue;
 use corro_types::{agent::SplitPool, api::Statement};
-use corrosion::client::{
-    read::{FromSqlValue, ServerRow},
-    write::UpdateBuilder,
+use corrosion::db::{
+    read::{self, FromSqlValue, ServerRow},
+    write,
 };
-use corrosion_utils as tu;
+use corrosion_tests::{self as ct, Cell};
 use quilkin_types::{AddressKind, Endpoint, IcaoCode};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
 
 async fn exec_all<const N: usize>(v: &mut smallvec::SmallVec<[Statement; N]>, sp: &SplitPool) {
     let mut conn = sp.write_priority().await.unwrap();
     let tx = conn.transaction().unwrap();
-    tu::exec(&tx, v.iter()).unwrap();
+    ct::exec(&tx, v.iter()).unwrap();
     tx.commit().unwrap();
     v.clear();
 }
@@ -57,12 +57,12 @@ fn make_row(i: u32) -> ServerRow {
 const PREP_PEER: SocketAddrV6 = SocketAddrV6::new(Ipv6Addr::from_bits(0xaaffeeff), 8999, 0, 0);
 
 async fn prep(name: &str, count: u32) -> SplitPool {
-    let sp = tu::new_split_pool(name, corrosion::schema::SCHEMA).await;
+    let sp = ct::new_split_pool(name, corrosion::schema::SCHEMA).await;
 
     const MAX: usize = 100;
 
     let mut iv = smallvec::SmallVec::<[_; MAX]>::new();
-    let mut s = corrosion::client::write::Server::for_peer(PREP_PEER, &mut iv);
+    let mut s = write::Server::for_peer(PREP_PEER, &mut iv);
 
     for i in 0..count {
         let row = make_row(i);
@@ -123,7 +123,7 @@ async fn collects_old_servers() {
 
     // Remove the DC as a contributor, but set the time of the update to an hour in the past
     {
-        let mut dc = corrosion::client::write::Datacenter(&mut v);
+        let mut dc = corrosion::db::write::Datacenter(&mut v);
         dc.remove(PREP_PEER, Some(fake_time));
         exec_all(dc.0, &sp).await;
     }
@@ -139,7 +139,7 @@ async fn collects_old_servers() {
 
     // Add a new server that should not be deleted since it still has a contributor
     {
-        let mut s = corrosion::client::write::Server::for_peer(PREP_PEER, &mut v);
+        let mut s = write::Server::for_peer(PREP_PEER, &mut v);
         s.upsert(
             &Endpoint {
                 address: AddressKind::Ip(Ipv6Addr::from_bits(0x888888888888).into()),
@@ -154,7 +154,7 @@ async fn collects_old_servers() {
 
     // Do the actual removal of the servers with no contributors that are older than 30 minutes
     {
-        let mut s = corrosion::client::write::Server::for_peer(PREP_PEER, &mut v);
+        let mut s = write::Server::for_peer(PREP_PEER, &mut v);
         s.reap_old(std::time::Duration::from_secs(60 * 30));
         exec_all(s.statements, &sp).await;
     }
@@ -164,19 +164,18 @@ async fn collects_old_servers() {
         let statement = conn
             .prepare("SELECT endpoint,icao,tokens,json(contributors) FROM servers")
             .unwrap();
-        tu::query_to_string(statement, |sql, row| {
-            row.add_cell(tu::Cell::new(
-                &corrosion::client::read::parse_endpoint(&sql.get::<_, String>(0).unwrap())
+        ct::query_to_string(statement, |sql, row| {
+            row.add_cell(Cell::new(
+                &read::parse_endpoint(&sql.get::<_, String>(0).unwrap())
                     .unwrap()
                     .to_string(),
             ));
-            row.add_cell(tu::Cell::new(&sql.get::<_, String>(1).unwrap()));
-            row.add_cell(tu::Cell::new(&format!(
+            row.add_cell(Cell::new(&sql.get::<_, String>(1).unwrap()));
+            row.add_cell(Cell::new(&format!(
                 "{:?}",
-                corrosion::client::read::deserialize_token_set(&sql.get::<_, String>(2).unwrap())
-                    .unwrap()
+                read::deserialize_token_set(&sql.get::<_, String>(2).unwrap()).unwrap()
             )));
-            row.add_cell(tu::Cell::new(
+            row.add_cell(Cell::new(
                 &serde_json::from_str::<serde_json::Value>(&sql.get::<_, String>(3).unwrap())
                     .unwrap()
                     .to_string(),
@@ -197,17 +196,16 @@ async fn updates_servers() {
         let statement = conn
             .prepare("SELECT endpoint,icao,tokens FROM servers WHERE rowid = 1")
             .unwrap();
-        tu::query_to_string(statement, |sql, row| {
-            row.add_cell(tu::Cell::new(
-                &corrosion::client::read::parse_endpoint(&sql.get::<_, String>(0).unwrap())
+        ct::query_to_string(statement, |sql, row| {
+            row.add_cell(Cell::new(
+                &read::parse_endpoint(&sql.get::<_, String>(0).unwrap())
                     .unwrap()
                     .to_string(),
             ));
-            row.add_cell(tu::Cell::new(&sql.get::<_, String>(1).unwrap()));
-            row.add_cell(tu::Cell::new(&format!(
+            row.add_cell(Cell::new(&sql.get::<_, String>(1).unwrap()));
+            row.add_cell(Cell::new(&format!(
                 "{:?}",
-                corrosion::client::read::deserialize_token_set(&sql.get::<_, String>(2).unwrap())
-                    .unwrap()
+                read::deserialize_token_set(&sql.get::<_, String>(2).unwrap()).unwrap()
             )));
         })
     };
@@ -222,8 +220,8 @@ async fn updates_servers() {
     let mut v = smallvec::SmallVec::<[_; 2]>::new();
     // Update just the ICAO
     {
-        let mut s = corrosion::client::write::Server::for_peer(PREP_PEER, &mut v);
-        s.update(UpdateBuilder::new(&ep).update_icao(IcaoCode::new_testing([b'Z'; 4])));
+        let mut s = write::Server::for_peer(PREP_PEER, &mut v);
+        s.update(&ep, Some(IcaoCode::new_testing([b'Z'; 4])), None);
         exec_all(s.statements, &sp).await;
     }
 
@@ -231,8 +229,8 @@ async fn updates_servers() {
 
     // Update just the tokenset
     {
-        let mut s = corrosion::client::write::Server::for_peer(PREP_PEER, &mut v);
-        s.update(UpdateBuilder::new(&ep).update_tokens(&[[b'Z'; 20]; 1].into()));
+        let mut s = write::Server::for_peer(PREP_PEER, &mut v);
+        s.update(&ep, None, Some(&[[b'Z'; 20]; 1].into()));
         exec_all(s.statements, &sp).await;
     }
 
@@ -240,11 +238,11 @@ async fn updates_servers() {
 
     // Update both
     {
-        let mut s = corrosion::client::write::Server::for_peer(PREP_PEER, &mut v);
+        let mut s = write::Server::for_peer(PREP_PEER, &mut v);
         s.update(
-            UpdateBuilder::new(&ep)
-                .update_icao(IcaoCode::new_testing([b'Y'; 4]))
-                .update_tokens(&[[b'Y'; 10]; 1].into()),
+            &ep,
+            Some(IcaoCode::new_testing([b'Y'; 4])),
+            Some(&[[b'Y'; 10]; 1].into()),
         );
         exec_all(s.statements, &sp).await;
     }
@@ -262,10 +260,10 @@ async fn updates_datacenters() {
         let statement = conn
             .prepare("SELECT ip,icao,port FROM dc WHERE rowid = 1")
             .unwrap();
-        tu::query_to_string(statement, |sql, row| {
-            row.add_cell(tu::Cell::new(&sql.get::<_, String>(0).unwrap()));
-            row.add_cell(tu::Cell::new(&sql.get::<_, String>(1).unwrap()));
-            row.add_cell(tu::Cell::new(&sql.get::<_, u16>(2).unwrap().to_string()));
+        ct::query_to_string(statement, |sql, row| {
+            row.add_cell(Cell::new(&sql.get::<_, String>(0).unwrap()));
+            row.add_cell(Cell::new(&sql.get::<_, String>(1).unwrap()));
+            row.add_cell(Cell::new(&sql.get::<_, u16>(2).unwrap().to_string()));
         })
     };
 
@@ -274,7 +272,7 @@ async fn updates_datacenters() {
     let mut v = smallvec::SmallVec::<[_; 2]>::new();
     // Update just the ICAO
     {
-        let mut dc = corrosion::client::write::Datacenter(&mut v);
+        let mut dc = write::Datacenter(&mut v);
         dc.update(PREP_PEER, None, Some(IcaoCode::new_testing([b'Z'; 4])));
         exec_all(dc.0, &sp).await;
     }
@@ -283,7 +281,7 @@ async fn updates_datacenters() {
 
     // Update just the port
     {
-        let mut dc = corrosion::client::write::Datacenter(&mut v);
+        let mut dc = write::Datacenter(&mut v);
         dc.update(PREP_PEER, Some(9876), None);
         exec_all(dc.0, &sp).await;
     }
@@ -292,7 +290,7 @@ async fn updates_datacenters() {
 
     // Update both
     {
-        let mut dc = corrosion::client::write::Datacenter(&mut v);
+        let mut dc = write::Datacenter(&mut v);
         dc.update(
             PREP_PEER,
             Some(1234),
