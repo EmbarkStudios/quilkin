@@ -3,7 +3,7 @@
 ## Requirements
 
 * A \*nix terminal
-* A binary release of Quilkin from the [Github releases page](https://github.com/googleforgames/quilkin/releases) or by running `cargo install quilkin`
+* A binary release of Quilkin from the [Github releases page](https://github.com/EmbarkStudios/quilkin/releases) or by running `cargo install quilkin`
 * [ncat](https://www.google.com/search?q=ncat)
 * [netcat](http://netcat.sourceforge.net/)
 
@@ -68,4 +68,4 @@ Congratulations! You have successfully routed a UDP packet and back again with Q
 What's next?
 
 * Run through the [Quilkin with Agones quickstart](agones-xonotic-sidecar.md).
-* Have a look at some of [the examples](https://github.com/googleforgames/quilkin/blob/{{GITHUB_REF_NAME}}/examples) we have.
+* Have a look at some of [the examples](https://github.com/EmbarkStudios/quilkin/blob/{{GITHUB_REF_NAME}}/examples) we have.

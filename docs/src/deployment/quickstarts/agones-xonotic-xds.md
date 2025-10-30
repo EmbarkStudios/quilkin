@@ -1,7 +1,7 @@
 # Quickstart: Quilkin with Agones and Xonotic (xDS)
 
 {{#include _agones.md}}
-* A local copy of the [Quilkin Binary](https://github.com/googleforgames/quilkin/releases).
+* A local copy of the [Quilkin Binary](https://github.com/EmbarkStudios/quilkin/releases).
 
 ## 1. Overview
 
@@ -21,7 +21,7 @@ To install Quilkin as an Agones integrated xDS control plane, we can create a de
 Run the following:
 
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/xds-control-plane.yaml
+kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/xds-control-plane.yaml
 ```
 
 This applies several resources to your cluster:
@@ -59,7 +59,7 @@ To install the Quilkin Proxy pool which connects to the above xDS provider, we c
 proxy instances that point to the aforementioned Service, like so:
 
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/proxy-pool.yaml
+kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/proxy-pool.yaml
 ```
 
 This will set up three instances of Quilkin running as `quilkin proxy --management-server http://quilkin-manage-agones:80`
@@ -82,7 +82,7 @@ manage agones` instance.
 In another terminal, run:  `kubectl port-forward deployments/quilkin-proxies 8001:8000`, to port forward the
 [admin endpoint](../admin.md) locally to port 8001, which we can then query.
 
-Go back to your original terminal and run `curl -s http://localhost:8001/config` 
+Go back to your original terminal and run `curl -s http://localhost:8001/config`
 
 > If you have [jq](https://stedolan.github.io/jq/) installed, run `curl -s http://localhost:8001/config | jq` for a
 > nicely formatted JSON output.
@@ -122,7 +122,7 @@ $ curl -s http://localhost:8001/config | jq
 This shows us the current configuration of the proxies coming from the xDS server created via `quilkin manage
 agones`. The most interesting part that we see here, is that we have a matching set of
 [Filters](../../services/proxy/filters.md) that are found in the `ConfigMap` in the
-[xds-control-plane.yaml](https://github.com/googleforgames/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/xds-control-plane.yaml)
+[xds-control-plane.yaml](https://github.com/EmbarkStudios/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/xds-control-plane.yaml)
 we installed earlier.
 
 ## 4. Create the Agones Fleet
@@ -131,10 +131,10 @@ Now we will create an [Agones Fleet](https://agones.dev/site/docs/reference/flee
 game servers.
 
 Thankfully, Agones Fleets require no specific configuration to work with Quilkin proxies, so this yaml is a
-[standard Agones Fleet configuration](https://github.com/googleforgames/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/fleet.yaml)
+[standard Agones Fleet configuration](https://github.com/EmbarkStudios/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/fleet.yaml)
 
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/fleet.yaml
+kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/fleet.yaml
 ```
 
 Run `kubectl get gameservers` until all the `GameServer` records show that they are `Ready` and able to take players.
@@ -161,7 +161,7 @@ Since you can add annotations to `GameServers` at
 and apply the annotation at the same time!
 
 ```shell
-kubectl create -f https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/gameserverallocation.yaml
+kubectl create -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/gameserverallocation.yaml
 ```
 
 If we check our `GameServers` now, we should see that one of them has moved to the `Allocated` state, marking it as
@@ -266,7 +266,7 @@ NAME              TYPE           CLUSTER-IP    EXTERNAL-IP     PORT(S)          
 quilkin-proxies   LoadBalancer   10.109.0.12   35.246.94.14    7777:30174/UDP   3h22m
 ```
 
-We have a [Quilkin config yaml](https://github.com/googleforgames/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/client-token.yaml)
+We have a [Quilkin config yaml](https://github.com/EmbarkStudios/quilkin/blob/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/client-token.yaml)
 file all ready for you, that is configured to append the routing token `456` to each
 packet that passes through it, via the power of a
 [Concatenate](../../services/proxy/filters/concatenate.md) Filter.
@@ -274,7 +274,7 @@ packet that passes through it, via the power of a
 Download `client-token.yaml` locally, so you can edit it:
 
 ```shell
-curl https://raw.githubusercontent.com/googleforgames/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/client-token.yaml --output client-token.yaml
+curl https://raw.githubusercontent.com/EmbarkStudios/quilkin/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds/client-token.yaml --output client-token.yaml
 ```
 
 We then take the EXTERNAL-IP and port from the `quilkin-proxies` service, and replace the`${LOADBALANCER_IP}`
