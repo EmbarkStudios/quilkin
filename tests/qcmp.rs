@@ -64,7 +64,7 @@ async fn ping(port: u16) {
     // is bug.
     let delay = reply.round_trip_delay(recv_time).unwrap();
     assert!(
-        MAX > delay.duration(),
+        MAX >= delay.duration(),
         "Delay {:?} greater than {MAX:?}",
         delay.duration(),
     );
