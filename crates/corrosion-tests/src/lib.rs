@@ -364,7 +364,7 @@ pub fn query_to_string(
     String::from_utf8(out).unwrap()
 }
 
-pub async fn assert_sub<T>(
+pub async fn assert_sub_event_eq<T>(
     rx: &mut tokio::sync::mpsc::Receiver<pubsub::SubscriptionEvent>,
     expected: &pubsub::TypedQueryEvent<T>,
 ) -> Option<T>

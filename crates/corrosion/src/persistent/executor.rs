@@ -17,7 +17,8 @@ use std::{
 
 pub type BroadcastTx = tokio::sync::mpsc::Sender<broadcast::BroadcastInput>;
 
-///
+/// A DB mutator that will broadcast changes to any subscribers when a mutation
+/// occurs that matches a subscriber's query
 #[derive(Clone)]
 pub struct BroadcastingTransactor {
     pool: SplitPool,

@@ -352,12 +352,12 @@ async fn single_sub() {
     let mut cur_cid = 0;
 
     // We always get a state of the world first, in our case the DB is empty
-    corrosion_tests::assert_sub::<ServerRow>(
+    corrosion_tests::assert_sub_event_eq::<ServerRow>(
         &mut rx,
         &TypedQueryEvent::Columns(vec!["endpoint".into(), "icao".into(), "tokens".into()]),
     )
     .await;
-    corrosion_tests::assert_sub::<ServerRow>(
+    corrosion_tests::assert_sub_event_eq::<ServerRow>(
         &mut rx,
         &TypedQueryEvent::EndOfQuery {
             time: 0.,
@@ -395,7 +395,7 @@ async fn single_sub() {
             pool.broadcast_changes(&mut states).await;
             cur_cid += 1;
 
-            corrosion_tests::assert_sub(
+            corrosion_tests::assert_sub_event_eq(
                 &mut rx,
                 &TypedQueryEvent::Change(
                     ChangeType::Insert,
@@ -423,7 +423,7 @@ async fn single_sub() {
             pool.broadcast_changes(&mut states).await;
             cur_cid += 1;
 
-            corrosion_tests::assert_sub(
+            corrosion_tests::assert_sub_event_eq(
                 &mut rx,
                 &TypedQueryEvent::Change(
                     ChangeType::Update,
@@ -451,7 +451,7 @@ async fn single_sub() {
             pool.broadcast_changes(&mut states).await;
             cur_cid += 1;
 
-            corrosion_tests::assert_sub(
+            corrosion_tests::assert_sub_event_eq(
                 &mut rx,
                 &TypedQueryEvent::Change(
                     ChangeType::Delete,
@@ -521,10 +521,10 @@ async fn multiple_subs() {
     let mut cur_cid = 0;
 
     let mut assert_all = async |tqe| {
-        corrosion_tests::assert_sub::<ServerRow>(&mut orx, &tqe).await;
+        corrosion_tests::assert_sub_event_eq::<ServerRow>(&mut orx, &tqe).await;
 
         for sub in &mut multi_subs {
-            corrosion_tests::assert_sub::<ServerRow>(sub, &tqe).await;
+            corrosion_tests::assert_sub_event_eq::<ServerRow>(sub, &tqe).await;
         }
     };
 

@@ -16,56 +16,58 @@ pub struct InitializedDb {
     pub actor_id: ActorId,
 }
 
-pub async fn setup(db_path: &crate::Path, schema: &str) -> eyre::Result<InitializedDb> {
-    let partial_schema = corro_types::schema::parse_sql(schema)?;
+impl InitializedDb {
+    pub async fn setup(db_path: &crate::Path, schema: &str) -> eyre::Result<Self> {
+        let partial_schema = corro_types::schema::parse_sql(schema)?;
 
-    let actor_id = {
-        // we need to set auto_vacuum before any tables are created
-        let db_conn = rusqlite::Connection::open(db_path)?;
-        db_conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL")?;
+        let actor_id = {
+            // we need to set auto_vacuum before any tables are created
+            let db_conn = rusqlite::Connection::open(db_path)?;
+            db_conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL")?;
 
-        let conn = CrConn::init(db_conn)?;
-        conn.query_row("SELECT crsql_site_id();", [], |row| {
-            row.get::<_, ActorId>(0)
-        })?
-    };
-
-    let write_sema = Arc::new(tokio::sync::Semaphore::new(1));
-    let pool = SplitPool::create(&db_path, write_sema.clone()).await?;
-
-    let clock = Arc::new(
-        uhlc::HLCBuilder::default()
-            .with_id(actor_id.try_into().unwrap())
-            .with_max_delta(std::time::Duration::from_millis(300))
-            .build(),
-    );
-
-    let schema = {
-        let mut conn = pool.write_priority().await?;
-
-        let old_schema = {
-            corro_types::agent::migrate(clock.clone(), &mut conn)?;
-            let mut schema = corro_types::schema::init_schema(&conn)?;
-            schema.constrain()?;
-
-            schema
+            let conn = CrConn::init(db_conn)?;
+            conn.query_row("SELECT crsql_site_id();", [], |row| {
+                row.get::<_, ActorId>(0)
+            })?
         };
 
-        tokio::task::block_in_place(|| update_schema(old_schema, partial_schema, &mut conn))?
-    };
+        let write_sema = Arc::new(tokio::sync::Semaphore::new(1));
+        let pool = SplitPool::create(&db_path, write_sema.clone()).await?;
 
-    Ok(InitializedDb {
-        pool,
-        clock,
-        schema: Arc::new(schema),
-        actor_id,
-    })
+        let clock = Arc::new(
+            uhlc::HLCBuilder::default()
+                .with_id(actor_id.try_into().unwrap())
+                .with_max_delta(std::time::Duration::from_millis(300))
+                .build(),
+        );
+
+        let schema = {
+            let mut conn = pool.write_priority().await?;
+
+            let old_schema = {
+                corro_types::agent::migrate(clock.clone(), &mut conn)?;
+                let mut schema = corro_types::schema::init_schema(&conn)?;
+                schema.constrain()?;
+
+                schema
+            };
+
+            tokio::task::block_in_place(|| update_schema(&mut conn, old_schema, partial_schema))?
+        };
+
+        Ok(Self {
+            pool,
+            clock,
+            schema: Arc::new(schema),
+            actor_id,
+        })
+    }
 }
 
 pub fn update_schema(
+    conn: &mut WriteConn,
     old_schema: Schema,
     new_schema: Schema,
-    conn: &mut WriteConn,
 ) -> eyre::Result<Schema> {
     // clone the previous schema and apply
     let mut new_schema = {
