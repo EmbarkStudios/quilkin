@@ -76,7 +76,7 @@ test = false
 
 [dependencies]
 # Local
-quilkin-macros = { version = "0.10.0-dev", path = "./crates/macros" }
+quilkin-macros = { version = "0.10.0", path = "./crates/macros" }
 quilkin-proto.workspace = true
 quilkin-types.workspace = true
 quilkin-xds.workspace = true
@@ -205,7 +205,7 @@ members = [
 [workspace.package]
 license = "Apache-2.0"
 edition = "2024"
-version = "0.10.0-dev"
+version = "0.10.0"
 
 [workspace.dependencies]
 arc-swap = { version = "1.7.1", features = ["serde"] }
@@ -234,9 +234,9 @@ prometheus = { version = "0.14", default-features = false }
 prost = "0.14"
 prost-types = "0.14"
 quilkin = { path = "." }
-quilkin-proto = {version = "0.10.0-dev", path = "crates/quilkin-proto" }
-quilkin-types = { version = "0.10.0-dev", path = "crates/types" }
-quilkin-xds = {version = "0.10.0-dev", path = "crates/xds" }
+quilkin-proto = {version = "0.10.0", path = "crates/quilkin-proto" }
+quilkin-types = { version = "0.10.0", path = "crates/types" }
+quilkin-xds = {version = "0.10.0", path = "crates/xds" }
 rand = "0.9"
 regex = "1.11.1"
 serde = { version = "1.0.219", features = ["derive", "rc"] }

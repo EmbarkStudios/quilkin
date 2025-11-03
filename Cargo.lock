@@ -1185,7 +1185,7 @@ dependencies = [
 
 [[package]]
 name = "corrosion-utils"
-version = "0.10.0-dev"
+version = "0.10.0"
 dependencies = [
  "camino",
  "corro-api-types",
@@ -3956,7 +3956,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin"
-version = "0.10.0-dev"
+version = "0.10.0"
 dependencies = [
  "arc-swap",
  "async-stream",
@@ -4047,7 +4047,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-macros"
-version = "0.10.0-dev"
+version = "0.10.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4056,7 +4056,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-proto"
-version = "0.10.0-dev"
+version = "0.10.0"
 dependencies = [
  "prost",
  "prost-types",
@@ -4066,7 +4066,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-types"
-version = "0.10.0-dev"
+version = "0.10.0"
 dependencies = [
  "data-encoding",
  "eyre",
@@ -4088,7 +4088,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-xds"
-version = "0.10.0-dev"
+version = "0.10.0"
 dependencies = [
  "arc-swap",
  "async-stream",
