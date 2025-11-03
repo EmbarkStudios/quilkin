@@ -362,7 +362,6 @@ pub async fn broadcast_changes(
     let conn = pool.read().await?;
 
     tokio::task::block_in_place(|| {
-        // TODO: make this more generic so both sync and local changes can use it.
         let mut prepped = conn.prepare_cached(
             r#"
                 SELECT "table", pk, cid, val, col_version, db_version, seq, site_id, cl
