@@ -36,3 +36,7 @@ accepted = ["ISC", "OpenSSL"]
 
 [xxhash-rust]
 accepted = ["BSL-1.0"]
+
+# TODO is it acceptable?
+[inferno]
+accepted = ["CDDL-1.0"]
