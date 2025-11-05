@@ -102,7 +102,13 @@
 <a href="#101" id="101">101</a>
 <a href="#102" id="102">102</a>
 <a href="#103" id="103">103</a>
-<a href="#104" id="104">104</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#104" id="104">104</a>
+<a href="#105" id="105">105</a>
+<a href="#106" id="106">106</a>
+<a href="#107" id="107">107</a>
+<a href="#108" id="108">108</a>
+<a href="#109" id="109">109</a>
+<a href="#110" id="110">110</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -118,92 +124,98 @@
  * limitations under the License.
  */
 
-</span><span class="doccomment">/// Spawns a task to periodically update the heap stat metrics from our tracking allocator
-</span><span class="attr">#[cfg(feature = <span class="string">"heap-stats"</span>)]
-</span><span class="kw">pub fn </span>spawn_heap_stats_updates(period: std::time::Duration, <span class="kw-2">mut </span>srx: <span class="kw">crate</span>::signal::ShutdownRx) {
-    <span class="kw">use </span><span class="kw">crate</span>::metrics::registry;
-    <span class="kw">use </span>once_cell::sync::Lazy;
-    <span class="kw">use </span>prometheus::{IntCounterVec, IntGaugeVec};
+</span><span class="macro">cfg_if::cfg_if!</span> {
+    <span class="kw">if </span><span class="attr">#[cfg(feature = <span class="string">"jemalloc"</span>)] </span>{
+        <span class="kw">pub fn </span>spawn_heap_stats_updates(_period: std::time::Duration, _srx: <span class="kw">crate</span>::signal::ShutdownRx) {}
+    } <span class="kw">else if </span><span class="attr">#[cfg(feature = <span class="string">"heap-stats"</span>)] </span>{
+        <span class="doccomment">/// Spawns a task to periodically update the heap stat metrics from our tracking allocator
+        </span><span class="kw">pub fn </span>spawn_heap_stats_updates(period: std::time::Duration, <span class="kw-2">mut </span>srx: <span class="kw">crate</span>::signal::ShutdownRx) {
+            <span class="kw">use </span><span class="kw">crate</span>::metrics::registry;
+            <span class="kw">use </span>once_cell::sync::Lazy;
+            <span class="kw">use </span>prometheus::{IntCounterVec, IntGaugeVec};
 
-    <span class="kw">static </span>BYTES_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
-        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
-            <span class="macro">prometheus::opts!</span> {
-                <span class="string">"allocation_bytes_total"</span>,
-                <span class="string">"total number of allocated bytes"</span>,
-            },
-            <span class="kw-2">&amp;</span>[],
-            registry(),
-        }
-        .unwrap()
-    });
-
-    <span class="kw">static </span>ALLOCS_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
-        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
-            <span class="macro">prometheus::opts!</span> {
-                <span class="string">"allocation_total"</span>,
-                <span class="string">"total number of allocations"</span>,
-            },
-            <span class="kw-2">&amp;</span>[],
-            registry(),
-        }
-        .unwrap()
-    });
-
-    <span class="kw">static </span>EXTANT_SIZE: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
-        <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
-            <span class="macro">prometheus::opts!</span> {
-                <span class="string">"extant_allocation_size"</span>,
-                <span class="string">"current total of extant allocation bytes"</span>,
-            },
-            <span class="kw-2">&amp;</span>[],
-            registry(),
-        }
-        .unwrap()
-    });
-
-    <span class="kw">static </span>EXTANT_COUNT: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
-        <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
-            <span class="macro">prometheus::opts!</span> {
-                <span class="string">"extant_allocation_count"</span>,
-                <span class="string">"current number of extant allocations"</span>,
-            },
-            <span class="kw-2">&amp;</span>[],
-            registry(),
-        }
-        .unwrap()
-    });
-
-    tokio::task::spawn(<span class="kw">async move </span>{
-        <span class="kw">let </span><span class="kw-2">mut </span>bytes_total = <span class="number">0u64</span>;
-        <span class="kw">let </span><span class="kw-2">mut </span>alloc_total = <span class="number">0u64</span>;
-
-        <span class="kw">loop </span>{
-            <span class="kw">if </span>tokio::time::timeout(period, srx.changed()).<span class="kw">await</span>.is_err() {
-                <span class="kw">let </span>stats = <span class="kw">super</span>::tracking::Allocator::stats();
-
-                BYTES_TOTAL
-                    .with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[])
-                    .inc_by(stats.cumul_alloc_size - bytes_total);
-                bytes_total = stats.cumul_alloc_size;
-                ALLOCS_TOTAL
-                    .with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[])
-                    .inc_by(stats.cumul_alloc_count - alloc_total);
-                alloc_total = stats.cumul_alloc_count;
-
-                <span class="kw">if let </span><span class="prelude-val">Ok</span>(val) = stats.current_allocated_size().try_into() {
-                    EXTANT_SIZE.with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[]).set(val);
+            <span class="kw">static </span>BYTES_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
+                <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
+                    <span class="macro">prometheus::opts!</span> {
+                        <span class="string">"allocation_bytes_total"</span>,
+                        <span class="string">"total number of allocated bytes"</span>,
+                    },
+                    <span class="kw-2">&amp;</span>[],
+                    registry(),
                 }
-                <span class="kw">if let </span><span class="prelude-val">Ok</span>(val) = stats.current_allocation_count().try_into() {
-                    EXTANT_COUNT.with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[]).set(val);
+                .unwrap()
+            });
+
+            <span class="kw">static </span>ALLOCS_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
+                <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
+                    <span class="macro">prometheus::opts!</span> {
+                        <span class="string">"allocation_total"</span>,
+                        <span class="string">"total number of allocations"</span>,
+                    },
+                    <span class="kw-2">&amp;</span>[],
+                    registry(),
                 }
-            } <span class="kw">else </span>{
-                <span class="macro">tracing::trace!</span>(<span class="string">"exiting heap-stats task"</span>);
-                <span class="kw">break</span>;
-            }
+                .unwrap()
+            });
+
+            <span class="kw">static </span>EXTANT_SIZE: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
+                <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
+                    <span class="macro">prometheus::opts!</span> {
+                        <span class="string">"extant_allocation_size"</span>,
+                        <span class="string">"current total of extant allocation bytes"</span>,
+                    },
+                    <span class="kw-2">&amp;</span>[],
+                    registry(),
+                }
+                .unwrap()
+            });
+
+            <span class="kw">static </span>EXTANT_COUNT: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
+                <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
+                    <span class="macro">prometheus::opts!</span> {
+                        <span class="string">"extant_allocation_count"</span>,
+                        <span class="string">"current number of extant allocations"</span>,
+                    },
+                    <span class="kw-2">&amp;</span>[],
+                    registry(),
+                }
+                .unwrap()
+            });
+
+            tokio::task::spawn(<span class="kw">async move </span>{
+                <span class="kw">let </span><span class="kw-2">mut </span>bytes_total = <span class="number">0u64</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>alloc_total = <span class="number">0u64</span>;
+
+                <span class="kw">loop </span>{
+                    <span class="kw">if </span>tokio::time::timeout(period, srx.changed()).<span class="kw">await</span>.is_err() {
+                        <span class="kw">let </span>stats = <span class="kw">super</span>::tracking::Allocator::stats();
+
+                        BYTES_TOTAL
+                            .with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[])
+                            .inc_by(stats.cumul_alloc_size - bytes_total);
+                        bytes_total = stats.cumul_alloc_size;
+                        ALLOCS_TOTAL
+                            .with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[])
+                            .inc_by(stats.cumul_alloc_count - alloc_total);
+                        alloc_total = stats.cumul_alloc_count;
+
+                        <span class="kw">if let </span><span class="prelude-val">Ok</span>(val) = stats.current_allocated_size().try_into() {
+                            EXTANT_SIZE.with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[]).set(val);
+                        }
+                        <span class="kw">if let </span><span class="prelude-val">Ok</span>(val) = stats.current_allocation_count().try_into() {
+                            EXTANT_COUNT.with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[]).set(val);
+                        }
+                    } <span class="kw">else </span>{
+                        <span class="macro">tracing::trace!</span>(<span class="string">"exiting heap-stats task"</span>);
+                        <span class="kw">break</span>;
+                    }
+                }
+            });
         }
-    });
+    } <span class="kw">else if </span><span class="attr">#[cfg(feature = <span class="string">"mimalloc"</span>)] </span>{
+        <span class="kw">pub fn </span>spawn_heap_stats_updates(_period: std::time::Duration, _srx: <span class="kw">crate</span>::signal::ShutdownRx) {}
+    } <span class="kw">else </span>{
+        <span class="kw">pub fn </span>spawn_heap_stats_updates(_period: std::time::Duration, _srx: <span class="kw">crate</span>::signal::ShutdownRx) {}
+    }
 }
-
-<span class="attr">#[cfg(not(feature = <span class="string">"heap-stats"</span>))]
-</span><span class="kw">pub fn </span>spawn_heap_stats_updates(_period: std::time::Duration, _srx: <span class="kw">crate</span>::signal::ShutdownRx) {}
 </code></pre></div></section></main></body></html>

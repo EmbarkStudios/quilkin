@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["spawn_heap_stats_updates"]};
+window.SIDEBAR_ITEMS = {"fn":["spawn_heap_stats_updates"],"static":["malloc_conf"]};
