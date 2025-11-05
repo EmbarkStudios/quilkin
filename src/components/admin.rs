@@ -113,16 +113,6 @@ async fn handle_request<C: serde::Serialize>(
                 .body(Body::new(Bytes::from(msg)))
                 .unwrap(),
         },
-        #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
-        (&Method::GET, "/debug/pprof/allocs/flamegraph") => {
-            match handle_get_heap_flamegraph().await {
-                Ok(response) => response,
-                Err((status_code, msg)) => Response::builder()
-                    .status(status_code)
-                    .body(Body::new(Bytes::from(msg)))
-                    .unwrap(),
-            }
-        }
         #[cfg(target_os = "linux")]
         (&Method::GET, "/debug/pprof/profile") => {
             let duration = request.uri().query().and_then(|query| {
@@ -383,19 +373,6 @@ async fn handle_get_heap() -> Result<Response<Body>, (StatusCode, String)> {
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     Response::builder()
         .body(Body::from(pprof))
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
-}
-
-#[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
-async fn handle_get_heap_flamegraph() -> Result<Response<Body>, (StatusCode, String)> {
-    let mut prof_ctl = jemalloc_pprof::PROF_CTL.as_ref().unwrap().lock().await;
-    require_profiling_activated(&prof_ctl)?;
-    let svg = prof_ctl
-        .dump_flamegraph()
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
-    Response::builder()
-        .header(hyper::header::CONTENT_TYPE, "image/svg+xml")
-        .body(Body::from(svg))
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
 }
 

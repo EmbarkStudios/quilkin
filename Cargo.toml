@@ -224,7 +224,7 @@ corrosion-utils = { path = "crates/corrosion-utils" }
 eyre = "0.6.12"
 enum-map = "2.7.3"
 futures = "0.3.31"
-jemalloc_pprof = { version = "0.8", features = ["symbolize", "flamegraph"] }
+jemalloc_pprof = { version = "0.8", features = ["symbolize"] }
 kube = { version = "1.1", features = [
     "runtime",
     "rustls-tls",
