@@ -3,7 +3,7 @@
 //! The Corrosion code was too linked to HTTP, which we may or may not use
 
 use crate::codec::PrefixedBuf;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use camino::{Utf8Path as Path, Utf8PathBuf as PathBuf};
 pub use corro_agent::api::public::pubsub::SubscriptionEvent;
 pub use corro_agent::api::public::pubsub::{CatchUpError, MatcherUpsertError};
@@ -47,7 +47,7 @@ pub struct SubParamsv1 {
     /// If events are buffered below this threshold, they will be emitted on
     /// the next `max_time` interval
     #[serde(default, rename = "mb")]
-    pub max_buffer: usize,
+    pub max_buffer: u16,
     /// The maximum amount of time that buffered events beneath the `max_buffer`
     /// threshold will be kept before being sent
     ///
@@ -802,7 +802,7 @@ impl futures::Stream for BufferingSubStream {
             Poll::Ready(Some(eve)) => {
                 let span = tracing::info_span!("sub event", sub_id = %self.id);
 
-                // We can't borrow multiple mutable fields from a pin, so...yah
+                // We can't borrow multiple mutable fields from a pin, thus this weird copy
                 let mut cid = self.change_id;
                 let maybe_buf = span
                     .in_scope(|| handle_sub_event(self.max_size, &mut self.buffer, eve, &mut cid));
@@ -844,9 +844,7 @@ pub fn read_length_prefixed_bytes(b: &mut Bytes) -> Option<Bytes> {
         return None;
     }
 
-    let mut len = [0u8; 2];
-    len.copy_from_slice(&b[..2]);
-    let len = u16::from_ne_bytes(len) as usize;
+    let len = (b[0] as u16 | (b[1] as u16) << 8) as usize;
 
     if len > b.len() - 2 {
         return None;

@@ -1,10 +1,12 @@
 use crate::{
     codec,
     persistent::proto::{self, VersionedRequest},
+    pubsub,
 };
 use bytes::Bytes;
-use corro_api_types::ExecResponse;
+use corro_api_types::{ExecResponse, ExecResult, QueryEvent};
 use quilkin_types::IcaoCode;
+use uuid::Uuid;
 use std::net::SocketAddr;
 use tokio::sync::{mpsc, oneshot};
 
@@ -34,7 +36,7 @@ pub enum StreamError {
     StreamEnded,
 }
 
-use super::LengthReadError as Lre;
+use codec::LengthReadError as Lre;
 
 impl From<Lre> for StreamError {
     fn from(value: Lre) -> Self {
@@ -59,7 +61,9 @@ pub enum ConnectError {
     #[error(transparent)]
     Creation(#[from] std::io::Error),
     #[error(transparent)]
-    Handshake(#[from] super::HandshakeError),
+    Handshake(#[from] proto::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
     #[error(transparent)]
     Write(#[from] StreamError),
 }
@@ -144,23 +148,30 @@ impl MutationClient {
 
         send.write_chunk(req_buf).await.map_err(StreamError::from)?;
 
-        let res = super::read_length_prefixed(&mut recv)
+        let res = codec::read_length_prefixed(&mut recv)
             .await
             .map_err(StreamError::from)?;
-        let peer_version = match super::ServerHandshake::read(VERSION, &res[..])? {
-            super::ServerHandshake::V1(shs) => {
-                if !shs.accept {
-                    return Err(ConnectError::Handshake(
-                        crate::persistent::HandshakeError::UnsupportedVersion {
-                            ours: VERSION,
-                            theirs: 1,
-                        },
-                    ));
-                }
 
-                1
+        let vb = proto::VersionedBuf::try_parse(&res)?;
+        let peer_version = vb.version;
+        let response = vb.deserialize_response()?;
+
+        match response {
+            proto::Response::V1(res) => {
+                use proto::v1;
+
+                match res {
+                    v1::Response::Ok(v1::OkResponse::Mutate(_)) => {}
+                    v1::Response::Ok(invalid) => {
+                        tracing::error!(?invalid, peer_version, "received a non-mutate response to a mutate request");
+                        return Err(proto::Error::InvalidResponse.into());
+                    }
+                    v1::Response::Err { code, message } => {
+                        return Err(proto::Error::ErrorResponse { code, message }.into());
+                    }
+                }   
             }
-        };
+        }
 
         let (tx, mut reqrx) = mpsc::unbounded_channel();
 
@@ -190,7 +201,7 @@ impl MutationClient {
                         };
 
                         send.write_chunk(msg).await?;
-                        let res = super::read_length_prefixed_jsonb::<ExecResponse>(&mut recv)
+                        let res = codec::read_length_prefixed_jsonb::<ExecResponse>(&mut recv)
                             .await
                             .map_err(StreamError::from);
 
@@ -219,11 +230,23 @@ impl MutationClient {
     }
 
     #[inline]
+    pub async fn update(&self, qcmp_port: Option<u16>, icao: Option<IcaoCode>) -> Result<ExecResponse, TransactionError> {
+        if qcmp_port.is_none() && icao.is_none() {
+            return Ok(ExecResponse { results:vec![ExecResult::Error { error: "neither THE QCMP port nor ICAO were provided".into() }], time: 0., version: None, actor_id: None });
+        }
+
+        self.transactions(&[proto::v1::ServerChange::UpdateMutator(proto::v1::MutatorUpdate {
+            qcmp_port,
+            icao,
+        })]).await
+    }
+
+    #[inline]
     pub async fn transactions(
         &self,
-        change: &[super::ServerChange],
+        change: &[proto::v1::ServerChange],
     ) -> Result<ExecResponse, TransactionError> {
-        let buf = super::write_length_prefixed_jsonb(&change)?;
+        let buf = codec::write_length_prefixed_jsonb(&change)?;
 
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -234,6 +257,130 @@ impl MutationClient {
 
     pub async fn shutdown(self) {
         drop(self.tx);
+        if let Ok(Err(error)) = self.task.await {
+            tracing::warn!(%error, "stream exited with error");
+        }
+        self.inner.shutdown().await;
+    }
+}
+
+pub struct SubscriptionClient {
+    inner: Client,
+    tx: mpsc::UnboundedSender<QueryEvent>,
+    task: tokio::task::JoinHandle<Result<Option<quinn::VarInt>, StreamError>>,
+}
+
+pub struct SubClientStream {
+    /// The unique identifier for this subscription
+    pub id: Uuid,
+    /// The hash of the query that was subscribed to
+    pub query_hash: String,
+    /// The stream of changes that match the subscription query
+    /// 
+    /// Dropping this will terminate the subscription on the remote server,
+    /// but ideally one would call [`SubscriptionClient::shutdown`] to gracefully
+    /// close the stream
+    pub rx: mpsc::UnboundedReceiver<QueryEvent>,
+}
+
+impl SubscriptionClient {
+    pub async fn connect(
+        inner: Client,
+        params: crate::pubsub::SubParamsv1,
+    ) -> Result<Self, ConnectError> {
+        let (mut send, mut recv) = inner.conn.open_bi().await?;
+
+        // We need to actually send something for the connection to be fully established
+        let req_buf =
+            proto::v1::Request::Subscribe(proto::v1::SubscribeRequest(params)).write()?;
+
+        send.write_chunk(req_buf).await.map_err(StreamError::from)?;
+
+        let res = codec::read_length_prefixed(&mut recv)
+            .await
+            .map_err(StreamError::from)?;
+
+        let vb = proto::VersionedBuf::try_parse(&res)?;
+        let peer_version = vb.version;
+        let response = vb.deserialize_response()?;
+
+        match response {
+            proto::Response::V1(res) => {
+                use proto::v1;
+
+                match res {
+                    v1::Response::Ok(v1::OkResponse::Subscribe(sr)) => {
+
+                    }
+                    v1::Response::Ok(invalid) => {
+                        tracing::error!(?invalid, peer_version, "received a non-subsccribe response to a subscribe request");
+                        return Err(proto::Error::InvalidResponse.into());
+                    }
+                    v1::Response::Err { code, message } => {
+                        return Err(proto::Error::ErrorResponse { code, message }.into());
+                    }
+                }   
+            }
+        }
+
+        let (tx, mut reqrx) = mpsc::unbounded_channel();
+
+        let task = tokio::task::spawn(async move {
+            let func = async || -> Result<Option<quinn::VarInt>, StreamError> {
+                match peer_version {
+                    1 => {
+                        loop {
+                            tokio::select! {
+                                res = recv.received_reset() => {
+                                    return res.map_err(StreamError::Reset);
+                                }
+                                res = codec::read_length_prefixed(&mut recv) => {
+                                    match res {
+                                        Ok(buf) => {
+                                            for item in pubsub::SubscriptionStream::new(buf) {
+                                                if tx.send(item).is_err() {
+                                                    
+                                                }
+                                            }
+                                        }
+                                        Err(err) => {
+
+                                        }
+                                    }
+                                }
+                            };
+
+                            send.write_chunk(msg).await?;
+                            let res = codec::read_length_prefixed_jsonb::<ExecResponse>(&mut recv)
+                                .await
+                                .map_err(StreamError::from);
+
+                            if let Err(error) = &res {
+                                tracing::error!(%error, "error occurred reading response to transaction");
+                            }
+
+                            if comp.send(res).is_err() {
+                                tracing::warn!("transaction response could not be sent to queuer");
+                            }
+                        },
+                        _invalid => {
+                            return Err(StreamError::Connect(
+                                quinn::ConnectionError::VersionMismatch,
+                            ));
+                        }
+                    }
+                }
+
+                Ok(None)
+            };
+
+            func().await
+        });
+
+        Ok(Self { inner, tx, task })
+    }
+
+    pub async fn shutdown(self) {
         if let Ok(Err(error)) = self.task.await {
             tracing::warn!(%error, "stream exited with error");
         }

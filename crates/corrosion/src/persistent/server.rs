@@ -23,7 +23,7 @@ pub trait Mutator: Sync + Send + Clone {
     async fn execute(
         &self,
         peer: Peer,
-        statements: &[super::ServerChange],
+        statements: &[proto::v1::ServerChange],
     ) -> corro_types::api::ExecResponse;
     /// A mutation client has disconnected
     async fn disconnected(&self, peer: Peer);
@@ -31,7 +31,7 @@ pub trait Mutator: Sync + Send + Clone {
 
 /// Trait used by a server implementation to perform database subscriptions
 #[async_trait::async_trait]
-pub trait SubManager: Sync + Sync + Clone {
+pub trait SubManager: Sync + Send + Clone {
     async fn subscribe(
         &self,
         subp: pubsub::SubParamsv1,
@@ -56,23 +56,23 @@ enum InitialConnectionError {
     #[error(transparent)]
     Connection(#[from] quinn::ConnectionError),
     #[error(transparent)]
-    Read(#[from] super::LengthReadError),
+    Read(#[from] codec::LengthReadError),
     #[error(transparent)]
-    Handshake(#[from] super::HandshakeError),
+    Handshake(#[from] proto::Error),
     #[error(transparent)]
     Write(#[from] quinn::WriteError),
 }
 
 impl From<quinn::ReadError> for InitialConnectionError {
     fn from(value: quinn::ReadError) -> Self {
-        Self::Read(super::LengthReadError::Read(value))
+        Self::Read(codec::LengthReadError::Read(value))
     }
 }
 
 #[derive(thiserror::Error, Debug)]
 enum IoLoopError {
     #[error(transparent)]
-    Read(#[from] super::LengthReadError),
+    Read(#[from] codec::LengthReadError),
     #[error(transparent)]
     Jsonb(#[from] serde_json::Error),
     #[error(transparent)]
@@ -140,18 +140,19 @@ impl Server {
         tracing::debug!(%peer, "accepting peer connection");
 
         let connection = conn.await?;
-        let (mut send, mut recv) = connection.accept_bi().await?;
+        let (send, mut recv) = connection.accept_bi().await?;
 
         let request = match codec::read_length_prefixed(&mut recv).await {
             Ok(bytes) => bytes,
             Err(error) => {
-                Self::close(peer, (&error).into(), send, recv).await;
+                dbg!(&error);
+                Self::close(peer, ErrorCode::BadRequest, send, recv).await;
                 return Err(error.into());
             }
         };
 
-        let rr = proto::RawRequest::try_parse(&request)?;
-        let request = rr.deserialize()?;
+        let vb = proto::VersionedBuf::try_parse(&request)?;
+        let request = vb.deserialize_request()?;
 
         Ok(ValidRequest {
             send,
@@ -174,51 +175,37 @@ impl Server {
             request,
         } = req;
 
-        async fn accept<T: Serialize>(ss: &mut SendStream, contents: T) -> Result<(), IoLoopError> {
-            let res = proto::Response {
-                code: 200,
-                version: proto::VERSION,
-                contents: proto::ResponseContents::Ok(contents),
-            };
-
-            let bytes = codec::write_length_prefixed_jsonb(&res)?.freeze();
-            Ok(ss.write_chunk(bytes).await?)
-        }
-
-        async fn reject(ss: &mut SendStream, code: u16, err: String) -> Result<(), IoLoopError> {
-            let res = proto::Response {
-                code,
-                version: proto::VERSION,
-                contents: proto::ResponseContents::Err(err),
-            };
-
-            let bytes = codec::write_length_prefixed_jsonb(&res)?.freeze();
+        #[inline]
+        async fn send_response<T: proto::VersionedResponse>(ss: &mut SendStream, response: T) -> Result<(), IoLoopError> {
+            let bytes = response.write()?;
             Ok(ss.write_chunk(bytes).await?)
         }
 
         let result = 'io: {
-            match req.request {
+            match request {
                 proto::Request::V1(inner) => {
+                    use proto::v1;
+
                     match inner {
-                        proto::v1::Request::Mutate(mreq) => {
+                        v1::Request::Mutate(mreq) => {
                             exec.connected(peer, mreq.icao, mreq.qcmp_port).await;
 
-                            if let Err(err) = accept(
+                            if let Err(err) = send_response(
                                 &mut send,
-                                proto::v1::Response::Mutate(proto::v1::MutateResponse),
+                                v1::Response::Ok(v1::OkResponse::Mutate(v1::MutateResponse)),
                             )
                             .await
                             {
                                 break 'io Err(err);
                             }
 
-                            let io_loop = async || -> Result<(), IoLoopError> {
+                            let mut io_loop = async || -> Result<(), IoLoopError> {
                                 loop {
                                     let to_exec = codec::read_length_prefixed_jsonb::<
-                                        proto::v1::ServerChange,
+                                        Vec<v1::ServerChange>,
                                     >(&mut recv)
                                     .await?;
-                                    let response = exec.execute(peer, &[to_exec]).await;
+                                    let response = exec.execute(peer, &to_exec).await;
                                     let response = codec::write_length_prefixed_jsonb(&response)?;
                                     send.write_chunk(response.freeze()).await?;
                                 }
@@ -228,20 +215,20 @@ impl Server {
                             exec.disconnected(peer).await;
                             res
                         }
-                        proto::v1::Request::Subscribe(sreq) => {
+                        v1::Request::Subscribe(sreq) => {
                             let max_buffer = sreq.0.max_buffer;
                             let max_time = sreq.0.max_time;
 
                             match subs.subscribe(sreq.0).await {
                                 Ok(sub) => {
-                                    if let Err(err) = accept(
+                                    if let Err(err) = send_response(
                                         &mut send,
-                                        proto::v1::Response::Subscribe(
-                                            proto::v1::SubscribeResponse {
+                                        v1::Response::Ok(v1::OkResponse::Subscribe(
+                                            v1::SubscribeResponse {
                                                 id: sub.id,
                                                 query_hash: sub.query_hash.clone(),
                                             },
-                                        ),
+                                        )),
                                     )
                                     .await
                                     {
@@ -253,11 +240,17 @@ impl Server {
                                     let mut bs =
                                         pubsub::BufferingSubStream::new(sub, max_buffer, max_time);
 
-                                    let io_loop = async || -> Result<(), IoLoopError> {
+                                    let mut io_loop = async || -> Result<(), IoLoopError> {
                                         loop {
                                             tokio::select! {
                                                 buf = bs.next() => {
-                                                    send.write_chunk(buf).await?;
+                                                    if let Some(buf) = buf {
+                                                        send.write_chunk(buf).await?;
+                                                    } else {
+                                                        tracing::info!(%peer, %sub_id, "subscription sender was closed");
+                                                        // This should maybe be an error?
+                                                        return Ok(());
+                                                    }
                                                 }
                                                 res = send.stopped() => {
                                                     match res {
@@ -274,7 +267,7 @@ impl Server {
                                         }
                                     };
 
-                                    let res = io_loop().await;
+                                    io_loop().await
                                 }
                                 Err(err) => {
                                     use pubsub::{MatcherError as Me, MatcherUpsertError as E};
@@ -297,7 +290,7 @@ impl Server {
                                         }
                                     };
 
-                                    reject(&mut send, code, err_str).await
+                                    send_response(&mut send, v1::Response::Err { code: code as u16, message: err_str }).await
                                 }
                             }
                         }
@@ -308,7 +301,7 @@ impl Server {
 
         let code = if let Err(error) = result {
             tracing::warn!(%peer, %error, "error handling peer connection");
-            error.into()
+            dbg!(error).into()
         } else {
             ErrorCode::Ok
         };
