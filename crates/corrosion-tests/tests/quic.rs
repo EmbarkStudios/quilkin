@@ -123,13 +123,16 @@ async fn test_quic_stream() {
 
     let icao = IcaoCode::new_testing([b'Y'; 4]);
 
-    let client = p::client::Client::connect_insecure(server.local_addr(), 2001, icao)
+    let client = p::client::Client::connect_insecure(server.local_addr())
         .await
         .unwrap();
 
+    let mutator = p::client::MutationClient::connect(client, 2001, icao)
+        .await
+        .unwrap();
     insta::assert_snapshot!("connect", ip.print().await);
 
-    client
+    mutator
         .transactions(&[p::ServerChange::Insert(vec![
             p::ServerUpsert {
                 endpoint: Endpoint {
@@ -169,7 +172,7 @@ async fn test_quic_stream() {
 
     insta::assert_snapshot!("initial_insert", ip.print().await);
 
-    client
+    mutator
         .transactions(&[
             p::ServerChange::Remove(vec![Endpoint {
                 address: std::net::Ipv4Addr::new(9, 9, 9, 9).into(),
@@ -189,6 +192,6 @@ async fn test_quic_stream() {
 
     insta::assert_snapshot!("remove_and_update", ip.print().await);
 
-    client.shutdown().await;
+    mutator.shutdown().await;
     insta::assert_snapshot!("disconnect", ip.print().await);
 }
