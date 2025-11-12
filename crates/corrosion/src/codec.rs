@@ -1,4 +1,4 @@
-use bytes::{Bytes, BytesMut};
+use bytes::{Bytes, BytesMut, BufMut};
 
 pub const LENGTH_MARKER: &[u8] = &[0xfe, 0xed];
 
@@ -49,6 +49,13 @@ impl PrefixedBuf {
         self.inner.len() <= 2
     }
 
+    /// The maximum amount of bytes that can be appended to this buffer before it
+    /// will be split
+    #[inline]
+    pub fn max_remainder(&self) -> usize {
+        (u16::MAX as usize).saturating_sub(self.len())
+    }
+
     /// Extends the buffer with the provided slice.
     ///
     /// Unlike [`BytesMut::extend_from_slice`], this will return a frozen buffer
@@ -83,11 +90,31 @@ impl PrefixedBuf {
         rb
     }
 
+    /// Serializes the specified object to JSON and appends it to the end of the buffer and returns it
+    /// 
+    /// This function is a helper and is meant to be used to emit buffers with a single item in it,
+    /// that then may be coalesced with other items
     #[inline]
-    pub fn write_json<T: serde::Serialize>(&mut self, obj: &T) -> Result<Bytes, serde_json::Error> {
+    pub fn write_json<T: serde::Serialize>(&mut self, obj: &T) -> serde_json::Result<Bytes> {
         {
-            let mut writer = self.inner.writer();
-            serde_json::to_writer(&mut writer, &obj)?;
+            // Write into a stack buffer, we should never have single objects that exceed this (generous)
+            // capacity
+            const CAPACITY: usize = 8 * 1024;
+            let mut cursor = std::io::Cursor::new([0u8; CAPACITY]);
+            serde_json::to_writer(&mut cursor, &obj)?;
+            let len = cursor.position() as usize;
+
+            if cursor.position() as usize > self.max_remainder() {
+                use serde::ser::Error;
+                return Err(
+                    serde_json::Error::custom(
+                        format!("serialized object of {len} was too large to fit in the remaining capacity of {}", self.max_remainder())
+                    )
+                );
+            }
+
+            let buf = cursor.into_inner();
+            debug_assert!(self.extend_from_slice(&buf[..len]).is_none());
         }
 
         Ok(self
@@ -183,7 +210,7 @@ pub enum LengthReadError {
     Json(#[from] serde_json::Error),
 }
 
-use error::ErrorCode as Ec;
+use crate::persistent::ErrorCode as Ec;
 
 impl<'s> From<&'s LengthReadError> for Ec {
     fn from(value: &'s LengthReadError) -> Self {
@@ -236,17 +263,17 @@ pub async fn read_length_prefixed_jsonb<T: serde::de::DeserializeOwned>(
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-#[inline]
-pub fn explicit_size<const N: usize>(buf: &[u8]) -> Result<[u8; N], Error> {
-    if buf.len() < N {
-        return Err(Error::InsufficientLength {
-            length: buf.len(),
-            expected: N,
-        });
-    }
+// #[inline]
+// pub fn explicit_size<const N: usize>(buf: &[u8]) -> Result<[u8; N], Error> {
+//     if buf.len() < N {
+//         return Err(Error::InsufficientLength {
+//             length: buf.len(),
+//             expected: N,
+//         });
+//     }
 
-    // For now we won't care about the length being larger than what we want
-    let mut es = [0u8; N];
-    es.copy_from_slice(&buf[..N]);
-    Ok(es)
-}
+//     // For now we won't care about the length being larger than what we want
+//     let mut es = [0u8; N];
+//     es.copy_from_slice(&buf[..N]);
+//     Ok(es)
+// }

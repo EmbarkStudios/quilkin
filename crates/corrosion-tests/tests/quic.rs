@@ -1,9 +1,11 @@
 //! Tests for basic connection, operation, and disconnection between a UDP
 //! server and clients
 
-use corrosion::{Peer, db, persistent as p};
+use std::sync::Arc;
+
+use corrosion::{Peer, db, pubsub, persistent::{server, client, proto::{v1 as p, ExecResponse, ExecResult}}};
 use corrosion_tests::{self as ct, Cell};
-use quilkin_types::{Endpoint, IcaoCode};
+use quilkin_types::{Endpoint, IcaoCode, TokenSet};
 
 #[derive(Clone)]
 struct InstaPrinter {
@@ -38,7 +40,7 @@ impl InstaPrinter {
 }
 
 #[async_trait::async_trait]
-impl p::server::AgentExecutor for InstaPrinter {
+impl server::Mutator for InstaPrinter {
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
         let mut dc = smallvec::SmallVec::<[_; 1]>::new();
         let mut dc = db::write::Datacenter(&mut dc);
@@ -52,27 +54,32 @@ impl p::server::AgentExecutor for InstaPrinter {
         }
     }
 
-    async fn execute(&self, peer: Peer, statements: &[p::ServerChange]) -> p::ExecResponse {
+    async fn execute(&self, peer: Peer, statements: &[p::ServerChange]) -> ExecResponse {
         let mut v = smallvec::SmallVec::<[_; 20]>::new();
         {
-            let mut srv = db::write::Server::for_peer(peer, &mut v);
-
             for s in statements {
                 match s {
-                    p::ServerChange::Insert(i) => {
+                    p::ServerChange::Upsert(i) => {
+                        let mut srv = db::write::Server::for_peer(peer, &mut v);
                         for i in i {
                             srv.upsert(&i.endpoint, i.icao, &i.tokens);
                         }
                     }
                     p::ServerChange::Remove(r) => {
+                        let mut srv = db::write::Server::for_peer(peer, &mut v);
                         for r in r {
                             srv.remove_immediate(r);
                         }
                     }
                     p::ServerChange::Update(u) => {
+                        let mut srv = db::write::Server::for_peer(peer, &mut v);
                         for u in u {
                             srv.update(&u.endpoint, u.icao, u.tokens.as_ref());
                         }
+                    }
+                    p::ServerChange::UpdateMutator(mu) => {
+                        let mut dc = db::write::Datacenter(&mut v);
+                        dc.update(peer, mu.qcmp_port, mu.icao);
                     }
                 }
             }
@@ -86,8 +93,8 @@ impl p::server::AgentExecutor for InstaPrinter {
             rows
         };
 
-        p::ExecResponse {
-            results: vec![p::ExecResult::Execute {
+        ExecResponse {
+            results: vec![ExecResult::Execute {
                 rows_affected,
                 time: 0.,
             }],
@@ -111,29 +118,54 @@ impl p::server::AgentExecutor for InstaPrinter {
     }
 }
 
+#[derive(Clone)]
+struct ServerSub {
+    ctx: pubsub::PubsubContext,
+}
+
+#[async_trait::async_trait]
+impl server::SubManager for ServerSub {
+    async fn subscribe(&self, subp: pubsub::SubParamsv1) -> Result<pubsub::Subscription, pubsub::MatcherUpsertError> {
+        unimplemented!();
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_quic_stream() {
+    let db = ct::TestSubsDb::new(corrosion::schema::SCHEMA, "test_quic_stream").await;
+
     let ip = InstaPrinter {
-        db: ct::new_split_pool("quic-basic", corrosion::schema::SCHEMA).await,
+        db: db.pool.clone(),
+    };
+
+    let ss = ServerSub {
+        ctx: db.pubsub_ctx(),
     };
 
     let server =
-        p::server::Server::new_unencrypted((std::net::Ipv6Addr::LOCALHOST, 0).into(), ip.clone())
+        server::Server::new_unencrypted((std::net::Ipv6Addr::LOCALHOST, 0).into(), ip.clone(), ss)
             .unwrap();
 
     let icao = IcaoCode::new_testing([b'Y'; 4]);
 
-    let client = p::client::Client::connect_insecure(server.local_addr())
+    let client = client::Client::connect_insecure(server.local_addr())
         .await
         .unwrap();
 
-    let mutator = p::client::MutationClient::connect(client, 2001, icao)
+    let mutator = client::MutationClient::connect(client, 2001, icao)
         .await
         .unwrap();
     insta::assert_snapshot!("connect", ip.print().await);
 
+    // TODO: Pull this out into an actual type used in quilkin when we integrate the corrosion stuff in
+    let mut actual = std::collections::BTreeMap::<IcaoCode, (Endpoint, TokenSet)>::new();
+    let mut expected = std::collections::BTreeMap::<IcaoCode, (Endpoint, TokenSet)>::new();
+
+    
+    
+
     mutator
-        .transactions(&[p::ServerChange::Insert(vec![
+        .transactions(&[p::ServerChange::Upsert(vec![
             p::ServerUpsert {
                 endpoint: Endpoint {
                     address: std::net::Ipv4Addr::new(1, 2, 3, 4).into(),
@@ -194,4 +226,6 @@ async fn test_quic_stream() {
 
     mutator.shutdown().await;
     insta::assert_snapshot!("disconnect", ip.print().await);
+
+    assert_eq!(expected, actual);
 }
