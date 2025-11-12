@@ -2,6 +2,7 @@ pub use corro_api_types as api;
 pub use corro_types as types;
 
 pub mod agent;
+pub mod codec;
 pub mod db;
 pub mod persistent;
 pub mod pubsub;

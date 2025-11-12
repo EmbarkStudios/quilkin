@@ -2,10 +2,11 @@
 //!
 //! The Corrosion code was too linked to HTTP, which we may or may not use
 
+use crate::codec::PrefixedBuf;
 use bytes::{BufMut, Bytes, BytesMut};
 use camino::{Utf8Path as Path, Utf8PathBuf as PathBuf};
 pub use corro_agent::api::public::pubsub::SubscriptionEvent;
-use corro_agent::api::public::pubsub::{CatchUpError, MatcherUpsertError};
+pub use corro_agent::api::public::pubsub::{CatchUpError, MatcherUpsertError};
 use corro_api_types::{QueryEventMeta, Statement};
 use corro_types::{
     agent::SplitPool,
@@ -15,7 +16,7 @@ use corro_types::{
 };
 pub use corro_types::{
     api::{ChangeId, QueryEvent, TypedQueryEvent},
-    pubsub::{MatchCandidates, MatcherHandle, SubsManager},
+    pubsub::{MatchCandidates, MatcherError, MatcherHandle, SubsManager},
 };
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
@@ -41,9 +42,18 @@ pub struct SubParamsv1 {
     pub from: Option<ChangeId>,
     #[serde(default, rename = "s")]
     pub skip_rows: bool,
-    /// The maximum amount in bytes that each individual
-    #[serde(default, rename = "m")]
+    /// The maximum amount in bytes that can be buffered before being sent
+    ///
+    /// If events are buffered below this threshold, they will be emitted on
+    /// the next `max_time` interval
+    #[serde(default, rename = "mb")]
     pub max_buffer: usize,
+    /// The maximum amount of time that buffered events beneath the `max_buffer`
+    /// threshold will be kept before being sent
+    ///
+    /// Defaults to 10ms
+    #[serde(default = "max_time", rename = "mt")]
+    pub max_time: Duration,
     /// The [`Matcher`] will buffer change notifications up to this time before emitting
     /// them, or until the notification buffer reaches the [`Self::change_threshold`]
     ///
@@ -70,6 +80,11 @@ pub const fn process_interval() -> Duration {
 /// The default [`SubParams::change_threshold`]
 pub const fn change_threshold() -> usize {
     1000
+}
+
+/// The default [`SubParams::max_time`]
+pub const fn max_time() -> Duration {
+    Duration::from_millis(10)
 }
 
 async fn expand_sql(sp: &SplitPool, stmt: &Statement) -> Result<String, MatcherUpsertError> {
@@ -113,8 +128,8 @@ async fn expand_sql(sp: &SplitPool, stmt: &Statement) -> Result<String, MatcherU
 }
 
 fn handle_sub_event(
-    max_size: usize,
-    buf: &mut BytesMut,
+    max_size: u16,
+    buf: &mut PrefixedBuf,
     event: SubscriptionEvent,
     last_change_id: &mut ChangeId,
 ) -> Option<Bytes> {
@@ -135,30 +150,14 @@ fn handle_sub_event(
         *last_change_id = change_id;
     }
 
-    if buf.len() + event.buff.len() >= max_size {
-        let mut to_send = if buf.len() <= 2 {
-            buf.extend_from_slice(&event.buff);
-            buf.split()
-        } else {
-            let to_send = buf.split();
-            buf.put_u16(0);
-            buf.extend_from_slice(&event.buff);
-            to_send
-        };
-
-        crate::persistent::update_length_prefix(&mut to_send);
-        Some(to_send.freeze())
-    } else {
-        buf.extend_from_slice(&event.buff);
-        None
-    }
+    buf.extend_capped(&event.buff, max_size)
 }
 
 const MAX_EVENTS_BUFFER_SIZE: usize = 10240;
 
 #[inline]
 pub fn error_to_sub_event(
-    buf: &mut BytesMut,
+    buf: &mut PrefixedBuf,
     e: impl compact_str::ToCompactString,
 ) -> SubscriptionEvent {
     query_to_sub_event(buf, QueryEvent::Error(e.to_compact_string())).unwrap()
@@ -166,19 +165,11 @@ pub fn error_to_sub_event(
 
 #[inline]
 pub fn query_to_sub_event(
-    buf: &mut BytesMut,
+    buf: &mut PrefixedBuf,
     query_evt: QueryEvent,
 ) -> serde_json::Result<SubscriptionEvent> {
-    buf.put_u16(0);
-
-    {
-        let mut writer = buf.writer();
-        serde_json::to_writer(&mut writer, &query_evt)?;
-    }
-
-    crate::persistent::update_length_prefix(buf);
     Ok(SubscriptionEvent {
-        buff: buf.split().freeze(),
+        buff: buf.write_json(&query_evt)?,
         meta: query_evt.meta(),
     })
 }
@@ -188,12 +179,12 @@ pub async fn catch_up_sub_from(
     from: ChangeId,
     evt_tx: &mpsc::Sender<SubscriptionEvent>,
 ) -> Result<ChangeId, CatchUpError> {
-    let (q_tx, mut q_rx) = mpsc::channel(10240);
+    let (q_tx, mut q_rx) = mpsc::channel(MAX_EVENTS_BUFFER_SIZE);
 
     let task = tokio::spawn({
         let evt_tx = evt_tx.clone();
         async move {
-            let mut buf = BytesMut::new();
+            let mut buf = PrefixedBuf::new();
             while let Some(event) = q_rx.recv().await {
                 evt_tx.send(query_to_sub_event(&mut buf, event)?).await?;
             }
@@ -215,12 +206,12 @@ pub async fn catch_up_sub_anew(
     matcher: &MatcherHandle,
     evt_tx: &mpsc::Sender<SubscriptionEvent>,
 ) -> Result<ChangeId, CatchUpError> {
-    let (q_tx, mut q_rx) = mpsc::channel(10240);
+    let (q_tx, mut q_rx) = mpsc::channel(MAX_EVENTS_BUFFER_SIZE);
 
     let task = tokio::spawn({
         let evt_tx = evt_tx.clone();
         async move {
-            let mut buf = BytesMut::new();
+            let mut buf = PrefixedBuf::new();
             while let Some(event) = q_rx.recv().await {
                 evt_tx.send(query_to_sub_event(&mut buf, event)?).await?;
             }
@@ -296,7 +287,7 @@ pub async fn catch_up_sub(
 ) {
     tracing::debug!(?params, "catching up sub");
 
-    let mut buf = BytesMut::new();
+    let mut buf = PrefixedBuf::new();
 
     // buffer events while we catch up...
     let (queue_tx, mut queue_rx) = mpsc::channel(MAX_EVENTS_BUFFER_SIZE);
@@ -508,7 +499,7 @@ pub async fn process_sub_channel(
     tx: broadcast::Sender<SubscriptionEvent>,
     mut evt_rx: mpsc::Receiver<QueryEvent>,
 ) {
-    let mut buf = BytesMut::new();
+    let mut buf = PrefixedBuf::new();
 
     let mut deadline = if tx.receiver_count() == 0 {
         Some(Box::pin(tokio::time::sleep(MAX_UNSUB_TIME)))
@@ -678,6 +669,37 @@ pub struct PubsubContext {
     pub path: PathBuf,
 }
 
+impl PubsubContext {
+    /// Creates a subscription for the specified [`PubusbContext`]
+    ///
+    /// Database mutations that match the query specified in the params will
+    /// cause subscription events to be emitted to the receiver
+    pub async fn subscribe(&self, params: SubParamsv1) -> Result<Subscription, MatcherUpsertError> {
+        let query = expand_sql(&self.pool, &params.query).await?;
+        let mut bcast_write = self.cache.write().await;
+
+        let (handle, created) = self.subs.get_or_insert(
+            &query,
+            &self.path,
+            &self.schema,
+            &self.pool,
+            self.tripwire.clone(),
+            MatcherLoopConfig {
+                changes_threshold: params.change_threshold,
+                process_buffer_interval: params.process_interval,
+                ..Default::default()
+            },
+        )?;
+
+        let (tx, rx) = mpsc::channel(MAX_EVENTS_BUFFER_SIZE);
+
+        let query_hash = handle.hash().to_owned();
+        let id = upsert_sub(handle, created, &self.subs, &mut bcast_write, params, tx).await?;
+
+        Ok(Subscription { id, query_hash, rx })
+    }
+}
+
 pub struct Subscription {
     pub id: Uuid,
     pub query_hash: String,
@@ -719,34 +741,31 @@ pub async fn subscribe(
 /// An async stream that buffers events, used by senders to batch changes
 ///
 /// This buffers up to a maximum size, or a certain amount of time has passed
-/// since the last change
+/// since the last emitted buffer set
 pub struct BufferingSubStream {
     rx: mpsc::Receiver<SubscriptionEvent>,
     id: Uuid,
-    max_size: usize,
+    max_size: u16,
     max_time: Duration,
     sleep: std::pin::Pin<Box<tokio::time::Sleep>>,
     change_id: ChangeId,
-    buffer: BytesMut,
+    buffer: PrefixedBuf,
 }
 
 impl BufferingSubStream {
     /// Buffers changes from the subscription
     #[inline]
     pub fn new(sub: Subscription, max_size: u16, max_time: Duration) -> Self {
-        let mut buffer = BytesMut::new();
-        buffer.put_u16(0);
-
         let sleep = Box::pin(tokio::time::sleep(max_time));
 
         Self {
             rx: sub.rx,
             id: sub.id,
-            max_size: max_size as usize,
+            max_size,
             max_time,
             sleep,
             change_id: ChangeId(0),
-            buffer,
+            buffer: PrefixedBuf::new(),
         }
     }
 
@@ -765,12 +784,7 @@ impl BufferingSubStream {
             }
         }
 
-        if self.buffer.len() <= 2 {
-            None
-        } else {
-            crate::persistent::update_length_prefix(&mut self.buffer);
-            Some(self.buffer.split().freeze())
-        }
+        self.buffer.freeze()
     }
 }
 
@@ -811,11 +825,8 @@ impl futures::Stream for BufferingSubStream {
             let new_time = tokio::time::Instant::now() + self.max_time;
             self.sleep.as_mut().reset(new_time);
 
-            if self.buffer.len() > 2 {
-                let mut buf = self.buffer.split();
-                crate::persistent::update_length_prefix(&mut buf);
-                self.buffer.put_u16(0);
-                return Poll::Ready(Some(buf.freeze()));
+            if let Some(buf) = self.buffer.freeze() {
+                return Poll::Ready(Some(buf));
             }
         }
 

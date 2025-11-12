@@ -1,3 +1,7 @@
+use crate::{
+    codec,
+    persistent::proto::{self, VersionedRequest},
+};
 use bytes::Bytes;
 use corro_api_types::ExecResponse;
 use quilkin_types::IcaoCode;
@@ -80,22 +84,16 @@ pub const VERSION: u16 = 1;
 
 /// A persistent connection to a corrosion agent
 pub struct Client {
-    inner: quinn::Connection,
+    conn: quinn::Connection,
     local_addr: SocketAddr,
-    tx: mpsc::UnboundedSender<(Bytes, ResponseTx)>,
-    task: tokio::task::JoinHandle<Result<Option<quinn::VarInt>, StreamError>>,
 }
 
 impl Client {
     /// Connects using a non-encrypted session
-    pub async fn connect_insecure(
-        addr: SocketAddr,
-        qcmp_port: u16,
-        icao: IcaoCode,
-    ) -> Result<Self, ConnectError> {
+    pub async fn connect_insecure(addr: SocketAddr) -> Result<Self, ConnectError> {
         let ep = quinn::Endpoint::client((std::net::Ipv6Addr::LOCALHOST, 0).into())?;
 
-        let inner = ep
+        let conn = ep
             .connect_with(
                 quinn_plaintext::client_config(),
                 addr,
@@ -106,34 +104,61 @@ impl Client {
         // This is really infallible
         let local_addr = ep.local_addr()?;
 
-        let client = inner.clone();
-        let (mut send, mut recv) = client.open_bi().await?;
+        Ok(Self { conn, local_addr })
+    }
 
-        // Handshake
+    #[inline]
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+
+    #[inline]
+    pub fn remote_addr(&self) -> SocketAddr {
+        self.conn.remote_address()
+    }
+
+    /// Closes the connection to the upstream server
+    #[inline]
+    pub async fn shutdown(self) {
+        drop(self.conn);
+    }
+}
+
+pub struct MutationClient {
+    inner: Client,
+    tx: mpsc::UnboundedSender<(Bytes, ResponseTx)>,
+    task: tokio::task::JoinHandle<Result<Option<quinn::VarInt>, StreamError>>,
+}
+
+impl MutationClient {
+    pub async fn connect(
+        inner: Client,
+        qcmp_port: u16,
+        icao: IcaoCode,
+    ) -> Result<Self, ConnectError> {
+        let (mut send, mut recv) = inner.conn.open_bi().await?;
+
         // We need to actually send something for the connection to be fully established
-        let peer_version = {
-            let req = super::ClientHandshakeRequestV1 { qcmp_port, icao }.write();
+        let req_buf =
+            proto::v1::Request::Mutate(proto::v1::MutateRequest { qcmp_port, icao }).write()?;
 
-            send.write_chunk(super::write_length_prefixed(&req).freeze())
-                .await
-                .map_err(StreamError::from)?;
+        send.write_chunk(req_buf).await.map_err(StreamError::from)?;
 
-            let res = super::read_length_prefixed(&mut recv)
-                .await
-                .map_err(StreamError::from)?;
-            match super::ServerHandshake::read(VERSION, &res[..])? {
-                super::ServerHandshake::V1(shs) => {
-                    if !shs.accept {
-                        return Err(ConnectError::Handshake(
-                            crate::persistent::HandshakeError::UnsupportedVersion {
-                                ours: VERSION,
-                                theirs: 1,
-                            },
-                        ));
-                    }
-
-                    1
+        let res = super::read_length_prefixed(&mut recv)
+            .await
+            .map_err(StreamError::from)?;
+        let peer_version = match super::ServerHandshake::read(VERSION, &res[..])? {
+            super::ServerHandshake::V1(shs) => {
+                if !shs.accept {
+                    return Err(ConnectError::Handshake(
+                        crate::persistent::HandshakeError::UnsupportedVersion {
+                            ours: VERSION,
+                            theirs: 1,
+                        },
+                    ));
                 }
+
+                1
             }
         };
 
@@ -190,22 +215,10 @@ impl Client {
             func().await
         });
 
-        Ok(Self {
-            inner,
-            tx,
-            task,
-            local_addr,
-        })
+        Ok(Self { inner, tx, task })
     }
 
-    pub fn local_addr(&self) -> SocketAddr {
-        self.local_addr
-    }
-
-    pub fn remote_addr(&self) -> SocketAddr {
-        self.inner.remote_address()
-    }
-
+    #[inline]
     pub async fn transactions(
         &self,
         change: &[super::ServerChange],
@@ -219,12 +232,11 @@ impl Client {
         Ok(rx.await.map_err(|_| TransactionError::TaskShutdown)??)
     }
 
-    /// Closes the connection to the upstream server
     pub async fn shutdown(self) {
         drop(self.tx);
         if let Ok(Err(error)) = self.task.await {
             tracing::warn!(%error, "stream exited with error");
         }
-        drop(self.inner);
+        self.inner.shutdown().await;
     }
 }
