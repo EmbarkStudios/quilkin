@@ -46,6 +46,9 @@ skip = [
     { crate = "object@0.32.2", reason = "transitive dependency due to backtrace, backtrace is updated, but stable-eyre using a feature that doesn't exist any longer, and can't update, sigh" },
     { crate = "hashbrown@0.14.5", reason = "many crates use this old version" },
     { crate = "getrandom@0.2.16", reason = "ring" },
+    { crate = "miniz_oxide@0.7.4", reason = "pprof_util carries two different versions transitively" },
+    { crate = "prost@0.13.5", reason = "pprof_util has an outdated version" },
+    { crate = "prost-derive@0.13.5", reason = "pprof_util has an outdated version" },
 ]
 skip-tree = [
     { crate = "thiserror@1.0.69", reason = "many crates use this old version" },

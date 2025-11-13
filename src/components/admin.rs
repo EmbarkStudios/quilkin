@@ -105,6 +105,14 @@ async fn handle_request<C: serde::Serialize>(
     match (request.method(), request.uri().path()) {
         (&Method::GET, "/metrics") => collect_metrics(),
         (&Method::GET, "/live" | "/livez") => health.check_liveness(),
+        #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
+        (&Method::GET, "/debug/pprof/allocs") => match handle_get_heap().await {
+            Ok(response) => response,
+            Err((status_code, msg)) => Response::builder()
+                .status(status_code)
+                .body(Body::new(Bytes::from(msg)))
+                .unwrap(),
+        },
         #[cfg(target_os = "linux")]
         (&Method::GET, "/debug/pprof/profile") => {
             let duration = request.uri().query().and_then(|query| {
@@ -342,6 +350,30 @@ fn encode_pprof(report: pprof::Report) -> eyre::Result<Vec<u8>> {
     };
 
     Ok(crate::codec::prost::encode(&profile)?)
+}
+
+/// Checks whether jemalloc profiling is activated an returns an error response if not.
+#[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
+fn require_profiling_activated(
+    prof_ctl: &jemalloc_pprof::JemallocProfCtl,
+) -> Result<(), (StatusCode, String)> {
+    if prof_ctl.activated() {
+        Ok(())
+    } else {
+        Err((StatusCode::FORBIDDEN, "heap profiling not activated".into()))
+    }
+}
+
+#[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
+async fn handle_get_heap() -> Result<Response<Body>, (StatusCode, String)> {
+    let mut prof_ctl = jemalloc_pprof::PROF_CTL.as_ref().unwrap().lock().await;
+    require_profiling_activated(&prof_ctl)?;
+    let pprof = prof_ctl
+        .dump_pprof()
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Response::builder()
+        .body(Body::from(pprof))
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
 }
 
 #[cfg(test)]

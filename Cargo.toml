@@ -45,10 +45,11 @@ codegen-units = 1
 lto = "fat"
 
 [features]
-default = []
+default = ["jemalloc"]
 instrument = []
 mimalloc = ["dep:mimalloc"]
 heap-stats = ["dep:crossbeam-utils"]
+jemalloc = ["dep:tikv-jemallocator", "dep:jemalloc_pprof"]
 
 
 [lints]
@@ -163,6 +164,10 @@ axum = { version = "0.8.4", features = ["macros"] }
 version = "0.1"
 features = ["client", "client-legacy"]
 
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+jemalloc_pprof = { workspace = true, optional = true }
+tikv-jemallocator = { workspace = true, optional = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.7", default-features = false }
 libc.workspace = true
@@ -219,6 +224,7 @@ corrosion-utils = { path = "crates/corrosion-utils" }
 eyre = "0.6.12"
 enum-map = "2.7.3"
 futures = "0.3.31"
+jemalloc_pprof = { version = "0.8", features = ["symbolize"] }
 kube = { version = "1.1", features = [
     "runtime",
     "rustls-tls",
@@ -243,6 +249,7 @@ serde = { version = "1.0.219", features = ["derive", "rc"] }
 serde_json = "1.0.140"
 socket2 = { version = "0.6", features = ["all"] }
 tempfile = "3.20.0"
+tikv-jemallocator = { version = "0.6", features = ["profiling", "unprefixed_malloc_on_supported_platforms"] }
 time = { version = "0.3", default-features = false, features = ["std"] }
 thiserror = "2.0.12"
 tokio-stream = { version = "0.1.17", features = ["net", "sync"] }
