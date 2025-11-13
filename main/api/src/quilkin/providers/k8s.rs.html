@@ -298,7 +298,15 @@
 <a href="#297" id="297">297</a>
 <a href="#298" id="298">298</a>
 <a href="#299" id="299">299</a>
-<a href="#300" id="300">300</a></pre></div><pre class="rust"><code><span class="comment">/*
+<a href="#300" id="300">300</a>
+<a href="#301" id="301">301</a>
+<a href="#302" id="302">302</a>
+<a href="#303" id="303">303</a>
+<a href="#304" id="304">304</a>
+<a href="#305" id="305">305</a>
+<a href="#306" id="306">306</a>
+<a href="#307" id="307">307</a>
+<a href="#308" id="308">308</a></pre></div><pre class="rust"><code><span class="comment">/*
  * Copyright 2024 Google LLC All Rights Reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -519,7 +527,15 @@
 
         <span class="kw">for await </span>event <span class="kw">in </span>gameserver_events(client, namespace) {
             <span class="kw">let </span>ads = address_selector.as_ref();
-            <span class="kw">match </span>track_event(GAMESERVER, event<span class="question-mark">?</span>) {
+            <span class="kw">let </span>event = <span class="kw">match </span>event {
+                <span class="prelude-val">Ok</span>(event) =&gt; event,
+                <span class="prelude-val">Err</span>(error) =&gt; {
+                    <span class="macro">tracing::warn!</span>(%error, <span class="string">"gameserver watch error"</span>);
+                    <span class="kw">continue</span>;
+                }
+            };
+
+            <span class="kw">match </span>track_event(GAMESERVER, event) {
                 Event::Apply(result) =&gt; {
                     <span class="kw">let </span>span = <span class="macro">tracing::trace_span!</span>(<span class="string">"k8s::gameservers::apply"</span>);
                     <span class="kw">let </span>_enter = span.enter();
