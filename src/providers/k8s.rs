@@ -219,7 +219,15 @@ pub fn update_endpoints_from_gameservers(
 
         for await event in gameserver_events(client, namespace) {
             let ads = address_selector.as_ref();
-            match track_event(GAMESERVER, event?) {
+            let event = match event {
+                Ok(event) => event,
+                Err(error) => {
+                    tracing::warn!(%error, "gameserver watch error");
+                    continue;
+                }
+            };
+
+            match track_event(GAMESERVER, event) {
                 Event::Apply(result) => {
                     let span = tracing::trace_span!("k8s::gameservers::apply");
                     let _enter = span.enter();
