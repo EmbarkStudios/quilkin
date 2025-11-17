@@ -1,4 +1,4 @@
-use bytes::{Bytes, BytesMut, BufMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
 pub const LENGTH_MARKER: &[u8] = &[0xfe, 0xed];
 
@@ -26,6 +26,7 @@ pub struct PrefixedBuf {
 
 impl PrefixedBuf {
     #[inline]
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self::with_capacity(0)
     }
@@ -62,6 +63,7 @@ impl PrefixedBuf {
     /// if the slice would extend the current buffer past the capacity of a `u16::MAX`
     #[inline]
     #[must_use]
+    #[allow(clippy::checked_conversions)]
     pub fn extend_from_slice(&mut self, buf: &[u8]) -> Option<Bytes> {
         assert!(buf.len() <= u16::MAX as usize);
 
@@ -91,11 +93,11 @@ impl PrefixedBuf {
     }
 
     /// Serializes the specified object to JSON and appends it to the end of the buffer and returns it
-    /// 
+    ///
     /// This function is a helper and is meant to be used to emit buffers with a single item in it,
     /// that then may be coalesced with other items
     #[inline]
-    pub fn write_json<T: serde::Serialize>(&mut self, obj: &T) -> serde_json::Result<Bytes> {
+    pub fn write_json<T: serde::Serialize>(&mut self, obj: &T) -> std::io::Result<Bytes> {
         {
             // Write into a stack buffer, we should never have single objects that exceed this (generous)
             // capacity
@@ -105,16 +107,18 @@ impl PrefixedBuf {
             let len = cursor.position() as usize;
 
             if cursor.position() as usize > self.max_remainder() {
-                use serde::ser::Error;
-                return Err(
-                    serde_json::Error::custom(
-                        format!("serialized object of {len} was too large to fit in the remaining capacity of {}", self.max_remainder())
-                    )
-                );
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::OutOfMemory,
+                    format!(
+                        "serialized object of {len} was too large to fit in the remaining capacity of {}",
+                        self.max_remainder()
+                    ),
+                ));
             }
 
             let buf = cursor.into_inner();
-            debug_assert!(self.extend_from_slice(&buf[..len]).is_none());
+            let res = self.extend_from_slice(&buf[..len]);
+            debug_assert!(res.is_none());
         }
 
         Ok(self
@@ -164,9 +168,7 @@ pub fn update_length_prefix(buf: &mut BytesMut) -> Result<(), LengthPrefixError>
 }
 
 #[inline]
-pub fn write_length_prefixed_jsonb<T: serde::Serialize>(
-    item: &T,
-) -> Result<BytesMut, serde_json::Error> {
+pub fn write_length_prefixed_jsonb<T: serde::Serialize>(item: &T) -> std::io::Result<BytesMut> {
     let mut buf = bytes::BytesMut::new();
 
     reserve_length_prefix(&mut buf);
@@ -177,19 +179,21 @@ pub fn write_length_prefixed_jsonb<T: serde::Serialize>(
         buf = w.into_inner();
     }
 
-    update_length_prefix(&mut buf);
+    update_length_prefix(&mut buf).map_err(|_e| {
+        std::io::Error::new(std::io::ErrorKind::OutOfMemory, "serialized JSON was > 64k")
+    })?;
     Ok(buf)
 }
 
 #[inline]
-pub fn write_length_prefixed(bytes: &[u8]) -> BytesMut {
+pub fn write_length_prefixed(bytes: &[u8]) -> Result<BytesMut, LengthPrefixError> {
     let mut buf = bytes::BytesMut::with_capacity(bytes.len() + 2);
 
     reserve_length_prefix(&mut buf);
     buf.extend_from_slice(bytes);
-    update_length_prefix(&mut buf);
+    update_length_prefix(&mut buf)?;
 
-    buf
+    Ok(buf)
 }
 
 #[derive(thiserror::Error, Debug)]
