@@ -8,7 +8,11 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+compact_str.workspace = true
 data-encoding = "2.9"
 eyre.workspace = true
 schemars.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
