@@ -1,4 +1,7 @@
-use crate::{Peer, db, persistent::proto::{v1 as p, ExecResponse, ExecResult}};
+use crate::{
+    Peer, db,
+    persistent::proto::{ExecResponse, ExecResult, v1 as p},
+};
 use corro_types::{
     actor::ActorId,
     agent::{Booked, BookedVersions, ChangeError, LockRegistry, SplitPool},
