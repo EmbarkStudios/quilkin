@@ -51,7 +51,7 @@ pub struct TestSubsDb {
     matcher_conns: std::collections::BTreeMap<uuid::Uuid, types::sqlite::CrConn>,
     db_version: usize,
     pub trip: Trip,
-    btx: BroadcastingTransactor,
+    pub btx: BroadcastingTransactor,
 }
 
 impl TestSubsDb {

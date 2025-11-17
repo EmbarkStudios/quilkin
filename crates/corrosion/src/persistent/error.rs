@@ -33,6 +33,8 @@ pub enum ErrorCode {
     Unsupported = 501,
     /// The version of the client is not supported by the server
     VersionNotSupported = 505,
+    /// The server send a bad response to a request
+    BadResponse = 588,
 }
 
 impl fmt::Display for ErrorCode {
@@ -50,7 +52,14 @@ impl fmt::Display for ErrorCode {
             Self::InternalServerError => f.write_str("500: internal server error"),
             Self::Unsupported => f.write_str("501: not supported"),
             Self::VersionNotSupported => f.write_str("505: version not supported"),
+            Self::BadResponse => f.write_str("588: bad response"),
         }
+    }
+}
+
+impl fmt::Debug for ErrorCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self}")
     }
 }
 
@@ -73,6 +82,7 @@ impl From<quinn::VarInt> for ErrorCode {
             500 => Self::InternalServerError,
             501 => Self::Unsupported,
             505 => Self::VersionNotSupported,
+            588 => Self::BadResponse,
             _ => Self::Unknown,
         }
     }

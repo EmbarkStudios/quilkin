@@ -3,6 +3,7 @@ use quilkin_types::IcaoCode;
 use quinn::{RecvStream, SendStream};
 use std::net::{IpAddr, SocketAddr};
 use tokio_stream::StreamExt;
+use tracing::Instrument as _;
 
 use super::error::ErrorCode;
 
@@ -74,7 +75,7 @@ enum IoLoopError {
     #[error(transparent)]
     Read(#[from] codec::LengthReadError),
     #[error(transparent)]
-    Jsonb(#[from] serde_json::Error),
+    Serialization(#[from] std::io::Error),
     #[error(transparent)]
     Write(#[from] quinn::WriteError),
 }
@@ -84,7 +85,7 @@ impl From<IoLoopError> for ErrorCode {
         match value {
             IoLoopError::Read(read) => (&read).into(),
             IoLoopError::Write(_) => Self::ClientClosed,
-            IoLoopError::Jsonb(_) => Self::InternalServerError,
+            IoLoopError::Serialization(_) => Self::InternalServerError,
         }
     }
 }
@@ -100,26 +101,57 @@ impl Server {
         let local_addr = endpoint.local_addr()?;
         let ep = endpoint.clone();
         let task = tokio::task::spawn(async move {
-            while let Some(conn) = ep.accept().await {
-                if !conn.remote_address_validated() {
-                    let _impossible = conn.retry();
+            while let Some(inc) = ep.accept().await {
+                if !inc.remote_address_validated() {
+                    let _impossible = inc.retry();
                     continue;
                 }
 
-                let peer_ip = conn.remote_address();
+                let peer_ip = inc.remote_address();
                 let exec = executor.clone();
                 let usbs = subs.clone();
 
                 tokio::spawn(async move {
-                    match Self::read_request(conn).await {
-                        Ok(vr) => {
-                            Self::handle_request(vr, exec, usbs).await;
-                        }
+                    let peer = match inc.remote_address().ip() {
+                        IpAddr::V4(v4) => v4.to_ipv6_mapped(),
+                        IpAddr::V6(v6) => v6,
+                    };
+
+                    let peer = std::net::SocketAddrV6::new(peer, inc.remote_address().port(), 0, 0);
+                    tracing::debug!("accepting peer connection");
+
+                    let connection = match inc.await {
+                        Ok(c) => c,
                         Err(error) => {
-                            tracing::warn!(%peer_ip, %error, "error handling peer handshake");
+                            tracing::warn!(%error, "failed to establish connection from remote peer");
+                            return;
+                        }
+                    };
+
+                    loop {
+                        tokio::select! {
+                            res = Self::read_request(peer, &connection) => {
+                                match res {
+                                    Ok(vr) => {
+                                        let exec = exec.clone();
+                                        let usbs = usbs.clone();
+                                        tokio::spawn(async move {
+                                            Self::handle_request(vr, exec, usbs).await;
+                                        });
+                                    }
+                                    Err(error) => {
+                                        tracing::warn!(%peer_ip, %error, "error handling peer handshake");
+                                    }
+                                }
+                            }
+                            reason = connection.closed() => {
+                                tracing::info!(%reason, "peer closed connection");
+                                break;
+                            }
                         }
                     }
-                });
+                }.instrument(tracing::info_span!("remote connection", %peer_ip))
+                );
             }
         });
 
@@ -130,29 +162,27 @@ impl Server {
         })
     }
 
-    async fn read_request(conn: quinn::Incoming) -> Result<ValidRequest, InitialConnectionError> {
-        let peer = match conn.remote_address().ip() {
-            IpAddr::V4(v4) => v4.to_ipv6_mapped(),
-            IpAddr::V6(v6) => v6,
-        };
+    async fn read_request(
+        peer: std::net::SocketAddrV6,
+        conn: &quinn::Connection,
+    ) -> Result<ValidRequest, InitialConnectionError> {
+        let (send, mut recv) = conn.accept_bi().await?;
 
-        let peer = std::net::SocketAddrV6::new(peer, conn.remote_address().port(), 0, 0);
-        tracing::debug!(%peer, "accepting peer connection");
+        macro_rules! bad_request {
+            ($op:expr) => {
+                match $op {
+                    Ok(o) => o,
+                    Err(error) => {
+                        Self::close(peer, ErrorCode::BadRequest, send, recv).await;
+                        return Err(error.into());
+                    }
+                }
+            };
+        }
 
-        let connection = conn.await?;
-        let (send, mut recv) = connection.accept_bi().await?;
-
-        let request = match codec::read_length_prefixed(&mut recv).await {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                dbg!(&error);
-                Self::close(peer, ErrorCode::BadRequest, send, recv).await;
-                return Err(error.into());
-            }
-        };
-
-        let vb = proto::VersionedBuf::try_parse(&request)?;
-        let request = vb.deserialize_request()?;
+        let request = bad_request!(codec::read_length_prefixed(&mut recv).await);
+        let vb = bad_request!(proto::VersionedBuf::try_parse(&request));
+        let request = bad_request!(vb.deserialize_request());
 
         Ok(ValidRequest {
             send,
@@ -176,7 +206,10 @@ impl Server {
         } = req;
 
         #[inline]
-        async fn send_response<T: proto::VersionedResponse>(ss: &mut SendStream, response: T) -> Result<(), IoLoopError> {
+        async fn send_response<T: proto::VersionedResponse>(
+            ss: &mut SendStream,
+            response: T,
+        ) -> Result<(), IoLoopError> {
             let bytes = response.write()?;
             Ok(ss.write_chunk(bytes).await?)
         }
@@ -205,6 +238,7 @@ impl Server {
                                         Vec<v1::ServerChange>,
                                     >(&mut recv)
                                     .await?;
+
                                     let response = exec.execute(peer, &to_exec).await;
                                     let response = codec::write_length_prefixed_jsonb(&response)?;
                                     send.write_chunk(response.freeze()).await?;
@@ -267,7 +301,9 @@ impl Server {
                                         }
                                     };
 
-                                    io_loop().await
+                                    let res = io_loop().await;
+                                    tracing::debug!(result = ?res, "subscription stream ended");
+                                    res
                                 }
                                 Err(err) => {
                                     use pubsub::{MatcherError as Me, MatcherUpsertError as E};
@@ -290,7 +326,14 @@ impl Server {
                                         }
                                     };
 
-                                    send_response(&mut send, v1::Response::Err { code: code as u16, message: err_str }).await
+                                    send_response(
+                                        &mut send,
+                                        v1::Response::Err {
+                                            code: code as u16,
+                                            message: err_str,
+                                        },
+                                    )
+                                    .await
                                 }
                             }
                         }
@@ -301,7 +344,7 @@ impl Server {
 
         let code = if let Err(error) = result {
             tracing::warn!(%peer, %error, "error handling peer connection");
-            dbg!(error).into()
+            error.into()
         } else {
             ErrorCode::Ok
         };
