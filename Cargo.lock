@@ -4218,10 +4218,12 @@ dependencies = [
 name = "quilkin-types"
 version = "0.10.0"
 dependencies = [
+ "compact_str",
  "data-encoding",
  "eyre",
  "schemars",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
