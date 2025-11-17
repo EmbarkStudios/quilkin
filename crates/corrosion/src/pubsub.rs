@@ -5,8 +5,8 @@
 use crate::codec::PrefixedBuf;
 use bytes::Bytes;
 use camino::{Utf8Path as Path, Utf8PathBuf as PathBuf};
+pub use corro_agent::api::public::pubsub::MatcherUpsertError;
 pub use corro_agent::api::public::pubsub::SubscriptionEvent;
-pub use corro_agent::api::public::pubsub::{CatchUpError, MatcherUpsertError};
 use corro_api_types::{QueryEventMeta, Statement};
 use corro_types::{
     agent::SplitPool,
@@ -29,7 +29,25 @@ use tracing::{Instrument, debug, error, info, warn};
 use tripwire::Tripwire;
 use uuid::Uuid;
 
+#[derive(Debug, thiserror::Error)]
+pub enum CatchUpError {
+    #[error(transparent)]
+    Pool(#[from] corro_types::sqlite::SqlitePoolError),
+    #[error(transparent)]
+    Sqlite(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Send(#[from] mpsc::error::SendError<SubscriptionEvent>),
+    #[error(transparent)]
+    Serialization(#[from] std::io::Error),
+    #[error(transparent)]
+    Matcher(#[from] MatcherError),
+    #[error(transparent)]
+    Join(#[from] tokio::task::JoinError),
+}
+
 pub type BodySender = mpsc::Sender<Bytes>;
+
+pub const SERVER_QUERY: &str = "SELECT endpoint,icao,tokens FROM servers";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SubParamsv1 {
@@ -167,7 +185,7 @@ pub fn error_to_sub_event(
 pub fn query_to_sub_event(
     buf: &mut PrefixedBuf,
     query_evt: QueryEvent,
-) -> serde_json::Result<SubscriptionEvent> {
+) -> std::io::Result<SubscriptionEvent> {
     Ok(SubscriptionEvent {
         buff: buf.write_json(&query_evt)?,
         meta: query_evt.meta(),
@@ -484,7 +502,7 @@ pub async fn catch_up_sub(
         }
     };
 
-    forward_sub_to_sender(matcher, sub_rx, evt_tx, params.skip_rows).await
+    forward_sub_to_sender(matcher, sub_rx, evt_tx, params.skip_rows).await;
 }
 
 const MAX_UNSUB_TIME: Duration = Duration::from_secs(10 * 60);
@@ -514,9 +532,9 @@ pub async fn process_sub_channel(
     loop {
         let deadline_check = async {
             if let Some(sleep) = deadline.as_mut() {
-                sleep.await
+                sleep.await;
             } else {
-                std::future::pending().await
+                std::future::pending::<()>().await;
             }
         };
 
@@ -844,7 +862,7 @@ pub fn read_length_prefixed_bytes(b: &mut Bytes) -> Option<Bytes> {
         return None;
     }
 
-    let len = (b[0] as u16 | (b[1] as u16) << 8) as usize;
+    let len = (b[0] as u16 | ((b[1] as u16) << 8)) as usize;
 
     if len > b.len() - 2 {
         return None;
@@ -887,7 +905,7 @@ impl Iterator for SubscriptionStream {
 /// Initialize subscription state and tasks
 ///
 /// 1. Get subscriptions state directory from config
-/// 2. Load existing subscriptions and restore them in SubsManager
+/// 2. Load existing subscriptions and restore them in [`SubsManager`]
 /// 3. Spawn subscription processor task
 pub async fn restore_subscriptions(
     subs_manager: &SubsManager,
