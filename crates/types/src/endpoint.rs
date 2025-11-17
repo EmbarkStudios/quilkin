@@ -78,7 +78,7 @@ impl<'de> serde::Deserialize<'de> for AddressKind {
             }
         }
 
-        impl<'de> serde::de::Visitor<'de> for Visitor {
+        impl serde::de::Visitor<'_> for Visitor {
             type Value = AddressKind;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
