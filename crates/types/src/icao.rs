@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct IcaoCode([u8; 4]);
 
 const VALID_RANGE: std::ops::RangeInclusive<u8> = b'A'..=b'Z';

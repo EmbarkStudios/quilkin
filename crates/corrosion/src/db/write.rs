@@ -5,6 +5,8 @@ use crate::{
     api::{SqliteParam, Statement},
 };
 use quilkin_types::{AddressKind, Endpoint, IcaoCode, TokenSet};
+use rusqlite::Transaction;
+use sqlite_pool::InterruptibleTransaction;
 
 pub trait ToSqlParam {
     fn to_sql(&self) -> SqliteParam;
@@ -15,7 +17,7 @@ pub type Statements<const N: usize> = smallvec::SmallVec<[Statement; N]>;
 impl ToSqlParam for TokenSet {
     /// Converts a token set to a SQL parameter
     ///
-    /// Due to the limitations imposed on us via JSON (binary data is cumbersome) and SQLite (no arrays)
+    /// Due to the limitations imposed on us via JSON (binary data is cumbersome) and `SQLite` (no arrays)
     /// we base64 a custom encoding for token sets
     fn to_sql(&self) -> SqliteParam {
         const MAX_TOKENS: usize = u8::MAX as usize >> 1;
@@ -52,6 +54,7 @@ impl ToSqlParam for TokenSet {
         };
 
         for tok in tokens {
+            #[allow(clippy::checked_conversions)]
             if len_prefix {
                 debug_assert!(
                     tok.len() <= u8::MAX as usize,
@@ -63,7 +66,7 @@ impl ToSqlParam for TokenSet {
                 blob.push(tok.len() as u8);
             }
 
-            blob.extend_from_slice(&tok);
+            blob.extend_from_slice(tok);
         }
 
         SqliteParam::Text(data_encoding::BASE64_NOPAD.encode(&blob).into())
@@ -88,6 +91,11 @@ impl ToSqlParam for std::net::Ipv6Addr {
     }
 }
 
+/// Serializes an [`Endpoint`] to a string for insertion into the DB
+///
+/// Since the endpoint is a string column, we always prefix IP endpoints with a
+/// '|' which allows us to easily disambiguate name from IP when parsing back to
+/// an endpoint
 #[inline]
 fn to_compact_str(ep: &Endpoint) -> compact_str::CompactString {
     use std::fmt::Write as _;
@@ -202,18 +210,28 @@ impl<'s, const N: usize> Server<'s, N> {
     }
 
     /// Create a statement to update one or more server columns
-    pub fn update(&mut self, update: UpdateBuilder<'_>) {
+    pub fn update(
+        &mut self,
+        endpoint: &Endpoint,
+        icao: Option<IcaoCode>,
+        tokens: Option<&TokenSet>,
+    ) {
+        if icao.is_none() && tokens.is_none() {
+            tracing::warn!("must update either icao or token set");
+            return;
+        }
+
         let mut query = String::with_capacity(128);
         query.push_str("UPDATE servers SET ");
 
-        let mut params = Vec::with_capacity(update.params() + 1);
+        let mut params = Vec::with_capacity(3);
 
-        if let Some(icao) = update.icao {
+        if let Some(icao) = icao {
             query.push_str("icao = ?");
             params.push(SqliteParam::Text(icao.as_ref().into()));
         }
 
-        if let Some(ts) = update.tokens {
+        if let Some(ts) = tokens {
             if !params.is_empty() {
                 query.push_str(", ");
             }
@@ -227,7 +245,7 @@ impl<'s, const N: usize> Server<'s, N> {
         // on UPDATE queries when built with `SQLITE_ENABLE_UPDATE_DELETE_LIMIT`
         // ...but that doesn't work https://github.com/rusqlite/rusqlite/issues/1111
         query.push_str(" WHERE rowid = (SELECT MIN(rowid) FROM servers WHERE endpoint = ?)");
-        params.push(update.ep.to_sql());
+        params.push(endpoint.to_sql());
 
         self.statements.push(Statement::WithParams(query, params));
     }
@@ -244,47 +262,6 @@ impl<'s, const N: usize> Server<'s, N> {
     }
 }
 
-pub struct UpdateBuilder<'s> {
-    ep: &'s Endpoint,
-    icao: Option<IcaoCode>,
-    tokens: Option<&'s TokenSet>,
-}
-
-impl<'s> UpdateBuilder<'s> {
-    #[inline]
-    pub fn new(ep: &'s Endpoint) -> Self {
-        Self {
-            ep,
-            icao: None,
-            tokens: None,
-        }
-    }
-
-    #[inline]
-    pub fn update_icao(mut self, icao: IcaoCode) -> Self {
-        self.icao = Some(icao);
-        self
-    }
-
-    #[inline]
-    pub fn update_tokens(mut self, ts: &'s TokenSet) -> Self {
-        self.tokens = Some(ts);
-        self
-    }
-
-    #[inline]
-    fn params(&self) -> usize {
-        let mut count = 0;
-        if self.icao.is_some() {
-            count += 1
-        }
-        if self.tokens.is_some() {
-            count += 1
-        }
-        count
-    }
-}
-
 impl ToSqlParam for Peer {
     fn to_sql(&self) -> SqliteParam {
         use std::fmt::Write as _;
@@ -296,14 +273,14 @@ impl ToSqlParam for Peer {
 
 pub struct Datacenter<'s, const N: usize>(pub &'s mut smallvec::SmallVec<[Statement; N]>);
 
-impl<'s, const N: usize> Datacenter<'s, N> {
+impl<const N: usize> Datacenter<'_, N> {
     #[inline]
     pub fn insert(&mut self, peer: Peer, qcmp: u16, icao: IcaoCode) {
-        let mut params = Vec::with_capacity(3);
-
-        params.push(peer.to_sql());
-        params.push(SqliteParam::Integer(qcmp as _));
-        params.push(icao.to_sql());
+        let params = vec![
+            peer.to_sql(),
+            SqliteParam::Integer(qcmp as _),
+            icao.to_sql(),
+        ];
 
         self.0.push(Statement::WithParams(
             "INSERT INTO dc (ip,port,icao,servers) VALUES (?,?,?,jsonb('{}'))".into(),
@@ -368,12 +345,56 @@ impl<'s, const N: usize> Datacenter<'s, N> {
 
 pub struct Filter<'s, const N: usize>(pub &'s mut smallvec::SmallVec<[Statement; N]>);
 
-impl<'s, const N: usize> Filter<'s, N> {
+impl<const N: usize> Filter<'_, N> {
     #[inline]
     pub fn upsert(&mut self, filter: &str) {
         self.0.push(Statement::WithParams(
             "INSERT INTO filter (id,filter) VALUES (9999,?) ON CONFLICT(id) DO UPDATE SET filter = excluded.filter".into(),
             vec![SqliteParam::Text(filter.into())]
         ));
+    }
+}
+
+pub fn exec_interruptible<const N: usize>(
+    tx: &InterruptibleTransaction<Transaction<'_>>,
+    statements: smallvec::SmallVec<[Statement; N]>,
+) -> Result<usize, rusqlite::Error> {
+    let mut rows = 0;
+    for stmt in statements {
+        rows += exec_single_interruptible(tx, stmt)?;
+    }
+
+    Ok(rows)
+}
+
+#[inline]
+pub fn exec_single_interruptible(
+    tx: &InterruptibleTransaction<Transaction<'_>>,
+    statement: Statement,
+) -> Result<usize, rusqlite::Error> {
+    let mut prepped = tx.prepare(statement.query())?;
+    match statement {
+        Statement::Simple(_)
+        | Statement::Verbose {
+            params: None,
+            named_params: None,
+            ..
+        } => prepped.execute([]),
+        Statement::WithParams(_, params)
+        | Statement::Verbose {
+            params: Some(params),
+            ..
+        } => prepped.execute(rusqlite::params_from_iter(params)),
+        Statement::WithNamedParams(_, params)
+        | Statement::Verbose {
+            named_params: Some(params),
+            ..
+        } => prepped.execute(
+            params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v as &dyn rusqlite::ToSql))
+                .collect::<Vec<(&str, &dyn rusqlite::ToSql)>>()
+                .as_slice(),
+        ),
     }
 }
