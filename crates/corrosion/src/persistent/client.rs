@@ -1,14 +1,18 @@
 use crate::{
     codec,
-    persistent::proto::{self, VersionedRequest},
+    persistent::{
+        ErrorCode,
+        proto::{self, VersionedRequest},
+    },
     pubsub,
 };
 use bytes::Bytes;
 use corro_api_types::{ExecResponse, ExecResult, QueryEvent};
 use quilkin_types::IcaoCode;
-use uuid::Uuid;
 use std::net::SocketAddr;
 use tokio::sync::{mpsc, oneshot};
+use tracing::Instrument as _;
+use uuid::Uuid;
 
 type ResponseTx = oneshot::Sender<Result<ExecResponse, StreamError>>;
 
@@ -61,32 +65,25 @@ pub enum ConnectError {
     #[error(transparent)]
     Creation(#[from] std::io::Error),
     #[error(transparent)]
-    Handshake(#[from] proto::Error),
-    #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     Write(#[from] StreamError),
+    #[error(transparent)]
+    Proto(#[from] proto::Error),
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionError {
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Serialization(#[from] std::io::Error),
     #[error(transparent)]
     Stream(#[from] StreamError),
     #[error("the I/O task for this client was shutdown")]
     TaskShutdown,
 }
 
-/// The current version of the client stream
-///
-/// - 0: Invalid
-/// - 1: The initial version
-///   Requests are 16-bit length-prefixed JSON, where the JSON is [`ServerChange`]
-///   Responses are the JSON of [`ExecResult`]
-pub const VERSION: u16 = 1;
-
 /// A persistent connection to a corrosion agent
+#[derive(Clone)]
 pub struct Client {
     conn: quinn::Connection,
     local_addr: SocketAddr,
@@ -163,20 +160,24 @@ impl MutationClient {
                 match res {
                     v1::Response::Ok(v1::OkResponse::Mutate(_)) => {}
                     v1::Response::Ok(invalid) => {
-                        tracing::error!(?invalid, peer_version, "received a non-mutate response to a mutate request");
+                        tracing::error!(
+                            ?invalid,
+                            peer_version,
+                            "received a non-mutate response to a mutate request"
+                        );
                         return Err(proto::Error::InvalidResponse.into());
                     }
                     v1::Response::Err { code, message } => {
                         return Err(proto::Error::ErrorResponse { code, message }.into());
                     }
-                }   
+                }
             }
         }
 
         let (tx, mut reqrx) = mpsc::unbounded_channel();
 
         let task = tokio::task::spawn(async move {
-            let func = async || -> Result<Option<quinn::VarInt>, StreamError> {
+            let mut func = async || -> Result<Option<quinn::VarInt>, StreamError> {
                 match peer_version {
                     1 => loop {
                         let (msg, comp): (_, ResponseTx) = tokio::select! {
@@ -185,13 +186,14 @@ impl MutationClient {
                             }
                             req = reqrx.recv() => {
                                 let Some(req) = req else {
-                                    let _ = send.reset(quinn::VarInt::from_u32(1));
+                                    // Initiate a shutdown, the server will see we've reset its receiver
+                                    // and it will exit the loop when it has finished all messages, closing
+                                    // its sender, which we will know when we receive a reset (or it times out)
+                                    let _ = send.reset(ErrorCode::Ok.into());
                                     let _ = send.finish();
-                                    // We need to drop the recv stream so that the server
-                                    // knows we don't care and it can finish closing the connection
-                                    drop(recv);
-                                    tracing::debug!("waiting for server to received buffered stream...");
-                                    drop(send.stopped().await);
+
+                                    tracing::debug!("waiting for server to shutdown this stream...");
+                                    drop(recv.received_reset().await);
                                     tracing::debug!("client finished");
                                     break;
                                 };
@@ -230,15 +232,26 @@ impl MutationClient {
     }
 
     #[inline]
-    pub async fn update(&self, qcmp_port: Option<u16>, icao: Option<IcaoCode>) -> Result<ExecResponse, TransactionError> {
+    pub async fn update(
+        &self,
+        qcmp_port: Option<u16>,
+        icao: Option<IcaoCode>,
+    ) -> Result<ExecResponse, TransactionError> {
         if qcmp_port.is_none() && icao.is_none() {
-            return Ok(ExecResponse { results:vec![ExecResult::Error { error: "neither THE QCMP port nor ICAO were provided".into() }], time: 0., version: None, actor_id: None });
+            return Ok(ExecResponse {
+                results: vec![ExecResult::Error {
+                    error: "neither THE QCMP port nor ICAO were provided".into(),
+                }],
+                time: 0.,
+                version: None,
+                actor_id: None,
+            });
         }
 
-        self.transactions(&[proto::v1::ServerChange::UpdateMutator(proto::v1::MutatorUpdate {
-            qcmp_port,
-            icao,
-        })]).await
+        self.transactions(&[proto::v1::ServerChange::UpdateMutator(
+            proto::v1::MutatorUpdate { qcmp_port, icao },
+        )])
+        .await
     }
 
     #[inline]
@@ -251,8 +264,8 @@ impl MutationClient {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send((buf.freeze(), tx))
-            .map_err(|_| TransactionError::TaskShutdown)?;
-        Ok(rx.await.map_err(|_| TransactionError::TaskShutdown)??)
+            .map_err(|_e| TransactionError::TaskShutdown)?;
+        Ok(rx.await.map_err(|_e| TransactionError::TaskShutdown)??)
     }
 
     pub async fn shutdown(self) {
@@ -264,9 +277,11 @@ impl MutationClient {
     }
 }
 
+pub enum SubscriptionStop {}
+
 pub struct SubscriptionClient {
     inner: Client,
-    tx: mpsc::UnboundedSender<QueryEvent>,
+    tx: oneshot::Sender<ErrorCode>,
     task: tokio::task::JoinHandle<Result<Option<quinn::VarInt>, StreamError>>,
 }
 
@@ -276,7 +291,7 @@ pub struct SubClientStream {
     /// The hash of the query that was subscribed to
     pub query_hash: String,
     /// The stream of changes that match the subscription query
-    /// 
+    ///
     /// Dropping this will terminate the subscription on the remote server,
     /// but ideally one would call [`SubscriptionClient::shutdown`] to gracefully
     /// close the stream
@@ -287,100 +302,150 @@ impl SubscriptionClient {
     pub async fn connect(
         inner: Client,
         params: crate::pubsub::SubParamsv1,
-    ) -> Result<Self, ConnectError> {
+    ) -> Result<(Self, SubClientStream), ConnectError> {
         let (mut send, mut recv) = inner.conn.open_bi().await?;
 
+        let res = Self::handshake(&mut send, &mut recv, params).await?;
+
+        let (tx, reqrx) = mpsc::unbounded_channel();
+        let (stx, mut srx) = oneshot::channel();
+
+        let sub_id = res.id;
+
+        let scs = SubClientStream {
+            id: res.id,
+            query_hash: res.query_hash,
+            rx: reqrx,
+        };
+
+        let task = tokio::task::spawn(async move {
+            let mut func = async || -> Result<Option<quinn::VarInt>, StreamError> {
+                tracing::info!("started subscription stream");
+
+                'io: loop {
+                    tokio::select! {
+                        res = codec::read_length_prefixed(&mut recv) => {
+                            match res {
+                                Ok(buf) => {
+                                    for item in pubsub::SubscriptionStream::new(buf) {
+                                        match item {
+                                            Ok(item) => {
+                                                if tx.send(item).is_err() {
+                                                    tracing::info!("subscription stream receiver closed, closing stream");
+                                                    let _ = recv.stop(ErrorCode::Unknown.into());
+                                                    break 'io;
+                                                }
+                                            }
+                                            Err(error) => {
+                                                tracing::error!(%error, "failed to deserialize event from subscription stream");
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(_err) => {
+                                    match recv.received_reset().await {
+                                        Ok(code) => {
+                                            tracing::warn!(code = ?code.map(ErrorCode::from), "server shutdown subscription stream");
+                                        }
+                                        Err(error) => {
+                                            tracing::warn!(%error, "server shutdown subscription stream abnormally");
+                                        }
+                                    }
+
+                                    break;
+                                }
+                            }
+                        }
+                        code = &mut srx => {
+                            let code = code.unwrap_or_else(|_| {
+                                tracing::error!("SubscriptionClient dropped without calling shutdown");
+                                    ErrorCode::Unknown
+                            });
+                            drop(recv.stop(code.into()));
+                            break;
+                        }
+                    }
+                }
+
+                tracing::info!("waiting for remote shutdown");
+                let stime = std::time::Instant::now();
+                let res = send.stopped().await;
+                tracing::info!(time = ?stime.elapsed(), result = ?res, "remote shutdown complete");
+
+                Ok(None)
+            };
+
+            func()
+                .instrument(tracing::info_span!("subscription", %sub_id))
+                .await
+        });
+
+        Ok((
+            Self {
+                inner,
+                tx: stx,
+                task,
+            },
+            scs,
+        ))
+    }
+
+    async fn handshake(
+        send: &mut quinn::SendStream,
+        recv: &mut quinn::RecvStream,
+        params: crate::pubsub::SubParamsv1,
+    ) -> Result<proto::v1::SubscribeResponse, ConnectError> {
         // We need to actually send something for the connection to be fully established
-        let req_buf =
-            proto::v1::Request::Subscribe(proto::v1::SubscribeRequest(params)).write()?;
+        let req_buf = proto::v1::Request::Subscribe(proto::v1::SubscribeRequest(params)).write()?;
 
         send.write_chunk(req_buf).await.map_err(StreamError::from)?;
 
-        let res = codec::read_length_prefixed(&mut recv)
+        let res = codec::read_length_prefixed(recv)
             .await
             .map_err(StreamError::from)?;
 
-        let vb = proto::VersionedBuf::try_parse(&res)?;
+        macro_rules! bad_response {
+            ($op:expr) => {
+                match $op {
+                    Ok(r) => r,
+                    Err(error) => {
+                        let _ = recv.stop(ErrorCode::BadResponse.into());
+                        return Err(error.into());
+                    }
+                }
+            };
+        }
+
+        let vb = bad_response!(proto::VersionedBuf::try_parse(&res));
         let peer_version = vb.version;
-        let response = vb.deserialize_response()?;
+        let response = bad_response!(vb.deserialize_response());
 
         match response {
             proto::Response::V1(res) => {
                 use proto::v1;
 
                 match res {
-                    v1::Response::Ok(v1::OkResponse::Subscribe(sr)) => {
-
-                    }
+                    v1::Response::Ok(v1::OkResponse::Subscribe(sr)) => Ok(sr),
                     v1::Response::Ok(invalid) => {
-                        tracing::error!(?invalid, peer_version, "received a non-subsccribe response to a subscribe request");
-                        return Err(proto::Error::InvalidResponse.into());
+                        tracing::error!(
+                            ?invalid,
+                            peer_version,
+                            "received a non-subscribe response to a subscribe request"
+                        );
+                        Err(proto::Error::InvalidResponse.into())
                     }
                     v1::Response::Err { code, message } => {
-                        return Err(proto::Error::ErrorResponse { code, message }.into());
-                    }
-                }   
-            }
-        }
-
-        let (tx, mut reqrx) = mpsc::unbounded_channel();
-
-        let task = tokio::task::spawn(async move {
-            let func = async || -> Result<Option<quinn::VarInt>, StreamError> {
-                match peer_version {
-                    1 => {
-                        loop {
-                            tokio::select! {
-                                res = recv.received_reset() => {
-                                    return res.map_err(StreamError::Reset);
-                                }
-                                res = codec::read_length_prefixed(&mut recv) => {
-                                    match res {
-                                        Ok(buf) => {
-                                            for item in pubsub::SubscriptionStream::new(buf) {
-                                                if tx.send(item).is_err() {
-                                                    
-                                                }
-                                            }
-                                        }
-                                        Err(err) => {
-
-                                        }
-                                    }
-                                }
-                            };
-
-                            send.write_chunk(msg).await?;
-                            let res = codec::read_length_prefixed_jsonb::<ExecResponse>(&mut recv)
-                                .await
-                                .map_err(StreamError::from);
-
-                            if let Err(error) = &res {
-                                tracing::error!(%error, "error occurred reading response to transaction");
-                            }
-
-                            if comp.send(res).is_err() {
-                                tracing::warn!("transaction response could not be sent to queuer");
-                            }
-                        },
-                        _invalid => {
-                            return Err(StreamError::Connect(
-                                quinn::ConnectionError::VersionMismatch,
-                            ));
-                        }
+                        Err(proto::Error::ErrorResponse { code, message }.into())
                     }
                 }
-
-                Ok(None)
-            };
-
-            func().await
-        });
-
-        Ok(Self { inner, tx, task })
+            }
+        }
     }
 
-    pub async fn shutdown(self) {
+    /// Shuts down this client, sending the specified code to the server if it
+    /// is able
+    pub async fn shutdown(self, code: ErrorCode) {
+        let _ = self.tx.send(code);
         if let Ok(Err(error)) = self.task.await {
             tracing::warn!(%error, "stream exited with error");
         }
