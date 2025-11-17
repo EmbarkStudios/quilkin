@@ -24,10 +24,11 @@ async fn read_server_row(id: usize, sp: &SplitPool) -> ServerRow {
         "SELECT endpoint,icao,tokens FROM servers WHERE rowid = ?",
         [id],
         |row| {
-            let mut v = Vec::with_capacity(3);
-            v.push(row.get::<_, SqliteValue>(0).unwrap());
-            v.push(row.get::<_, SqliteValue>(1).unwrap());
-            v.push(row.get::<_, SqliteValue>(2).unwrap());
+            let v = vec![
+                row.get::<_, SqliteValue>(0).unwrap(),
+                row.get::<_, SqliteValue>(1).unwrap(),
+                row.get::<_, SqliteValue>(2).unwrap(),
+            ];
             Ok(ServerRow::from_sql(&v).unwrap())
         },
     )

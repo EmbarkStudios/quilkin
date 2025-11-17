@@ -1,6 +1,6 @@
 use crate::codec;
-use quilkin_types::{Endpoint, IcaoCode, TokenSet};
 pub use corro_api_types::{ExecResponse, ExecResult};
+use quilkin_types::{Endpoint, IcaoCode, TokenSet};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -17,19 +17,16 @@ pub enum Error {
     #[error(transparent)]
     InvalidIcao(#[from] quilkin_types::IcaoError),
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Serialization(#[from] std::io::Error),
     #[error("{} - error response: {}", code, message)]
-    ErrorResponse {
-        code: u16,
-        message: String,
-    }
+    ErrorResponse { code: u16, message: String },
 }
 
 pub const MAGIC: [u8; 4] = 0xf0cacc1au32.to_ne_bytes();
 pub const VERSION: u16 = 1;
 
 #[inline]
-fn write_req_res<T: Serialize>(version: u16, obj: &T) -> serde_json::Result<bytes::Bytes> {
+fn write_req_res<T: Serialize>(version: u16, obj: &T) -> std::io::Result<bytes::Bytes> {
     let mut buf = codec::PrefixedBuf::with_capacity(128);
 
     drop(buf.extend_from_slice(&MAGIC));
@@ -41,7 +38,7 @@ fn write_req_res<T: Serialize>(version: u16, obj: &T) -> serde_json::Result<byte
 pub trait VersionedRequest: Serialize + Sized {
     const VERSION: u16;
 
-    fn write(&self) -> serde_json::Result<bytes::Bytes> {
+    fn write(&self) -> std::io::Result<bytes::Bytes> {
         write_req_res(Self::VERSION, self)
     }
 }
@@ -49,7 +46,7 @@ pub trait VersionedRequest: Serialize + Sized {
 pub trait VersionedResponse: Serialize + Sized {
     const VERSION: u16;
 
-    fn write(&self) -> serde_json::Result<bytes::Bytes> {
+    fn write(&self) -> std::io::Result<bytes::Bytes> {
         write_req_res(Self::VERSION, self)
     }
 }
@@ -69,11 +66,11 @@ impl<'buf> VersionedBuf<'buf> {
             });
         }
 
-        if &buf[..4] != &MAGIC {
+        if buf[..4] != MAGIC {
             return Err(Error::InvalidMagic);
         }
 
-        let version = buf[4] as u16 | (buf[5] as u16) << 8;
+        let version = buf[4] as u16 | ((buf[5] as u16) << 8);
 
         Ok(Self {
             version,
@@ -85,7 +82,8 @@ impl<'buf> VersionedBuf<'buf> {
     pub fn deserialize_request(self) -> Result<Request, Error> {
         match self.version {
             1 => {
-                let req = serde_json::from_slice::<v1::Request>(self.buf)?;
+                let req = serde_json::from_slice::<v1::Request>(self.buf)
+                    .map_err(std::io::Error::from)?;
                 Ok(Request::V1(req))
             }
             theirs => Err(Error::UnsupportedVersion {
@@ -99,7 +97,8 @@ impl<'buf> VersionedBuf<'buf> {
     pub fn deserialize_response(self) -> Result<Response, Error> {
         match self.version {
             1 => {
-                let res = serde_json::from_slice::<v1::Response>(self.buf)?;
+                let res = serde_json::from_slice::<v1::Response>(self.buf)
+                    .map_err(std::io::Error::from)?;
                 Ok(Response::V1(res))
             }
             theirs => Err(Error::UnsupportedVersion {

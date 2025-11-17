@@ -17,7 +17,7 @@ pub type Statements<const N: usize> = smallvec::SmallVec<[Statement; N]>;
 impl ToSqlParam for TokenSet {
     /// Converts a token set to a SQL parameter
     ///
-    /// Due to the limitations imposed on us via JSON (binary data is cumbersome) and SQLite (no arrays)
+    /// Due to the limitations imposed on us via JSON (binary data is cumbersome) and `SQLite` (no arrays)
     /// we base64 a custom encoding for token sets
     fn to_sql(&self) -> SqliteParam {
         const MAX_TOKENS: usize = u8::MAX as usize >> 1;
@@ -54,6 +54,7 @@ impl ToSqlParam for TokenSet {
         };
 
         for tok in tokens {
+            #[allow(clippy::checked_conversions)]
             if len_prefix {
                 debug_assert!(
                     tok.len() <= u8::MAX as usize,
@@ -65,7 +66,7 @@ impl ToSqlParam for TokenSet {
                 blob.push(tok.len() as u8);
             }
 
-            blob.extend_from_slice(&tok);
+            blob.extend_from_slice(tok);
         }
 
         SqliteParam::Text(data_encoding::BASE64_NOPAD.encode(&blob).into())
@@ -90,6 +91,11 @@ impl ToSqlParam for std::net::Ipv6Addr {
     }
 }
 
+/// Serializes an [`Endpoint`] to a string for insertion into the DB
+///
+/// Since the endpoint is a string column, we always prefix IP endpoints with a
+/// '|' which allows us to easily disambiguate name from IP when parsing back to
+/// an endpoint
 #[inline]
 fn to_compact_str(ep: &Endpoint) -> compact_str::CompactString {
     use std::fmt::Write as _;
@@ -267,14 +273,14 @@ impl ToSqlParam for Peer {
 
 pub struct Datacenter<'s, const N: usize>(pub &'s mut smallvec::SmallVec<[Statement; N]>);
 
-impl<'s, const N: usize> Datacenter<'s, N> {
+impl<const N: usize> Datacenter<'_, N> {
     #[inline]
     pub fn insert(&mut self, peer: Peer, qcmp: u16, icao: IcaoCode) {
-        let mut params = Vec::with_capacity(3);
-
-        params.push(peer.to_sql());
-        params.push(SqliteParam::Integer(qcmp as _));
-        params.push(icao.to_sql());
+        let params = vec![
+            peer.to_sql(),
+            SqliteParam::Integer(qcmp as _),
+            icao.to_sql(),
+        ];
 
         self.0.push(Statement::WithParams(
             "INSERT INTO dc (ip,port,icao,servers) VALUES (?,?,?,jsonb('{}'))".into(),
@@ -339,7 +345,7 @@ impl<'s, const N: usize> Datacenter<'s, N> {
 
 pub struct Filter<'s, const N: usize>(pub &'s mut smallvec::SmallVec<[Statement; N]>);
 
-impl<'s, const N: usize> Filter<'s, N> {
+impl<const N: usize> Filter<'_, N> {
     #[inline]
     pub fn upsert(&mut self, filter: &str) {
         self.0.push(Statement::WithParams(

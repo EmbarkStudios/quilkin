@@ -1,9 +1,12 @@
 use corro_api_types::{QueryEvent, TypedQueryEvent};
 use corro_types::pubsub::ChangeType;
-use corrosion::{codec, db::{
-    read::{self, FromSqlValue, ServerRow},
-    write,
-}};
+use corrosion::{
+    codec,
+    db::{
+        read::{self, FromSqlValue, ServerRow},
+        write,
+    },
+};
 use corrosion_tests::TestSubsDb;
 use quilkin_types::{Endpoint, IcaoCode, TokenSet};
 use std::{
@@ -22,7 +25,7 @@ struct Server {
 /// Tests subscriptions to server notifications work properly
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn server_subscriptions() {
-    let _guard = qt::init_logging(qt::Level::DEBUG, "corro_types");
+    qt::init_logging(qt::Level::DEBUG, "corro_types");
 
     let mut pool = TestSubsDb::new(corrosion::schema::SCHEMA, "server_subscriptions").await;
 
@@ -125,26 +128,24 @@ async fn server_subscriptions() {
     states.clear();
     pool.send_changes(&sh).await;
 
-    {
-        match srx.recv().await.expect("expected a change") {
-            read::QueryEvent::Change(kind, _rid, row, _id) => {
-                assert_eq!(kind, ChangeType::Insert);
-                let ns = ServerRow::from_sql(&row).expect("failed to deserialize insert");
-                current_set.insert(
-                    ns.endpoint,
-                    Server {
-                        icao: ns.icao,
-                        tokens: ns.tokens,
-                    },
-                );
+    match srx.recv().await.expect("expected a change") {
+        read::QueryEvent::Change(kind, _rid, row, _id) => {
+            assert_eq!(kind, ChangeType::Insert);
+            let ns = ServerRow::from_sql(&row).expect("failed to deserialize insert");
+            current_set.insert(
+                ns.endpoint,
+                Server {
+                    icao: ns.icao,
+                    tokens: ns.tokens,
+                },
+            );
 
-                assert_eq!(server_set, current_set);
-            }
-            other => {
-                panic!("unexpected event {other:?}");
-            }
+            assert_eq!(server_set, current_set);
         }
-    };
+        other => {
+            panic!("unexpected event {other:?}");
+        }
+    }
 
     // Change an existing server
     {
@@ -277,7 +278,7 @@ async fn server_subscriptions() {
             } else {
                 true
             }
-        })
+        });
     }
 
     pool.transaction(states.iter()).await;
@@ -323,29 +324,26 @@ async fn server_subscriptions() {
 
 use corrosion::pubsub;
 
-const NORMAL_QUERY: &str = "SELECT endpoint,icao,tokens FROM servers";
-
 /// Tests that a single subscription works
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn single_sub() {
-    let _guard = qt::init_logging(qt::Level::DEBUG, "corro_types");
+    qt::init_logging(qt::Level::DEBUG, "corro_types");
 
     let pool = TestSubsDb::new(corrosion::schema::SCHEMA, "single_sub").await;
     let ctx = pool.pubsub_ctx();
 
-    let sub = ctx.subscribe(
-        pubsub::SubParamsv1 {
-            query: corro_api_types::Statement::Simple(NORMAL_QUERY.to_owned()),
+    let sub = ctx
+        .subscribe(pubsub::SubParamsv1 {
+            query: corro_api_types::Statement::Simple(pubsub::SERVER_QUERY.to_owned()),
             from: None,
             skip_rows: false,
             max_buffer: 0,
             max_time: Duration::from_millis(10),
             change_threshold: 0,
             process_interval: Duration::from_secs(1),
-        }
-    )
-    .await
-    .unwrap();
+        })
+        .await
+        .unwrap();
 
     let mut rx = sub.rx;
 
@@ -472,24 +470,23 @@ async fn single_sub() {
 /// Tests that multiple subscriptions for the same query works
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn multiple_subs() {
-    let _guard = qt::init_logging(qt::Level::DEBUG, "corro_types");
+    qt::init_logging(qt::Level::DEBUG, "corro_types");
 
     let pool = TestSubsDb::new(corrosion::schema::SCHEMA, "multiple_subs").await;
     let ctx = pool.pubsub_ctx();
 
-    let original = ctx.subscribe(
-        pubsub::SubParamsv1 {
-            query: corro_api_types::Statement::Simple(NORMAL_QUERY.to_owned()),
+    let original = ctx
+        .subscribe(pubsub::SubParamsv1 {
+            query: corro_api_types::Statement::Simple(pubsub::SERVER_QUERY.to_owned()),
             from: None,
             skip_rows: false,
             max_buffer: 0,
             max_time: Duration::from_millis(10),
             change_threshold: 0,
             process_interval: Duration::from_secs(1),
-        },
-    )
-    .await
-    .unwrap();
+        })
+        .await
+        .unwrap();
 
     let mut orx = original.rx;
 
@@ -497,19 +494,18 @@ async fn multiple_subs() {
         let mut ms = Vec::with_capacity(3);
 
         for _ in 0..3 {
-            let ns = ctx.subscribe(
-                pubsub::SubParamsv1 {
-                    query: corro_api_types::Statement::Simple(NORMAL_QUERY.to_owned()),
+            let ns = ctx
+                .subscribe(pubsub::SubParamsv1 {
+                    query: corro_api_types::Statement::Simple(pubsub::SERVER_QUERY.to_owned()),
                     from: None,
                     skip_rows: false,
                     max_buffer: 0,
                     max_time: Duration::from_millis(10),
                     change_threshold: 0,
                     process_interval: Duration::from_secs(1),
-                },
-            )
-            .await
-            .unwrap();
+                })
+                .await
+                .unwrap();
 
             assert_eq!(original.query_hash, ns.query_hash);
             ms.push(ns.rx);
