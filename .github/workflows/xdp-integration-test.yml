@@ -33,7 +33,7 @@ jobs:
       #     registry: true
       #     registry_name: ${{ env.REGISTRY_NAME }}
       #     registry_port: ${{ env.REGISTRY_PORT }}
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.85.0
       - name: Install virtme-ng
         env:
           VIRTME_VERSION: "v1.38"
