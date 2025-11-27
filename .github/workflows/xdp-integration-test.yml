@@ -42,5 +42,7 @@ jobs:
         run: |
           curl -L -o fortio.deb https://github.com/fortio/fortio/releases/download/v1.68.0/fortio_1.68.0_amd64.deb
           sudo dpkg -i fortio.deb
+      - name: Install virtme-ng
+        run: .ci/install-virtme-ng.sh
       - name: Run XDP integration test
-        run: sudo .ci/xdp/veth-integ-test.sh
+        run: .ci/xdp/integ-test-multi-kernel.sh
