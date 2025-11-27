@@ -9,5 +9,5 @@ KERNEL_VERSIONS=('6.11' '6.12' '6.13' '6.14' '6.15' '6.16')
 for vers in "${KERNEL_VERSIONS[@]}"
 do
   echo "::notice file=$source,line=$LINENO::Running xdp test in kernel $vers"
-  sudo vng --rw --network user -r "$vers" --exec .ci/xdp/veth-integ-test.sh
+  sudo "$RUNNER_TEMP/virtme-ng/vng" --rw --network user -r "$vers" --exec .ci/xdp/veth-integ-test.sh
 done
