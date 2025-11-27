@@ -35,6 +35,8 @@ jobs:
       #     registry_port: ${{ env.REGISTRY_PORT }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Install virtme-ng
+        env:
+          VIRTME_VERSION: "v3.18"
         run: .ci/install-virtme-ng.sh
       - name: Install fortio
         run: |
