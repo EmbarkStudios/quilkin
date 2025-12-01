@@ -30,6 +30,7 @@ type Body = Full<Bytes>;
 use health::Health;
 
 pub const PORT: u16 = 8000;
+pub const PORT_LABEL: &str = "8000";
 
 pub(crate) const IDLE_REQUEST_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -67,6 +68,7 @@ where
                             let health = health.clone();
                             let ready = ready.clone();
                             tokio::spawn(async move {
+                                crate::metrics::http::http_connections(PORT_LABEL).inc();
                                 let svc = hyper::service::service_fn(move |req| {
                                     let config = config.clone();
                                     let health = health.clone();
@@ -86,6 +88,7 @@ where
                                 {
                                     tracing::warn!("failed to reponse to phoenix request: {err}");
                                 }
+                                crate::metrics::http::http_connections(PORT_LABEL).dec();
                             });
                         }
                     });
@@ -102,7 +105,8 @@ async fn handle_request<C: serde::Serialize>(
     ready: &AtomicBool,
     health: Health,
 ) -> Response<Body> {
-    match (request.method(), request.uri().path()) {
+    crate::metrics::http::http_inflight_requests(PORT_LABEL).inc();
+    let response = match (request.method(), request.uri().path()) {
         (&Method::GET, "/metrics") => collect_metrics(),
         (&Method::GET, "/live" | "/livez") => health.check_liveness(),
         #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
@@ -155,7 +159,9 @@ async fn handle_request<C: serde::Serialize>(
             *response.status_mut() = StatusCode::NOT_FOUND;
             response
         }
-    }
+    };
+    crate::metrics::http::http_inflight_requests(PORT_LABEL).dec();
+    response
 }
 
 fn check_readiness(check: &AtomicBool) -> Response<Body> {
