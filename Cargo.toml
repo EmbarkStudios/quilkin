@@ -106,9 +106,9 @@ hyper-rustls = { version = "0.27", default-features = false, features = [
     "webpki-roots",
     "ring",
 ] }
-ipnetwork = "0.20.0" # keep in sync with maxmind
+ipnetwork = { version = "0.21.1", features = ["serde"] } # keep in sync with maxmind
 k8s-openapi.workspace = true
-maxminddb = "0.24.0"
+maxminddb = "0.27.0"
 notify = "8.0"
 num_cpus = "1.16.0"
 mimalloc = { version = "0.1.46", optional = true }
