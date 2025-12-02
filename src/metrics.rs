@@ -72,6 +72,40 @@ pub(crate) fn leader_election(is_leader: bool) {
     METRIC.set(is_leader as _);
 }
 
+pub(crate) mod http {
+    use super::*;
+
+    pub(crate) fn http_connections(port: &str) -> IntGauge {
+        static METRIC: Lazy<IntGaugeVec> = Lazy::new(|| {
+            prometheus::register_int_gauge_vec_with_registry! {
+                prometheus::opts! {
+                    "http_connections",
+                    "Number of active http connections",
+                },
+                &["port"],
+                registry(),
+            }
+            .unwrap()
+        });
+        METRIC.with_label_values(&[port])
+    }
+
+    pub(crate) fn http_inflight_requests(port: &str) -> IntGauge {
+        static METRIC: Lazy<IntGaugeVec> = Lazy::new(|| {
+            prometheus::register_int_gauge_vec_with_registry! {
+                prometheus::opts! {
+                    "http_inflight_requests",
+                    "Number of inflight http requests",
+                },
+                &["port"],
+                registry(),
+            }
+            .unwrap()
+        });
+        METRIC.with_label_values(&[port])
+    }
+}
+
 pub(crate) mod k8s {
     use super::*;
 
