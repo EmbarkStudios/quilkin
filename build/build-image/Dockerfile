@@ -27,7 +27,7 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN set -eux && \
     apt-get update && \
     apt-get install -y lsb-release jq curl wget zip git build-essential software-properties-common protobuf-compiler \
-        libssl-dev pkg-config bash-completion g++-x86-64-linux-gnu g++-mingw-w64-x86-64 && \
+    libssl-dev pkg-config bash-completion g++-x86-64-linux-gnu g++-mingw-w64-x86-64 g++-aarch64-linux-gnu && \
     echo "source /etc/bash_completion" >> /root/.bashrc
 
 # install protoc-gen-doc
@@ -60,11 +60,11 @@ RUN git config --global --add safe.directory /workspace
 RUN set -eux; \
     dpkgArch="$(dpkg --print-architecture)" && \
     case "${dpkgArch##*-}" in \
-        amd64) rustArch='x86_64-unknown-linux-gnu';; \
-        armhf) rustArch='armv7-unknown-linux-gnueabihf';; \
-        arm64) rustArch='aarch64-unknown-linux-gnu';; \
-        i386) rustArch='i686-unknown-linux-gnu';; \
-        *) echo >&2 "unsupported architecture: ${dpkgArch}"; exit 1 ;; \
+    amd64) rustArch='x86_64-unknown-linux-gnu';; \
+    armhf) rustArch='armv7-unknown-linux-gnueabihf';; \
+    arm64) rustArch='aarch64-unknown-linux-gnu';; \
+    i386) rustArch='i686-unknown-linux-gnu';; \
+    *) echo >&2 "unsupported architecture: ${dpkgArch}"; exit 1 ;; \
     esac && \
     wget --quiet "https://static.rust-lang.org/rustup/dist/${rustArch}/rustup-init" && \
     chmod +x rustup-init; \
