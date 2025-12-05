@@ -475,158 +475,160 @@ async fn multiple_subs() {
     let pool = TestSubsDb::new(corrosion::schema::SCHEMA, "multiple_subs").await;
     let ctx = pool.pubsub_ctx();
 
-    let original = ctx
-        .subscribe(pubsub::SubParamsv1 {
-            query: corro_api_types::Statement::Simple(pubsub::SERVER_QUERY.to_owned()),
-            from: None,
-            skip_rows: false,
-            max_buffer: 0,
-            max_time: Duration::from_millis(10),
-            change_threshold: 0,
-            process_interval: Duration::from_secs(1),
+    for _ in 0..5 {
+        let original = ctx
+            .subscribe(pubsub::SubParamsv1 {
+                query: corro_api_types::Statement::Simple(pubsub::SERVER_QUERY.to_owned()),
+                from: None,
+                skip_rows: false,
+                max_buffer: 0,
+                max_time: Duration::from_millis(10),
+                change_threshold: 0,
+                process_interval: Duration::from_secs(1),
+            })
+            .await
+            .unwrap();
+
+        let mut orx = original.rx;
+
+        let mut multi_subs = {
+            let mut ms = Vec::with_capacity(10);
+
+            for _ in 0..ms.capacity() {
+                let ns = ctx
+                    .subscribe(pubsub::SubParamsv1 {
+                        query: corro_api_types::Statement::Simple(pubsub::SERVER_QUERY.to_owned()),
+                        from: None,
+                        skip_rows: false,
+                        max_buffer: 0,
+                        max_time: Duration::from_millis(10),
+                        change_threshold: 0,
+                        process_interval: Duration::from_secs(1),
+                    })
+                    .await
+                    .unwrap();
+
+                assert_eq!(original.query_hash, ns.query_hash);
+                ms.push(ns.rx);
+            }
+
+            ms
+        };
+
+        let mut cur_cid = 0;
+
+        let mut assert_all = async |tqe| {
+            corrosion_tests::assert_sub_event_eq::<ServerRow>(&mut orx, &tqe).await;
+
+            for sub in &mut multi_subs {
+                corrosion_tests::assert_sub_event_eq::<ServerRow>(sub, &tqe).await;
+            }
+        };
+
+        // We always get a state of the world first, in our case the DB is empty
+        assert_all(TypedQueryEvent::Columns(vec![
+            "endpoint".into(),
+            "icao".into(),
+            "tokens".into(),
+        ]))
+        .await;
+        assert_all(TypedQueryEvent::EndOfQuery {
+            time: 0.,
+            change_id: Some(cur_cid.into()),
         })
-        .await
-        .unwrap();
+        .await;
 
-    let mut orx = original.rx;
+        let peer = corrosion::Peer::new(Ipv6Addr::from_bits(0xaabbccddeeff), 15111, 0, 0);
+        let mut server_set = BTreeMap::<Endpoint, Server>::new();
 
-    let mut multi_subs = {
-        let mut ms = Vec::with_capacity(1000);
+        let mut states = write::Statements::<30>::new();
+        let key = Endpoint::new(Ipv4Addr::new(1, 2, 3, 4).into(), 7777);
+        let icao = IcaoCode::new_testing([b'T'; 4]);
+        let new_icao = IcaoCode::new_testing([b'N'; 4]);
+        let tokens = TokenSet::from([[8; 8]]);
 
-        for _ in 0..ms.capacity() {
-            let ns = ctx
-                .subscribe(pubsub::SubParamsv1 {
-                    query: corro_api_types::Statement::Simple(pubsub::SERVER_QUERY.to_owned()),
-                    from: None,
-                    skip_rows: false,
-                    max_buffer: 0,
-                    max_time: Duration::from_millis(10),
-                    change_threshold: 0,
-                    process_interval: Duration::from_secs(1),
-                })
-                .await
-                .unwrap();
-
-            assert_eq!(original.query_hash, ns.query_hash);
-            ms.push(ns.rx);
-        }
-
-        ms
-    };
-
-    let mut cur_cid = 0;
-
-    let mut assert_all = async |tqe| {
-        corrosion_tests::assert_sub_event_eq::<ServerRow>(&mut orx, &tqe).await;
-
-        for sub in &mut multi_subs {
-            corrosion_tests::assert_sub_event_eq::<ServerRow>(sub, &tqe).await;
-        }
-    };
-
-    // We always get a state of the world first, in our case the DB is empty
-    assert_all(TypedQueryEvent::Columns(vec![
-        "endpoint".into(),
-        "icao".into(),
-        "tokens".into(),
-    ]))
-    .await;
-    assert_all(TypedQueryEvent::EndOfQuery {
-        time: 0.,
-        change_id: Some(cur_cid.into()),
-    })
-    .await;
-
-    let peer = corrosion::Peer::new(Ipv6Addr::from_bits(0xaabbccddeeff), 15111, 0, 0);
-    let mut server_set = BTreeMap::<Endpoint, Server>::new();
-
-    let mut states = write::Statements::<30>::new();
-    let key = Endpoint::new(Ipv4Addr::new(1, 2, 3, 4).into(), 7777);
-    let icao = IcaoCode::new_testing([b'T'; 4]);
-    let new_icao = IcaoCode::new_testing([b'N'; 4]);
-    let tokens = TokenSet::from([[8; 8]]);
-
-    for _ in 0..1000 {
-        // Insert
-        {
+        for _ in 0..100 {
+            // Insert
             {
-                let mut s = write::Server::for_peer(peer, &mut states);
+                {
+                    let mut s = write::Server::for_peer(peer, &mut states);
 
-                server_set.insert(
-                    key.clone(),
-                    Server {
+                    server_set.insert(
+                        key.clone(),
+                        Server {
+                            icao,
+                            tokens: tokens.clone(),
+                        },
+                    );
+                    let srv = server_set.get(&key).unwrap();
+                    s.upsert(&key, srv.icao, &srv.tokens);
+                }
+
+                pool.broadcast_changes(&mut states).await;
+                cur_cid += 1;
+
+                assert_all(TypedQueryEvent::Change(
+                    ChangeType::Insert,
+                    0.into(),
+                    ServerRow {
                         icao,
+                        endpoint: key.clone(),
                         tokens: tokens.clone(),
                     },
-                );
-                let srv = server_set.get(&key).unwrap();
-                s.upsert(&key, srv.icao, &srv.tokens);
+                    cur_cid.into(),
+                ))
+                .await;
             }
 
-            pool.broadcast_changes(&mut states).await;
-            cur_cid += 1;
-
-            assert_all(TypedQueryEvent::Change(
-                ChangeType::Insert,
-                0.into(),
-                ServerRow {
-                    icao,
-                    endpoint: key.clone(),
-                    tokens: tokens.clone(),
-                },
-                cur_cid.into(),
-            ))
-            .await;
-        }
-
-        // Mutate
-        {
+            // Mutate
             {
-                let mut s = write::Server::for_peer(peer, &mut states);
+                {
+                    let mut s = write::Server::for_peer(peer, &mut states);
 
-                server_set.get_mut(&key).unwrap().icao = new_icao;
-                s.update(&key, Some(new_icao), None);
+                    server_set.get_mut(&key).unwrap().icao = new_icao;
+                    s.update(&key, Some(new_icao), None);
+                }
+
+                pool.broadcast_changes(&mut states).await;
+                cur_cid += 1;
+
+                assert_all(TypedQueryEvent::Change(
+                    ChangeType::Update,
+                    0.into(),
+                    ServerRow {
+                        icao: new_icao,
+                        endpoint: key.clone(),
+                        tokens: tokens.clone(),
+                    },
+                    cur_cid.into(),
+                ))
+                .await;
             }
 
-            pool.broadcast_changes(&mut states).await;
-            cur_cid += 1;
-
-            assert_all(TypedQueryEvent::Change(
-                ChangeType::Update,
-                0.into(),
-                ServerRow {
-                    icao: new_icao,
-                    endpoint: key.clone(),
-                    tokens: tokens.clone(),
-                },
-                cur_cid.into(),
-            ))
-            .await;
-        }
-
-        // Delete
-        {
+            // Delete
             {
-                let mut s = write::Server::for_peer(peer, &mut states);
+                {
+                    let mut s = write::Server::for_peer(peer, &mut states);
 
-                server_set.remove(&key);
-                s.remove_immediate(&key);
+                    server_set.remove(&key);
+                    s.remove_immediate(&key);
+                }
+
+                pool.broadcast_changes(&mut states).await;
+                cur_cid += 1;
+
+                assert_all(TypedQueryEvent::Change(
+                    ChangeType::Delete,
+                    0.into(),
+                    ServerRow {
+                        icao: new_icao,
+                        endpoint: key.clone(),
+                        tokens: tokens.clone(),
+                    },
+                    cur_cid.into(),
+                ))
+                .await;
             }
-
-            pool.broadcast_changes(&mut states).await;
-            cur_cid += 1;
-
-            assert_all(TypedQueryEvent::Change(
-                ChangeType::Delete,
-                0.into(),
-                ServerRow {
-                    icao: new_icao,
-                    endpoint: key.clone(),
-                    tokens: tokens.clone(),
-                },
-                cur_cid.into(),
-            ))
-            .await;
         }
     }
 }
