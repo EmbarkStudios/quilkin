@@ -491,7 +491,7 @@ async fn multiple_subs() {
     let mut orx = original.rx;
 
     let mut multi_subs = {
-        let mut ms = Vec::with_capacity(100);
+        let mut ms = Vec::with_capacity(1000);
 
         for _ in 0..ms.capacity() {
             let ns = ctx
