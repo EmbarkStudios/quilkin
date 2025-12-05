@@ -39,7 +39,7 @@ pub fn deserialize_token_set(s: &str) -> eyre::Result<TokenSet> {
         for _ in 0..tokens[0] as usize {
             let len = toks[0] as usize;
             eyre::ensure!(
-                len <= toks.len() - 1,
+                len < toks.len(),
                 "token length {len} is longer than remaining binary slice"
             );
 

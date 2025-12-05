@@ -15,6 +15,7 @@ pub struct Trip {
 
 impl Trip {
     #[inline]
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let (tripwire, worker, tx) = tripwire::Tripwire::new_simple();
         Self {
@@ -50,7 +51,7 @@ pub struct TestSubsDb {
     matcher_conns: std::collections::BTreeMap<uuid::Uuid, types::sqlite::CrConn>,
     db_version: usize,
     pub trip: Trip,
-    btx: BroadcastingTransactor,
+    pub btx: BroadcastingTransactor,
 }
 
 impl TestSubsDb {
@@ -211,7 +212,7 @@ impl TestSubsDb {
             .changes_tx()
             .send(candidates)
             .await
-            .expect("failed to send changes")
+            .expect("failed to send changes");
     }
 
     #[inline]
@@ -348,7 +349,7 @@ pub fn query_to_string(
         statement
             .column_names()
             .into_iter()
-            .map(|name| pt::Cell::new(name))
+            .map(pt::Cell::new)
             .collect(),
     ));
 

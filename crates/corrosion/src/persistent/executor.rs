@@ -1,4 +1,7 @@
-use crate::{Peer, db, persistent as p};
+use crate::{
+    Peer, db,
+    persistent::proto::{ExecResponse, ExecResult, v1 as p},
+};
 use corro_types::{
     actor::ActorId,
     agent::{Booked, BookedVersions, ChangeError, LockRegistry, SplitPool},
@@ -148,7 +151,7 @@ impl BroadcastingTransactor {
 }
 
 #[async_trait::async_trait]
-impl super::server::AgentExecutor for BroadcastingTransactor {
+impl super::server::Mutator for BroadcastingTransactor {
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
         let mut dc = smallvec::SmallVec::<[_; 1]>::new();
         {
@@ -176,29 +179,34 @@ impl super::server::AgentExecutor for BroadcastingTransactor {
         }
     }
 
-    async fn execute(&self, peer: Peer, statements: &[p::ServerChange]) -> p::ExecResponse {
+    async fn execute(&self, peer: Peer, statements: &[p::ServerChange]) -> ExecResponse {
         let start = std::time::Instant::now();
 
         let mut v = smallvec::SmallVec::<[_; 32]>::new();
         {
-            let mut srv = db::write::Server::for_peer(peer, &mut v);
-
             for s in statements {
                 match s {
-                    p::ServerChange::Insert(i) => {
+                    p::ServerChange::Upsert(i) => {
+                        let mut srv = db::write::Server::for_peer(peer, &mut v);
                         for i in i {
                             srv.upsert(&i.endpoint, i.icao, &i.tokens);
                         }
                     }
                     p::ServerChange::Remove(r) => {
+                        let mut srv = db::write::Server::for_peer(peer, &mut v);
                         for r in r {
                             srv.remove_immediate(r);
                         }
                     }
                     p::ServerChange::Update(u) => {
+                        let mut srv = db::write::Server::for_peer(peer, &mut v);
                         for u in u {
                             srv.update(&u.endpoint, u.icao, u.tokens.as_ref());
                         }
+                    }
+                    p::ServerChange::UpdateMutator(mu) => {
+                        let mut dc = db::write::Datacenter(&mut v);
+                        dc.update(peer, mu.qcmp_port, mu.icao);
                     }
                 }
             }
@@ -213,13 +221,13 @@ impl super::server::AgentExecutor for BroadcastingTransactor {
                     match db::write::exec_single_interruptible(tx, statement) {
                         Ok(rows_affected) => {
                             rows += rows_affected;
-                            results.push(p::ExecResult::Execute {
+                            results.push(ExecResult::Execute {
                                 rows_affected,
                                 time: start.elapsed().as_secs_f64(),
                             });
                         }
                         Err(error) => {
-                            results.push(p::ExecResult::Error {
+                            results.push(ExecResult::Error {
                                 error: error.to_string(),
                             });
                         }
@@ -237,14 +245,14 @@ impl super::server::AgentExecutor for BroadcastingTransactor {
             }
             Err(error) => {
                 tracing::error!(%peer, %error, "failed to update servers");
-                results.push(p::ExecResult::Error {
+                results.push(ExecResult::Error {
                     error: error.to_string(),
                 });
                 None
             }
         };
 
-        p::ExecResponse {
+        ExecResponse {
             results,
             time: start.elapsed().as_secs_f64(),
             version,
