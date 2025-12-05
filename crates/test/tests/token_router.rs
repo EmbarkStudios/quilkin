@@ -18,7 +18,7 @@
 use qt::xdp_util;
 use quilkin::filters;
 
-// This test covers the scenario in https://github.com/googleforgames/quilkin/issues/988
+// This test covers the scenario in https://github.com/EmbarkStudios/quilkin/issues/988
 // to make sure there are no issues with overlapping streams between clients.
 #[tokio::test]
 async fn multiple_clients() {
