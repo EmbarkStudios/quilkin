@@ -205,140 +205,9 @@ impl Server {
             request,
         } = req;
 
-        #[inline]
-        async fn send_response<T: proto::VersionedResponse>(
-            ss: &mut SendStream,
-            response: T,
-        ) -> Result<(), IoLoopError> {
-            let bytes = response.write()?;
-            Ok(ss.write_chunk(bytes).await?)
-        }
-
-        let result = 'io: {
-            match request {
-                proto::Request::V1(inner) => {
-                    use proto::v1;
-
-                    match inner {
-                        v1::Request::Mutate(mreq) => {
-                            exec.connected(peer, mreq.icao, mreq.qcmp_port).await;
-
-                            if let Err(err) = send_response(
-                                &mut send,
-                                v1::Response::Ok(v1::OkResponse::Mutate(v1::MutateResponse)),
-                            )
-                            .await
-                            {
-                                break 'io Err(err);
-                            }
-
-                            let mut io_loop = async || -> Result<(), IoLoopError> {
-                                loop {
-                                    let to_exec = codec::read_length_prefixed_jsonb::<
-                                        Vec<v1::ServerChange>,
-                                    >(&mut recv)
-                                    .await?;
-
-                                    let response = exec.execute(peer, &to_exec).await;
-                                    let response = codec::write_length_prefixed_jsonb(&response)?;
-                                    send.write_chunk(response.freeze()).await?;
-                                }
-                            };
-
-                            let res = io_loop().await;
-                            exec.disconnected(peer).await;
-                            res
-                        }
-                        v1::Request::Subscribe(sreq) => {
-                            let max_buffer = sreq.0.max_buffer;
-                            let max_time = sreq.0.max_time;
-
-                            match subs.subscribe(sreq.0).await {
-                                Ok(sub) => {
-                                    if let Err(err) = send_response(
-                                        &mut send,
-                                        v1::Response::Ok(v1::OkResponse::Subscribe(
-                                            v1::SubscribeResponse {
-                                                id: sub.id,
-                                                query_hash: sub.query_hash.clone(),
-                                            },
-                                        )),
-                                    )
-                                    .await
-                                    {
-                                        break 'io Err(err);
-                                    }
-
-                                    let sub_id = sub.id;
-
-                                    let mut bs =
-                                        pubsub::BufferingSubStream::new(sub, max_buffer, max_time);
-
-                                    let mut io_loop = async || -> Result<(), IoLoopError> {
-                                        loop {
-                                            tokio::select! {
-                                                buf = bs.next() => {
-                                                    if let Some(buf) = buf {
-                                                        send.write_chunk(buf).await?;
-                                                    } else {
-                                                        tracing::info!(%peer, %sub_id, "subscription sender was closed");
-                                                        // This should maybe be an error?
-                                                        return Ok(());
-                                                    }
-                                                }
-                                                res = send.stopped() => {
-                                                    match res {
-                                                        Ok(code) => {
-                                                            tracing::info!(%peer, %sub_id, ?code, "subscriber disconnected with code");
-                                                        }
-                                                        Err(_) => {
-                                                            tracing::info!(%peer, %sub_id, "subscriber disconnected");
-                                                        }
-                                                    }
-                                                    return Ok(());
-                                                }
-                                            }
-                                        }
-                                    };
-
-                                    let res = io_loop().await;
-                                    tracing::debug!(result = ?res, "subscription stream ended");
-                                    res
-                                }
-                                Err(err) => {
-                                    use pubsub::{MatcherError as Me, MatcherUpsertError as E};
-
-                                    let err_str = err.to_string();
-                                    let code = match err {
-                                        E::Pool(_) | E::Sqlite(_) | E::MissingBroadcaster => {
-                                            ErrorCode::InternalServerError
-                                        }
-                                        E::CouldNotExpand
-                                        | E::NormalizeStatement(_)
-                                        | E::SubFromWithoutMatcher => ErrorCode::BadRequest,
-                                        E::Matcher(me) => {
-                                            match me {
-                                                Me::Lexer(_) | Me::StatementRequired |  Me::TableRequired | Me::QualificationRequired { .. } | Me::AggPrimaryKeyMissing(_, _) => ErrorCode::BadRequest,
-                                                Me::TableNotFound(_) | Me::TableForColumnNotFound { .. }=> ErrorCode::NotFound,
-                                                Me::UnsupportedStatement | Me::UnsupportedExpr { .. } | Me::JoinOnExprUnsupported { .. } => ErrorCode::Unsupported,
-                                                Me::Sqlite(_) | Me::NoPrimaryKey(_) | Me::TableStarNotFound { .. } | Me::MissingPrimaryKeys | Me::ChangeQueueClosedOrFull /* this could maybe be serviceunavailable */ | Me::NoChangeInserted | Me::EventReceiverClosed | Me::Unpack(_) | Me::InsertSub | Me::FromSql(_) | Me::Io(_) | Me::ChangesetEncode(_) | Me::QueueFull | Me::CannotRestoreExisting | Me::WritePermitAcquire(_) | Me::NotRunning | Me::MissingSql => ErrorCode::InternalServerError,
-                                            }
-                                        }
-                                    };
-
-                                    send_response(
-                                        &mut send,
-                                        v1::Response::Err {
-                                            code: code as u16,
-                                            message: err_str,
-                                        },
-                                    )
-                                    .await
-                                }
-                            }
-                        }
-                    }
-                }
+        let result = match request {
+            proto::Request::V1(inner) => {
+                v1_impl::handle_stream(inner, peer, &mut send, &mut recv, exec, subs).await
             }
         };
 
@@ -372,5 +241,152 @@ impl Server {
     #[inline]
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+}
+
+#[inline]
+async fn send_response<T: proto::VersionedResponse>(
+    ss: &mut SendStream,
+    response: T,
+) -> Result<(), IoLoopError> {
+    let bytes = response.write()?;
+    Ok(ss.write_chunk(bytes).await?)
+}
+
+mod v1_impl {
+    use super::*;
+    use proto::v1;
+
+    async fn handle_mutate(
+        req: v1::MutateRequest,
+        peer: Peer,
+        send: &mut SendStream,
+        recv: &mut RecvStream,
+        exec: impl Mutator + 'static,
+    ) -> Result<(), IoLoopError> {
+        exec.connected(peer, req.icao, req.qcmp_port).await;
+
+        send_response(
+            send,
+            v1::Response::Ok(v1::OkResponse::Mutate(v1::MutateResponse)),
+        )
+        .await?;
+
+        let mut io_loop = async || -> Result<(), IoLoopError> {
+            loop {
+                let to_exec =
+                    codec::read_length_prefixed_jsonb::<Vec<v1::ServerChange>>(recv).await?;
+
+                let response = exec.execute(peer, &to_exec).await;
+                let response = codec::write_length_prefixed_jsonb(&response)?;
+                send.write_chunk(response.freeze()).await?;
+            }
+        };
+
+        let res = io_loop().await;
+        exec.disconnected(peer).await;
+        res
+    }
+
+    async fn handle_subscribe(
+        req: v1::SubscribeRequest,
+        peer: Peer,
+        send: &mut SendStream,
+        subs: impl SubManager + 'static,
+    ) -> Result<(), IoLoopError> {
+        let max_buffer = req.0.max_buffer;
+        let max_time = req.0.max_time;
+
+        match subs.subscribe(req.0).await {
+            Ok(sub) => {
+                send_response(
+                    send,
+                    v1::Response::Ok(v1::OkResponse::Subscribe(v1::SubscribeResponse {
+                        id: sub.id,
+                        query_hash: sub.query_hash.clone(),
+                    })),
+                )
+                .await?;
+
+                let sub_id = sub.id;
+
+                let mut bs = pubsub::BufferingSubStream::new(sub, max_buffer, max_time);
+
+                let mut io_loop = async || -> Result<(), IoLoopError> {
+                    loop {
+                        tokio::select! {
+                            buf = bs.next() => {
+                                if let Some(buf) = buf {
+                                    send.write_chunk(buf).await?;
+                                } else {
+                                    tracing::info!(%peer, %sub_id, "subscription sender was closed");
+                                    // This should maybe be an error?
+                                    return Ok(());
+                                }
+                            }
+                            res = send.stopped() => {
+                                match res {
+                                    Ok(code) => {
+                                        tracing::info!(%peer, %sub_id, ?code, "subscriber disconnected with code");
+                                    }
+                                    Err(_) => {
+                                        tracing::info!(%peer, %sub_id, "subscriber disconnected");
+                                    }
+                                }
+                                return Ok(());
+                            }
+                        }
+                    }
+                };
+
+                let res = io_loop().await;
+                tracing::debug!(result = ?res, "subscription stream ended");
+                res
+            }
+            Err(err) => {
+                use pubsub::{MatcherError as Me, MatcherUpsertError as E};
+
+                let err_str = err.to_string();
+                let code = match err {
+                    E::Pool(_) | E::Sqlite(_) | E::MissingBroadcaster => {
+                        ErrorCode::InternalServerError
+                    }
+                    E::CouldNotExpand | E::NormalizeStatement(_) | E::SubFromWithoutMatcher => {
+                        ErrorCode::BadRequest
+                    }
+                    E::Matcher(me) => {
+                        match me {
+                            Me::Lexer(_) | Me::StatementRequired |  Me::TableRequired | Me::QualificationRequired { .. } | Me::AggPrimaryKeyMissing(_, _) => ErrorCode::BadRequest,
+                            Me::TableNotFound(_) | Me::TableForColumnNotFound { .. }=> ErrorCode::NotFound,
+                            Me::UnsupportedStatement | Me::UnsupportedExpr { .. } | Me::JoinOnExprUnsupported { .. } => ErrorCode::Unsupported,
+                            Me::Sqlite(_) | Me::NoPrimaryKey(_) | Me::TableStarNotFound { .. } | Me::MissingPrimaryKeys | Me::ChangeQueueClosedOrFull /* this could maybe be serviceunavailable */ | Me::NoChangeInserted | Me::EventReceiverClosed | Me::Unpack(_) | Me::InsertSub | Me::FromSql(_) | Me::Io(_) | Me::ChangesetEncode(_) | Me::QueueFull | Me::CannotRestoreExisting | Me::WritePermitAcquire(_) | Me::NotRunning | Me::MissingSql => ErrorCode::InternalServerError,
+                        }
+                    }
+                };
+
+                send_response(
+                    send,
+                    v1::Response::Err {
+                        code: code as u16,
+                        message: err_str,
+                    },
+                )
+                .await
+            }
+        }
+    }
+
+    pub(super) async fn handle_stream(
+        request: proto::v1::Request,
+        peer: Peer,
+        send: &mut SendStream,
+        recv: &mut RecvStream,
+        exec: impl Mutator + 'static,
+        subs: impl SubManager + 'static,
+    ) -> Result<(), IoLoopError> {
+        match request {
+            v1::Request::Mutate(mreq) => handle_mutate(mreq, peer, send, recv, exec).await,
+            v1::Request::Subscribe(sreq) => handle_subscribe(sreq, peer, send, subs).await,
+        }
     }
 }

@@ -240,7 +240,7 @@ impl MutationClient {
         if qcmp_port.is_none() && icao.is_none() {
             return Ok(ExecResponse {
                 results: vec![ExecResult::Error {
-                    error: "neither THE QCMP port nor ICAO were provided".into(),
+                    error: "neither the QCMP port nor ICAO were provided".into(),
                 }],
                 time: 0.,
                 version: None,
@@ -308,7 +308,7 @@ impl SubscriptionClient {
         let res = Self::handshake(&mut send, &mut recv, params).await?;
 
         let (tx, reqrx) = mpsc::unbounded_channel();
-        let (stx, mut srx) = oneshot::channel();
+        let (stx, srx) = oneshot::channel();
 
         let sub_id = res.id;
 
@@ -319,63 +319,7 @@ impl SubscriptionClient {
         };
 
         let task = tokio::task::spawn(async move {
-            let mut func = async || -> Result<Option<quinn::VarInt>, StreamError> {
-                tracing::info!("started subscription stream");
-
-                'io: loop {
-                    tokio::select! {
-                        res = codec::read_length_prefixed(&mut recv) => {
-                            match res {
-                                Ok(buf) => {
-                                    for item in pubsub::SubscriptionStream::new(buf) {
-                                        match item {
-                                            Ok(item) => {
-                                                if tx.send(item).is_err() {
-                                                    tracing::info!("subscription stream receiver closed, closing stream");
-                                                    let _ = recv.stop(ErrorCode::Unknown.into());
-                                                    break 'io;
-                                                }
-                                            }
-                                            Err(error) => {
-                                                tracing::error!(%error, "failed to deserialize event from subscription stream");
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(_err) => {
-                                    match recv.received_reset().await {
-                                        Ok(code) => {
-                                            tracing::warn!(code = ?code.map(ErrorCode::from), "server shutdown subscription stream");
-                                        }
-                                        Err(error) => {
-                                            tracing::warn!(%error, "server shutdown subscription stream abnormally");
-                                        }
-                                    }
-
-                                    break;
-                                }
-                            }
-                        }
-                        code = &mut srx => {
-                            let code = code.unwrap_or_else(|_| {
-                                tracing::error!("SubscriptionClient dropped without calling shutdown");
-                                    ErrorCode::Unknown
-                            });
-                            drop(recv.stop(code.into()));
-                            break;
-                        }
-                    }
-                }
-
-                tracing::info!("waiting for remote shutdown");
-                let stime = std::time::Instant::now();
-                let res = send.stopped().await;
-                tracing::info!(time = ?stime.elapsed(), result = ?res, "remote shutdown complete");
-
-                Ok(None)
-            };
-
-            func()
+            Self::run_subscription_loop(recv, send, tx, srx)
                 .instrument(tracing::info_span!("subscription", %sub_id))
                 .await
         });
@@ -388,6 +332,67 @@ impl SubscriptionClient {
             },
             scs,
         ))
+    }
+
+    async fn run_subscription_loop(
+        mut recv: quinn::RecvStream,
+        send: quinn::SendStream,
+        tx: mpsc::UnboundedSender<QueryEvent>,
+        mut srx: oneshot::Receiver<ErrorCode>,
+    ) -> Result<Option<quinn::VarInt>, StreamError> {
+        tracing::info!("started subscription stream");
+
+        'io: loop {
+            tokio::select! {
+                res = codec::read_length_prefixed(&mut recv) => {
+                    match res {
+                        Ok(buf) => {
+                            for item in pubsub::SubscriptionStream::new(buf) {
+                                match item {
+                                    Ok(item) => {
+                                        if tx.send(item).is_err() {
+                                            tracing::info!("subscription stream receiver closed, closing stream");
+                                            let _ = recv.stop(ErrorCode::Unknown.into());
+                                            break 'io;
+                                        }
+                                    }
+                                    Err(error) => {
+                                        tracing::error!(%error, "failed to deserialize event from subscription stream");
+                                    }
+                                }
+                            }
+                        }
+                        Err(_err) => {
+                            match recv.received_reset().await {
+                                Ok(code) => {
+                                    tracing::warn!(code = ?code.map(ErrorCode::from), "server shutdown subscription stream");
+                                }
+                                Err(error) => {
+                                    tracing::warn!(%error, "server shutdown subscription stream abnormally");
+                                }
+                            }
+
+                            break;
+                        }
+                    }
+                }
+                code = &mut srx => {
+                    let code = code.unwrap_or_else(|_| {
+                        tracing::error!("SubscriptionClient dropped without calling shutdown");
+                            ErrorCode::Unknown
+                    });
+                    drop(recv.stop(code.into()));
+                    break;
+                }
+            }
+        }
+
+        tracing::info!("waiting for remote shutdown");
+        let stime = std::time::Instant::now();
+        let res = send.stopped().await;
+        tracing::info!(time = ?stime.elapsed(), result = ?res, "remote shutdown complete");
+
+        Ok(None)
     }
 
     async fn handshake(
@@ -420,24 +425,20 @@ impl SubscriptionClient {
         let peer_version = vb.version;
         let response = bad_response!(vb.deserialize_response());
 
-        match response {
-            proto::Response::V1(res) => {
-                use proto::v1;
+        use proto::v1;
 
-                match res {
-                    v1::Response::Ok(v1::OkResponse::Subscribe(sr)) => Ok(sr),
-                    v1::Response::Ok(invalid) => {
-                        tracing::error!(
-                            ?invalid,
-                            peer_version,
-                            "received a non-subscribe response to a subscribe request"
-                        );
-                        Err(proto::Error::InvalidResponse.into())
-                    }
-                    v1::Response::Err { code, message } => {
-                        Err(proto::Error::ErrorResponse { code, message }.into())
-                    }
-                }
+        match response {
+            proto::Response::V1(v1::Response::Ok(v1::OkResponse::Subscribe(sr))) => Ok(sr),
+            proto::Response::V1(v1::Response::Ok(invalid)) => {
+                tracing::error!(
+                    ?invalid,
+                    peer_version,
+                    "received a non-subscribe response to a subscribe request"
+                );
+                Err(proto::Error::InvalidResponse.into())
+            }
+            proto::Response::V1(v1::Response::Err { code, message }) => {
+                Err(proto::Error::ErrorResponse { code, message }.into())
             }
         }
     }
