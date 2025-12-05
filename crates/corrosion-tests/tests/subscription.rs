@@ -546,7 +546,7 @@ async fn multiple_subs() {
     let new_icao = IcaoCode::new_testing([b'N'; 4]);
     let tokens = TokenSet::from([[8; 8]]);
 
-    for _ in 0..100 {
+    for _ in 0..1000 {
         // Insert
         {
             {
