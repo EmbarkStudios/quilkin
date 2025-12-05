@@ -474,6 +474,7 @@ async fn multiple_subs() {
 
     let pool = TestSubsDb::new(corrosion::schema::SCHEMA, "multiple_subs").await;
     let ctx = pool.pubsub_ctx();
+    let mut cur_cid = 0;
 
     for _ in 0..5 {
         let original = ctx
@@ -514,8 +515,6 @@ async fn multiple_subs() {
 
             ms
         };
-
-        let mut cur_cid = 0;
 
         let mut assert_all = async |tqe| {
             corrosion_tests::assert_sub_event_eq::<ServerRow>(&mut orx, &tqe).await;
