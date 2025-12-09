@@ -398,10 +398,10 @@ fn copy() {
 
     {
         let parent = tbp.parent().unwrap();
-        if !parent.exists() {
-            if let Err(err) = std::fs::create_dir_all(parent) {
-                panic!("failed to create directory {parent:?}: {err}");
-            }
+        if !parent.exists()
+            && let Err(err) = std::fs::create_dir_all(parent)
+        {
+            panic!("failed to create directory {parent:?}: {err}");
         }
     }
 

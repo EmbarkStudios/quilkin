@@ -520,10 +520,10 @@ pub fn gen_endpoints(
     hasher.write_u16(num_endpoints);
 
     let mut endpoints = BTreeSet::new();
-    if let Some(tg) = &mut tg {
-        if let Some(prev) = &mut tg.previous {
-            prev.clear();
-        }
+    if let Some(tg) = &mut tg
+        && let Some(prev) = &mut tg.previous
+    {
+        prev.clear();
     }
 
     for i in 0..num_endpoints {

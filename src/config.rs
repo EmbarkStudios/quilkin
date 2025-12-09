@@ -489,7 +489,6 @@ impl Config {
                 Ok(file) => break file,
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                     tracing::debug!(path = %path.display(), "config path not found");
-                    continue;
                 }
                 Err(err) => {
                     tracing::error!(path = %path.display(), error = ?err, "failed to read path");

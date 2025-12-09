@@ -312,7 +312,7 @@ impl Pail {
 
 impl Pail {
     pub fn construct(spc: SandboxPailConfig, pails: &Pails, td: &std::path::Path) -> Self {
-        let pail = match spc.config {
+        match spc.config {
             PailConfig::Server(sspc) => {
                 let (packet_tx, packet_rx) = mpsc::channel::<String>(10);
                 let socket = quilkin::net::DualStackEpollSocket::new(0)
@@ -617,8 +617,7 @@ impl Pail {
                     delta_applies: Some(rtrx),
                 })
             }
-        };
-        pail
+        }
     }
 }
 

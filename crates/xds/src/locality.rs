@@ -205,11 +205,7 @@ impl<'de> Deserialize<'de> for Locality {
 }
 
 impl schemars::JsonSchema for Locality {
-    fn is_referenceable() -> bool {
-        String::is_referenceable()
-    }
-
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         String::schema_name()
     }
 
@@ -217,14 +213,14 @@ impl schemars::JsonSchema for Locality {
         String::schema_id()
     }
 
-    fn json_schema(r#gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        String::json_schema(r#gen)
+    fn json_schema(sg: &mut schemars::generate::SchemaGenerator) -> schemars::Schema {
+        String::json_schema(sg)
     }
 
     fn _schemars_private_non_optional_json_schema(
-        r#gen: &mut schemars::r#gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        String::_schemars_private_non_optional_json_schema(r#gen)
+        sg: &mut schemars::generate::SchemaGenerator,
+    ) -> schemars::Schema {
+        String::_schemars_private_non_optional_json_schema(sg)
     }
 
     fn _schemars_private_is_option() -> bool {

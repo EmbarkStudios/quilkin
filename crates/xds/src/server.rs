@@ -440,7 +440,6 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
                                 Err(error) => {
                                     crate::metrics::errors_total(KIND_SERVER, "respond").inc();
                                     tracing::error!(%error, "responder failed to generate response");
-                                    continue;
                                 }
                             }
                         }
@@ -873,7 +872,6 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                                 Err(error) => {
                                     crate::metrics::errors_total(KIND_SERVER, "respond").inc();
                                     tracing::error!(%error, "responder failed to generate response");
-                                    continue;
                                 }
                             }
                         }

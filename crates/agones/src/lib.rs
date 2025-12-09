@@ -149,10 +149,8 @@ async fn setup_namespace(client: kube::Client) -> String {
                 Some(chrono::Utc::now() > expiry)
             })
             .unwrap_or(true);
-        if delete {
-            if let Err(err) = namespaces.delete(name.as_str(), &dp).await {
-                println!("Failure attempting to deleted namespace: {:?}, {err}", name);
-            }
+        if delete && let Err(err) = namespaces.delete(name.as_str(), &dp).await {
+            println!("Failure attempting to deleted namespace: {:?}, {err}", name);
         }
     }
 

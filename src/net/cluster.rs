@@ -442,11 +442,11 @@ where
         locality: Option<Locality>,
         endpoint: Endpoint,
     ) -> Option<Endpoint> {
-        if let Some(raddr) = self.localities.get(&locality) {
-            if *raddr != remote_addr {
-                tracing::trace!("not replacing locality endpoints");
-                return None;
-            }
+        if let Some(raddr) = self.localities.get(&locality)
+            && *raddr != remote_addr
+        {
+            tracing::trace!("not replacing locality endpoints");
+            return None;
         }
 
         if let Some(mut set) = self.map.get_mut(&locality) {
@@ -517,11 +517,11 @@ where
         remote_addr: Option<std::net::IpAddr>,
         locality: Locality,
     ) {
-        if let Some(raddr) = self.localities.get(&None) {
-            if *raddr != remote_addr {
-                tracing::trace!("not updating locality");
-                return;
-            }
+        if let Some(raddr) = self.localities.get(&None)
+            && *raddr != remote_addr
+        {
+            tracing::trace!("not updating locality");
+            return;
         }
 
         self.localities.remove(&None);
@@ -565,11 +565,11 @@ where
         locality: &Option<Locality>,
     ) -> Option<EndpointSet> {
         {
-            if let Some(raddr) = self.localities.get(locality) {
-                if *raddr != remote_addr {
-                    tracing::trace!("skipping locality removal");
-                    return None;
-                }
+            if let Some(raddr) = self.localities.get(locality)
+                && *raddr != remote_addr
+            {
+                tracing::trace!("skipping locality removal");
+                return None;
             }
         }
 
@@ -671,15 +671,11 @@ impl From<(Option<Locality>, &EndpointSet)> for EndpointWithLocality {
 }
 
 impl schemars::JsonSchema for ClusterMap {
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         <Vec<EndpointWithLocality>>::schema_name()
     }
-    fn json_schema(r#gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        <Vec<EndpointWithLocality>>::json_schema(r#gen)
-    }
-
-    fn is_referenceable() -> bool {
-        <Vec<EndpointWithLocality>>::is_referenceable()
+    fn json_schema(sg: &mut schemars::generate::SchemaGenerator) -> schemars::Schema {
+        <Vec<EndpointWithLocality>>::json_schema(sg)
     }
 }
 

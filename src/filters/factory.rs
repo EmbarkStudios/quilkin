@@ -86,7 +86,7 @@ pub trait FilterFactory: Sync + Send {
     fn name(&self) -> &'static str;
 
     /// Returns the schema for the configuration of the [`crate::filters::Filter`].
-    fn config_schema(&self) -> schemars::schema::RootSchema;
+    fn config_schema(&self) -> schemars::Schema;
 
     /// Returns a filter based on the provided arguments.
     fn create_filter(&self, args: CreateFilterArgs) -> Result<FilterInstance, CreationError>;
@@ -120,7 +120,7 @@ where
         F::NAME
     }
 
-    fn config_schema(&self) -> schemars::schema::RootSchema {
+    fn config_schema(&self) -> schemars::Schema {
         schemars::schema_for!(F::Configuration)
     }
 

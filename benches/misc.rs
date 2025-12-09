@@ -15,7 +15,7 @@ struct Name {
 
 impl GenAddress for Name {
     fn generate(&mut self, slim: bool) -> (usize, ProtoEndpoint) {
-        let ep = if self.counter % 2 == 0 {
+        let ep = if self.counter.is_multiple_of(2) {
             let host = format!("nometa-{}", self.counter);
 
             quilkin::net::Endpoint::new(quilkin::net::EndpointAddress {
@@ -77,7 +77,7 @@ struct Ip {
 
 impl GenAddress for Ip {
     fn generate(&mut self, slim: bool) -> (usize, ProtoEndpoint) {
-        let ip = if self.counter % 2 == 0 {
+        let ip = if self.counter.is_multiple_of(2) {
             std::net::Ipv6Addr::new(
                 ((self.counter >> 112) & 0xffff) as _,
                 ((self.counter >> 96) & 0xffff) as _,

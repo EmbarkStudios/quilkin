@@ -173,22 +173,15 @@ impl<'de> serde::Deserialize<'de> for IcaoCode {
 }
 
 impl schemars::JsonSchema for IcaoCode {
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         "IcaoCode".into()
     }
 
-    fn is_referenceable() -> bool {
-        false
-    }
-
-    fn json_schema(r#gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        let mut schema = r#gen.subschema_for::<String>();
-        if let schemars::schema::Schema::Object(schema_object) = &mut schema {
-            if schema_object.has_type(schemars::schema::InstanceType::String) {
-                let validation = schema_object.string();
-                validation.pattern = Some(r"^[A-Z]{4}$".to_string());
-            }
-        }
+    fn json_schema(_sg: &mut schemars::generate::SchemaGenerator) -> schemars::Schema {
+        let schema = schemars::json_schema!({
+            "type": "string",
+            "pattern": r"^[A-Z]{4}$",
+        });
         schema
     }
 }

@@ -326,12 +326,12 @@ pub async fn catch_up_sub(
                     else => break
                 };
 
-                if let QueryEventMeta::Change(change_id) = eve.meta {
-                    if let Err(_e) = queue_tx.try_send((eve.buff, change_id)) {
-                        return Err(eyre::eyre!(
-                            "catching up too slowly, gave up after buffering {MAX_EVENTS_BUFFER_SIZE} events"
-                        ));
-                    }
+                if let QueryEventMeta::Change(change_id) = eve.meta
+                    && let Err(_e) = queue_tx.try_send((eve.buff, change_id))
+                {
+                    return Err(eyre::eyre!(
+                        "catching up too slowly, gave up after buffering {MAX_EVENTS_BUFFER_SIZE} events"
+                    ));
                 }
             }
             Ok(sub_rx)

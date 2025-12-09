@@ -275,12 +275,12 @@ impl Resource for GameServer {
 impl kube::core::crd::v1::CustomResourceExt for GameServer {
     fn crd() -> CustomResourceDefinition {
         let open_api_v3_schema = Some(
-            schemars::r#gen::SchemaSettings::openapi3()
+            schemars::generate::SchemaSettings::openapi3()
                 .with(|s| {
                     s.inline_subschemas = true;
                     s.meta_schema = None;
                 })
-                .with_visitor(kube_core::schema::StructuralSchemaRewriter)
+                .with_transform(kube_core::schema::StructuralSchemaRewriter)
                 .into_generator()
                 .into_root_schema_for::<Self>(),
         );
@@ -731,12 +731,12 @@ impl ::kube::core::crd::v1::CustomResourceExt for Fleet {
         } else {
             ::serde_json::Value::Object(::serde_json::Map::new())
         };
-        let r#gen = ::schemars::r#gen::SchemaSettings::openapi3()
+        let r#gen = schemars::generate::SchemaSettings::openapi3()
             .with(|s| {
                 s.inline_subschemas = true;
                 s.meta_schema = None;
             })
-            .with_visitor(kube_core::schema::StructuralSchemaRewriter)
+            .with_transform(kube_core::schema::StructuralSchemaRewriter)
             .into_generator();
         let schema = r#gen.into_root_schema_for::<Self>();
         let jsondata = ::serde_json::Value::Object({

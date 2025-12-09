@@ -263,15 +263,12 @@ impl serde::Serialize for FilterChain {
 }
 
 impl schemars::JsonSchema for FilterChain {
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         <Vec<FilterConfig>>::schema_name()
     }
-    fn json_schema(r#gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        <Vec<FilterConfig>>::json_schema(r#gen)
-    }
 
-    fn is_referenceable() -> bool {
-        <Vec<FilterConfig>>::is_referenceable()
+    fn json_schema(sg: &mut schemars::generate::SchemaGenerator) -> schemars::Schema {
+        <Vec<FilterConfig>>::json_schema(sg)
     }
 }
 

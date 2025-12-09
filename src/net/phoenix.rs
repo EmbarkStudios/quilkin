@@ -149,8 +149,8 @@ pub fn spawn(
                         http_task.abort();
                     }
 
-                    if let Err(err) = http_task.await {
-                        if let Ok(panic) = err.try_into_panic() {
+                    if let Err(err) = http_task.await
+                        && let Ok(panic) = err.try_into_panic() {
                             let message = panic
                                 .downcast_ref::<String>()
                                 .map(String::as_str)
@@ -159,7 +159,6 @@ pub fn spawn(
 
                             tracing::error!(panic = message, "phoenix HTTP task panicked");
                         }
-                    }
 
                     res
                 }
@@ -460,12 +459,11 @@ impl<M: Measurement + 'static> Phoenix<M> {
                     let consecutive_errors = node.consecutive_errors();
                     if consecutive_errors > 3 {
                         tracing::warn!(%address, %error, %consecutive_errors, "error measuring distance");
-                        if consecutive_errors > BAD_NODE_THRESHOLD {
-                            if let Some(bad_node_informer) = self.bad_node_informer.as_ref() {
-                                if let Err(error) = bad_node_informer.send(address) {
-                                    tracing::warn!(%address, %error, %consecutive_errors, "failed to inform about bad node");
-                                }
-                            }
+                        if consecutive_errors > BAD_NODE_THRESHOLD
+                            && let Some(bad_node_informer) = self.bad_node_informer.as_ref()
+                            && let Err(error) = bad_node_informer.send(address)
+                        {
+                            tracing::warn!(%address, %error, %consecutive_errors, "failed to inform about bad node");
                         }
                     } else {
                         tracing::debug!(%address, %error, "error measuring distance");

@@ -286,11 +286,10 @@ pub fn handle_delta_discovery_responses<C: Configuration>(
                 res
             };
 
-            if let Some(note) = &notifier {
-                if note.send(type_url.clone()).is_err() {
+            if let Some(note) = &notifier
+                && note.send(type_url.clone()).is_err() {
                     notifier = None;
                 }
-            }
 
             let error_detail = if let Err(error) = result {
                 crate::metrics::nacks(control_plane_identifier, &type_url).inc();

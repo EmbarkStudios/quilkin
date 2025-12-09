@@ -44,7 +44,7 @@ deny = [
 multiple-versions = "deny"
 skip = [
     { crate = "object@0.32.2", reason = "transitive dependency due to backtrace, backtrace is updated, but stable-eyre using a feature that doesn't exist any longer, and can't update, sigh" },
-    { crate = "hashbrown@0.14.5", reason = "many crates use this old version" },
+    { crate = "hashbrown@0.14.5", reason = "many crates this old version" },
     { crate = "getrandom@0.2.16", reason = "ring" },
     { crate = "miniz_oxide@0.7.4", reason = "pprof_util carries two different versions transitively" },
     { crate = "prost@0.13.5", reason = "pprof_util has an outdated version" },
@@ -52,6 +52,7 @@ skip = [
 ]
 skip-tree = [
     { crate = "thiserror@1.0.69", reason = "many crates use this old version" },
+    { crate = "hashbrown@0.15.5", reason = "many crates this old version" },
 ]
 
 [[bans.features]]
@@ -80,4 +81,5 @@ exceptions = [
     # This license should not really be used for code, but here we are
     { crate = "notify", allow = ["CC0-1.0"] },
     { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+    { crate = "ar_archive_writer", allow = ["Apache-2.0 WITH LLVM-exception"] }
 ]

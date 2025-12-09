@@ -326,7 +326,6 @@ impl MdsClient {
                                                 }
                                                 Err(error) => {
                                                     tracing::trace!(duration=TIMEOUT_INTERVAL.as_secs_f64(), %error, "no requests received");
-                                                    continue;
                                                 }
                                             }
                                         }
@@ -650,7 +649,6 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
                                 crate::metrics::errors_total(KIND_CLIENT, "ack_failed").inc();
                                 tracing::error!(%error, %node_id, "failed to ack delta response");
                             }
-                            continue;
                         }
                         Ok(Some(Err(error))) => {
                             if crate::is_broken_pipe(&error) {

@@ -618,14 +618,14 @@ impl Service {
             loop {
                 sessions_check.tick().await;
                 let elapsed = start.elapsed();
-                if let Some(tt) = &termination_timeout {
-                    if elapsed > **tt {
-                        tracing::info!(
-                            ?elapsed,
-                            "termination timeout was reached before all sessions expired"
-                        );
-                        break;
-                    }
+                if let Some(tt) = &termination_timeout
+                    && elapsed > **tt
+                {
+                    tracing::info!(
+                        ?elapsed,
+                        "termination timeout was reached before all sessions expired"
+                    );
+                    break;
                 }
 
                 if sessions.sessions().is_empty() {
