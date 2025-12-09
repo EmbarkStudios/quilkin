@@ -535,8 +535,7 @@ impl Default for SdkServer {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[derive(Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
 pub enum SdkServerLogLevel {
     /// Output all messages except for debug messages.
     #[default]
@@ -547,9 +546,7 @@ pub enum SdkServerLogLevel {
     Error,
 }
 
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[derive(Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
 pub enum PortPolicy {
     /// The user defines the host port to be used in the configuration.
     Static,
@@ -562,7 +559,6 @@ pub enum PortPolicy {
     Passthrough,
     None,
 }
-
 
 /// The strategy that a [`Fleet`] & [`GameServer`]s will use when scheduling
 /// [`GameServer`]s' Pods across a cluster. In future versions, this will also
@@ -581,8 +577,7 @@ pub enum SchedulingStrategy {
     Distributed,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[derive(Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
 pub enum Protocol {
     #[serde(rename = "UDP")]
     #[default]
@@ -592,7 +587,6 @@ pub enum Protocol {
     #[serde(rename = "TCPUDP")]
     UdpTcp,
 }
-
 
 #[derive(Clone, Debug, JsonSchema)]
 pub struct Fleet {
