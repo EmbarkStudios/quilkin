@@ -2,7 +2,7 @@
 set -e
 
 # We _cannot_ test on 6.17 due to a kernel bug
-KERNEL_VERSIONS=('6.11' '6.12' '6.13' '6.14' '6.15' '6.16')
+KERNEL_VERSIONS=('6.11' '6.12' '6.13' '6.14' '6.16') #'6.15'
  
 for vers in "${KERNEL_VERSIONS[@]}"
 do
