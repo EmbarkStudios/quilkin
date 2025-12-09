@@ -903,16 +903,13 @@ impl Config {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Serialize, JsonSchema, PartialEq)]
+#[derive(Default)]
 pub enum Version {
     #[serde(rename = "v1alpha1")]
+    #[default]
     V1Alpha1,
 }
 
-impl Default for Version {
-    fn default() -> Self {
-        Self::V1Alpha1
-    }
-}
 
 pub(crate) fn default_typemap() -> ConfigMap {
     typemap_rev::TypeMap::custom()

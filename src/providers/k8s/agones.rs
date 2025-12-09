@@ -536,8 +536,10 @@ impl Default for SdkServer {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Default)]
 pub enum SdkServerLogLevel {
     /// Output all messages except for debug messages.
+    #[default]
     Info,
     /// Output all messages including debug messages.
     Debug,
@@ -545,17 +547,14 @@ pub enum SdkServerLogLevel {
     Error,
 }
 
-impl Default for SdkServerLogLevel {
-    fn default() -> Self {
-        Self::Info
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Default)]
 pub enum PortPolicy {
     /// The user defines the host port to be used in the configuration.
     Static,
     /// The system will choose an open port for the [`GameServer`] in question.
+    #[default]
     Dynamic,
     /// Dynamically sets the container port to the same value as the dynamically
     /// selected host port. This will mean that users will need to lookup what
@@ -564,11 +563,6 @@ pub enum PortPolicy {
     None,
 }
 
-impl Default for PortPolicy {
-    fn default() -> Self {
-        Self::Dynamic
-    }
-}
 
 /// The strategy that a [`Fleet`] & [`GameServer`]s will use when scheduling
 /// [`GameServer`]s' Pods across a cluster. In future versions, this will also
@@ -588,8 +582,10 @@ pub enum SchedulingStrategy {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Default)]
 pub enum Protocol {
     #[serde(rename = "UDP")]
+    #[default]
     Udp,
     #[serde(rename = "TCP")]
     Tcp,
@@ -597,11 +593,6 @@ pub enum Protocol {
     UdpTcp,
 }
 
-impl Default for Protocol {
-    fn default() -> Self {
-        Self::Udp
-    }
-}
 
 #[derive(Clone, Debug, JsonSchema)]
 pub struct Fleet {
