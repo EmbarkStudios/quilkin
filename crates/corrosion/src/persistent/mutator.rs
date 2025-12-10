@@ -1,3 +1,6 @@
+//! Contains the [`BroadcastingTransactor`] used to process database mutations
+//! and send events to subscribers whose queries match the applied mutations
+
 use crate::{
     Peer, db,
     persistent::proto::{ExecResponse, ExecResult, v1 as p},
