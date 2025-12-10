@@ -81,6 +81,7 @@ quilkin-macros = { version = "0.10.0", path = "./crates/macros" }
 quilkin-proto.workspace = true
 quilkin-types.workspace = true
 quilkin-xds.workspace = true
+corrosion.workspace = true
 
 # Crates.io
 arc-swap.workspace = true
@@ -90,6 +91,7 @@ base64.workspace = true
 base64-serde = "0.8.0"
 bytes.workspace = true
 cached.workspace = true
+camino.workspace = true
 cfg-if = "1.0"
 crossbeam-utils = { version = "0.8", optional = true }
 clap = { version = "4.5.38", features = ["cargo", "derive", "env"] }

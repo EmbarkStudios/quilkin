@@ -1,3 +1,6 @@
+//! Code for clients that connect to a remote [`crate::server::Server`] and either
+//! send mutations, or subscribe to said mutations
+
 use crate::{
     codec,
     persistent::{

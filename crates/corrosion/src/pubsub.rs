@@ -688,6 +688,28 @@ pub struct PubsubContext {
 }
 
 impl PubsubContext {
+    /// Creates a new [`Self`], attempting to restore subscriptions
+    pub async fn new(
+        subs: SubsManager,
+        path: PathBuf,
+        pool: SplitPool,
+        schema: Arc<Schema>,
+        tripwire: Tripwire,
+        loop_config: MatcherLoopConfig,
+    ) -> eyre::Result<Self> {
+        let cache =
+            restore_subscriptions(&subs, &path, &pool, &schema, &tripwire, loop_config).await?;
+
+        Ok(Self {
+            subs,
+            path,
+            pool,
+            schema,
+            tripwire,
+            cache,
+        })
+    }
+
     /// Creates a subscription for the specified [`PubusbContext`]
     ///
     /// Database mutations that match the query specified in the params will
@@ -715,6 +737,13 @@ impl PubsubContext {
         let id = upsert_sub(handle, created, &self.subs, &mut bcast_write, params, tx).await?;
 
         Ok(Subscription { id, query_hash, rx })
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::persistent::server::SubManager for PubsubContext {
+    async fn subscribe(&self, subp: SubParamsv1) -> Result<Subscription, MatcherUpsertError> {
+        self.subscribe(subp).await
     }
 }
 
