@@ -1,9 +1,9 @@
-//! Implementation for a persistent connection between a client (agent) and
-//! server (relay).
+//! Implementation for a persistent connection between a client (mutating agent
+//! or subscribing proxy) and server (relay).
 
 pub mod client;
 mod error;
-pub mod executor;
+pub mod mutator;
 pub mod proto;
 pub mod server;
 

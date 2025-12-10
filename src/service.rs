@@ -131,6 +131,25 @@ pub struct Service {
         hide = true
     )]
     tls_key_path: Option<std::path::PathBuf>,
+
+    // START CORROSION OPTIONS
+    #[clap(
+        long = "service.corrosion.port",
+        env = "QUILKIN_SERVICE_CORROSION_PORT",
+        default_value_t = 7901
+    )]
+    corrosion_port: u16,
+
+    /// Path to the root directory where the `SQLite` databases are stored
+    ///
+    /// If not specified, defaults to `$TMPDIR/quilkin_db`
+    #[clap(
+        long = "service.corrosion.db-path",
+        env = "QUILKIN_SERVICE_CORROSION_DB_PATH"
+    )]
+    corrosion_db_path: Option<camino::Utf8PathBuf>,
+
+    // END CORROSION
     #[clap(long = "termination-timeout")]
     termination_timeout: Option<crate::cli::Duration>,
     #[clap(skip)]
@@ -160,6 +179,8 @@ impl Default for Service {
             tls_key: None,
             tls_cert_path: None,
             tls_key_path: None,
+            corrosion_port: 7901,
+            corrosion_db_path: None,
             termination_timeout: None,
             testing: false,
         }
@@ -296,9 +317,10 @@ impl Service {
         }
     }
 
-    /// The main entrypoint for listening network servers. When called will
-    /// spawn any and all enabled services, if successful returning a future
-    /// that can be await to wait on services to be cancelled.
+    /// The main entrypoint for listening network servers.
+    ///
+    /// When called will spawn any and all enabled services, if successful
+    /// returning a future that can be await to wait on services to be cancelled.
     pub fn spawn_services(
         mut self,
         config: &Arc<Config>,
@@ -416,7 +438,7 @@ impl Service {
         Ok(())
     }
 
-    /// Spawns an xDS server if enabled, otherwise returns a future which never completes.
+    /// Spawns an xDS server if enabled
     fn publish_xds(
         &self,
         config: &Arc<Config>,
@@ -446,13 +468,20 @@ impl Service {
         Ok(())
     }
 
-    /// Spawns an xDS server if enabled, otherwise returns a future which never completes.
+    /// Spawns an xDS server and/or corrosion server if enabled
     fn publish_mds(
         &self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
     ) -> crate::Result<()> {
-        if !self.mds_enabled && !self.grpc_enabled {
+        if !self.mds_enabled {
+            return Ok(());
+        }
+
+        tokio::runtime::Handle::current()
+            .block_on(async { self.spawn_corrosion_server(shutdown).await })?;
+
+        if !self.grpc_enabled {
             return Ok(());
         }
 
@@ -477,7 +506,6 @@ impl Service {
         Ok(())
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn publish_udp(
         &mut self,
         config: &Arc<Config>,
@@ -691,6 +719,76 @@ impl Service {
         Ok(Some(Box::new(move || {
             io_loop.shutdown(true);
         })))
+    }
+
+    /// Spawn corrosion server
+    ///
+    /// Creates/open the database and machinery that allows clients to send mutation
+    /// requests and/or subscription requests and be notified when a change has
+    /// been made that matches their query
+    async fn spawn_corrosion_server(&self, shutdown: &mut ShutdownHandler) -> eyre::Result<()> {
+        use corrosion::types;
+
+        let db_root = if let Some(cdb) = self.corrosion_db_path.clone() {
+            cdb
+        } else {
+            let mut dr = match camino::Utf8PathBuf::from_path_buf(std::env::temp_dir()) {
+                Ok(dr) => dr,
+                Err(td) => {
+                    eyre::bail!("$TEMP_DIR {td:?} was not utf-8")
+                }
+            };
+            dr.push("quilkin_db");
+            dr
+        };
+
+        let sub_path = db_root.join("subs");
+        let db_path = db_root.join("db.db");
+
+        let db = corrosion::db::InitializedDb::setup(&db_path, corrosion::schema::SCHEMA).await?;
+        let subs = types::pubsub::SubsManager::default();
+
+        let btx = corrosion::persistent::mutator::BroadcastingTransactor::new(
+            db.actor_id,
+            db.clock.clone(),
+            db.pool.clone(),
+            subs.clone(),
+            Default::default(),
+            None,
+        )
+        .await;
+
+        // Tripwire is how corrosion communicates a shutdown was requested
+        let (tw, _, tw_tx) = corrosion::Tripwire::new_simple();
+        let ps_ctx = corrosion::pubsub::PubsubContext::new(
+            subs,
+            sub_path,
+            db.pool,
+            db.schema,
+            tw,
+            types::pubsub::MatcherLoopConfig::default(),
+        )
+        .await?;
+
+        let udp_server = corrosion::persistent::server::Server::new_unencrypted(
+            (std::net::Ipv6Addr::UNSPECIFIED, self.corrosion_port).into(),
+            btx,
+            ps_ctx,
+        )?;
+
+        let finished = shutdown.push("corrosion_server");
+        let mut srx = shutdown.shutdown_rx();
+
+        tokio::spawn(async move {
+            drop(srx.changed().await);
+
+            let _ = tw_tx.send(()).await;
+            udp_server.shutdown("graceful shutdown").await;
+
+            drop(finished.send(Ok(())));
+        });
+
+        Ok(())
     }
 }
 

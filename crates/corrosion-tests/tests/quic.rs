@@ -9,7 +9,7 @@ use corrosion::{
     Peer, db,
     persistent::{
         ErrorCode, client,
-        executor::BroadcastingTransactor,
+        mutator::BroadcastingTransactor,
         proto::{ExecResponse, ExecResult, v1 as p},
         server,
     },
