@@ -51,6 +51,22 @@ pub(crate) const IDLE_REQUEST_INTERVAL: Duration = Duration::from_secs(30);
 
 const REQUEST_BUFFER_SIZE: usize = 100;
 
+pub trait HealthState {
+    fn set_healthy(&self);
+    fn set_unhealthy(&self, reason: impl std::fmt::Display);
+}
+
+impl HealthState for Arc<AtomicBool> {
+    fn set_healthy(&self) {
+        self.store(true, Ordering::SeqCst);
+    }
+
+    fn set_unhealthy(&self, reason: impl std::fmt::Display) {
+        tracing::warn!("unhealthy: {reason}");
+        self.store(false, Ordering::SeqCst);
+    }
+}
+
 #[tonic::async_trait]
 pub trait ServiceClient: Clone + Sized + Send + 'static {
     type Request: Clone + Send + Sync + Sized + 'static + std::fmt::Debug;
@@ -246,9 +262,9 @@ impl<C: ServiceClient> Client<C> {
 
 impl MdsClient {
     pub async fn delta_stream<C: crate::config::Configuration>(
-        self,
+        mut self,
         config: Arc<C>,
-        is_healthy: Arc<AtomicBool>,
+        health: impl HealthState + Send + 'static,
         mut shutdown: crate::ShutdownSignal,
     ) -> Result<tokio::task::JoinHandle<Result<()>>, Self> {
         const LEADERSHIP_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
@@ -275,6 +291,7 @@ impl MdsClient {
             async move {
                 tracing::trace!("starting relay client delta stream task");
 
+                health.set_healthy();
                 loop {
                     if config.is_leader() == Some(false) {
                         tracing::debug!("not leader, delaying task");
@@ -297,8 +314,6 @@ impl MdsClient {
                             res = control_plane.delta_aggregated_resources(stream) => {
                                 match res {
                                     Ok(mut stream) => {
-                                        is_healthy.store(true, Ordering::SeqCst);
-
                                         loop {
                                             if config.is_leader() == Some(false) {
                                                 tracing::warn!("lost leader lock mid-stream, disconnecting");
@@ -344,20 +359,40 @@ impl MdsClient {
                         }
                     }
 
-                    is_healthy.store(false, Ordering::SeqCst);
+                    health.set_unhealthy("delta_stream: connection lost");
 
-                    if shutdown.has_changed().is_ok_and(|b| b) {
-                        // We are shutting down, just quit
-                        return Ok(());
+                    tracing::info!("Lost connection to mDS, retrying");
+                    loop {
+                        if shutdown.has_changed().is_ok_and(|b| b) {
+                            // We are shutting down, just quit
+                            return Ok(());
+                        }
+
+                        match MdsClient::connect_with_backoff(&self.management_servers)
+                           .await {
+                            Ok(res) => {
+                                (self.client, self.connected_endpoint) = res;
+                            },
+                            Err(error) => {
+                                tracing::error!(%error, "failed to establish connection");
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                continue;
+                            },
+                        }
+                        match DeltaServerStream::connect(self.client.clone(), identifier.clone()).await {
+                            Ok(res) => {
+                                (ds, stream) = res;
+                                break;
+                            }
+                            Err(error) => {
+                                tracing::error!(%error, "failed to connect stream");
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                            }
+                        }
+
                     }
-
-                    tracing::debug!("lost connection to relay server, retrying");
-                    let new_client = MdsClient::connect_with_backoff(&self.management_servers)
-                        .await
-                        .unwrap()
-                        .0;
-                    (ds, stream) =
-                        DeltaServerStream::connect(new_client, identifier.clone()).await?;
+                    tracing::info!("mDS connection refreshed");
+                    health.set_healthy();
                 }
             }
             .instrument(tracing::trace_span!("handle_delta_discovery_response", id)),
@@ -528,7 +563,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
     config: Arc<C>,
     identifier: String,
     endpoints: Vec<Endpoint>,
-    is_healthy: Arc<AtomicBool>,
+    health: impl HealthState + Send + 'static,
     notifier: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     resources: &'static [(&'static str, &'static [(&'static str, Vec<String>)])],
 ) -> eyre::Result<tokio::task::JoinHandle<Result<()>>> {
@@ -620,7 +655,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
             let mut response_stream = response_stream;
             let mut resource_subscriptions = resource_subscriptions;
 
-            is_healthy.store(true, Ordering::SeqCst);
+            health.set_healthy();
             loop {
                 tracing::info!(%control_plane, "creating discovery response handler");
                 let mut ack_request_stream = crate::config::handle_delta_discovery_responses(
@@ -682,7 +717,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
                     }
                 }
 
-                is_healthy.store(false, Ordering::SeqCst);
+                health.set_unhealthy("delta_subscribe: connection lost");
 
                 loop {
                     tracing::info!(%control_plane, "Lost connection to xDS, retrying");
@@ -717,7 +752,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
                     return Err(error.wrap_err("refresh failed"));
                 }
                 tracing::info!(%control_plane, "xDS connection refreshed");
-                is_healthy.store(true, Ordering::SeqCst);
+                health.set_healthy();
             }
         }
         .instrument(tracing::trace_span!("xds_client_stream", client_id)),
