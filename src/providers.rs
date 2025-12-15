@@ -16,6 +16,7 @@
 
 pub mod fs;
 pub mod k8s;
+mod corrosion;
 
 use std::{
     net::SocketAddr,
@@ -176,6 +177,12 @@ pub struct Providers {
         value_delimiter = ','
     )]
     xds_endpoints: Vec<tonic::transport::Endpoint>,
+    #[clap(
+        long = "provider.corrosion.endpoints",
+        env = "QUILKIN_PROVIDERS_CORROSION_ENDPOINTS",
+        value_delimiter = ','
+    )]
+    corrosion_endpoints: Vec<SocketAddr>,
 }
 
 #[derive(Clone)]
@@ -265,6 +272,11 @@ impl Providers {
         endpoints: impl Into<Vec<tonic::transport::Endpoint>>,
     ) -> Self {
         self.xds_endpoints = endpoints.into();
+        self
+    }
+
+    pub fn corrosion_endpoints(mut self, endpoints: impl Into<Vec<std::net::IpAddr>>) -> Self {
+        self.corrosion_endpoints = endpoints.into();
         self
     }
 
@@ -605,6 +617,10 @@ impl Providers {
         self.mmdb.is_some()
     }
 
+    pub fn corrosion_enabled(&self) -> bool {
+        !self.corrosion_endpoints.is_empty()
+    }
+
     pub fn any_provider_enabled(&self) -> bool {
         self.agones_enabled()
             || self.fs_enabled()
@@ -613,6 +629,7 @@ impl Providers {
             || self.k8s_enabled()
             || self.mmdb_enabled()
             || self.static_enabled()
+            || self.corrosion_enabled()
     }
 
     /// Adds the required typemap entries to the config depending on what providers are enabled
@@ -650,6 +667,7 @@ impl Providers {
             self.k8s_enabled().then_some("k8s"),
             self.mmdb_enabled().then_some("mmdb"),
             self.static_enabled().then_some("static"),
+            self.corrosion_enabled().then_some("corrosion"),
         ].into_iter().flatten().collect::<Vec<&str>>(), "starting configuration providers");
 
         if self.mmdb_enabled() {
@@ -680,6 +698,8 @@ impl Providers {
                 notifier,
             ));
         }
+
+        self.maybe_spawn_corrosion(config, &health_check);
 
         if self.fs_enabled() {
             let config = config.clone();
