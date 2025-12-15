@@ -33,7 +33,10 @@ use uuid::Uuid;
 
 use crate::{
     generated::envoy::service::discovery::v3::Resource as XdsResource,
-    net::cluster::{self, ClusterMap},
+    net::{
+        cluster::{self, ClusterMap},
+        servers::Servers,
+    },
     xds::{self, ResourceType},
 };
 
@@ -118,6 +121,11 @@ impl DynamicConfig {
         self.typemap.get::<ClusterMap>()
     }
 
+    #[inline]
+    pub fn servers(&self) -> Option<Servers> {
+        self.typemap.get::<Servers>()
+    }
+
     pub fn datacenters(&self) -> Option<&Watch<DatacenterMap>> {
         self.typemap.get::<DatacenterMap>()
     }
@@ -164,6 +172,7 @@ mod test_impls {
                 && compare::<qcmp::QcmpPort>(&self.typemap, &other.typemap)
                 && compare::<ClusterMap>(&self.typemap, &other.typemap)
                 && compare::<DatacenterMap>(&self.typemap, &other.typemap)
+                && compare::<Servers>(&self.typemap, &other.typemap)
         }
     }
 
