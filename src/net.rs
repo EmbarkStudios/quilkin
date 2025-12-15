@@ -21,6 +21,7 @@ pub mod io;
 pub(crate) mod maxmind_db;
 pub mod packet;
 pub mod phoenix;
+pub mod servers;
 pub mod sessions;
 
 use std::{

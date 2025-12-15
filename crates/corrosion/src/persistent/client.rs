@@ -10,7 +10,7 @@ use crate::{
     pubsub,
 };
 use bytes::Bytes;
-use corro_api_types::{ExecResponse, ExecResult, QueryEvent};
+pub use corro_api_types::{ExecResponse, ExecResult, QueryEvent};
 use quilkin_types::IcaoCode;
 use std::net::SocketAddr;
 use tokio::sync::{mpsc, oneshot};

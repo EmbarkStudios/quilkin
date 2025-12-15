@@ -15,7 +15,7 @@ use corro_types::{
     updates::Handle,
 };
 pub use corro_types::{
-    api::{ChangeId, QueryEvent, TypedQueryEvent},
+    api::{ChangeId, QueryEvent, TypedQueryEvent, sqlite::ChangeType},
     pubsub::{MatchCandidates, MatcherError, MatcherHandle, SubsManager},
 };
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,8 @@ pub enum CatchUpError {
 pub type BodySender = mpsc::Sender<Bytes>;
 
 pub const SERVER_QUERY: &str = "SELECT endpoint,icao,tokens FROM servers";
+pub const DC_QUERY: &str = "SELECT ip,port,icao FROM dc";
+pub const FILTER_QUERY: &str = "SELECT filter FROM filter";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SubParamsv1 {
@@ -64,7 +66,7 @@ pub struct SubParamsv1 {
     ///
     /// If events are buffered below this threshold, they will be emitted on
     /// the next `max_time` interval
-    #[serde(default, rename = "mb")]
+    #[serde(default = "max_buffer", rename = "mb")]
     pub max_buffer: u16,
     /// The maximum amount of time that buffered events beneath the `max_buffer`
     /// threshold will be kept before being sent
@@ -90,19 +92,44 @@ pub struct SubParamsv1 {
     pub change_threshold: usize,
 }
 
-/// The default [`SubParams::process_interval`]
+impl SubParamsv1 {
+    /// Creates [`Self`] with the specified query and the rest of the items
+    /// set to their default
+    pub fn new(query: &str) -> Self {
+        Self {
+            query: query.into(),
+            from: None,
+            skip_rows: false,
+            max_buffer: max_buffer(),
+            max_time: max_time(),
+            process_interval: process_interval(),
+            change_threshold: change_threshold(),
+        }
+    }
+}
+
+/// The default [`SubParamsv1::process_interval`]
+#[inline]
 pub const fn process_interval() -> Duration {
     Duration::from_millis(600)
 }
 
-/// The default [`SubParams::change_threshold`]
+/// The default [`SubParamsv1::change_threshold`]
+#[inline]
 pub const fn change_threshold() -> usize {
     1000
 }
 
-/// The default [`SubParams::max_time`]
+/// The default [`SubParamsv1::max_time`]
+#[inline]
 pub const fn max_time() -> Duration {
     Duration::from_millis(10)
+}
+
+/// The default [`SubParamsv1::max_buffer`]
+#[inline]
+pub const fn max_buffer() -> u16 {
+    1500 /* Ethernet MTU */ - 20 /* max size of a quic header */
 }
 
 async fn expand_sql(sp: &SplitPool, stmt: &Statement) -> Result<String, MatcherUpsertError> {
