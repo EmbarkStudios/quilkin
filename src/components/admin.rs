@@ -175,28 +175,39 @@ fn check_readiness(check: &AtomicBool) -> Response<Body> {
 }
 
 fn collect_metrics() -> Response<Body> {
-    let mut response = Response::new(Body::new(Bytes::new()));
+    use prometheus_client::encoding::text::{encode_eof, encode_registry};
+    let mut text_encoding = String::new();
+
+    // Encode metrics from prometheus_client crate
+    crate::metrics::with_registry(|registry| {
+        if let Err(error) = encode_registry(&mut text_encoding, &registry) {
+            tracing::error!(?error, "failed to encode registry");
+        }
+    });
+
+    // Encode metrics from prometheus crate
     let mut buffer = vec![];
     let encoder = prometheus::TextEncoder::new();
-    let body =
-        prometheus::Encoder::encode(&encoder, &crate::metrics::registry().gather(), &mut buffer)
-            .map_err(|error| tracing::warn!(%error, "Failed to encode metrics"))
-            .and_then(|_| {
-                String::from_utf8(buffer)
-                    .map(hyper::body::Bytes::from)
-                    .map_err(|error| tracing::warn!(%error, "Failed to convert metrics to utf8"))
-            });
-
-    match body {
-        Ok(body) => {
-            *response.body_mut() = Body::new(body);
+    match prometheus::Encoder::encode(&encoder, &crate::metrics::registry().gather(), &mut buffer) {
+        Ok(_) => match String::from_utf8(buffer) {
+            Ok(section) => {
+                text_encoding.push_str(section.as_str());
+            }
+            Err(error) => {
+                tracing::error!(?error, "failed to convert metrics buffer to UTF-8");
+            }
+        },
+        Err(error) => {
+            tracing::error!(?error, "failed to encode metrics to buffer");
         }
-        Err(_) => {
-            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-        }
-    };
+    }
 
-    response
+    // Encode EOF
+    if let Err(error) = encode_eof(&mut text_encoding) {
+        tracing::error!(?error, "failed to encode eof");
+    }
+
+    Response::new(Body::new(Bytes::from(text_encoding)))
 }
 
 /// Collects profiling information using `prof` for an optional `duration` or

@@ -269,6 +269,10 @@ impl Cli {
         );
         config.read_config(&self.config, locality.clone())?;
 
+        crate::metrics::with_mut_registry(|mut registry| {
+            crate::metrics::register_metrics(&mut registry, config.id());
+        });
+
         let ready = Arc::<std::sync::atomic::AtomicBool>::default();
         if self.admin.enabled {
             crate::components::admin::server(

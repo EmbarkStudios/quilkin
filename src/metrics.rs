@@ -44,6 +44,60 @@ pub fn registry() -> &'static Registry {
     &REGISTRY
 }
 
+fn registry2() -> &'static std::sync::RwLock<prometheus_client::registry::Registry> {
+    static PROMETHEUS_CLIENT_REGISTRY: Lazy<
+        std::sync::RwLock<prometheus_client::registry::Registry>,
+    > = Lazy::new(|| std::sync::RwLock::new(<_>::default()));
+
+    &PROMETHEUS_CLIENT_REGISTRY
+}
+
+pub fn with_registry<F>(func: F)
+where
+    F: FnOnce(std::sync::RwLockReadGuard<'_, prometheus_client::registry::Registry>),
+{
+    let guard = match registry2().read() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("recovered from poisoned rwlock");
+            poisoned.into_inner()
+        }
+    };
+    func(guard);
+}
+
+pub fn with_mut_registry<F>(func: F)
+where
+    F: FnOnce(std::sync::RwLockWriteGuard<'_, prometheus_client::registry::Registry>),
+{
+    let guard = match registry2().write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("recovered from poisoned rwlock");
+            poisoned.into_inner()
+        }
+    };
+    func(guard);
+}
+
+static INFO_APP_ID: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
+
+pub fn register_metrics(registry: &mut prometheus_client::registry::Registry, id: String) {
+    INFO_APP_ID.set(id).expect("APP_ID has already been set");
+    registry.register(
+        "quilkin",
+        "Static information about the quilkin instance",
+        prometheus_client::metrics::info::Info::new(vec![
+            ("id", INFO_APP_ID.get().unwrap().as_str()),
+            ("version", clap::crate_version!()),
+            (
+                "commit",
+                crate::net::endpoint::metadata::build::GIT_COMMIT_HASH.unwrap_or("none"),
+            ),
+        ]),
+    );
+}
+
 /// Start the histogram bucket at a quarter of a millisecond, as number below a millisecond are
 /// what we are aiming for, but some granularity below a millisecond is useful for performance
 /// profiling.
