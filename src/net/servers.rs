@@ -63,7 +63,7 @@ impl Servers {
     /// Also removes the server from the token map
     #[inline]
     pub fn remove(&self, server_endpoint: &Endpoint) -> Option<(IcaoCode, TokenSet)> {
-        let Some((_, sd)) = self.servers.remove(server_endpoint)?;
+        let (_, sd) = self.servers.remove(server_endpoint)?;
 
         for tok in &sd.tokens.0 {
             let tok = hash_token(tok);

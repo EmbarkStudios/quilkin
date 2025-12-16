@@ -18,6 +18,7 @@ pub mod agones;
 
 use std::collections::BTreeSet;
 
+use eyre::ContextCompat;
 use futures::Stream;
 use k8s_openapi::api::core::v1::ConfigMap;
 use kube::{core::DeserializeGuard, runtime::watcher::Event};
@@ -72,6 +73,7 @@ pub(crate) async fn update_leader_lock(
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 }
+
 pub fn update_filters_from_configmap(
     client: kube::Client,
     namespace: impl AsRef<str>,
@@ -117,8 +119,8 @@ pub fn update_filters_from_configmap(
                 }
             };
 
-            let data = configmap.data.ok_or_else(|| eyre::eyre!("configmap data missing"))?;
-            let data = data.get("quilkin.yaml").ok_or_else(|| eyre::eyre!("quilkin.yaml property not found"))?;
+            let data = configmap.data.context("configmap data missing")?;
+            let data = data.get("quilkin.yaml").context("quilkin.yaml property not found")?;
             let data: serde_json::Map<String, serde_json::Value> = serde_yaml::from_str(data)?;
 
             if let Some(de_filters) = data

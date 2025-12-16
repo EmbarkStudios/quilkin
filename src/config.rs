@@ -122,7 +122,7 @@ impl DynamicConfig {
     }
 
     #[inline]
-    pub fn servers(&self) -> Option<Servers> {
+    pub fn servers(&self) -> Option<&Servers> {
         self.typemap.get::<Servers>()
     }
 

@@ -62,7 +62,9 @@ impl TestSubsDb {
         let sub_path = root.join("subs");
         let db_path = root.join("db.db");
 
-        let db = corrosion::db::InitializedDb::setup(&db_path, schema).await.expect("failed to initialize DB");
+        let db = corrosion::db::InitializedDb::setup(&db_path, schema)
+            .await
+            .expect("failed to initialize DB");
 
         let subs = types::pubsub::SubsManager::default();
 
