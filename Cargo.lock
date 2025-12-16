@@ -4061,6 +4061,7 @@ dependencies = [
  "sys-info",
  "tempfile",
  "thiserror 2.0.17",
+ "tikv-jemalloc-ctl",
  "tikv-jemallocator",
  "time",
  "tokio",

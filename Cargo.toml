@@ -49,7 +49,7 @@ default = ["jemalloc"]
 instrument = []
 mimalloc = ["dep:mimalloc"]
 heap-stats = ["dep:crossbeam-utils"]
-jemalloc = ["dep:tikv-jemallocator", "dep:jemalloc_pprof"]
+jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl", "dep:jemalloc_pprof"]
 
 
 [lints]
@@ -167,6 +167,7 @@ features = ["client", "client-legacy"]
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemalloc_pprof = { workspace = true, optional = true }
 tikv-jemallocator = { workspace = true, optional = true }
+tikv-jemalloc-ctl = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.7", default-features = false }
@@ -249,6 +250,7 @@ serde = { version = "1.0.219", features = ["derive", "rc"] }
 serde_json = "1.0.140"
 socket2 = { version = "0.6", features = ["all"] }
 tempfile = "3.20.0"
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"] }
 tikv-jemallocator = { version = "0.6", features = ["profiling", "unprefixed_malloc_on_supported_platforms"] }
 time = { version = "0.3", default-features = false, features = ["std"] }
 thiserror = "2.0.12"
