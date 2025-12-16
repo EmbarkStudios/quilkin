@@ -14,9 +14,9 @@
  *  limitations under the License.
  */
 
+mod corrosion;
 pub mod fs;
 pub mod k8s;
-mod corrosion;
 
 use std::{
     net::SocketAddr,
@@ -277,7 +277,7 @@ impl Providers {
         self
     }
 
-    pub fn corrosion_endpoints(mut self, endpoints: impl Into<Vec<std::net::IpAddr>>) -> Self {
+    pub fn corrosion_endpoints(mut self, endpoints: impl Into<Vec<SocketAddr>>) -> Self {
         self.corrosion_endpoints = endpoints.into();
         self
     }
@@ -499,10 +499,10 @@ impl Providers {
     ) -> crate::Result<()> {
         tokio::pin!(stream);
         loop {
-            match stream.try_next().await {
-                Ok(Some(_)) => health_check.store(true, Ordering::SeqCst),
-                Ok(None) => break Err(eyre::eyre!("kubernetes watch stream terminated")),
-                Err(error) => break Err(error),
+            if let Some(_) = stream.try_next().await? {
+                health_check.store(true, Ordering::SeqCst);
+            } else {
+                eyre::bail!("kubernetes watch stream terminated");
             }
         }
     }
@@ -676,6 +676,18 @@ impl Providers {
             providers.spawn(self.spawn_mmdb_provider());
         }
 
+        let mutator = self.maybe_spawn_corrosion(config, &health_check, &mut providers);
+
+        if mutator.is_some() {
+            if self.fs_enabled() {
+                tracing::error!("corrosion mutation does not work with file system data");
+            }
+
+            if self.static_enabled() {
+                tracing::error!("corrosion mutation does not work with static data");
+            }
+        };
+
         if self.grpc_push_enabled() {
             providers.spawn(self.spawn_mds_provider(
                 config.clone(),
@@ -700,8 +712,6 @@ impl Providers {
                 notifier,
             ));
         }
-
-        self.maybe_spawn_corrosion(config, &health_check);
 
         if self.fs_enabled() {
             let config = config.clone();
