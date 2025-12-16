@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::net::endpoint::{Endpoint, EndpointAddress, Locality};
 
-const SUBSYSTEM: &str = "cluster";
 const HASH_SEED: i64 = 0xdeadbeef;
 
 pub use crate::generated::quilkin::config::v1alpha1 as proto;
@@ -34,9 +33,8 @@ pub use crate::generated::quilkin::config::v1alpha1 as proto;
 pub(crate) fn active_clusters() -> &'static prometheus::IntGauge {
     static ACTIVE_CLUSTERS: Lazy<prometheus::IntGauge> = Lazy::new(|| {
         crate::metrics::register(
-            prometheus::IntGauge::with_opts(crate::metrics::opts(
-                "active",
-                SUBSYSTEM,
+            prometheus::IntGauge::with_opts(prometheus::Opts::new(
+                "quilkin_cluster_active",
                 "Number of currently active clusters.",
             ))
             .unwrap(),
@@ -50,7 +48,7 @@ pub(crate) fn active_endpoints(cluster: &str) -> prometheus::IntGauge {
     static ACTIVE_ENDPOINTS: Lazy<prometheus::IntGaugeVec> = Lazy::new(|| {
         prometheus::register_int_gauge_vec_with_registry! {
             prometheus::opts! {
-                "active_endpoints",
+                "quilkin_active_endpoints",
                 "Number of currently available endpoints across clusters",
             },
             &["quilkin_cluster"],

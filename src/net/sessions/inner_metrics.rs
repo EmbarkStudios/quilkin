@@ -31,7 +31,7 @@ const PREFIX_NAME_LABEL: &str = "prefix_name";
 pub(crate) fn active_sessions(asn: Option<&crate::net::maxmind_db::IpNetEntry>) -> IntGauge {
     static ACTIVE_SESSIONS: Lazy<IntGaugeVec> = Lazy::new(|| {
         prometheus::register_int_gauge_vec_with_registry! {
-            Opts::new("active", "number of sessions currently active").subsystem(SUBSYSTEM),
+            Opts::new("active", "number of sessions currently active").subsystem(SUBSYSTEM).namespace("quilkin"),
             &[COUNTRY_CODE_LABEL],
             crate::metrics::registry(),
         }
@@ -49,7 +49,9 @@ pub(crate) fn total_sessions() -> &'static IntCounter {
     static TOTAL_SESSIONS: Lazy<IntCounter> = Lazy::new(|| {
         register(
             IntCounter::with_opts(
-                Opts::new("total", "total number of established sessions").subsystem(SUBSYSTEM),
+                Opts::new("total", "total number of established sessions")
+                    .subsystem(SUBSYSTEM)
+                    .namespace("quilkin"),
             )
             .unwrap(),
         )

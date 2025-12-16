@@ -45,7 +45,7 @@ pub(crate) fn active_control_planes(control_plane: &str) -> prometheus::IntGauge
     static ACTIVE_CONTROL_PLANES: Lazy<IntGaugeVec> = Lazy::new(|| {
         prometheus::register_int_gauge_vec_with_registry! {
             prometheus::opts! {
-                "active_control_planes",
+                "xds_active_control_planes",
                 "Total number of active control plane connections",
             },
             &[CONTROL_PLANE_LABEL],
@@ -61,7 +61,7 @@ pub(crate) fn delta_discovery_requests(client_id: &str, type_url: &str) -> prome
     static DELTA_DISCOVERY_REQUESTS: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
-                "delta_discovery_requests",
+                "xds_delta_discovery_requests",
                 "Total number of xDS delta discovery requests",
             },
             &[CLIENT_ID_LABEL, TYPE_LABEL],
@@ -80,7 +80,7 @@ pub(crate) fn delta_discovery_responses(
     pub(crate) static DELTA_DISCOVERY_RESPONSES: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
-                "delta_discovery_responses",
+                "xds_delta_discovery_responses",
                 "Total number of xDS delta discovery responses",
             },
             &[CONTROL_PLANE_LABEL, TYPE_LABEL],

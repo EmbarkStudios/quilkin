@@ -15,66 +15,66 @@
  */
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "jemalloc")] {
-        use prometheus::core::Collector;
+    if #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))] {
+        use prometheus::core::{Collector, Desc};
         use tikv_jemalloc_ctl::stats;
 
         struct JemallocCollector {
             epoch: tikv_jemalloc_ctl::epoch_mib,
-            active_desc: prometheus::core::Desc,
-            active: tikv_jemalloc_ctl::stats::active_mib,
-            allocated_desc: prometheus::core::Desc,
-            allocated: tikv_jemalloc_ctl::stats::allocated_mib,
-            mapped_desc: prometheus::core::Desc,
-            mapped: tikv_jemalloc_ctl::stats::mapped_mib,
-            metadata_desc: prometheus::core::Desc,
-            metadata: tikv_jemalloc_ctl::stats::metadata_mib,
-            resident_desc: prometheus::core::Desc,
-            resident: tikv_jemalloc_ctl::stats::resident_mib,
-            retained_desc: prometheus::core::Desc,
-            retained: tikv_jemalloc_ctl::stats::retained_mib,
+            active_desc: Desc,
+            active: stats::active_mib,
+            allocated_desc: Desc,
+            allocated: stats::allocated_mib,
+            mapped_desc: Desc,
+            mapped: stats::mapped_mib,
+            metadata_desc: Desc,
+            metadata: stats::metadata_mib,
+            resident_desc: Desc,
+            resident: stats::resident_mib,
+            retained_desc: Desc,
+            retained: stats::retained_mib,
         }
 
         impl JemallocCollector {
             fn new() -> crate::Result<Self> {
                 Ok(Self {
                     epoch: tikv_jemalloc_ctl::epoch::mib()?,
-                    active_desc: prometheus::core::Desc::new(
+                    active_desc: Desc::new(
                         "jemalloc_stats_active_bytes".to_string(),
                         "Total number of bytes in active pages allocated by the application.".to_string(),
                         Vec::new(),
                         std::collections::HashMap::new(),
                     )?,
                     active: stats::active::mib()?,
-                    allocated_desc: prometheus::core::Desc::new(
+                    allocated_desc: Desc::new(
                         "jemalloc_stats_allocated_bytes".to_string(),
                         "Total number of bytes allocated by the application.".to_string(),
                         Vec::new(),
                         std::collections::HashMap::new(),
                     )?,
                     allocated: stats::allocated::mib()?,
-                    mapped_desc: prometheus::core::Desc::new(
+                    mapped_desc: Desc::new(
                         "jemalloc_stats_mapped_bytes".to_string(),
                         "Total number of bytes in active extents mapped by the allocator.".to_string(),
                         Vec::new(),
                         std::collections::HashMap::new(),
                     )?,
                     mapped: stats::mapped::mib()?,
-                    metadata_desc: prometheus::core::Desc::new(
+                    metadata_desc: Desc::new(
                         "jemalloc_stats_metadata_bytes".to_string(),
                         "Total number of bytes dedicated to jemalloc metadata.".to_string(),
                         Vec::new(),
                         std::collections::HashMap::new(),
                     )?,
                     metadata: stats::metadata::mib()?,
-                    resident_desc: prometheus::core::Desc::new(
+                    resident_desc: Desc::new(
                         "jemalloc_stats_resident_bytes".to_string(),
                         "Total number of bytes in physically resident data pages mapped by the allocator.".to_string(),
                         Vec::new(),
                         std::collections::HashMap::new(),
                     )?,
                     resident: stats::resident::mib()?,
-                    retained_desc: prometheus::core::Desc::new(
+                    retained_desc: Desc::new(
                         "jemalloc_stats_retained_bytes".to_string(),
                         "Total number of bytes in virtual memory mappings that were retained rather than being returned to the operating system via e.g. munmap(2).".to_string(),
                         Vec::new(),
@@ -100,7 +100,7 @@ cfg_if::cfg_if! {
         }
 
         impl Collector for JemallocCollector {
-            fn desc(&self) -> Vec<&prometheus::core::Desc> {
+            fn desc(&self) -> Vec<&Desc> {
                 vec![
                     &self.active_desc,
                     &self.allocated_desc,
@@ -114,7 +114,7 @@ cfg_if::cfg_if! {
             fn collect(&self) -> Vec<prometheus::proto::MetricFamily> {
                 // many statistics are cached and only updated when the epoch is advanced.
                 if let Err(error) = self.epoch.advance() {
-                    tracing::warn!(?error, "failed to advance epoch")
+                    tracing::warn!(?error, "failed to advance epoch");
                 }
 
                 let mut results = Vec::with_capacity(6);
