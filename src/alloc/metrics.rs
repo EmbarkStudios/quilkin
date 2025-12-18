@@ -16,115 +16,59 @@
 
 cfg_if::cfg_if! {
     if #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))] {
-        use prometheus::core::{Collector, Desc};
         use tikv_jemalloc_ctl::stats;
 
         struct JemallocCollector {
             epoch: tikv_jemalloc_ctl::epoch_mib,
-            active_desc: Desc,
             active: stats::active_mib,
-            allocated_desc: Desc,
             allocated: stats::allocated_mib,
-            mapped_desc: Desc,
             mapped: stats::mapped_mib,
-            metadata_desc: Desc,
             metadata: stats::metadata_mib,
-            resident_desc: Desc,
             resident: stats::resident_mib,
-            retained_desc: Desc,
             retained: stats::retained_mib,
+        }
+
+        impl std::fmt::Debug for JemallocCollector {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("JemallocCollector {}")
+            }
         }
 
         impl JemallocCollector {
             fn new() -> crate::Result<Self> {
                 Ok(Self {
                     epoch: tikv_jemalloc_ctl::epoch::mib()?,
-                    active_desc: Desc::new(
-                        "jemalloc_stats_active_bytes".to_string(),
-                        "Total number of bytes in active pages allocated by the application.".to_string(),
-                        Vec::new(),
-                        std::collections::HashMap::new(),
-                    )?,
                     active: stats::active::mib()?,
-                    allocated_desc: Desc::new(
-                        "jemalloc_stats_allocated_bytes".to_string(),
-                        "Total number of bytes allocated by the application.".to_string(),
-                        Vec::new(),
-                        std::collections::HashMap::new(),
-                    )?,
                     allocated: stats::allocated::mib()?,
-                    mapped_desc: Desc::new(
-                        "jemalloc_stats_mapped_bytes".to_string(),
-                        "Total number of bytes in active extents mapped by the allocator.".to_string(),
-                        Vec::new(),
-                        std::collections::HashMap::new(),
-                    )?,
                     mapped: stats::mapped::mib()?,
-                    metadata_desc: Desc::new(
-                        "jemalloc_stats_metadata_bytes".to_string(),
-                        "Total number of bytes dedicated to jemalloc metadata.".to_string(),
-                        Vec::new(),
-                        std::collections::HashMap::new(),
-                    )?,
                     metadata: stats::metadata::mib()?,
-                    resident_desc: Desc::new(
-                        "jemalloc_stats_resident_bytes".to_string(),
-                        "Total number of bytes in physically resident data pages mapped by the allocator.".to_string(),
-                        Vec::new(),
-                        std::collections::HashMap::new(),
-                    )?,
                     resident: stats::resident::mib()?,
-                    retained_desc: Desc::new(
-                        "jemalloc_stats_retained_bytes".to_string(),
-                        "Total number of bytes in virtual memory mappings that were retained rather than being returned to the operating system via e.g. munmap(2).".to_string(),
-                        Vec::new(),
-                        std::collections::HashMap::new(),
-                    )?,
                     retained: stats::retained::mib()?,
                 })
             }
         }
 
-        fn bytes_gauge_into_metric_family(
-            bytes: usize,
-            desc: &prometheus::core::Desc,
-        ) -> prometheus::proto::MetricFamily {
-            let mut gauge = prometheus::proto::Gauge::default();
-            gauge.set_value(bytes as f64);
-            let mut mf = prometheus::proto::MetricFamily::default();
-            mf.set_name(desc.fq_name.clone());
-            mf.set_help(desc.help.clone());
-            mf.set_field_type(prometheus::proto::MetricType::GAUGE);
-            mf.set_metric(vec![prometheus::proto::Metric::from_gauge(gauge)]);
-            mf
-        }
-
-        impl Collector for JemallocCollector {
-            fn desc(&self) -> Vec<&Desc> {
-                vec![
-                    &self.active_desc,
-                    &self.allocated_desc,
-                    &self.mapped_desc,
-                    &self.metadata_desc,
-                    &self.resident_desc,
-                    &self.retained_desc,
-                ]
-            }
-
-            fn collect(&self) -> Vec<prometheus::proto::MetricFamily> {
+        impl prometheus_client::collector::Collector for JemallocCollector {
+            fn encode(&self, mut encoder: prometheus_client::encoding::DescriptorEncoder<'_>) -> std::fmt::Result {
+                use prometheus_client::{registry::Unit, encoding::EncodeMetric, metrics::gauge::ConstGauge};
                 // many statistics are cached and only updated when the epoch is advanced.
                 if let Err(error) = self.epoch.advance() {
                     tracing::warn!(?error, "failed to advance epoch");
                 }
-
-                let mut results = Vec::with_capacity(6);
 
                 if let Ok(active) = self
                     .active
                     .read()
                     .inspect_err(|error| tracing::warn!(?error, "failed to collect jemalloc metric"))
                 {
-                    results.push(bytes_gauge_into_metric_family(active, &self.active_desc));
+                    let active_bytes = ConstGauge::new(active as u64);
+                    let active_bytes_metric = encoder.encode_descriptor(
+                        "jemalloc_stats_active",
+                        "Total number of bytes in active pages allocated by the application.",
+                        Some(&Unit::Bytes),
+                        active_bytes.metric_type(),
+                    )?;
+                    active_bytes.encode(active_bytes_metric)?;
                 }
 
                 if let Ok(allocated) = self
@@ -132,10 +76,14 @@ cfg_if::cfg_if! {
                     .read()
                     .inspect_err(|error| tracing::warn!(?error, "failed to collect jemalloc metric"))
                 {
-                    results.push(bytes_gauge_into_metric_family(
-                        allocated,
-                        &self.allocated_desc,
-                    ));
+                    let allocated_bytes = ConstGauge::new(allocated as u64);
+                    let allocated_bytes_metric = encoder.encode_descriptor(
+                        "jemalloc_stats_allocated",
+                        "Total number of bytes allocated by the application.",
+                        Some(&Unit::Bytes),
+                        allocated_bytes.metric_type(),
+                    )?;
+                    allocated_bytes.encode(allocated_bytes_metric)?;
                 }
 
                 if let Ok(mapped) = self
@@ -143,7 +91,14 @@ cfg_if::cfg_if! {
                     .read()
                     .inspect_err(|error| tracing::warn!(?error, "failed to collect jemalloc metric"))
                 {
-                    results.push(bytes_gauge_into_metric_family(mapped, &self.mapped_desc));
+                    let mapped_bytes = ConstGauge::new(mapped as u64);
+                    let mapped_bytes_metric = encoder.encode_descriptor(
+                        "jemalloc_stats_mapped",
+                        "Total number of bytes in active extents mapped by the allocator.",
+                        Some(&Unit::Bytes),
+                        mapped_bytes.metric_type(),
+                    )?;
+                    mapped_bytes.encode(mapped_bytes_metric)?;
                 }
 
                 if let Ok(metadata) = self
@@ -151,10 +106,14 @@ cfg_if::cfg_if! {
                     .read()
                     .inspect_err(|error| tracing::warn!(?error, "failed to collect jemalloc metric"))
                 {
-                    results.push(bytes_gauge_into_metric_family(
-                        metadata,
-                        &self.metadata_desc,
-                    ));
+                    let metadata_bytes = ConstGauge::new(metadata as u64);
+                    let metadata_bytes_metric = encoder.encode_descriptor(
+                        "jemalloc_stats_metadata",
+                        "Total number of bytes dedicated to jemalloc metadata.",
+                        Some(&Unit::Bytes),
+                        metadata_bytes.metric_type(),
+                    )?;
+                    metadata_bytes.encode(metadata_bytes_metric)?;
                 }
 
                 if let Ok(resident) = self
@@ -162,10 +121,14 @@ cfg_if::cfg_if! {
                     .read()
                     .inspect_err(|error| tracing::warn!(?error, "failed to collect jemalloc metric"))
                 {
-                    results.push(bytes_gauge_into_metric_family(
-                        resident,
-                        &self.resident_desc,
-                    ));
+                    let resident_bytes = ConstGauge::new(resident as u64);
+                    let resident_bytes_metric = encoder.encode_descriptor(
+                        "jemalloc_stats_resident",
+                        "Total number of bytes in physically resident data pages mapped by the allocator.",
+                        Some(&Unit::Bytes),
+                        resident_bytes.metric_type(),
+                    )?;
+                    resident_bytes.encode(resident_bytes_metric)?;
                 }
 
                 if let Ok(retained) = self
@@ -173,22 +136,26 @@ cfg_if::cfg_if! {
                     .read()
                     .inspect_err(|error| tracing::warn!(?error, "failed to collect jemalloc metric"))
                 {
-                    results.push(bytes_gauge_into_metric_family(
-                        retained,
-                        &self.retained_desc,
-                    ));
+                    let retained_bytes = ConstGauge::new(retained as u64);
+                    let retained_bytes_metric = encoder.encode_descriptor(
+                        "jemalloc_stats_retained",
+                        "Total number of bytes in virtual memory mappings that were retained rather than being returned to the operating system via e.g. munmap(2).",
+                        Some(&Unit::Bytes),
+                        retained_bytes.metric_type(),
+                    )?;
+                    retained_bytes.encode(retained_bytes_metric)?;
                 }
 
-                results
+                Ok(())
             }
         }
 
         pub fn spawn_heap_stats_updates(_period: std::time::Duration, _srx: crate::signal::ShutdownRx) {
             match JemallocCollector::new() {
                 Ok(collector) => {
-                    if let Err(error) = crate::metrics::registry().register(Box::new(collector)) {
-                        tracing::error!(?error, "failed to register JemallocCollector");
-                    }
+                    crate::metrics::with_mut_registry(|mut registry| {
+                        registry.register_collector(Box::new(collector));
+                    });
                 },
                 Err(error) => tracing::error!(?error, "failed to create JemallocCollector"),
             }
