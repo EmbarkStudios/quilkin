@@ -202,6 +202,12 @@ fn http_router(
                 axum::response::Json(phoenix.coordinate_map())
             }),
         )
+        .layer(
+            crate::metrics::http::HttpMetricsLayer::new_with_path_buckets(
+                "phoenix".to_string(),
+                ["/", "/network-coordinates"],
+            ),
+        )
 }
 
 #[derive(Copy, Clone)]

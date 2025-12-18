@@ -23,6 +23,8 @@ use prometheus::{
 
 pub use prometheus::Result;
 
+pub mod http;
+
 /// "event" is used as a label for Metrics that can apply to both Filter
 /// `read` and `write` executions.
 pub const DIRECTION_LABEL: &str = "event";
@@ -96,6 +98,8 @@ pub fn register_metrics(registry: &mut prometheus_client::registry::Registry, id
             ),
         ]),
     );
+
+    http::register_metrics(registry);
 }
 
 /// Start the histogram bucket at a quarter of a millisecond, as number below a millisecond are
@@ -123,40 +127,6 @@ pub(crate) fn leader_election(is_leader: bool) {
     });
 
     METRIC.set(is_leader as _);
-}
-
-pub(crate) mod http {
-    use super::*;
-
-    pub(crate) fn http_connections(port: &str) -> IntGauge {
-        static METRIC: Lazy<IntGaugeVec> = Lazy::new(|| {
-            prometheus::register_int_gauge_vec_with_registry! {
-                prometheus::opts! {
-                    "http_connections",
-                    "Number of active http connections",
-                },
-                &["port"],
-                registry(),
-            }
-            .unwrap()
-        });
-        METRIC.with_label_values(&[port])
-    }
-
-    pub(crate) fn http_inflight_requests(port: &str) -> IntGauge {
-        static METRIC: Lazy<IntGaugeVec> = Lazy::new(|| {
-            prometheus::register_int_gauge_vec_with_registry! {
-                prometheus::opts! {
-                    "http_inflight_requests",
-                    "Number of inflight http requests",
-                },
-                &["port"],
-                registry(),
-            }
-            .unwrap()
-        });
-        METRIC.with_label_values(&[port])
-    }
 }
 
 pub(crate) mod k8s {
