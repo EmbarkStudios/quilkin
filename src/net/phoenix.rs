@@ -189,7 +189,6 @@ fn http_router(
         .route(
             "/",
             axum::routing::get(|| async move {
-                crate::metrics::phoenix_requests().inc();
                 tracing::trace!("serving phoenix request");
                 axum::response::Json(hj)
             }),
@@ -197,7 +196,6 @@ fn http_router(
         .route(
             "/network-coordinates",
             axum::routing::get(|| async move {
-                crate::metrics::phoenix_requests().inc();
                 tracing::trace!("serving phoenix request");
                 axum::response::Json(phoenix.coordinate_map())
             }),

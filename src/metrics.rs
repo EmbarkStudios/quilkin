@@ -418,21 +418,6 @@ pub(crate) fn game_traffic_task_closed() -> &'static IntCounter {
     &GAME_TRAFFIC_TASK_CLOSED
 }
 
-pub(crate) fn phoenix_requests() -> &'static IntCounter {
-    static PHOENIX_REQUESTS: Lazy<IntCounter> = Lazy::new(|| {
-        prometheus::register_int_counter_with_registry! {
-            prometheus::opts! {
-                "quilkin_phoenix_requests",
-                "The amount of phoenix requests",
-            },
-            registry(),
-        }
-        .unwrap()
-    });
-
-    &PHOENIX_REQUESTS
-}
-
 pub(crate) fn phoenix_measurement_seconds(
     icao: crate::config::IcaoCode,
     direction: &str,
