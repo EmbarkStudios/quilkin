@@ -85,19 +85,26 @@ where
 static INFO_APP_ID: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
 
 pub fn register_metrics(registry: &mut prometheus_client::registry::Registry, id: String) {
+    use prometheus_client::metrics::{family::Family, gauge::ConstGauge};
     INFO_APP_ID.set(id).expect("APP_ID has already been set");
+
+    // TODO this should be a prometheus_client::metrics::info::Info but that metric type is new
+    // and not guaranteed to be widely supported by scrapers
+    let quilkin_info_family =
+        Family::<Vec<(&str, &str)>, ConstGauge>::new_with_constructor(|| ConstGauge::new(1));
     registry.register(
-        "quilkin",
+        "quilkin_info",
         "Static information about the quilkin instance",
-        prometheus_client::metrics::info::Info::new(vec![
-            ("id", INFO_APP_ID.get().unwrap().as_str()),
-            ("version", clap::crate_version!()),
-            (
-                "commit",
-                crate::net::endpoint::metadata::build::GIT_COMMIT_HASH.unwrap_or("none"),
-            ),
-        ]),
+        quilkin_info_family.clone(),
     );
+    drop(quilkin_info_family.get_or_create(&vec![
+        ("id", INFO_APP_ID.get().unwrap().as_str()),
+        ("version", clap::crate_version!()),
+        (
+            "commit",
+            crate::net::endpoint::metadata::build::GIT_COMMIT_HASH.unwrap_or("none"),
+        ),
+    ]));
 
     http::register_metrics(registry);
 }
