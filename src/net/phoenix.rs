@@ -447,12 +447,14 @@ impl<M: Measurement + 'static> Phoenix<M> {
         let mut total_difference = 0;
         let mut count = 0;
         for address in nodes {
+            let measurement = self.measurement.measure_distance(address).await;
+
             let Some(mut node) = self.nodes.get_mut(&address) else {
                 tracing::debug!(%address, "node removed between selection and measurement");
                 continue;
             };
 
-            match self.measurement.measure_distance(address).await {
+            match measurement {
                 Ok(distance) => {
                     node.adjust_coordinates(distance);
                     total_difference += distance.total_nanos();
