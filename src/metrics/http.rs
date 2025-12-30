@@ -21,7 +21,13 @@ struct HttpLabels {
     code: u16,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
+pub(crate) struct ConnectionLabels {
+    pub service: String,
+}
+
 struct HttpMetrics {
+    connections: Family<ConnectionLabels, Gauge>,
     inflight_requests: Family<InflightLabels, Gauge>,
     requests: Family<HttpLabels, Counter>,
     request_duration: Family<HttpLabels, Histogram>,
@@ -29,6 +35,7 @@ struct HttpMetrics {
 
 fn get_http_metrics() -> &'static HttpMetrics {
     static HTTP_METRICS: Lazy<HttpMetrics> = Lazy::new(|| HttpMetrics {
+        connections: <_>::default(),
         inflight_requests: <_>::default(),
         requests: <_>::default(),
         request_duration: Family::<HttpLabels, Histogram>::new_with_constructor(|| {
@@ -40,6 +47,11 @@ fn get_http_metrics() -> &'static HttpMetrics {
 
 pub fn register_metrics(registry: &mut prometheus_client::registry::Registry) {
     let http_metrics = get_http_metrics();
+    registry.register(
+        "http_connections",
+        "Number of open http connections",
+        http_metrics.connections.clone(),
+    );
     registry.register(
         "http_inflight_requests",
         "Number of inflight http requests",
@@ -193,36 +205,21 @@ where
     }
 }
 
-#[expect(unused)]
-pub(crate) fn http_connections(port: &str) -> prometheus::IntGauge {
-    static METRIC: Lazy<prometheus::IntGaugeVec> = Lazy::new(|| {
-        prometheus::register_int_gauge_vec_with_registry! {
-            prometheus::opts! {
-                "http_connections",
-                "Number of active http connections",
-            },
-            &["port"],
-            crate::metrics::registry(),
-        }
-        .unwrap()
-    });
-    METRIC.with_label_values(&[port])
+/// Increases the connection gauge by one and decreases it by one when the guard is dropped
+pub(crate) fn connection_guard(labels: &ConnectionLabels) -> ConnectionGuard {
+    let gauge = get_http_metrics().connections.get_or_create_owned(labels);
+    gauge.inc();
+    ConnectionGuard { gauge }
 }
 
-#[expect(unused)]
-pub(crate) fn http_inflight_requests(port: &str) -> prometheus::IntGauge {
-    static METRIC: Lazy<prometheus::IntGaugeVec> = Lazy::new(|| {
-        prometheus::register_int_gauge_vec_with_registry! {
-            prometheus::opts! {
-                "http_inflight_requests",
-                "Number of inflight http requests",
-            },
-            &["port"],
-            crate::metrics::registry(),
-        }
-        .unwrap()
-    });
-    METRIC.with_label_values(&[port])
+pub struct ConnectionGuard {
+    gauge: Gauge,
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        self.gauge.dec();
+    }
 }
 
 #[cfg(test)]
