@@ -78,7 +78,8 @@ pub fn spawn(
                 let datacenters = datacenters.clone();
 
                 async move {
-                    let node_latencies_response = Arc::new(arc_swap::ArcSwap::new(Arc::new(serde_json::Map::default())));
+                    let node_latencies_response =
+                        Arc::new(arc_swap::ArcSwap::new(Arc::new(serde_json::Map::default())));
                     let update_node_latencies = || {
                         let nodes = phoenix.ordered_nodes_by_latency();
 
@@ -89,7 +90,8 @@ pub fn spawn(
 
                         node_latencies_response.store(json.into());
                     };
-                    let network_coordinates_response = Arc::new(arc_swap::ArcSwap::new(Arc::new(serde_json::Map::default())));
+                    let network_coordinates_response =
+                        Arc::new(arc_swap::ArcSwap::new(Arc::new(serde_json::Map::default())));
                     let update_network_coordinates = || {
                         let coordinate_map = phoenix.coordinate_map();
                         let mut json = serde_json::Map::default();
@@ -97,10 +99,10 @@ pub fn spawn(
                             match serde_json::to_value(coordinates) {
                                 Ok(coords) => {
                                     json.insert(icao.to_string(), coords);
-                                },
+                                }
                                 Err(error) => {
                                     tracing::error!(?error, "failed to serialize coordinates");
-                                },
+                                }
                             };
                         }
                         network_coordinates_response.store(json.into());
@@ -118,9 +120,16 @@ pub fn spawn(
 
                     let http_task: tokio::task::JoinHandle<eyre::Result<()>> = {
                         tokio::spawn(async move {
-                            let router = http_router(handler_network_coordinates, handler_node_latencies);
+                            let router =
+                                http_router(handler_network_coordinates, handler_node_latencies);
+                            let listener = listener.into_tokio()?;
+
                             tokio::select! {
-                                result = async move { axum::serve(listener.into_tokio()?, router).await } => result.map_err(From::from),
+                                // result = async move { axum::serve(listener.into_tokio()?, router).await } => result.map_err(From::from),
+                                _ = async move { serve(listener, router).await } => {
+                                    // result.map_err(From::from)
+                                    Ok(())
+                                },
                                 _ = &mut srx => {
                                     crate::metrics::phoenix_task_closed().set(true as _);
                                     Ok(())
@@ -170,15 +179,16 @@ pub fn spawn(
                     }
 
                     if let Err(err) = http_task.await
-                        && let Ok(panic) = err.try_into_panic() {
-                            let message = panic
-                                .downcast_ref::<String>()
-                                .map(String::as_str)
-                                .or_else(|| panic.downcast_ref::<&str>().copied())
-                                .unwrap_or("<unknown non-string panic>");
+                        && let Ok(panic) = err.try_into_panic()
+                    {
+                        let message = panic
+                            .downcast_ref::<String>()
+                            .map(String::as_str)
+                            .or_else(|| panic.downcast_ref::<&str>().copied())
+                            .unwrap_or("<unknown non-string panic>");
 
-                            tracing::error!(panic = message, "phoenix HTTP task panicked");
-                        }
+                        tracing::error!(panic = message, "phoenix HTTP task panicked");
+                    }
 
                     res
                 }
@@ -199,6 +209,49 @@ pub fn spawn(
     });
 
     Ok(finalizer)
+}
+
+async fn serve<L: axum::serve::Listener>(mut listener: L, router: axum::Router) -> ! {
+    use tower::Service;
+
+    // TODO graceful shutdown stuff
+
+    loop {
+        let (socket, _remote_addr) = listener.accept().await;
+
+        let tower_service = router.clone();
+        tokio::spawn(async move {
+            let conn_labels = crate::metrics::http::ConnectionLabels {
+                service: "phoenix".to_string(),
+            };
+            let _conn_gaurd = crate::metrics::http::connection_guard(&conn_labels);
+
+            let socket = hyper_util::rt::TokioIo::new(socket);
+            let hyper_service = hyper::service::service_fn(
+                move |request: axum::extract::Request<hyper::body::Incoming>| {
+                    tower_service.clone().call(request)
+                },
+            );
+
+            let mut builder =
+                hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+            // CONNECT protocol needed for HTTP/2 websockets
+            builder.http2().enable_connect_protocol();
+
+            let conn = builder.serve_connection_with_upgrades(socket, hyper_service);
+
+            // loop {
+            tokio::select! {
+                result = conn => {
+                    if let Err(error) = result {
+                        tracing::trace!(%error, "failed to serve connection");
+                    }
+                    // break;
+                }
+            }
+            // }
+        });
+    }
 }
 
 fn http_router(
