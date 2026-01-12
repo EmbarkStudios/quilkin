@@ -263,14 +263,14 @@ fn http_router(
             "/",
             axum::routing::get(|| async move {
                 tracing::trace!("serving phoenix request");
-                axum::response::Json(node_latencies)
+                axum::response::Json(node_latencies.load().clone())
             }),
         )
         .route(
             "/network-coordinates",
             axum::routing::get(|| async move {
                 tracing::trace!("serving phoenix request");
-                axum::response::Json(network_coordinates)
+                axum::response::Json(network_coordinates.load().clone())
             }),
         )
         .layer(
