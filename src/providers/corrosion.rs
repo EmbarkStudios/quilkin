@@ -12,6 +12,13 @@ type CorrosionAddrs = Vec<std::net::SocketAddr>;
 type HealthCheck = Arc<atomic::AtomicBool>;
 type State = Arc<crate::config::Config>;
 
+use tryhard::backoff_strategies::{BackoffStrategy as _, ExponentialBackoff};
+
+const BACKOFF_INITIAL_DELAY: Duration = Duration::from_millis(500);
+const BACKOFF_MAX_DELAY: Duration = Duration::from_secs(30);
+const BACKOFF_MAX_JITTER: Duration = Duration::from_secs(2);
+const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl super::Providers {
     pub(super) fn maybe_spawn_corrosion(
         &self,
@@ -48,6 +55,8 @@ impl super::Providers {
 
             None
         } else {
+            push::corrosion_mutate(state, endpoints, hc)
+
             // We're an agent, pushing changes to a remote relay
             providers.spawn(Self::task(
                 "corrosion_mutate".into(),
@@ -57,7 +66,7 @@ impl super::Providers {
                     let endpoints = endpoints.clone();
                     let hc = health_check.clone();
 
-                    async move { push::corrosion_mutate(state, endpoints, hc).await }
+                    async move { .await }
                 },
             ));
         }

@@ -1,12 +1,6 @@
 use super::*;
 
 use rand::Rng;
-use tryhard::backoff_strategies::{BackoffStrategy as _, ExponentialBackoff};
-
-const BACKOFF_INITIAL_DELAY: Duration = Duration::from_millis(500);
-const BACKOFF_MAX_DELAY: Duration = Duration::from_secs(30);
-const BACKOFF_MAX_JITTER: Duration = Duration::from_secs(2);
-const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct Sub {
     #[allow(unused)]
