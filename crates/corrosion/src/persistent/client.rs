@@ -263,7 +263,11 @@ impl MutationClient {
         change: &[proto::v1::ServerChange],
     ) -> Result<ExecResponse, TransactionError> {
         let buf = codec::write_length_prefixed_jsonb(&change)?;
+        self.send_raw(buf).await
+    }
 
+    #[inline]
+    pub async fn send_raw(&self, buf: bytes::BytesMut) -> Result<ExecResponse, TransactionError> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send((buf.freeze(), tx))
