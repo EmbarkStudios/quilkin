@@ -20,5 +20,5 @@ COPY ./license.html .
 COPY ./dependencies-src.zip .
 COPY --chown=nonroot:nonroot ./target/image/quilkin .
 
-USER nonroot
+USER root
 ENTRYPOINT ["/quilkin"]

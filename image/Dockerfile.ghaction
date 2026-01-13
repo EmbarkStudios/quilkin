@@ -15,5 +15,5 @@ COPY --from=builder /workspace/license.html .
 COPY --from=builder /workspace/dependencies-src.zip .
 COPY --from=builder --chown=nonroot:nonroot /workspace/target/x86_64-unknown-linux-gnu/lto/quilkin .
 
-USER nonroot
+USER root
 ENTRYPOINT ["/quilkin"]
