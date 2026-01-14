@@ -9,7 +9,7 @@ workspace = true
 
 [dependencies]
 compact_str.workspace = true
-data-encoding = "2.9"
+data-encoding = "2.10"
 eyre.workspace = true
 schemars.workspace = true
 serde.workspace = true

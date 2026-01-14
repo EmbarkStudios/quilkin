@@ -25,8 +25,8 @@ workspace = true
 
 [dependencies]
 # Packet creation/parsing to validate the packet processing for XDP
-etherparse = "0.17"
-insta = { version = "1.43", features = ["json"] }
+etherparse = "0.19"
+insta = { version = "1.46", features = ["json"] }
 once_cell.workspace = true
 quilkin.workspace = true
 quilkin-xds.workspace = true

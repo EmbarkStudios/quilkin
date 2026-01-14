@@ -92,7 +92,7 @@ bytes.workspace = true
 cached.workspace = true
 cfg-if = "1.0"
 crossbeam-utils = { version = "0.8", optional = true }
-clap = { version = "4.5.38", features = ["cargo", "derive", "env"] }
+clap = { version = "4.5.54", features = ["cargo", "derive", "env"] }
 dashmap = { version = "6.1", features = ["serde"] }
 either = "1.15.0"
 enum-map.workspace = true
@@ -100,7 +100,7 @@ eyre.workspace = true
 fixedstr.workspace = true
 futures.workspace = true
 http-body-util = "0.1"
-hyper = { version = "1.7", features = ["http2", "http1", "server"] }
+hyper = { version = "1.8", features = ["http2", "http1", "server"] }
 hyper-rustls = { version = "0.27", default-features = false, features = [
     "http2",
     "webpki-roots",
@@ -108,10 +108,10 @@ hyper-rustls = { version = "0.27", default-features = false, features = [
 ] }
 ipnetwork = { version = "0.21.1", features = ["serde"] } # keep in sync with maxmind
 k8s-openapi.workspace = true
-maxminddb = "0.27.0"
-notify = "8.0"
-num_cpus = "1.16.0"
-mimalloc = { version = "0.1.46", optional = true }
+maxminddb = "0.27.1"
+notify = "8.2"
+num_cpus = "1.17.0"
+mimalloc = { version = "0.1.48", optional = true }
 once_cell.workspace = true
 parking_lot.workspace = true
 prometheus.workspace = true
@@ -125,7 +125,7 @@ seahash = "4.1"
 serde.workspace = true
 serde_json.workspace = true
 serde_regex = "1.1.0"
-serde_stacker = "0.1.12"
+serde_stacker = "0.1.14"
 serde_yaml = "0.9.34"
 socket2.workspace = true
 stable-eyre = "0.2.2"
@@ -152,14 +152,14 @@ hickory-resolver = { version = "0.25.2", features = [
 ] }
 strum = "0.27"
 strum_macros = "0.27"
-libflate = "2.1.0"
-form_urlencoded = "1.2.1"
+libflate = "2.2.1"
+form_urlencoded = "1.2.2"
 enum_dispatch = "0.3.13"
 gxhash = "3.5.0"
 kube-leader-election = "0.42.0"
 rustls = { version = "0.23", default-features = false }
 tracing-appender.workspace = true
-axum = { version = "0.8.4", features = ["macros"] }
+axum = { version = "0.8.8", features = ["macros"] }
 
 [dependencies.hyper-util]
 version = "0.1"
@@ -215,12 +215,12 @@ edition = "2024"
 version = "0.10.0"
 
 [workspace.dependencies]
-arc-swap = { version = "1.7.1", features = ["serde"] }
+arc-swap = { version = "1.8.0", features = ["serde"] }
 async-stream = "0.3.6"
-async-trait = "0.1.88"
+async-trait = "0.1.89"
 base64 = "0.22.1"
-bytes = { version = "1.10.1", features = ["serde"] }
-cached = { version = "0.54", default-features = false }
+bytes = { version = "1.11.0", features = ["serde"] }
+cached = { version = "0.56", default-features = false }
 compact_str = "0.7"
 corrosion = { path = "crates/corrosion" }
 eyre = "0.6.12"
@@ -247,17 +247,17 @@ quilkin-proto = {version = "0.10.0", path = "crates/quilkin-proto" }
 quilkin-types = { version = "0.10.0", path = "crates/types" }
 quilkin-xds = {version = "0.10.0", path = "crates/xds" }
 rand = "0.9"
-regex = "1.11.1"
-serde = { version = "1.0.219", features = ["derive", "rc"] }
-serde_json = "1.0.140"
+regex = "1.12.2"
+serde = { version = "1.0.228", features = ["derive", "rc"] }
+serde_json = "1.0.149"
 socket2 = { version = "0.6", features = ["all"] }
-tempfile = "3.20.0"
+tempfile = "3.24.0"
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"] }
 tikv-jemallocator = { version = "0.6", features = ["profiling", "unprefixed_malloc_on_supported_platforms"] }
 time = { version = "0.3", default-features = false, features = ["std"] }
-thiserror = "2.0.12"
-tokio-stream = { version = "0.1.17", features = ["net", "sync"] }
-tokio = { version = "1.45.0", features = [
+thiserror = "2.0.17"
+tokio-stream = { version = "0.1.18", features = ["net", "sync"] }
+tokio = { version = "1.49.0", features = [
     "rt-multi-thread",
     "fs",
     "signal",
@@ -265,30 +265,30 @@ tokio = { version = "1.45.0", features = [
     "parking_lot",
     "tracing",
 ] }
-tokio-util = "0.7.16"
+tokio-util = "0.7.18"
 tonic = { version = "0.14", default-features = false, features = ["codegen", "router", "tls-ring", "transport"] }
 tonic-prost = "0.14"
 tower = "0.5"
-tracing = "0.1.41"
-tracing-appender = "0.2.3"
+tracing = "0.1.44"
+tracing-appender = "0.2.4"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-subscriber = "0.3"
-tryhard = "0.5.1"
-uuid = { version = "1.16.0", default-features = false, features = ["v4"] }
+tryhard = "0.5.2"
+uuid = { version = "1.19.0", default-features = false, features = ["v4"] }
 fixedstr = { version = "0.5", features = ["flex-str"] }
-parking_lot = "0.12.3"
-schemars = { version = "1.1", features = ["bytes1", "url2"] }
-url = { version = "2.5.4", features = ["serde"] }
-xdp = "0.7.0"
+parking_lot = "0.12.5"
+schemars = { version = "1.2", features = ["bytes1", "url2"] }
+url = { version = "2.5.8", features = ["serde"] }
+xdp = "0.7.1"
 
 # Corrosion libraries. The libraries that corrosion transitively depends on that
 # we also need to depend on should be kept in line with the versions used by corrosion
-camino = "1.1"
+camino = "1.2"
 corro-agent = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 corro-client = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 corro-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-rusqlite = "0.33"
+rusqlite = "=0.33"
 spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 sqlite-pool = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
