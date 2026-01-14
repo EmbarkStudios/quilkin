@@ -108,8 +108,7 @@ impl<S> HttpMetricsMiddleware<S> {
     fn find_path_bucket(&self, path: &str) -> String {
         self.path_buckets
             .iter()
-            .filter(|&path_prefix| path.starts_with(path_prefix))
-            .next_back()
+            .rfind(|&path_prefix| path.starts_with(path_prefix))
             .cloned()
             .unwrap_or_else(|| UNMATCHED_PATH.to_string())
     }
