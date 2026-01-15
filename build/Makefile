@@ -29,15 +29,17 @@ rust_toolchain := $(shell grep channel $(project_path)/rust-toolchain.toml | awk
 
 # if this is a release, don't put the sha, otherwise, leave it off.
 ifdef QUILKIN_RELEASE
-	package_version := $(shell grep -A1 -w "name = \"quilkin\"" $(project_path)/Cargo.toml | grep version -m 1 | awk '{print $$3}')
+	package_version := $(shell grep -A1 -w "name = \"quilkin\"" $(project_path)/Cargo.toml | grep version -m 1 | awk -F'"' '{print $$2}')
 else
 	git_sha := $(shell git rev-parse --short=7 HEAD)
-	package_version := $(shell grep -A1 -w "name = \"quilkin\"" $(project_path)/Cargo.toml | grep version -m 1 | awk '{print $$3}')-${git_sha}
+	package_version := $(shell grep -A1 -w "name = \"quilkin\"" $(project_path)/Cargo.toml | grep version -m 1 | awk  -F'"' '{print $$2}')-${git_sha}
 endif
 
 # Set this value if you want to use an external registry
 REPOSITORY ?= ""
 IMAGE_TAG ?= ${REPOSITORY}quilkin:$(package_version)
+IMAGE_TAG_ARM64 ?= ${REPOSITORY}quilkin-arm64:$(package_version)
+IMAGE_TAG_AMD64 ?= ${REPOSITORY}quilkin-amd64:$(package_version)
 PREV_IMAGE_TAG ?= us-docker.pkg.dev/quilkin/release/quilkin:0.8.0
 MINIKUBE_PROFILE ?= quilkin
 CARGO_TARGET_DIR ?= /workspace/target/build-image
@@ -57,6 +59,7 @@ gcloud_mount_args := -v $(build_path)/.config/gcloud:/root/.config/gcloud
 cargo_build_x86_64_linux := build --profile=lto --target x86_64-unknown-linux-gnu
 cargo_build_x86_64_apple := build --release --target x86_64-apple-darwin
 cargo_build_aarch64-apple := build --release --target aarch64-apple-darwin
+cargo_build_aarch64_linux := build  --profile=lto --target aarch64-unknown-linux-gnu
 cargo_build_x86_64_windows := build --release --target x86_64-pc-windows-gnu
 
 #   _____                    _
@@ -103,14 +106,18 @@ binary-archive: ensure-build-image build-licence-report build-all-binaries
 	docker run --rm $(common_rust_args) -w $(CARGO_TARGET_DIR) \
 			--entrypoint=bash $(BUILD_IMAGE_TAG) -c 'cp ../../license.html . && zip ../../quilkin-$(package_version).zip ./*/lto/quilkin ./*/lto/quilkin.exe ./license.html'
 
-# Build binary for x86_64-unknown-linux-gnu.
+# Build binary for x86_64-unknown-linux-gnu and aarch64-unknown-linux-gnu
 # Use BUILD_LOCAL=1 to build through local cargo rather than through the build container.
 build-linux-binary: ensure-build-image gen-protobuf
 ifdef BUILD_LOCAL
 	cargo $(cargo_build_x86_64_linux)
+	cargo $(cargo_build_aarch64_linux)
 else
-	docker run --rm $(common_rust_args) -e "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/x86_64-linux-gnu-gcc" \
-		--entrypoint=cargo $(BUILD_IMAGE_TAG) $(cargo_build_x86_64_linux)
+	docker run --rm $(common_rust_args) \
+	    -e "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/x86_64-linux-gnu-gcc" \
+		-e "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/aarch64-linux-gnu-gcc" \
+		$(BUILD_IMAGE_TAG) \
+		sh -c "cargo $(cargo_build_x86_64_linux) && CC=aarch64-linux-gnu-gcc cargo $(cargo_build_aarch64_linux) --no-default-features"
 endif
 
 # Build binary for x86_64-pc-windows-gnu
@@ -147,15 +154,18 @@ endif
 # Use BUILD_LOCAL=1 to build the binary through local cargo rather than through the build container.
 build-image: ensure-build-image build-licence-report build-linux-binary
 build-image:
-	-mkdir -p "$(project_path)/target/image/"
+	-mkdir -p "$(project_path)/target/image/linux/amd64"
+	-mkdir -p "$(project_path)/target/image/linux/arm64"
 ifdef BUILD_LOCAL
-	cp "$(project_path)/target/x86_64-unknown-linux-gnu/lto/quilkin" "$(project_path)/target/image/"
+	cp "$(project_path)/target/x86_64-unknown-linux-gnu/lto/quilkin" "$(project_path)/target/image/linux/amd64/"
+	cp "$(project_path)/target/aarch64-unknown-linux-gnu/lto/quilkin" "$(project_path)/target/image/linux/arm64/"
 else
-	cp "$(project_path)/target/build-image/x86_64-unknown-linux-gnu/lto/quilkin" "$(project_path)/target/image/"
+	cp "$(project_path)/target/build-image/x86_64-unknown-linux-gnu/lto/quilkin" "$(project_path)/target/image/linux/amd64/"
+	cp "$(project_path)/target/build-image/aarch64-unknown-linux-gnu/lto/quilkin" "$(project_path)/target/image/linux/arm64/"
 endif
 	docker run --rm $(common_rust_args) \
 		--entrypoint=bash $(BUILD_IMAGE_TAG) -c './image/archive_dependencies.sh'
-	docker build --platform=linux/amd64 -t $(IMAGE_TAG) -f $(project_path)/image/Dockerfile $(project_path)
+	docker build -t $(IMAGE_TAG) -f $(project_path)/image/Dockerfile $(project_path)
 
 # Generates the HTML report of all open source licence dependencies
 build-licence-report: ensure-build-image
@@ -170,7 +180,9 @@ build-licence-report:
 # to set those options.
 # If a `kubectl` authentication failure occurs, run `kubectl get ns` to confirm access and refresh the Kubernetes
 # authentication token, and try again if successful.
-test-agones: push
+ifndef SKIP_BUILD_IMAGE
+test-agones: build-image
+endif
 test-agones:
 	$(MAKE) run-test-agones
 
@@ -189,13 +201,10 @@ run-test-agones:
 
 # Convenience target to build and push quilkin images to a repository.
 # Use `REPOSITORY` arg to specify the repository to push to.
-# USe `SKIP_BUILD_IMAGE` if you want to skip building the image if it has been already built.
-# See `build-image` for more details.
 push:
-ifndef SKIP_BUILD_IMAGE
-push: build-image
-endif
-	docker push $(IMAGE_TAG)
+	docker buildx create --use --name multi-platform-builder --driver docker-container
+	docker buildx build --platform=linux/amd64,linux/arm64 -t $(IMAGE_TAG) \
+	-f $(project_path)/image/Dockerfile $(project_path) --push
 
 # Convenience target to build and push quilkin images into a minikube instance
 # Use `MINIKUBE_PROFILE` to specify the profile. Defaults to `quilkin`.
