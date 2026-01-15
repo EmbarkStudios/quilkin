@@ -158,6 +158,7 @@ where
     }
 }
 
+#[expect(unused)]
 pub(crate) fn http_connections(port: &str) -> prometheus::IntGauge {
     static METRIC: Lazy<prometheus::IntGaugeVec> = Lazy::new(|| {
         prometheus::register_int_gauge_vec_with_registry! {
@@ -173,6 +174,7 @@ pub(crate) fn http_connections(port: &str) -> prometheus::IntGauge {
     METRIC.with_label_values(&[port])
 }
 
+#[expect(unused)]
 pub(crate) fn http_inflight_requests(port: &str) -> prometheus::IntGauge {
     static METRIC: Lazy<prometheus::IntGaugeVec> = Lazy::new(|| {
         prometheus::register_int_gauge_vec_with_registry! {

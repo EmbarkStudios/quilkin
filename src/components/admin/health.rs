@@ -16,7 +16,6 @@
 
 use std::sync::atomic::AtomicBool;
 
-use hyper::{Response, StatusCode};
 use std::panic;
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
@@ -48,14 +47,8 @@ impl Health {
     }
 
     /// returns a HTTP 200 response if the proxy is healthy.
-    pub fn check_liveness(&self) -> Response<http_body_util::Full<bytes::Bytes>> {
-        if self.healthy.load(Relaxed) {
-            return Response::new("ok".into());
-        };
-
-        let mut response = Response::new(http_body_util::Full::new(bytes::Bytes::new()));
-        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-        response
+    pub fn check_liveness(&self) -> bool {
+        self.healthy.load(Relaxed)
     }
 }
 
@@ -63,21 +56,17 @@ impl Health {
 mod tests {
     use super::*;
 
-    use hyper::StatusCode;
-
     #[test]
     fn panic_hook() {
         let (shutdown_tx, _shutdown_rx) = crate::signal::channel();
         let health = Health::new(shutdown_tx);
 
-        let response = health.check_liveness();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert!(health.check_liveness());
 
         let _unused = std::panic::catch_unwind(|| {
             panic!("oh no!");
         });
 
-        let response = health.check_liveness();
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!health.check_liveness());
     }
 }
