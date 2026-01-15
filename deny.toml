@@ -35,6 +35,7 @@ deny = [
     { crate = "aws-lc-sys", use-instead = "ring" },
     { crate = "cmake", use-instead = "cc" },
     { crate = "chrono", use-instead = "time", wrappers = [
+        "expect-json",
         "k8s-openapi",
         "kube-client",
         "kube-core",

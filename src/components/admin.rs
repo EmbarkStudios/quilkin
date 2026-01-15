@@ -22,9 +22,13 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use axum::{
+    extract::State,
+    http::{Response, StatusCode},
+    response::{IntoResponse, Json},
+};
 use bytes::Bytes;
 use http_body_util::Full;
-use hyper::{Method, Request, Response, StatusCode};
 type Body = Full<Bytes>;
 
 use health::Health;
@@ -34,144 +38,120 @@ pub const PORT_LABEL: &str = "8000";
 
 pub(crate) const IDLE_REQUEST_INTERVAL: Duration = Duration::from_secs(30);
 
-pub fn server<C>(
-    config: Arc<C>,
+pub fn serve(
+    config: Arc<crate::Config>,
     ready: Arc<AtomicBool>,
     shutdown_tx: crate::signal::ShutdownTx,
     address: Option<std::net::SocketAddr>,
-) -> std::thread::JoinHandle<eyre::Result<()>>
-where
-    C: serde::Serialize + Send + Sync + 'static,
-{
+) -> std::thread::JoinHandle<std::io::Result<()>> {
     let address = address.unwrap_or_else(|| (std::net::Ipv6Addr::UNSPECIFIED, PORT).into());
     let health = Health::new(shutdown_tx);
     tracing::info!(address = %address, "Starting admin endpoint");
 
+    let router = Admin {
+        config,
+        health,
+        ready,
+    }
+    .router();
+
     std::thread::Builder::new()
         .name("admin-http".into())
         .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_io()
-                .enable_time()
-                .thread_name("admin-http-worker")
-                .build()
-                .expect("couldn't create tokio runtime in thread");
+            let runtime = Admin::runtime();
             runtime.block_on(async move {
-                let accept_stream = tokio::net::TcpListener::bind(address).await?;
-                let http_task: tokio::task::JoinHandle<eyre::Result<()>> =
-                    tokio::task::spawn(async move {
-                        loop {
-                            let (stream, _) = accept_stream.accept().await?;
-                            let stream = hyper_util::rt::TokioIo::new(stream);
-
-                            let config = config.clone();
-                            let health = health.clone();
-                            let ready = ready.clone();
-                            tokio::spawn(async move {
-                                crate::metrics::http::http_connections(PORT_LABEL).inc();
-                                let svc = hyper::service::service_fn(move |req| {
-                                    let config = config.clone();
-                                    let health = health.clone();
-                                    let ready = ready.clone();
-
-                                    async move {
-                                        Ok::<_, std::convert::Infallible>(
-                                            handle_request(req, config, &ready, health).await,
-                                        )
-                                    }
-                                });
-
-                                let svc = tower::ServiceBuilder::new().service(svc);
-                                if let Err(err) = hyper::server::conn::http1::Builder::new()
-                                    .serve_connection(stream, svc)
-                                    .await
-                                {
-                                    tracing::warn!("failed to reponse to phoenix request: {err}");
-                                }
-                                crate::metrics::http::http_connections(PORT_LABEL).dec();
-                            });
-                        }
-                    });
-
-                http_task.await?
+                let listener = tokio::net::TcpListener::bind(address).await?;
+                axum::serve(listener, router).await
             })
         })
         .expect("failed to spawn admin-http thread")
 }
 
-async fn handle_request<C: serde::Serialize>(
-    request: Request<hyper::body::Incoming>,
-    config: Arc<C>,
-    ready: &AtomicBool,
+#[derive(Clone)]
+struct Admin {
     health: Health,
-) -> Response<Body> {
-    crate::metrics::http::http_inflight_requests(PORT_LABEL).inc();
-    let response = match (request.method(), request.uri().path()) {
-        (&Method::GET, "/metrics") => collect_metrics(),
-        (&Method::GET, "/live" | "/livez") => health.check_liveness(),
-        #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
-        (&Method::GET, "/debug/pprof/allocs") => match handle_get_heap().await {
-            Ok(response) => response,
-            Err((status_code, msg)) => Response::builder()
-                .status(status_code)
-                .body(Body::new(Bytes::from(msg)))
-                .unwrap(),
-        },
-        #[cfg(target_os = "linux")]
-        (&Method::GET, "/debug/pprof/profile") => {
-            let duration = request.uri().query().and_then(|query| {
-                form_urlencoded::parse(query.as_bytes())
-                    .find(|(k, _)| k == "seconds")
-                    .and_then(|(_, v)| v.parse().ok())
-                    .map(std::time::Duration::from_secs)
-            });
-
-            match collect_pprof(duration).await {
-                Ok(value) => value,
-                Err(error) => {
-                    tracing::warn!(%error, "admin http server error");
-                    Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::new(Bytes::from("internal error")))
-                        .unwrap()
-                }
-            }
-        }
-        (&Method::GET, "/ready" | "/readyz") => check_readiness(ready),
-        (&Method::GET, "/config") => match serde_json::to_string(&config) {
-            Ok(body) => Response::builder()
-                .status(StatusCode::OK)
-                .header(
-                    "Content-Type",
-                    hyper::header::HeaderValue::from_static("application/json"),
-                )
-                .body(Body::new(Bytes::from(body)))
-                .unwrap(),
-            Err(err) => Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::new(Bytes::from(format!(
-                    "failed to create config dump: {err}"
-                ))))
-                .unwrap(),
-        },
-        (_, _) => {
-            let mut response = Response::new(Body::new(Bytes::new()));
-            *response.status_mut() = StatusCode::NOT_FOUND;
-            response
-        }
-    };
-    crate::metrics::http::http_inflight_requests(PORT_LABEL).dec();
-    response
+    config: Arc<crate::Config>,
+    ready: Arc<AtomicBool>,
 }
 
-fn check_readiness(check: &AtomicBool) -> Response<Body> {
-    if check.load(Ordering::SeqCst) {
-        return Response::new("ok".into());
+#[cfg(target_os = "linux")]
+#[derive(serde::Deserialize)]
+struct ProfileParams {
+    seconds: Option<std::time::Duration>,
+}
+
+impl Admin {
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .thread_name("admin-http-worker")
+            .build()
+            .expect("couldn't create tokio runtime in thread")
     }
 
-    let mut response = Response::new(bytes::Bytes::from_static(b"NOT READY").into());
-    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-    response
+    fn router<S>(self) -> axum::Router<S> {
+        let mut router = axum::Router::new()
+            .route(
+                "/metrics",
+                axum::routing::get(|| async { collect_metrics() }),
+            )
+            .route("/live", axum::routing::get(live))
+            .route("/livez", axum::routing::get(live))
+            .route("/ready", axum::routing::get(ready))
+            .route("/readyz", axum::routing::get(ready))
+            .route("/config", axum::routing::get(config));
+
+        cfg_if::cfg_if! {
+            if #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))] {
+                router = router.route("/debug/pprof/allocs", axum::routing::get(|| async {
+                    match handle_get_heap().await {
+                        Ok(response) => response,
+                        Err((status_code, msg)) => Response::builder()
+                            .status(status_code)
+                            .body(Body::new(Bytes::from(msg)))
+                            .unwrap(),
+                    }
+                }));
+            }
+        }
+
+        cfg_if::cfg_if! {
+            if #[cfg(target_os = "linux")] {
+                router = router.route("/debug/pprof/profile", axum::routing::get(|params: axum::extract::Query<ProfileParams>| async move {
+                    match collect_pprof(params.seconds).await {
+                        Ok(value) => value.into_response(),
+                        Err(error) => {
+                            tracing::warn!(%error, "admin http server error");
+                            (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+                        }
+                    }
+                }));
+            }
+        }
+
+        router.with_state(self)
+    }
+}
+
+async fn live(state: State<Admin>) -> StatusCode {
+    if state.health.check_liveness() {
+        StatusCode::OK
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+async fn ready(state: State<Admin>) -> StatusCode {
+    if state.ready.load(Ordering::SeqCst) {
+        StatusCode::OK
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+async fn config(state: State<Admin>) -> Json<Arc<crate::Config>> {
+    Json(state.config.clone())
 }
 
 fn collect_metrics() -> Response<Body> {
@@ -215,7 +195,7 @@ fn collect_metrics() -> Response<Body> {
 #[cfg(target_os = "linux")]
 async fn collect_pprof(
     duration: Option<std::time::Duration>,
-) -> Result<Response<Body>, eyre::Error> {
+) -> Result<impl IntoResponse, eyre::Error> {
     let duration = duration.unwrap_or_else(|| std::time::Duration::from_secs(2));
     tracing::debug!(duration_seconds = duration.as_secs(), "profiling");
 
@@ -236,12 +216,16 @@ async fn collect_pprof(
     let gzip_body = encoder.finish().into_result()?;
     tracing::debug!("profile encoded to gzip");
 
-    Response::builder()
-        .header(hyper::header::CONTENT_LENGTH, gzip_body.len() as u64)
-        .header(hyper::header::CONTENT_TYPE, "application/octet-stream")
-        .header(hyper::header::CONTENT_ENCODING, "gzip")
-        .body(Body::new(Bytes::from(gzip_body)))
-        .map_err(From::from)
+    Ok((
+        axum::response::AppendHeaders([
+            (
+                axum::http::header::CONTENT_LENGTH,
+                gzip_body.len().to_string(),
+            ),
+            (axum::http::header::CONTENT_ENCODING, "gzip".to_string()),
+        ]),
+        gzip_body,
+    ))
 }
 
 /// Encodes a pprof report into a binary protobuf
@@ -395,6 +379,28 @@ async fn handle_get_heap() -> Result<Response<Body>, (StatusCode, String)> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn live() {
+        let (shutdown_tx, _shutdown_rx) = crate::signal::channel();
+        let health = Health::new(shutdown_tx);
+        let admin = Admin {
+            config: crate::test::TestHelper::new_config(),
+            ready: <_>::default(),
+            health,
+        };
+
+        let server = axum_test::TestServer::new(admin.router()).unwrap();
+
+        server.get("/live").expect_success().await;
+
+        let _unused = std::panic::catch_unwind(|| {
+            panic!("oh no!");
+        });
+
+        server.get("/live").expect_failure().await;
+    }
 
     #[tokio::test]
     async fn collect_metrics() {

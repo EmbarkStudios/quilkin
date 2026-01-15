@@ -275,7 +275,7 @@ impl Cli {
 
         let ready = Arc::<std::sync::atomic::AtomicBool>::default();
         if self.admin.enabled {
-            crate::components::admin::server(
+            crate::components::admin::serve(
                 config.clone(),
                 ready.clone(),
                 shutdown_handler.shutdown_tx(),

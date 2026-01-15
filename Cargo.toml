@@ -187,6 +187,7 @@ regex.workspace = true
 tracing-test = "0.2.5"
 tempfile.workspace = true
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+axum-test = "18.6.0"
 
 # We want debug information when doing benchmarks for debugging purposes as well
 # as better (correct) callstacks in perf

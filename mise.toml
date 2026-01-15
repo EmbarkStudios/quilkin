@@ -1,5 +1,6 @@
 [tools]
 cargo-insta = "latest"
+"cargo:cargo-nextest" = "latest"
 gcloud = "latest"
 "github:EmbarkStudios/cargo-about" = "latest"
 "github:pseudomuto/protoc-gen-doc" = "latest"
