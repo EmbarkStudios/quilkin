@@ -12,7 +12,7 @@ camino.workspace = true
 corro-api-types.workspace = true
 corro-types.workspace = true
 corrosion.workspace = true
-insta = "1.43"
+insta = "1.46"
 prettytable = { version = "0.10", default-features = false }
 qt = { path = "../test" }
 quilkin-types.workspace = true
@@ -27,7 +27,7 @@ tokio.workspace = true
 tokio-stream.workspace = true
 tripwire.workspace = true
 uhlc.workspace = true
-uuid = "1.18"
+uuid = "1.19"
 
 [lints]
 workspace = true
