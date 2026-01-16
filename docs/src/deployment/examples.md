@@ -6,10 +6,10 @@ each providing different capabilities and complexity tradeoffs.
 Below captures several of the most useful and prevalent architectural patterns to give you inspiration
 on how you can use Quilkin in your multiplayer game networking architecture.
 
-These [examples](https://github.com/googleforgames/quilkin/tree/{{GITHUB_REF_NAME}}/examples)
+These [examples](https://github.com/EmbarkStudios/quilkin/tree/{{GITHUB_REF_NAME}}/examples)
 as well many others are available on Github repository.
 
-## [Server Proxy as a Sidecar](https://github.com/googleforgames/quilkin/tree/{{GITHUB_REF_NAME}}/examples/agones-xonotic-sidecar)
+## [Server Proxy as a Sidecar](https://github.com/EmbarkStudios/quilkin/tree/{{GITHUB_REF_NAME}}/examples/agones-xonotic-sidecar)
 
 ```text
                   |
@@ -85,7 +85,7 @@ advantage of Client Proxy functionality.
 * The Game Client will need to communicate to the Client Proxy what IP it should connect to when the Client is
   match-made with a Game Server.
 
-## [Client Proxy to Separate Server Proxies Pools](https://github.com/googleforgames/quilkin/tree/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds)
+## [Client Proxy to Separate Server Proxies Pools](https://github.com/EmbarkStudios/quilkin/tree/{{GITHUB_REF_NAME}}/examples/agones-xonotic-xds)
 
 ```text
                                        |                             |
