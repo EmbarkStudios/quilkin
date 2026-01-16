@@ -68,7 +68,12 @@ where
                             let health = health.clone();
                             let ready = ready.clone();
                             tokio::spawn(async move {
-                                crate::metrics::http::http_connections(PORT_LABEL).inc();
+                                let conn_labels = crate::metrics::http::ConnectionLabels {
+                                    service: "admin".to_string(),
+                                };
+                                let _conn_gaurd =
+                                    crate::metrics::http::connection_guard(&conn_labels);
+
                                 let svc = hyper::service::service_fn(move |req| {
                                     let config = config.clone();
                                     let health = health.clone();
@@ -88,7 +93,6 @@ where
                                 {
                                     tracing::warn!("failed to reponse to phoenix request: {err}");
                                 }
-                                crate::metrics::http::http_connections(PORT_LABEL).dec();
                             });
                         }
                     });

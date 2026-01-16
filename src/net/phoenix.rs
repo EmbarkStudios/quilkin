@@ -78,7 +78,35 @@ pub fn spawn(
                 let datacenters = datacenters.clone();
 
                 async move {
-                    let json = Arc::new(arc_swap::ArcSwap::new(Arc::new(serde_json::Map::default())));
+                    let node_latencies_response =
+                        Arc::new(arc_swap::ArcSwap::new(Arc::new(serde_json::Map::default())));
+                    let update_node_latencies = || {
+                        let nodes = phoenix.ordered_nodes_by_latency();
+
+                        let mut json = serde_json::Map::default();
+                        for (identifier, latency) in nodes {
+                            json.insert(identifier.to_string(), latency.into());
+                        }
+
+                        node_latencies_response.store(json.into());
+                    };
+                    let network_coordinates_response =
+                        Arc::new(arc_swap::ArcSwap::new(Arc::new(serde_json::Map::default())));
+                    let update_network_coordinates = || {
+                        let coordinate_map = phoenix.coordinate_map();
+                        let mut json = serde_json::Map::default();
+                        for (icao, coordinates) in coordinate_map {
+                            match serde_json::to_value(coordinates) {
+                                Ok(coords) => {
+                                    json.insert(icao.to_string(), coords);
+                                }
+                                Err(error) => {
+                                    tracing::error!(?error, "failed to serialize coordinates");
+                                }
+                            };
+                        }
+                        network_coordinates_response.store(json.into());
+                    };
 
                     tokio::spawn({
                         let phoenix = phoenix.clone();
@@ -87,14 +115,21 @@ pub fn spawn(
 
                     tracing::info!(addr=%listener.local_addr(), "starting phoenix HTTP service");
                     let (stx, mut srx) = tokio::sync::oneshot::channel::<()>();
-                    let handler_json = json.clone();
+                    let handler_node_latencies = node_latencies_response.clone();
+                    let handler_network_coordinates = network_coordinates_response.clone();
 
                     let http_task: tokio::task::JoinHandle<eyre::Result<()>> = {
-                        let phoenix = phoenix.clone();
                         tokio::spawn(async move {
-                            let router = http_router(phoenix, handler_json);
+                            let router =
+                                http_router(handler_network_coordinates, handler_node_latencies);
+                            let listener = listener.into_tokio()?;
+
                             tokio::select! {
-                                result = async move { axum::serve(listener.into_tokio()?, router).await } => result.map_err(From::from),
+                                // result = async move { axum::serve(listener.into_tokio()?, router).await } => result.map_err(From::from),
+                                _ = async move { serve(listener, router).await } => {
+                                    // result.map_err(From::from)
+                                    Ok(())
+                                },
                                 _ = &mut srx => {
                                     crate::metrics::phoenix_task_closed().set(true as _);
                                     Ok(())
@@ -118,14 +153,8 @@ pub fn spawn(
 
                         tracing::trace!("change detected, updating phoenix");
                         phoenix.add_nodes_from_config(&datacenters);
-                        let nodes = phoenix.ordered_nodes_by_latency();
-                        let mut new_json = serde_json::Map::default();
-
-                        for (identifier, latency) in nodes {
-                            new_json.insert(identifier.to_string(), latency.into());
-                        }
-
-                        json.store(new_json.into());
+                        update_node_latencies();
+                        update_network_coordinates();
                     };
 
                     if stx.send(()).is_err() {
@@ -150,15 +179,16 @@ pub fn spawn(
                     }
 
                     if let Err(err) = http_task.await
-                        && let Ok(panic) = err.try_into_panic() {
-                            let message = panic
-                                .downcast_ref::<String>()
-                                .map(String::as_str)
-                                .or_else(|| panic.downcast_ref::<&str>().copied())
-                                .unwrap_or("<unknown non-string panic>");
+                        && let Ok(panic) = err.try_into_panic()
+                    {
+                        let message = panic
+                            .downcast_ref::<String>()
+                            .map(String::as_str)
+                            .or_else(|| panic.downcast_ref::<&str>().copied())
+                            .unwrap_or("<unknown non-string panic>");
 
-                            tracing::error!(panic = message, "phoenix HTTP task panicked");
-                        }
+                        tracing::error!(panic = message, "phoenix HTTP task panicked");
+                    }
 
                     res
                 }
@@ -181,23 +211,66 @@ pub fn spawn(
     Ok(finalizer)
 }
 
+async fn serve<L: axum::serve::Listener>(mut listener: L, router: axum::Router) -> ! {
+    use tower::Service;
+
+    // TODO graceful shutdown stuff
+
+    loop {
+        let (socket, _remote_addr) = listener.accept().await;
+
+        let tower_service = router.clone();
+        tokio::spawn(async move {
+            let conn_labels = crate::metrics::http::ConnectionLabels {
+                service: "phoenix".to_string(),
+            };
+            let _conn_gaurd = crate::metrics::http::connection_guard(&conn_labels);
+
+            let socket = hyper_util::rt::TokioIo::new(socket);
+            let hyper_service = hyper::service::service_fn(
+                move |request: axum::extract::Request<hyper::body::Incoming>| {
+                    tower_service.clone().call(request)
+                },
+            );
+
+            let mut builder =
+                hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+            // CONNECT protocol needed for HTTP/2 websockets
+            builder.http2().enable_connect_protocol();
+
+            let conn = builder.serve_connection_with_upgrades(socket, hyper_service);
+
+            // loop {
+            tokio::select! {
+                result = conn => {
+                    if let Err(error) = result {
+                        tracing::trace!(%error, "failed to serve connection");
+                    }
+                    // break;
+                }
+            }
+            // }
+        });
+    }
+}
+
 fn http_router(
-    phoenix: Phoenix<crate::codec::qcmp::QcmpTransceiver>,
-    hj: Arc<arc_swap::ArcSwap<serde_json::Map<String, serde_json::Value>>>,
+    network_coordinates: Arc<arc_swap::ArcSwap<serde_json::Map<String, serde_json::Value>>>,
+    node_latencies: Arc<arc_swap::ArcSwap<serde_json::Map<String, serde_json::Value>>>,
 ) -> axum::Router {
     axum::Router::new()
         .route(
             "/",
             axum::routing::get(|| async move {
                 tracing::trace!("serving phoenix request");
-                axum::response::Json(hj)
+                axum::response::Json(node_latencies.load().clone())
             }),
         )
         .route(
             "/network-coordinates",
             axum::routing::get(|| async move {
                 tracing::trace!("serving phoenix request");
-                axum::response::Json(phoenix.coordinate_map())
+                axum::response::Json(network_coordinates.load().clone())
             }),
         )
         .layer(
@@ -374,6 +447,7 @@ impl<M> Phoenix<M> {
         icao_map
     }
 
+    #[cfg(test)]
     pub fn add_node(&self, address: SocketAddr, icao_code: IcaoCode) {
         self.nodes.insert(address, Node::new(icao_code));
     }
@@ -447,12 +521,14 @@ impl<M: Measurement + 'static> Phoenix<M> {
         let mut total_difference = 0;
         let mut count = 0;
         for address in nodes {
+            let measurement = self.measurement.measure_distance(address).await;
+
             let Some(mut node) = self.nodes.get_mut(&address) else {
                 tracing::debug!(%address, "node removed between selection and measurement");
                 continue;
             };
 
-            match self.measurement.measure_distance(address).await {
+            match measurement {
                 Ok(distance) => {
                     node.adjust_coordinates(distance);
                     total_difference += distance.total_nanos();
