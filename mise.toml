@@ -1,0 +1,7 @@
+[tools]
+gcloud = "latest"
+"github:EmbarkStudios/cargo-about" = "latest"
+"github:pseudomuto/protoc-gen-doc" = "latest"
+helm = "latest"
+opentofu = "latest"
+rust = "latest"
