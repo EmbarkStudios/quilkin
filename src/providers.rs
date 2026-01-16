@@ -35,7 +35,6 @@ use futures::TryStreamExt;
 const RETRIES: u32 = u32::MAX;
 const BACKOFF_STEP: std::time::Duration = std::time::Duration::from_millis(250);
 const MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
-pub(crate) const NO_UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The available xDS source provider.
 #[derive(Clone, Debug, Default, clap::Args)]
@@ -510,7 +509,7 @@ impl Providers {
     ) -> crate::Result<()> {
         tokio::pin!(stream);
         loop {
-            if let Some(_) = stream.try_next().await? {
+            if stream.try_next().await?.is_some() {
                 health_check.store(true, Ordering::SeqCst);
             } else {
                 eyre::bail!("kubernetes watch stream terminated");

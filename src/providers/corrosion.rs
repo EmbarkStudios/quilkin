@@ -47,11 +47,11 @@ impl super::Providers {
     /// Potentially spawns a corrosion related provider
     ///
     /// 1. If `[CorrosionMode::Push]`, spawns a `Mutator` and `Pusher` to mutate the local state
-    /// and send those mutations to a remote corrosion DB
+    ///    and send those mutations to a remote corrosion DB
     /// 1. If `[CorrosionMode::Pull]`, spawns a provider that subscribes to changes from a remote
-    /// corrosion DB and applies events to the local state
+    ///    corrosion DB and applies events to the local state
     /// 1. If `[CorrosionMode::Db]`, creates or opens a corrosion DB and spins up a
-    /// server that remote clients can push or pull changes to/from
+    ///    server that remote clients can push or pull changes to/from
     pub(super) fn maybe_spawn_corrosion(
         &self,
         config: &State,
