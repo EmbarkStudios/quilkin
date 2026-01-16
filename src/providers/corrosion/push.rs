@@ -1,31 +1,37 @@
 use super::*;
-use corrosion::{
-    api::ExecResponse,
-    persistent::{client, proto::v1},
-};
+use corrosion::persistent::{client, proto::v1};
 use quilkin_types::{Endpoint, IcaoCode, TokenSet};
 use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 
 pub(super) fn corrosion_mutate(
-    state: State,
+    qcmp: &crate::config::qcmp::QcmpPort,
+    icao: &crate::config::NotifyingIcaoCode,
     endpoints: CorrosionAddrs,
     hc: HealthCheck,
 ) -> (Mutator, Pusher) {
     let (tx, rx) = mpsc::unbounded_channel();
-    let state = Arc::new(LocalState::default());
+    let ls = Arc::new(LocalState::default());
+
+    let agent_info = AgentInfo {
+        qcmp: qcmp.load(),
+        icao: icao.load(),
+    };
 
     (
         Mutator {
-            state: state.clone(),
+            state: ls.clone(),
             tx,
         },
         Pusher {
             hc,
             endpoints,
-            state,
+            state: ls,
             rx,
+            agent_info,
+            qcmp: qcmp.subscribe(),
+            icao: icao.subscribe(),
         },
     )
 }
@@ -85,7 +91,7 @@ impl Mutator {
 
     #[inline]
     fn send(&self, to_send: Mutation) {
-        let _ = self.tx.send(to_send);
+        drop(self.tx.send(to_send));
     }
 }
 
@@ -105,7 +111,7 @@ pub struct Pusher {
 }
 
 impl Pusher {
-    pub async fn push_changes(mut self) {
+    pub async fn push_changes(mut self) -> crate::Result<()> {
         let mut backoff = ExponentialBackoff::new(BACKOFF_INITIAL_DELAY);
 
         loop {
@@ -133,7 +139,7 @@ impl Pusher {
                 );
 
                 // Attempt to connect to multiple servers in parallel, otherwise
-                // down/slow servers in the list can unneccessarily delay connections
+                // down/slow servers in the list can unnecessarily delay connections
                 // to healthy servers.
                 //
                 // Currently we just go with the first server that we can successfully
@@ -255,7 +261,7 @@ impl Pusher {
         tokio::task::spawn(async move {
             async fn publish_changes(
                 client: &client::MutationClient,
-                rx: mpsc::UnboundedReceiver<v1::ServerChange>,
+                mut rx: mpsc::UnboundedReceiver<v1::ServerChange>,
             ) -> Result<(), client::TransactionError> {
                 while let Some(change) = rx.recv().await {
                     match v1::ServerIter::new(change) {
@@ -279,6 +285,15 @@ impl Pusher {
 
             client.shutdown().await;
         });
+
+        macro_rules! send {
+            ($item:expr) => {
+                if tx.send($item).is_err() {
+                    tracing::warn!("lost connection to remote server");
+                    return;
+                }
+            };
+        }
 
         // Transmit mutations. If we received mutations in the time between
         // the connection was made we might send duplicate data.
@@ -318,24 +333,41 @@ impl Pusher {
                 }
                 _ = update_interval.tick() => {
                     if !upserts.is_empty() {
-                        if tx.send(v1::ServerChange::Upsert(std::mem::replace(&mut upserts, Vec::new()))).is_err() {
-                            tracing::warn!("lost connection to remote server");
-                            return;
-                        }
+                        send!(v1::ServerChange::Upsert(std::mem::replace(&mut upserts, Vec::new())));
                     }
 
                     if !removes.is_empty() {
-                        if tx.send(v1::ServerChange::Remove(std::mem::replace(&mut removes, Vec::new()))).is_err() {
-                            tracing::warn!("lost connection to remote server");
-                            return;
-                        }
+                        send!(v1::ServerChange::Remove(std::mem::replace(&mut removes, Vec::new())));
                     }
 
                     if !updates.is_empty() {
-                        if tx.send(v1::ServerChange::Update(std::mem::replace(&mut updates, Vec::new()))).is_err() {
-                            tracing::warn!("lost connection to remote server");
-                            return;
-                        }
+                        send!(v1::ServerChange::Update(std::mem::replace(&mut updates, Vec::new())));
+                    }
+                }
+                qcmp = self.qcmp.recv() => {
+                    let Ok(qcmp) = qcmp else {
+                        tracing::warn!("QCMP broadcaster has been closed");
+                        continue;
+                    };
+                    if self.agent_info.qcmp != qcmp {
+                        self.agent_info.qcmp = qcmp;
+                        send!(v1::ServerChange::UpdateMutator(v1::MutatorUpdate {
+                            qcmp_port: Some(qcmp),
+                            icao: None,
+                        }));
+                    }
+                }
+                icao = self.icao.recv() => {
+                    let Ok(icao) = icao else {
+                        tracing::warn!("ICAO broadcaster has been closed");
+                        continue;
+                    };
+                    if self.agent_info.icao != icao {
+                        self.agent_info.icao = icao;
+                        send!(v1::ServerChange::UpdateMutator(v1::MutatorUpdate {
+                            icao: Some(icao),
+                            qcmp_port: None,
+                        }));
                     }
                 }
             }

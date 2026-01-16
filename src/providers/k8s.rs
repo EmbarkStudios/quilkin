@@ -16,8 +16,6 @@
 
 pub mod agones;
 
-use std::collections::BTreeSet;
-
 use eyre::ContextCompat;
 use futures::Stream;
 use k8s_openapi::api::core::v1::ConfigMap;
@@ -209,15 +207,44 @@ fn validate_gameserver(
     }
 }
 
+#[inline]
+fn get_uid(res: &DeserializeGuard<GameServer>) -> Option<uuid::Uuid> {
+    res.0.as_ref().ok().and_then(|gs| {
+        let Some(uid) = gs.metadata.uid.as_ref() else {
+            tracing::warn!("gameserver does not have a uid field");
+            return None;
+        };
+
+        match uuid::Uuid::parse_str(uid) {
+            Ok(uid) => Some(uid),
+            Err(error) => {
+                tracing::warn!(uid, %error, "failed to parse uid field");
+                None
+            }
+        }
+    })
+}
+
+#[inline]
+fn get_simple_endpoint_and_token_set(
+    endpoint: &crate::net::endpoint::Endpoint,
+) -> (quilkin_types::Endpoint, quilkin_types::TokenSet) {
+    (
+        quilkin_types::Endpoint::new(endpoint.address.host.clone(), endpoint.address.port),
+        endpoint.metadata.known.tokens.clone(),
+    )
+}
+
 pub fn update_endpoints_from_gameservers(
     client: kube::Client,
     namespace: impl AsRef<str>,
     clusters: config::Watch<ClusterMap>,
     locality: Option<Locality>,
     address_selector: Option<crate::config::AddressSelector>,
+    mutator: Option<crate::providers::corrosion::Mutator>,
 ) -> impl Stream<Item = crate::Result<(), eyre::Error>> {
     async_stream::stream! {
-        let mut servers = BTreeSet::new();
+        let mut servers = std::collections::BTreeMap::new();
 
         for await event in gameserver_events(client, namespace) {
             let ads = address_selector.as_ref();
@@ -233,24 +260,36 @@ pub fn update_endpoints_from_gameservers(
                 Event::Apply(result) => {
                     let span = tracing::trace_span!("k8s::gameservers::apply");
                     let _enter = span.enter();
+                    let uid = get_uid(&result);
                     let Some(endpoint) = validate_gameserver(result, ads) else {
                         continue;
                     };
                     tracing::debug!(endpoint=%serde_json::to_value(&endpoint).unwrap(), "Adding endpoint");
                     metrics::k8s::gameservers_total_valid();
+
+                    if let Some(mutator) = mutator.as_ref() {
+                        if let Some(uid) = uid {
+                            let (ep, ts) = get_simple_endpoint_and_token_set(&endpoint);
+                            mutator.upsert_server(uid, ep, ts);
+                        } else {
+                            tracing::warn!("apply event gameserverspec did not specify a valid UID");
+                        }
+                    }
+
                     clusters.write().replace(None, locality.clone(), endpoint);
                 }
                 Event::Init => {},
                 Event::InitApply(result) => {
                     let span = tracing::trace_span!("k8s::gameservers::init_apply");
                     let _enter = span.enter();
+                    let uid = get_uid(&result);
                     let Some(endpoint) = validate_gameserver(result, ads) else {
                         continue;
                     };
 
                     tracing::trace!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "applying server");
                     metrics::k8s::gameservers_total_valid();
-                    servers.insert(endpoint);
+                    servers.insert(endpoint, uid);
                 }
                 Event::InitDone => {
                     let span = tracing::trace_span!("k8s::gameservers::init_done");
@@ -262,11 +301,24 @@ pub fn update_endpoints_from_gameservers(
                         "Restarting with endpoints"
                     );
 
-                    clusters.write().insert(None, locality.clone(), std::mem::take(&mut servers));
+                    if let Some(mutator) = mutator.as_ref() {
+                        for (ep, uid) in &servers {
+                            let Some(uid) = uid else {
+                                continue;
+                            };
+
+                            let (ep, ts) = get_simple_endpoint_and_token_set(ep);
+                            mutator.upsert_server(*uid, ep, ts);
+                        }
+                    }
+
+                    let servers = std::mem::take(&mut servers).into_keys().collect();
+                    clusters.write().insert(None, locality.clone(), servers);
                 }
                 Event::Delete(result) => {
                     let span = tracing::trace_span!("k8s::gameservers::delete");
                     let _enter = span.enter();
+                    let uid = get_uid(&result);
                     let server = match result.0 {
                         Ok(server) => server,
                         Err(error) => {
@@ -275,6 +327,10 @@ pub fn update_endpoints_from_gameservers(
                             continue;
                         }
                     };
+
+                    if let Some((uid, mutator)) = uid.zip(mutator.as_ref()) {
+                        mutator.remove_server(uid);
+                    }
 
                     let found = if let Some(endpoint) = server.endpoint(ads) {
                         tracing::debug!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "deleting by endpoint");

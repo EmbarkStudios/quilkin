@@ -286,7 +286,7 @@ pub mod v1 {
                 }
                 ServerChange::Remove(r) => (index < r.len()).then_some(Self::Remove(&r[index..])),
                 ServerChange::Update(u) => (index < u.len()).then_some(Self::Update(&u[index..])),
-                _ => None,
+                ServerChange::UpdateMutator(_) => None,
             }
         }
 

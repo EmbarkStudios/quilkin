@@ -36,63 +36,63 @@ use crate::net::endpoint::{Endpoint, Locality};
 
 const QUILKIN_TOKEN_LABEL: &str = "quilkin.dev/tokens";
 
-pub async fn watch(
-    gameservers_namespace: String,
-    config_namespace: Option<String>,
-    health_check: Arc<AtomicBool>,
-    locality: Option<Locality>,
-    filters: crate::config::filter::FilterChainConfig,
-    clusters: crate::config::Watch<crate::net::ClusterMap>,
-    address_selector: Option<crate::config::AddressSelector>,
-) -> crate::Result<()> {
-    let client = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        kube::Client::try_default(),
-    )
-    .await??;
+// pub async fn watch(
+//     gameservers_namespace: String,
+//     config_namespace: Option<String>,
+//     health_check: Arc<AtomicBool>,
+//     locality: Option<Locality>,
+//     filters: crate::config::filter::FilterChainConfig,
+//     clusters: crate::config::Watch<crate::net::ClusterMap>,
+//     address_selector: Option<crate::config::AddressSelector>,
+// ) -> crate::Result<()> {
+//     let client = tokio::time::timeout(
+//         std::time::Duration::from_secs(5),
+//         kube::Client::try_default(),
+//     )
+//     .await??;
 
-    let mut configmap_reflector: std::pin::Pin<Box<dyn futures::Stream<Item = _> + Send>> =
-        if let Some(cns) = config_namespace {
-            Box::pin(super::update_filters_from_configmap(
-                client.clone(),
-                cns,
-                filters,
-            ))
-        } else {
-            Box::pin(futures::stream::pending())
-        };
+//     let mut configmap_reflector: std::pin::Pin<Box<dyn futures::Stream<Item = _> + Send>> =
+//         if let Some(cns) = config_namespace {
+//             Box::pin(super::update_filters_from_configmap(
+//                 client.clone(),
+//                 cns,
+//                 filters,
+//             ))
+//         } else {
+//             Box::pin(futures::stream::pending())
+//         };
 
-    let gameserver_reflector = super::update_endpoints_from_gameservers(
-        client,
-        gameservers_namespace,
-        clusters,
-        locality,
-        address_selector,
-    );
+//     let gameserver_reflector = super::update_endpoints_from_gameservers(
+//         client,
+//         gameservers_namespace,
+//         clusters,
+//         locality,
+//         address_selector,
+//     );
 
-    tokio::pin!(gameserver_reflector);
+//     tokio::pin!(gameserver_reflector);
 
-    loop {
-        let result = tokio::select! {
-            result = configmap_reflector.try_next() => result,
-            result = gameserver_reflector.try_next() => result,
-            _ = tokio::time::sleep(crate::providers::NO_UPDATE_INTERVAL) => {
-                tracing::trace!(duration_secs=crate::providers::NO_UPDATE_INTERVAL.as_secs_f64(), "no updates from gameservers or configmap");
-                Ok(Some(()))
-            }
-        };
+//     loop {
+//         let result = tokio::select! {
+//             result = configmap_reflector.try_next() => result,
+//             result = gameserver_reflector.try_next() => result,
+//             _ = tokio::time::sleep(crate::providers::NO_UPDATE_INTERVAL) => {
+//                 tracing::trace!(duration_secs=crate::providers::NO_UPDATE_INTERVAL.as_secs_f64(), "no updates from gameservers or configmap");
+//                 Ok(Some(()))
+//             }
+//         };
 
-        match result
-            .and_then(|opt| opt.ok_or_else(|| eyre::eyre!("kubernetes watch stream terminated")))
-        {
-            Ok(_) => {
-                crate::metrics::k8s::active(true);
-                health_check.store(true, Ordering::SeqCst);
-            }
-            Err(error) => break Err(error),
-        }
-    }
-}
+//         match result
+//             .and_then(|opt| opt.ok_or_else(|| eyre::eyre!("kubernetes watch stream terminated")))
+//         {
+//             Ok(_) => {
+//                 crate::metrics::k8s::active(true);
+//                 health_check.store(true, Ordering::SeqCst);
+//             }
+//             Err(error) => break Err(error),
+//         }
+//     }
+// }
 
 /// Auto-generated derived type for [`GameServerSpec`] via `CustomResource`
 #[derive(Clone, Debug, JsonSchema)]

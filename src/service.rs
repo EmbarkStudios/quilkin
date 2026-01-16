@@ -1,7 +1,12 @@
+use corrosion::persistent::mutator::BroadcastingTransactor;
 use eyre::ContextCompat;
 use std::sync::Arc;
 
-use crate::{components::proxy::SessionPool, config::Config, signal::ShutdownHandler};
+use crate::{
+    components::proxy::SessionPool,
+    config::{Config, filter::CachedFilterChain},
+    signal::ShutdownHandler,
+};
 
 #[derive(Debug, clap::Parser)]
 #[command(next_help_heading = "Service Options")]
@@ -479,7 +484,7 @@ impl Service {
         }
 
         tokio::runtime::Handle::current()
-            .block_on(async { self.spawn_corrosion_server(shutdown).await })?;
+            .block_on(async { self.spawn_corrosion_server(config.clone(), shutdown).await })?;
 
         if !self.grpc_enabled {
             return Ok(());
@@ -564,9 +569,11 @@ impl Service {
     }
 
     /// Launches the user space implementation of the packet router using
-    /// sockets. This implementation uses a pool of buffers and sockets to
-    /// manage UDP sessions and sockets. On Linux this will use io-uring, where
-    /// as it will use epoll interfaces on non-Linux platforms.
+    /// sockets.
+    ///
+    /// This implementation uses a pool of buffers and sockets to manage UDP
+    /// sessions and sockets. On Linux this will use `io-uring`, and `epoll`
+    /// interfaces on non-Linux platforms.
     #[allow(clippy::type_complexity)]
     pub fn spawn_user_space_router(
         &self,
@@ -726,7 +733,11 @@ impl Service {
     /// Creates/open the database and machinery that allows clients to send mutation
     /// requests and/or subscription requests and be notified when a change has
     /// been made that matches their query
-    async fn spawn_corrosion_server(&self, shutdown: &mut ShutdownHandler) -> eyre::Result<()> {
+    async fn spawn_corrosion_server(
+        &self,
+        config: Arc<Config>,
+        shutdown: &mut ShutdownHandler,
+    ) -> eyre::Result<()> {
         use corrosion::types;
 
         let db_root = if let Some(cdb) = self.corrosion_db_path.clone() {
@@ -758,6 +769,70 @@ impl Service {
         )
         .await;
 
+        // Spawn a task to update the DB and broadcast changes when the filter
+        // changes
+        if let Some((mut filters, mut filters_sub)) = config
+            .dyn_cfg
+            .cached_filter_chain()
+            .zip(config.dyn_cfg.subscribe_filter_changes())
+        {
+            let finished = shutdown.push("corrosion_db_mutator");
+            let mut srx = shutdown.shutdown_rx();
+
+            let btx = btx.clone();
+
+            async fn update_filters(btx: &BroadcastingTransactor, filters: &mut CachedFilterChain) {
+                let filters = filters.load();
+                let serialized =
+                    serde_json::to_string(&filters).expect("failed to serialize filter chain");
+                let mut statement = corrosion::SmallVec::<[_; 1]>::new();
+                {
+                    let mut fdb = corrosion::db::write::Filter(&mut statement);
+                    fdb.upsert(&serialized);
+                }
+
+                let res = btx
+                    .make_broadcastable_changes(None, |tx| {
+                        corrosion::db::write::exec_single_interruptible(
+                            tx,
+                            statement.pop().unwrap(),
+                        )
+                        .map_err(|source| {
+                            corrosion::types::agent::ChangeError::Rusqlite {
+                                source,
+                                actor_id: Some(btx.actor_id()),
+                                version: None,
+                            }
+                        })
+                    })
+                    .await;
+
+                match res {
+                    Ok((_, version, elapsed)) => {
+                        tracing::debug!(?version, ?elapsed, "updated filters");
+                    }
+                    Err(error) => {
+                        tracing::error!(%error, "failed to update filters");
+                    }
+                }
+            }
+
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _fc = filters_sub.recv() => {
+                            update_filters(&btx, &mut filters).await;
+                        }
+                        _ = srx.changed() => {
+                            break;
+                        }
+                    }
+                }
+
+                drop(finished.send(Ok(())));
+            });
+        }
+
         // Tripwire is how corrosion communicates a shutdown was requested
         let (tw, _, tw_tx) = corrosion::Tripwire::new_simple();
         let ps_ctx = corrosion::pubsub::PubsubContext::new(
@@ -770,6 +845,8 @@ impl Service {
         )
         .await?;
 
+        // Spin up a UDP socket to receive state mutations from agents and send
+        // events to proxy subscribers
         let udp_server = corrosion::persistent::server::Server::new_unencrypted(
             (std::net::Ipv6Addr::UNSPECIFIED, self.corrosion_port).into(),
             btx,
