@@ -344,7 +344,7 @@ async fn process_subscription_events(
         };
 
         let update_filter = |row: &[SqliteValue]| -> crate::Result<()> {
-            let column = row.get(0).context("missing 'filter' column")?;
+            let column = row.get(1).context("missing 'filter' column")?;
 
             let filter = column.as_str().with_context(|| {
                 format!(

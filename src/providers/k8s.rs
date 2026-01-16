@@ -245,6 +245,7 @@ pub fn update_endpoints_from_gameservers(
 ) -> impl Stream<Item = crate::Result<(), eyre::Error>> {
     async_stream::stream! {
         let mut servers = std::collections::BTreeMap::new();
+        metrics::k8s::active(true);
 
         for await event in gameserver_events(client, namespace) {
             let ads = address_selector.as_ref();
@@ -362,5 +363,7 @@ pub fn update_endpoints_from_gameservers(
             crate::metrics::apply_clusters(&clusters);
             yield Ok(());
         }
+
+        metrics::k8s::active(false);
     }
 }

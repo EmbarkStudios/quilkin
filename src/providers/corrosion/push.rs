@@ -211,8 +211,8 @@ impl Pusher {
             self.hc.store(true, atomic::Ordering::Relaxed);
 
             self.push(client)
-                .await
-                .instrument(tracing::debug_span!("corrosion mutation events", %address));
+                .instrument(tracing::debug_span!("corrosion mutation events", %address))
+                .await;
 
             self.hc.store(false, atomic::Ordering::Relaxed);
         }
@@ -314,7 +314,7 @@ impl Pusher {
                                     endpoint: server.0.clone(),
                                     icao,
                                     tokens: server.1.clone(),
-                                })
+                                });
                             }
                         }
                         Mutation::Update(id) => {
@@ -333,15 +333,15 @@ impl Pusher {
                 }
                 _ = update_interval.tick() => {
                     if !upserts.is_empty() {
-                        send!(v1::ServerChange::Upsert(std::mem::replace(&mut upserts, Vec::new())));
+                        send!(v1::ServerChange::Upsert(std::mem::take(&mut upserts)));
                     }
 
                     if !removes.is_empty() {
-                        send!(v1::ServerChange::Remove(std::mem::replace(&mut removes, Vec::new())));
+                        send!(v1::ServerChange::Remove(std::mem::take(&mut removes)));
                     }
 
                     if !updates.is_empty() {
-                        send!(v1::ServerChange::Update(std::mem::replace(&mut updates, Vec::new())));
+                        send!(v1::ServerChange::Update(std::mem::take(&mut updates)));
                     }
                 }
                 qcmp = self.qcmp.recv() => {
