@@ -179,12 +179,19 @@ pub struct Providers {
         hide = true
     )]
     xds_endpoints: Vec<tonic::transport::Endpoint>,
+    /// One or more `quilkin relay` endpoints to push or pull configuration changes to/from
     #[clap(
         long = "provider.corrosion.endpoints",
         env = "QUILKIN_PROVIDERS_CORROSION_ENDPOINTS",
         value_delimiter = ','
     )]
     corrosion_endpoints: Vec<SocketAddr>,
+    /// What mode to run corrosion in
+    #[clap(
+        long = "provider.corrosion.mode",
+        env = "QUILKIN_PROVIDERS_CORROSION_MODE"
+    )]
+    corrosion_mode: Option<corrosion::CorrosionMode>,
 }
 
 #[derive(Clone)]
@@ -383,6 +390,7 @@ impl Providers {
         health_check: Arc<AtomicBool>,
         locality: Option<crate::net::endpoint::Locality>,
         config: &super::Config,
+        mutator: Option<crate::providers::corrosion::Mutator>,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let agones_namespaces = if !self.agones_namespace.is_empty() {
             tracing::warn!(
@@ -415,6 +423,7 @@ impl Providers {
             let selector = selector.clone();
             let locality = locality.clone();
             let health_check = health_check.clone();
+            let mutator = mutator.clone();
 
             move || {
                 let config = config.clone();
@@ -426,6 +435,7 @@ impl Providers {
                 let selector = selector.clone();
                 let locality = locality.clone();
                 let health_check = health_check.clone();
+                let mutator = mutator.clone();
 
                 async move {
                     let client = tokio::time::timeout(
@@ -473,6 +483,7 @@ impl Providers {
                                     clusters.clone(),
                                     locality.clone(),
                                     selector.clone(),
+                                    mutator.clone(),
                                 ),
                             ));
                         }
@@ -620,7 +631,8 @@ impl Providers {
     }
 
     pub fn corrosion_enabled(&self) -> bool {
-        !self.corrosion_endpoints.is_empty()
+        self.corrosion_mode
+            .is_some_and(|_cm| !self.corrosion_endpoints.is_empty())
     }
 
     pub fn any_provider_enabled(&self) -> bool {
@@ -702,6 +714,7 @@ impl Providers {
                 health_check.clone(),
                 locality.clone(),
                 config,
+                mutator,
             ));
         }
 

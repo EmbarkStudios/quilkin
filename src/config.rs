@@ -312,7 +312,7 @@ impl quilkin_xds::config::Configuration for Config {
                     tokio::select! {
                         i = icao_rx.recv() => {
                             match i {
-                                Ok(()) => cp.push_update(xds::DATACENTER_TYPE),
+                                Ok(_) => cp.push_update(xds::DATACENTER_TYPE),
                                 Err(error) => tracing::error!(%error, "error watching ICAO changes"),
                             }
                         }

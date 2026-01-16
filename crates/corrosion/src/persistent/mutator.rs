@@ -68,6 +68,11 @@ impl BroadcastingTransactor {
         }
     }
 
+    #[inline]
+    pub fn actor_id(&self) -> ActorId {
+        self.id
+    }
+
     pub async fn make_broadcastable_changes<F, T>(
         &self,
         timeout: Option<Duration>,

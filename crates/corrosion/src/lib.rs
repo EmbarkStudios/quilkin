@@ -13,3 +13,4 @@ pub mod server;
 pub use camino::{Utf8Path as Path, Utf8PathBuf as PathBuf};
 
 pub type Peer = std::net::SocketAddrV6;
+pub use smallvec::SmallVec;
