@@ -139,9 +139,6 @@ pub struct Client<C: ServiceClient> {
     client: C,
     identifier: Arc<str>,
     management_servers: Vec<Endpoint>,
-    /// The management server endpoint the client is currently connected to
-    #[allow(dead_code)]
-    connected_endpoint: Endpoint,
 }
 
 impl<C: ServiceClient> Client<C> {
@@ -158,12 +155,11 @@ impl<C: ServiceClient> Client<C> {
             eyre::ensure!(uri.host().is_some(), "endpoint {uri} has no host");
         }
 
-        let (client, connected_endpoint) = Self::connect_with_backoff(&management_servers).await?;
+        let (client, _connected_endpoint) = Self::connect_with_backoff(&management_servers).await?;
         Ok(Self {
             client,
             identifier: Arc::from(identifier),
             management_servers,
-            connected_endpoint,
         })
     }
 
@@ -262,7 +258,7 @@ impl<C: ServiceClient> Client<C> {
 
 impl MdsClient {
     pub async fn delta_stream<C: crate::config::Configuration>(
-        mut self,
+        self,
         config: Arc<C>,
         health: impl HealthState + Send + 'static,
         mut shutdown: crate::ShutdownSignal,
@@ -370,26 +366,23 @@ impl MdsClient {
 
                         match MdsClient::connect_with_backoff(&self.management_servers)
                            .await {
-                            Ok(res) => {
-                                (self.client, self.connected_endpoint) = res;
+                            Ok((client, _)) => {
+                                match DeltaServerStream::connect(client, identifier.clone()).await {
+                                    Ok(res) => {
+                                        (ds, stream) = res;
+                                        break;
+                                    }
+                                    Err(error) => {
+                                        tracing::error!(%error, "failed to connect stream");
+                                        tokio::time::sleep(Duration::from_secs(1)).await;
+                                    }
+                                }
                             },
                             Err(error) => {
                                 tracing::error!(%error, "failed to establish connection");
                                 tokio::time::sleep(Duration::from_secs(1)).await;
-                                continue;
                             },
                         }
-                        match DeltaServerStream::connect(self.client.clone(), identifier.clone()).await {
-                            Ok(res) => {
-                                (ds, stream) = res;
-                                break;
-                            }
-                            Err(error) => {
-                                tracing::error!(%error, "failed to connect stream");
-                                tokio::time::sleep(Duration::from_secs(1)).await;
-                            }
-                        }
-
                     }
                     tracing::info!("mDS connection refreshed");
                     health.set_healthy();
