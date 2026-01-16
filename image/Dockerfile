@@ -14,6 +14,8 @@
 
 FROM debian:bookworm-slim AS base
 WORKDIR /
+RUN groupadd --gid 65532 nonroot
+RUN useradd --create-home --uid 65532 --gid 65532 --shell /bin/bash nonroot
 RUN apt-get update && \
     apt-get install --no-install-recommends -y ca-certificates
 COPY ./license.html .
