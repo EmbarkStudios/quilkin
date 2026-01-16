@@ -1,0 +1,43 @@
+name: Unreal Plugin
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/epicgames/unreal-engine:dev
+      credentials:
+        username: ${{ secrets.GITHUB_ACTOR }}
+        password: ${{ secrets.DOCKER_GITHUB_PAT }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Setup environment variables
+      run: |
+        echo "UE_PATH=/home/ue4/UnrealEngine" >> $GITHUB_ENV
+
+    - name: Build Plugin
+      run: |
+        "${{ env.UE_PATH }}/Engine/Build/BatchFiles/RunUAT.sh" \
+          BuildPlugin \
+          -Plugin="${{ github.workspace }}/sdks/ue4/Quilkin.uplugin" \
+          -Package="${{ github.workspace }}/PluginBuild" \
+          -Rocket
+
+    - name: Run Tests
+      run: |
+        "${{ env.UE_PATH }}/Engine/Binaries/Linux/UE4Editor-Cmd" \
+          -run=Automation \
+          -Plugin="${{ github.workspace }}/sdks/ue4/Quilkin.uplugin" \
+          -unattended \
+          -nopause \
+          -testexit="Automation Test Queue Empty" \
+          -log
