@@ -525,38 +525,6 @@ pub(crate) fn phoenix_distance_error_estimate(icao: crate::config::IcaoCode) -> 
     PHOENIX_DISTANCE_ERROR_ESTIMATE.with_label_values(&[icao.as_ref()])
 }
 
-pub(crate) fn phoenix_task_closed() -> &'static IntGauge {
-    static PHOENIX_TASK_CLOSED: Lazy<IntGauge> = Lazy::new(|| {
-        prometheus::register_int_gauge_with_registry! {
-            prometheus::opts! {
-                "quilkin_phoenix_task_closed",
-                "Whether the phoenix task has shutdown",
-            },
-            registry(),
-        }
-        .unwrap()
-    });
-
-    &PHOENIX_TASK_CLOSED
-}
-
-#[allow(dead_code)]
-pub(crate) fn phoenix_server_errors(error: &str) -> IntCounter {
-    static PHOENIX_SERVER_ERRORS: Lazy<IntCounterVec> = Lazy::new(|| {
-        prometheus::register_int_counter_vec_with_registry! {
-            prometheus::opts! {
-                "quilkin_phoenix_server_errors",
-                "The amount of errors attempting to spawn the phoenix HTTP server",
-            },
-            &["error"],
-            registry(),
-        }
-        .unwrap()
-    });
-
-    PHOENIX_SERVER_ERRORS.with_label_values(&[error])
-}
-
 pub(crate) fn processing_time(direction: Direction) -> Histogram {
     static PROCESSING_TIME: Lazy<HistogramVec> = Lazy::new(|| {
         prometheus::register_histogram_vec_with_registry! {
