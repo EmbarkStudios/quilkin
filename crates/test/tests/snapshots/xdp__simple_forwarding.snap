@@ -26,16 +26,14 @@ PacketHeaders {
             },
         ),
     ),
-    vlan: None,
+    link_exts: [],
     net: Some(
         Ipv4(
             Ipv4Header {
-                dscp: Ipv4Dscp(
+                dscp: IpDscp(
                     0,
                 ),
-                ecn: Ipv4Ecn(
-                    0,
-                ),
+                ecn: NotEct,
                 total_len: 39,
                 identification: 0,
                 dont_fragment: true,
