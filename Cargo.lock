@@ -4145,6 +4145,7 @@ dependencies = [
  "fixedstr",
  "form_urlencoded",
  "futures",
+ "futures-util",
  "gxhash",
  "hickory-resolver",
  "http-body-util",

@@ -38,6 +38,7 @@ use std::{collections::HashMap, net::SocketAddr, ops::Range, sync::Arc, time::Du
 
 use async_trait::async_trait;
 use dashmap::DashMap;
+use futures::FutureExt as _;
 
 use crate::{
     config::{self, IcaoCode},
@@ -114,27 +115,24 @@ pub fn spawn(
                     });
 
                     tracing::info!(addr=%listener.local_addr(), "starting phoenix HTTP service");
-                    let (stx, mut srx) = tokio::sync::oneshot::channel::<()>();
                     let handler_node_latencies = node_latencies_response.clone();
                     let handler_network_coordinates = network_coordinates_response.clone();
 
+                    let mut http_task_shutdown_rx = shutdown_rx.clone();
                     let http_task: tokio::task::JoinHandle<eyre::Result<()>> = {
                         tokio::spawn(async move {
                             let router =
                                 http_router(handler_network_coordinates, handler_node_latencies);
                             let listener = listener.into_tokio()?;
 
-                            tokio::select! {
-                                // result = async move { axum::serve(listener.into_tokio()?, router).await } => result.map_err(From::from),
-                                _ = async move { serve(listener, router).await } => {
-                                    // result.map_err(From::from)
-                                    Ok(())
-                                },
-                                _ = &mut srx => {
-                                    crate::metrics::phoenix_task_closed().set(true as _);
-                                    Ok(())
+                            let shutdown_signal = async move {
+                                if let Err(error) = http_task_shutdown_rx.changed().await {
+                                    tracing::error!(%error, "shutdown signal error");
                                 }
-                            }
+                            };
+
+                            serve(listener, router, shutdown_signal).await;
+                            Ok(())
                         })
                     };
 
@@ -156,27 +154,6 @@ pub fn spawn(
                         update_node_latencies();
                         update_network_coordinates();
                     };
-
-                    if stx.send(()).is_err() {
-                        tracing::error!("phoenix HTTP service task has already exited");
-                    }
-
-                    // This should happen quickly, abort if it takes too long
-                    let max_wait =
-                        std::time::Instant::now() + std::time::Duration::from_millis(100);
-                    let mut interval = tokio::time::interval(std::time::Duration::from_millis(1));
-
-                    loop {
-                        if http_task.is_finished() || std::time::Instant::now() > max_wait {
-                            break;
-                        }
-
-                        interval.tick().await;
-                    }
-
-                    if !http_task.is_finished() {
-                        http_task.abort();
-                    }
 
                     if let Err(err) = http_task.await
                         && let Ok(panic) = err.try_into_panic()
@@ -211,47 +188,88 @@ pub fn spawn(
     Ok(finalizer)
 }
 
-async fn serve<L: axum::serve::Listener>(mut listener: L, router: axum::Router) -> ! {
-    use tower::Service;
+async fn serve<L, F>(mut listener: L, router: axum::Router, shutdown_signal: F)
+where
+    L: axum::serve::Listener,
+    F: Future<Output = ()> + Send + 'static,
+{
+    // watch channel used to initiate graceful shutdown of connections and stop accepting new ones
+    let (signal_tx, signal_rx) = tokio::sync::watch::channel(());
+    tokio::spawn(async move {
+        shutdown_signal.await;
+        tracing::trace!("received graceful shutdown signal. Telling tasks to shutdown");
+        drop(signal_rx);
+    });
 
-    // TODO graceful shutdown stuff
+    // watch channel used to ensure accepted requests are fullfilled before we shut down fully
+    let (close_tx, close_rx) = tokio::sync::watch::channel(());
 
     loop {
-        let (socket, _remote_addr) = listener.accept().await;
+        let (socket, _remote_addr) = tokio::select! {
+            conn = listener.accept() => conn,
+            _ = signal_tx.closed() => {
+                tracing::trace!("signal received, not accepting new connections");
+                break;
+            }
+        };
 
-        let tower_service = router.clone();
-        tokio::spawn(async move {
-            let conn_labels = crate::metrics::http::ConnectionLabels {
-                service: "phoenix".to_string(),
-            };
-            let _conn_gaurd = crate::metrics::http::connection_guard(&conn_labels);
+        handle_connection::<L>(&signal_tx, &close_rx, socket, &router).await;
+    }
 
-            let socket = hyper_util::rt::TokioIo::new(socket);
-            let hyper_service = hyper::service::service_fn(
-                move |request: axum::extract::Request<hyper::body::Incoming>| {
-                    tower_service.clone().call(request)
-                },
-            );
+    drop(close_rx);
 
-            let mut builder =
-                hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
-            // CONNECT protocol needed for HTTP/2 websockets
-            builder.http2().enable_connect_protocol();
+    // Ensure all requests currently being processed are allowed to finish before we return
+    tracing::trace!(
+        "waiting for {} task(s) to finish",
+        close_tx.receiver_count()
+    );
+    close_tx.closed().await;
+}
 
-            let conn = builder.serve_connection_with_upgrades(socket, hyper_service);
+async fn handle_connection<L: axum::serve::Listener>(
+    signal_tx: &tokio::sync::watch::Sender<()>,
+    close_rx: &tokio::sync::watch::Receiver<()>,
+    socket: <L as axum::serve::Listener>::Io,
+    router: &axum::Router,
+) {
+    let socket = hyper_util::rt::TokioIo::new(socket);
 
-            // loop {
+    let signal_tx = signal_tx.clone();
+    let close_rx = close_rx.clone();
+    let hyper_service = hyper_util::service::TowerToHyperService::new(router.clone());
+
+    tokio::spawn(async move {
+        let conn_labels = crate::metrics::http::ConnectionLabels {
+            service: "phoenix".to_string(),
+        };
+        let _conn_guard = crate::metrics::http::connection_guard(&conn_labels);
+
+        let mut builder =
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+        // CONNECT protocol needed for HTTP/2 websockets
+        builder.http2().enable_connect_protocol();
+
+        let mut conn =
+            core::pin::pin!(builder.serve_connection_with_upgrades(socket, hyper_service));
+        let mut signal_closed = core::pin::pin!(signal_tx.closed().fuse());
+
+        loop {
             tokio::select! {
-                result = conn => {
+                result = conn.as_mut() => {
                     if let Err(error) = result {
-                        tracing::trace!(%error, "failed to serve connection");
+                        tracing::error!(%error, "failed to serve connection");
                     }
-                    // break;
+                    break;
+                }
+                _ = &mut signal_closed => {
+                    tracing::trace!("signal received in task, starting graceful shutdown");
+                    conn.as_mut().graceful_shutdown();
                 }
             }
-            // }
-        });
-    }
+        }
+        // signal that all requests on this connection have finished
+        drop(close_rx);
+    });
 }
 
 fn http_router(

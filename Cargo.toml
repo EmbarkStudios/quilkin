@@ -99,6 +99,7 @@ enum-map.workspace = true
 eyre.workspace = true
 fixedstr.workspace = true
 futures.workspace = true
+futures-util.workspace = true
 http-body-util = "0.1"
 hyper = { version = "1.8", features = ["http2", "http1", "server"] }
 hyper-rustls = { version = "0.27", default-features = false, features = [
@@ -227,6 +228,7 @@ corrosion = { path = "crates/corrosion" }
 eyre = "0.6.12"
 enum-map = "2.7.3"
 futures = "0.3.31"
+futures-util = "0.3.31"
 jemalloc_pprof = { version = "0.8", features = ["symbolize"] }
 kube = { version = "2.0", features = [
     "runtime",

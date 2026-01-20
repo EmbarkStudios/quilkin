@@ -378,9 +378,7 @@ impl Service {
         tokio::spawn(async move {
             let _ = srx.changed().await;
 
-            tokio::task::spawn_blocking(|| {
-                finalizer();
-            });
+            finalizer();
 
             drop(finished.send(Ok(())));
         });
