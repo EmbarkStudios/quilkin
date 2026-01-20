@@ -42,6 +42,7 @@ pub fn serve(
     config: Arc<crate::Config>,
     ready: Arc<AtomicBool>,
     shutdown_tx: crate::signal::ShutdownTx,
+    shutdown_rx: crate::signal::ShutdownRx,
     address: Option<std::net::SocketAddr>,
 ) -> std::thread::JoinHandle<std::io::Result<()>> {
     let address = address.unwrap_or_else(|| (std::net::Ipv6Addr::UNSPECIFIED, PORT).into());
@@ -61,7 +62,13 @@ pub fn serve(
             let runtime = Admin::runtime();
             runtime.block_on(async move {
                 let listener = tokio::net::TcpListener::bind(address).await?;
-                axum::serve(listener, router).await
+                crate::net::http::serve(
+                    "admin",
+                    listener,
+                    router,
+                    crate::signal::await_shutdown(shutdown_rx),
+                )
+                .await
             })
         })
         .expect("failed to spawn admin-http thread")

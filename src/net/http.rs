@@ -11,7 +11,8 @@ pub async fn serve<L, F>(
     mut listener: L,
     router: axum::Router,
     shutdown_signal: F,
-) where
+) -> std::io::Result<()>
+where
     L: axum::serve::Listener,
     F: Future<Output = ()> + Send + 'static,
 {
@@ -48,6 +49,7 @@ pub async fn serve<L, F>(
         close_tx.receiver_count()
     );
     close_tx.closed().await;
+    Ok(())
 }
 
 async fn handle_connection<L: axum::serve::Listener>(
@@ -80,7 +82,12 @@ async fn handle_connection<L: axum::serve::Listener>(
             tokio::select! {
                 result = conn.as_mut() => {
                     if let Err(error) = result {
-                        tracing::error!(%error, "failed to serve connection");
+                        // It is expected to receive std::io::ErrorKind::Interrupted with the
+                        // message "Cancelled" when an open connection is being closed after all
+                        // requests have been served
+                        if error.downcast_ref::<std::io::Error>().filter(|e| e.kind() != std::io::ErrorKind::Interrupted).is_some() {
+                            tracing::error!(%error, "failed to serve connection");
+                        }
                     }
                     break;
                 }

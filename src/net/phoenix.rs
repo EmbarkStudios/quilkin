@@ -117,22 +117,20 @@ pub fn spawn(
                     let handler_node_latencies = node_latencies_response.clone();
                     let handler_network_coordinates = network_coordinates_response.clone();
 
-                    let mut http_task_shutdown_rx = shutdown_rx.clone();
-                    let http_task: tokio::task::JoinHandle<eyre::Result<()>> = {
+                    let http_task_shutdown_rx = shutdown_rx.clone();
+                    let http_task: tokio::task::JoinHandle<std::io::Result<()>> = {
                         tokio::spawn(async move {
                             let router =
                                 http_router(handler_network_coordinates, handler_node_latencies);
                             let listener = listener.into_tokio()?;
 
-                            let shutdown_signal = async move {
-                                if let Err(error) = http_task_shutdown_rx.changed().await {
-                                    tracing::error!(%error, "shutdown signal error");
-                                }
-                            };
-
-                            crate::net::http::serve("phoenix", listener, router, shutdown_signal)
-                                .await;
-                            Ok(())
+                            crate::net::http::serve(
+                                "phoenix",
+                                listener,
+                                router,
+                                crate::signal::await_shutdown(http_task_shutdown_rx),
+                            )
+                            .await
                         })
                     };
 
