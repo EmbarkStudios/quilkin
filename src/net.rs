@@ -17,6 +17,7 @@
 pub mod cluster;
 pub mod endpoint;
 pub mod error;
+pub mod http;
 pub mod io;
 pub(crate) mod maxmind_db;
 pub mod packet;
