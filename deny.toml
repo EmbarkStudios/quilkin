@@ -35,6 +35,7 @@ deny = [
     { crate = "aws-lc-sys", use-instead = "ring" },
     { crate = "cmake", use-instead = "cc" },
     { crate = "chrono", use-instead = "time", wrappers = [
+        "expect-json",
         "k8s-openapi",
         "kube-client",
         "kube-core",
@@ -44,11 +45,15 @@ deny = [
 multiple-versions = "deny"
 skip = [
     { crate = "object@0.32.2", reason = "transitive dependency due to backtrace, backtrace is updated, but stable-eyre using a feature that doesn't exist any longer, and can't update, sigh" },
-    { crate = "hashbrown@0.14.5", reason = "many crates use this old version" },
-    { crate = "getrandom@0.2.16", reason = "ring" },
+    { crate = "hashbrown@0.14.5", reason = "many crates this old version" },
+    { crate = "getrandom@0.2.17", reason = "ring" },
+    { crate = "miniz_oxide@0.7.4", reason = "pprof_util carries two different versions transitively" },
+    { crate = "prost@0.13.5", reason = "pprof_util has an outdated version" },
+    { crate = "prost-derive@0.13.5", reason = "pprof_util has an outdated version" },
 ]
 skip-tree = [
     { crate = "thiserror@1.0.69", reason = "many crates use this old version" },
+    { crate = "hashbrown@0.15.5", reason = "many crates this old version" },
 ]
 
 [[bans.features]]
@@ -64,6 +69,7 @@ name = "rustls-webpki"
 deny = ["aws-lc-rs"]
 
 [bans.workspace-dependencies]
+unused = 'allow'
 
 # This section is considered when running `cargo deny check licenses`
 # More documentation for the licenses section can be found here:
@@ -76,4 +82,5 @@ exceptions = [
     # This license should not really be used for code, but here we are
     { crate = "notify", allow = ["CC0-1.0"] },
     { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+    { crate = "ar_archive_writer", allow = ["Apache-2.0 WITH LLVM-exception"] }
 ]

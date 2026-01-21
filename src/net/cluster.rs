@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::net::endpoint::{Endpoint, EndpointAddress, Locality};
 
-const SUBSYSTEM: &str = "cluster";
 const HASH_SEED: i64 = 0xdeadbeef;
 
 pub use crate::generated::quilkin::config::v1alpha1 as proto;
@@ -34,9 +33,8 @@ pub use crate::generated::quilkin::config::v1alpha1 as proto;
 pub(crate) fn active_clusters() -> &'static prometheus::IntGauge {
     static ACTIVE_CLUSTERS: Lazy<prometheus::IntGauge> = Lazy::new(|| {
         crate::metrics::register(
-            prometheus::IntGauge::with_opts(crate::metrics::opts(
-                "active",
-                SUBSYSTEM,
+            prometheus::IntGauge::with_opts(prometheus::Opts::new(
+                "quilkin_cluster_active",
                 "Number of currently active clusters.",
             ))
             .unwrap(),
@@ -50,10 +48,10 @@ pub(crate) fn active_endpoints(cluster: &str) -> prometheus::IntGauge {
     static ACTIVE_ENDPOINTS: Lazy<prometheus::IntGaugeVec> = Lazy::new(|| {
         prometheus::register_int_gauge_vec_with_registry! {
             prometheus::opts! {
-                "active_endpoints",
+                "quilkin_active_endpoints",
                 "Number of currently available endpoints across clusters",
             },
-            &["cluster"],
+            &["quilkin_cluster"],
             crate::metrics::registry(),
         }
         .unwrap()
@@ -114,9 +112,6 @@ pub struct EndpointSet {
     pub token_map: TokenAddressMap,
     /// The hash of all of the endpoints in this set
     hash: u64,
-    /// Version of this set of endpoints. Any mutatation of the endpoints
-    /// set monotonically increases this number
-    version: u64,
 }
 
 impl EndpointSet {
@@ -127,7 +122,6 @@ impl EndpointSet {
             endpoints,
             token_map: <_>::default(),
             hash: 0,
-            version: 0,
         };
 
         this.update();
@@ -145,7 +139,6 @@ impl EndpointSet {
             endpoints,
             token_map: <_>::default(),
             hash: hash.number(),
-            version: 1,
         };
 
         this.build_token_map();
@@ -185,7 +178,7 @@ impl EndpointSet {
         for ep in &self.endpoints {
             ep.hash(&mut hasher);
 
-            for tok in &ep.metadata.known.tokens {
+            for tok in ep.metadata.known.tokens.iter() {
                 let hash = gxhash::gxhash64(tok, HASH_SEED);
                 token_map
                     .entry(hash)
@@ -195,7 +188,6 @@ impl EndpointSet {
         }
 
         self.hash = hasher.finish();
-        self.version += 1;
         std::mem::replace(&mut self.token_map, token_map)
     }
 
@@ -206,7 +198,7 @@ impl EndpointSet {
 
         // This is only called on proxies, so calculate a token map
         for ep in &self.endpoints {
-            for tok in &ep.metadata.known.tokens {
+            for tok in ep.metadata.known.tokens.iter() {
                 let hash = gxhash::gxhash64(tok, HASH_SEED);
                 token_map
                     .entry(hash)
@@ -232,7 +224,6 @@ impl EndpointSet {
             self.update()
         } else {
             self.hash = replacement.hash;
-            self.version += 1;
             self.build_token_map()
         };
 
@@ -449,11 +440,11 @@ where
         locality: Option<Locality>,
         endpoint: Endpoint,
     ) -> Option<Endpoint> {
-        if let Some(raddr) = self.localities.get(&locality) {
-            if *raddr != remote_addr {
-                tracing::trace!("not replacing locality endpoints");
-                return None;
-            }
+        if let Some(raddr) = self.localities.get(&locality)
+            && *raddr != remote_addr
+        {
+            tracing::trace!("not replacing locality endpoints");
+            return None;
         }
 
         if let Some(mut set) = self.map.get_mut(&locality) {
@@ -524,11 +515,11 @@ where
         remote_addr: Option<std::net::IpAddr>,
         locality: Locality,
     ) {
-        if let Some(raddr) = self.localities.get(&None) {
-            if *raddr != remote_addr {
-                tracing::trace!("not updating locality");
-                return;
-            }
+        if let Some(raddr) = self.localities.get(&None)
+            && *raddr != remote_addr
+        {
+            tracing::trace!("not updating locality");
+            return;
         }
 
         self.localities.remove(&None);
@@ -555,17 +546,28 @@ where
     }
 
     #[inline]
+    pub fn remove_contributor(&self, remote_addr: Option<std::net::IpAddr>) {
+        self.localities.retain(|k, v| {
+            let keep = *v != remote_addr;
+            if !keep {
+                tracing::debug!(locality=?k, ?remote_addr, "removing locality contributor");
+            }
+            keep
+        });
+    }
+
+    #[inline]
     pub fn remove_locality(
         &self,
         remote_addr: Option<std::net::IpAddr>,
         locality: &Option<Locality>,
     ) -> Option<EndpointSet> {
         {
-            if let Some(raddr) = self.localities.get(locality) {
-                if *raddr != remote_addr {
-                    tracing::trace!("skipping locality removal");
-                    return None;
-                }
+            if let Some(raddr) = self.localities.get(locality)
+                && *raddr != remote_addr
+            {
+                tracing::trace!("skipping locality removal");
+                return None;
             }
         }
 
@@ -653,27 +655,25 @@ where
 pub(crate) struct EndpointWithLocality {
     pub endpoints: BTreeSet<Endpoint>,
     pub locality: Option<Locality>,
+    pub version: Option<u64>,
 }
 
-impl From<(Option<Locality>, BTreeSet<Endpoint>)> for EndpointWithLocality {
-    fn from((locality, endpoints): (Option<Locality>, BTreeSet<Endpoint>)) -> Self {
+impl From<(Option<Locality>, &EndpointSet)> for EndpointWithLocality {
+    fn from((locality, endpoint_set): (Option<Locality>, &EndpointSet)) -> Self {
         Self {
             locality,
-            endpoints,
+            endpoints: endpoint_set.endpoints.clone(),
+            version: Some(endpoint_set.version().number()),
         }
     }
 }
 
 impl schemars::JsonSchema for ClusterMap {
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         <Vec<EndpointWithLocality>>::schema_name()
     }
-    fn json_schema(r#gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        <Vec<EndpointWithLocality>>::json_schema(r#gen)
-    }
-
-    fn is_referenceable() -> bool {
-        <Vec<EndpointWithLocality>>::is_referenceable()
+    fn json_schema(sg: &mut schemars::generate::SchemaGenerator) -> schemars::Schema {
+        <Vec<EndpointWithLocality>>::json_schema(sg)
     }
 }
 
@@ -715,7 +715,19 @@ impl<'de> Deserialize<'de> for ClusterMap {
                 |EndpointWithLocality {
                      locality,
                      endpoints,
-                 }| { (locality, EndpointSet::new(endpoints)) },
+                     version,
+                 }| {
+                    let eps = if let Some(version) = version {
+                        EndpointSet::with_version(
+                            endpoints,
+                            EndpointSetVersion::from_number(version),
+                        )
+                    } else {
+                        EndpointSet::new(endpoints)
+                    };
+
+                    (locality, eps)
+                },
             )
             .collect::<DashMap<_, _, _>>();
         Ok(Self::from(map))
@@ -729,9 +741,7 @@ impl Serialize for ClusterMap {
     {
         self.map
             .iter()
-            .map(|entry| {
-                EndpointWithLocality::from((entry.key().clone(), entry.value().endpoints.clone()))
-            })
+            .map(|entry| EndpointWithLocality::from((entry.key().clone(), entry.value())))
             .collect::<Vec<_>>()
             .serialize(ser)
     }

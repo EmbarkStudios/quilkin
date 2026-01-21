@@ -520,10 +520,10 @@ pub fn gen_endpoints(
     hasher.write_u16(num_endpoints);
 
     let mut endpoints = BTreeSet::new();
-    if let Some(tg) = &mut tg {
-        if let Some(prev) = &mut tg.previous {
-            prev.clear();
-        }
+    if let Some(tg) = &mut tg
+        && let Some(prev) = &mut tg.previous
+    {
+        prev.clear();
     }
 
     for i in 0..num_endpoints {
@@ -630,11 +630,11 @@ pub struct TokenGenerator {
 }
 
 impl Iterator for TokenGenerator {
-    type Item = quilkin::net::endpoint::Set;
+    type Item = quilkin_types::TokenSet;
 
     fn next(&mut self) -> Option<Self::Item> {
         use rand::RngCore;
-        let mut set = Self::Item::new();
+        let mut set = std::collections::BTreeSet::new();
 
         let count = if let Some(range) = self.range.clone() {
             self.rng.random_range(range)
@@ -664,7 +664,7 @@ impl Iterator for TokenGenerator {
             }
         }
 
-        Some(set)
+        Some(quilkin_types::TokenSet(set))
     }
 }
 

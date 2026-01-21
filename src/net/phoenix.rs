@@ -39,16 +39,21 @@ use std::{collections::HashMap, net::SocketAddr, ops::Range, sync::Arc, time::Du
 use async_trait::async_trait;
 use dashmap::DashMap;
 
-use crate::config::{self, IcaoCode};
+use crate::{
+    config::{self, IcaoCode},
+    time::DurationNanos,
+};
 
-pub fn spawn<M: Clone + Measurement + Sync + Send + 'static>(
+/// The number of consecutive ping failures after which we will inform that this is a bad node
+const BAD_NODE_THRESHOLD: u64 = 10;
+
+pub fn spawn(
     listener: crate::net::TcpListener,
     datacenters: config::Watch<config::DatacenterMap>,
-    phoenix: Phoenix<M>,
+    phoenix: Phoenix<crate::codec::qcmp::QcmpTransceiver>,
     mut shutdown_rx: crate::signal::ShutdownRx,
 ) -> crate::Result<crate::service::Finalizer> {
     use eyre::WrapErr as _;
-    use hyper::{Response, StatusCode};
 
     phoenix.add_nodes_from_config(&datacenters);
 
@@ -73,7 +78,35 @@ pub fn spawn<M: Clone + Measurement + Sync + Send + 'static>(
                 let datacenters = datacenters.clone();
 
                 async move {
-                    let json = Arc::new(arc_swap::ArcSwap::new(Arc::new(serde_json::Map::default())));
+                    let node_latencies_response =
+                        Arc::new(arc_swap::ArcSwap::new(Arc::new(serde_json::Map::default())));
+                    let update_node_latencies = || {
+                        let nodes = phoenix.ordered_nodes_by_latency();
+
+                        let mut json = serde_json::Map::default();
+                        for (identifier, latency) in nodes {
+                            json.insert(identifier.to_string(), latency.into());
+                        }
+
+                        node_latencies_response.store(json.into());
+                    };
+                    let network_coordinates_response =
+                        Arc::new(arc_swap::ArcSwap::new(Arc::new(serde_json::Map::default())));
+                    let update_network_coordinates = || {
+                        let coordinate_map = phoenix.coordinate_map();
+                        let mut json = serde_json::Map::default();
+                        for (icao, coordinates) in coordinate_map {
+                            match serde_json::to_value(coordinates) {
+                                Ok(coords) => {
+                                    json.insert(icao.to_string(), coords);
+                                }
+                                Err(error) => {
+                                    tracing::error!(?error, "failed to serialize coordinates");
+                                }
+                            };
+                        }
+                        network_coordinates_response.store(json.into());
+                    };
 
                     tokio::spawn({
                         let phoenix = phoenix.clone();
@@ -81,68 +114,25 @@ pub fn spawn<M: Clone + Measurement + Sync + Send + 'static>(
                     });
 
                     tracing::info!(addr=%listener.local_addr(), "starting phoenix HTTP service");
-                    let (stx, mut srx) = tokio::sync::oneshot::channel::<()>();
-                    let accept_stream = listener.into_stream()?.into_inner();
-                    let handler_json = json.clone();
+                    let handler_node_latencies = node_latencies_response.clone();
+                    let handler_network_coordinates = network_coordinates_response.clone();
 
-                    let http_task: tokio::task::JoinHandle<eyre::Result<()>> =
+                    let http_task_shutdown_rx = shutdown_rx.clone();
+                    let http_task: tokio::task::JoinHandle<std::io::Result<()>> = {
                         tokio::spawn(async move {
-                            loop {
-                                tokio::select! {
-                                    res = accept_stream.accept() => {
-                                        let (conn, _) = res?;
-                                        let conn = hyper_util::rt::TokioIo::new(conn);
+                            let router =
+                                http_router(handler_network_coordinates, handler_node_latencies);
+                            let listener = listener.into_tokio()?;
 
-                                        let hj = handler_json.clone();
-                                        tokio::spawn(async move {
-                                            let svc = hyper::service::service_fn(move |_req| {
-                                                let hj = hj.clone();
-                                                async move {
-                                                    #[allow(clippy::declare_interior_mutable_const)]
-                                                    const JSON: hyper::header::HeaderValue =
-                                                        hyper::header::HeaderValue::from_static(
-                                                            "application/json",
-                                                        );
-
-                                                    crate::metrics::phoenix_requests().inc();
-                                                    tracing::trace!("serving phoenix request");
-                                                    Ok::<_, std::convert::Infallible>(
-                                                        Response::builder()
-                                                            .status(StatusCode::OK)
-                                                            .header(hyper::header::CONTENT_TYPE, JSON)
-                                                            .body(http_body_util::Full::new(
-                                                                bytes::Bytes::from(
-                                                                    serde_json::to_string(&hj).unwrap(),
-                                                                ),
-                                                            ))
-                                                            .unwrap(),
-                                                    )
-                                                }
-                                            });
-
-                                            let svc = tower::ServiceBuilder::new().service(svc);
-                                            if let Err(err) = hyper::server::conn::http1::Builder::new()
-                                                .serve_connection(conn, svc)
-                                                .await
-                                            {
-                                                let error_display = err.to_string();
-                                                crate::metrics::phoenix_server_errors(&error_display).inc();
-                                                tracing::debug!(
-                                                    "failed to respond to phoenix request: {error_display}"
-                                                );
-                                            }
-                                        });
-                                    }
-                                    _ = &mut srx => {
-                                        crate::metrics::phoenix_task_closed().set(true as _);
-                                        tracing::info!("shutting down phoenix HTTP service");
-                                        break;
-                                    }
-                                }
-                            }
-
-                            Ok(())
-                        });
+                            crate::net::http::serve(
+                                "phoenix",
+                                listener,
+                                router,
+                                crate::signal::await_shutdown(http_task_shutdown_rx),
+                            )
+                            .await
+                        })
+                    };
 
                     let res = loop {
                         use eyre::WrapErr as _;
@@ -159,47 +149,20 @@ pub fn spawn<M: Clone + Measurement + Sync + Send + 'static>(
 
                         tracing::trace!("change detected, updating phoenix");
                         phoenix.add_nodes_from_config(&datacenters);
-                        let nodes = phoenix.ordered_nodes_by_latency();
-                        let mut new_json = serde_json::Map::default();
-
-                        for (identifier, latency) in nodes {
-                            new_json.insert(identifier.to_string(), latency.into());
-                        }
-
-                        json.store(new_json.into());
+                        update_node_latencies();
+                        update_network_coordinates();
                     };
 
-                    if stx.send(()).is_err() {
-                        tracing::error!("phoenix HTTP service task has already exited");
-                    }
+                    if let Err(err) = http_task.await
+                        && let Ok(panic) = err.try_into_panic()
+                    {
+                        let message = panic
+                            .downcast_ref::<String>()
+                            .map(String::as_str)
+                            .or_else(|| panic.downcast_ref::<&str>().copied())
+                            .unwrap_or("<unknown non-string panic>");
 
-                    // This should happen quickly, abort if it takes too long
-                    let max_wait =
-                        std::time::Instant::now() + std::time::Duration::from_millis(100);
-                    let mut interval = tokio::time::interval(std::time::Duration::from_millis(1));
-
-                    loop {
-                        if http_task.is_finished() || std::time::Instant::now() > max_wait {
-                            break;
-                        }
-
-                        interval.tick().await;
-                    }
-
-                    if !http_task.is_finished() {
-                        http_task.abort();
-                    }
-
-                    if let Err(err) = http_task.await {
-                        if let Ok(panic) = err.try_into_panic() {
-                            let message = panic
-                                .downcast_ref::<String>()
-                                .map(String::as_str)
-                                .or_else(|| panic.downcast_ref::<&str>().copied())
-                                .unwrap_or("<unknown non-string panic>");
-
-                            tracing::error!(panic = message, "phoenix HTTP task panicked");
-                        }
+                        tracing::error!(panic = message, "phoenix HTTP task panicked");
                     }
 
                     res
@@ -223,7 +186,32 @@ pub fn spawn<M: Clone + Measurement + Sync + Send + 'static>(
     Ok(finalizer)
 }
 
-use crate::time::DurationNanos;
+fn http_router(
+    network_coordinates: Arc<arc_swap::ArcSwap<serde_json::Map<String, serde_json::Value>>>,
+    node_latencies: Arc<arc_swap::ArcSwap<serde_json::Map<String, serde_json::Value>>>,
+) -> axum::Router {
+    axum::Router::new()
+        .route(
+            "/",
+            axum::routing::get(|| async move {
+                tracing::trace!("serving phoenix request");
+                axum::response::Json(node_latencies.load().clone())
+            }),
+        )
+        .route(
+            "/network-coordinates",
+            axum::routing::get(|| async move {
+                tracing::trace!("serving phoenix request");
+                axum::response::Json(network_coordinates.load().clone())
+            }),
+        )
+        .layer(
+            crate::metrics::http::HttpMetricsLayer::new_with_path_buckets(
+                "phoenix".to_string(),
+                ["/", "/network-coordinates"],
+            ),
+        )
+}
 
 #[derive(Copy, Clone)]
 #[cfg_attr(test, derive(Debug))]
@@ -273,9 +261,17 @@ pub trait Measurement {
 /// distributed system to estimate their network latencies. It uses the provided
 /// `Measurement` trait to periodically measure and update each node's
 /// coordinates, allowing for latency estimation between any two nodes.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Phoenix<M> {
     inner: Arc<Inner<M>>,
+}
+
+impl<M> Clone for Phoenix<M> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -290,78 +286,10 @@ pub struct Inner<M> {
         tokio::sync::watch::Sender<()>,
         tokio::sync::watch::Receiver<()>,
     ),
+    bad_node_informer: Option<crate::config::BadNodeInformer>,
 }
 
-impl<M: Measurement + 'static> Phoenix<M> {
-    pub fn new(measurement: M) -> Self {
-        Builder::new(measurement).build()
-    }
-
-    pub fn builder(measurement: M) -> Builder<M> {
-        Builder::new(measurement)
-    }
-
-    async fn update(&self, mut current_interval: std::time::Duration) -> std::time::Duration {
-        let mut total_difference = 0;
-        let mut count = 0;
-
-        let nodes = self.select_nodes_to_probe();
-
-        for address in nodes {
-            let Some(mut node) = self.nodes.get_mut(&address) else {
-                tracing::debug!(%address, "node removed between selection and measurement");
-                continue;
-            };
-
-            match self.measurement.measure_distance(address).await {
-                Ok(distance) => {
-                    node.adjust_coordinates(distance);
-                    total_difference += distance.total_nanos();
-                    count += 1;
-                }
-                Err(error) => {
-                    node.increase_error_estimate();
-                    let consecutive_errors = node.consecutive_errors();
-                    if consecutive_errors > 3 {
-                        tracing::warn!(%address, %error, %consecutive_errors, "error measuring distance");
-                    } else {
-                        tracing::debug!(%address, %error, "error measuring distance");
-                    }
-                }
-            }
-        }
-
-        if count > 0 {
-            let avg_difference_ns = total_difference / count;
-
-            // Adjust the interval based on the avg_difference
-            if Duration::from_nanos(avg_difference_ns as u64) < self.stability_threshold {
-                current_interval += self.adjustment_duration;
-            } else {
-                current_interval -= self.adjustment_duration;
-            }
-
-            // Ensure current_interval remains within bounds
-            current_interval =
-                current_interval.clamp(self.interval_range.start, self.interval_range.end);
-        }
-
-        let _ = self.update_watcher.0.send(());
-        current_interval
-    }
-
-    /// Starts the background update task to continously sample from nodes
-    /// and update their coordinates.
-    pub async fn background_update_task(&self) {
-        let mut current_interval = self.interval_range.start;
-
-        loop {
-            current_interval = self.update(current_interval).await;
-
-            tokio::time::sleep(current_interval).await;
-        }
-    }
-
+impl<M> Phoenix<M> {
     fn update_watcher(&self) -> tokio::sync::watch::Receiver<()> {
         self.update_watcher.1.clone()
     }
@@ -402,30 +330,6 @@ impl<M: Measurement + 'static> Phoenix<M> {
             .collect()
     }
 
-    #[cfg(test)]
-    async fn measure_all_nodes(&self) {
-        for address in self
-            .nodes
-            .iter()
-            .map(|entry| *entry.key())
-            .collect::<Vec<_>>()
-        {
-            match self.nodes.get_mut(&address) {
-                Some(mut node) => {
-                    let Ok(distance) = self.measurement.measure_distance(address).await else {
-                        continue;
-                    };
-                    node.adjust_coordinates(distance);
-                }
-                _ => {
-                    self.nodes.entry(address).and_modify(|node| {
-                        node.increase_error_estimate();
-                    });
-                }
-            }
-        }
-    }
-
     pub fn get_coordinates(&self, address: &SocketAddr) -> Option<Coordinates> {
         self.nodes.get(address).and_then(|node| node.coordinates)
     }
@@ -461,6 +365,21 @@ impl<M: Measurement + 'static> Phoenix<M> {
         vec
     }
 
+    pub fn coordinate_map(&self) -> HashMap<IcaoCode, Coordinates> {
+        let mut icao_map = HashMap::new();
+
+        for entry in self.nodes.iter() {
+            let Some(coordinates) = entry.value().coordinates else {
+                continue;
+            };
+            let icao = entry.value().icao_code;
+            icao_map.insert(icao, coordinates);
+        }
+
+        icao_map
+    }
+
+    #[cfg(test)]
     pub fn add_node(&self, address: SocketAddr, icao_code: IcaoCode) {
         self.nodes.insert(address, Node::new(icao_code));
     }
@@ -485,6 +404,99 @@ impl<M: Measurement + 'static> Phoenix<M> {
     }
 }
 
+impl<M: Measurement + 'static> Phoenix<M> {
+    pub fn new(measurement: M) -> Self {
+        Builder::new(measurement).build()
+    }
+
+    pub fn builder(measurement: M) -> Builder<M> {
+        Builder::new(measurement)
+    }
+
+    async fn update(&self, mut current_interval: std::time::Duration) -> std::time::Duration {
+        let nodes = self.select_nodes_to_probe();
+
+        let (count, total_difference) = self.measure_nodes(nodes).await;
+
+        if count > 0 {
+            let avg_difference_ns = total_difference / count;
+
+            // Adjust the interval based on the avg_difference
+            if Duration::from_nanos(avg_difference_ns as u64) < self.stability_threshold {
+                current_interval += self.adjustment_duration;
+            } else {
+                current_interval -= self.adjustment_duration;
+            }
+
+            // Ensure current_interval remains within bounds
+            current_interval =
+                current_interval.clamp(self.interval_range.start, self.interval_range.end);
+        }
+
+        let _ = self.update_watcher.0.send(());
+        current_interval
+    }
+
+    /// Starts the background update task to continously sample from nodes
+    /// and update their coordinates.
+    pub async fn background_update_task(&self) {
+        let mut current_interval = self.interval_range.start;
+
+        loop {
+            current_interval = self.update(current_interval).await;
+
+            tokio::time::sleep(current_interval).await;
+        }
+    }
+
+    async fn measure_nodes(&self, nodes: Vec<SocketAddr>) -> (i64, i64) {
+        let mut total_difference = 0;
+        let mut count = 0;
+        for address in nodes {
+            let measurement = self.measurement.measure_distance(address).await;
+
+            let Some(mut node) = self.nodes.get_mut(&address) else {
+                tracing::debug!(%address, "node removed between selection and measurement");
+                continue;
+            };
+
+            match measurement {
+                Ok(distance) => {
+                    node.adjust_coordinates(distance);
+                    total_difference += distance.total_nanos();
+                    count += 1;
+                }
+                Err(error) => {
+                    node.increase_error_estimate();
+                    let consecutive_errors = node.consecutive_errors();
+                    if consecutive_errors > 3 {
+                        tracing::warn!(%address, %error, %consecutive_errors, "error measuring distance");
+                        if consecutive_errors > BAD_NODE_THRESHOLD
+                            && let Some(bad_node_informer) = self.bad_node_informer.as_ref()
+                            && let Err(error) = bad_node_informer.send(address)
+                        {
+                            tracing::warn!(%address, %error, %consecutive_errors, "failed to inform about bad node");
+                        }
+                    } else {
+                        tracing::debug!(%address, %error, "error measuring distance");
+                    }
+                }
+            }
+        }
+        (count, total_difference)
+    }
+
+    #[cfg(test)]
+    async fn measure_all_nodes(&self) {
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|entry| *entry.key())
+            .collect::<Vec<_>>();
+        let _ = self.measure_nodes(nodes).await;
+    }
+}
+
 impl<M> std::ops::Deref for Phoenix<M> {
     type Target = Inner<M>;
 
@@ -499,6 +511,7 @@ pub struct Builder<M> {
     adjustment_duration: Option<Duration>,
     interval_range: Option<Range<Duration>>,
     subset_percentage: Option<f64>,
+    bad_node_informer: Option<crate::config::BadNodeInformer>,
 }
 
 impl<M: Measurement> Builder<M> {
@@ -516,6 +529,7 @@ impl<M: Measurement> Builder<M> {
             adjustment_duration: None,
             interval_range: None,
             subset_percentage: None,
+            bad_node_informer: None,
         }
     }
 
@@ -553,6 +567,12 @@ impl<M: Measurement> Builder<M> {
         self
     }
 
+    /// Inform about bad nodes that don't respond to pings.
+    pub fn inform_bad_nodes(mut self, bad_node_informer: crate::config::BadNodeInformer) -> Self {
+        self.bad_node_informer = Some(bad_node_informer);
+        self
+    }
+
     pub fn build(self) -> Phoenix<M> {
         Phoenix {
             inner: Arc::new(Inner {
@@ -567,24 +587,28 @@ impl<M: Measurement> Builder<M> {
                 interval_range: self.interval_range.unwrap_or(Self::DEFAULT_INTERVAL_RANGE),
                 subset_percentage: self.subset_percentage.unwrap_or(Self::DEFAULT_SUBSET),
                 update_watcher: tokio::sync::watch::channel(()),
+                bad_node_informer: self.bad_node_informer,
             }),
         }
     }
 }
 
 /// The network coordinates of a node in the phoenix system.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct Coordinates {
-    x: f64,
-    y: f64,
+    incoming: f64,
+    outgoing: f64,
 }
 
 impl Coordinates {
-    const ORIGIN: Self = Self { x: 0.0, y: 0.0 };
+    const ORIGIN: Self = Self {
+        incoming: 0.0,
+        outgoing: 0.0,
+    };
 
     fn distance_to(&self, other: &Coordinates) -> f64 {
-        let x_diff = self.x - other.x;
-        let y_diff = self.y - other.y;
+        let x_diff = self.incoming - other.incoming;
+        let y_diff = self.outgoing - other.outgoing;
         #[allow(clippy::imprecise_flops)]
         (x_diff.powi(2) + y_diff.powi(2)).sqrt()
     }
@@ -638,12 +662,9 @@ impl Node {
             .observe(distance.outgoing.duration().as_secs_f64());
 
         let Some(coordinates) = &mut self.coordinates else {
-            let coordinates = Coordinates {
-                x: incoming,
-                y: outgoing,
-            };
-            crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coordinates.x);
-            crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coordinates.y);
+            let coordinates = Coordinates { incoming, outgoing };
+            crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coordinates.incoming);
+            crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coordinates.outgoing);
             crate::metrics::phoenix_distance(self.icao_code)
                 .set(Coordinates::ORIGIN.distance_to(&coordinates));
             self.coordinates = Some(coordinates);
@@ -651,13 +672,13 @@ impl Node {
         };
 
         // Exponentially weighted moving average
-        coordinates.x = self.alpha * incoming + (1.0 - self.alpha) * coordinates.x;
-        coordinates.y = self.alpha * outgoing + (1.0 - self.alpha) * coordinates.y;
+        coordinates.incoming = self.alpha * incoming + (1.0 - self.alpha) * coordinates.incoming;
+        coordinates.outgoing = self.alpha * outgoing + (1.0 - self.alpha) * coordinates.outgoing;
         self.alpha = (self.alpha + 0.05).clamp(0.2, 1.0);
         crate::metrics::phoenix_coordinates_alpha(self.icao_code).set(self.alpha);
 
-        crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coordinates.x);
-        crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coordinates.y);
+        crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coordinates.incoming);
+        crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coordinates.outgoing);
         crate::metrics::phoenix_distance(self.icao_code)
             .set(Coordinates::ORIGIN.distance_to(coordinates));
     }
@@ -834,7 +855,7 @@ mod tests {
             .get_coordinates(&"127.0.0.1:8081".parse().unwrap())
             .unwrap();
         assert!(
-            coords.x != 0.0 || coords.y != 0.0,
+            coords.incoming != 0.0 || coords.outgoing != 0.0,
             "Coordinates were not adjusted."
         );
     }
@@ -965,6 +986,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bad_nodes_reported() {
+        let ok_node = "127.0.0.1:8080".parse().unwrap();
+        let bad_node = "127.0.0.1:8081".parse().unwrap();
+        let latencies =
+            HashMap::from([(ok_node, (100, 100).into()), (bad_node, (200, 200).into())]);
+        let failed_addresses = Arc::new(Mutex::new(HashSet::from([bad_node])));
+        let measurement = FailedAddressesMock {
+            latencies,
+            failed_addresses,
+        };
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let phoenix = Phoenix::builder(measurement).inform_bad_nodes(tx).build();
+
+        phoenix.add_node(ok_node, abcd());
+        phoenix.add_node(bad_node, efgh());
+
+        for _ in 0..(BAD_NODE_THRESHOLD) {
+            phoenix.measure_all_nodes().await;
+        }
+
+        // Check that we haven't informed yet
+        assert!(rx.try_recv().is_err());
+
+        // But one more measurement brings it over the threshold
+        phoenix.measure_all_nodes().await;
+
+        let result = rx.try_recv();
+        assert!(result.is_ok());
+        let node = result.unwrap();
+        assert_eq!(node, bad_node);
+    }
+
+    #[tokio::test]
     #[cfg_attr(target_os = "macos", ignore)]
     async fn http_server() {
         let qcmp_listener = crate::net::TcpListener::bind(None).expect("failed to bind listener");
@@ -1022,8 +1077,8 @@ mod tests {
             let map = serde_json::from_slice::<serde_json::Map<_, _>>(&resp).unwrap();
 
             let coords = Coordinates {
-                x: std::time::Duration::from_millis(50).as_nanos() as f64 / 2.0,
-                y: std::time::Duration::from_millis(1).as_nanos() as f64 / 2.0,
+                incoming: std::time::Duration::from_millis(50).as_nanos() as f64 / 2.0,
+                outgoing: std::time::Duration::from_millis(1).as_nanos() as f64 / 2.0,
             };
 
             let min = Coordinates::ORIGIN.distance_to(&coords);
@@ -1034,6 +1089,73 @@ mod tests {
                 distance > min && distance < max,
                 "expected distance {distance} to be > {min} and < {max}",
             );
+        }
+
+        let _ = tx.send(());
+        end();
+    }
+
+    #[tokio::test]
+    #[cfg_attr(target_os = "macos", ignore)]
+    async fn get_network_coordinates() {
+        let qcmp_listener = crate::net::TcpListener::bind(None).expect("failed to bind listener");
+        let qcmp_port = qcmp_listener.port();
+
+        let icao_code = "ABCD".parse().unwrap();
+
+        let datacenters =
+            crate::config::Watch::<crate::config::DatacenterMap>::new(Default::default());
+
+        datacenters.write().insert(
+            std::net::Ipv4Addr::LOCALHOST.into(),
+            crate::config::Datacenter {
+                qcmp_port,
+                icao_code,
+            },
+        );
+
+        let (tx, rx) = crate::signal::channel();
+        let socket = raw_socket_with_reuse(qcmp_port).unwrap();
+        let pc = crate::codec::qcmp::port_channel();
+        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let measurement =
+            crate::codec::qcmp::QcmpTransceiver::with_artificial_delay(Duration::from_millis(50))
+                .unwrap();
+
+        let phoenix = Phoenix::builder(measurement)
+            .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
+            .build();
+
+        let end = super::spawn(qcmp_listener, datacenters, phoenix, rx).unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .build_http::<http_body_util::Empty<bytes::Bytes>>();
+        use http_body_util::BodyExt;
+        for _ in 0..10 {
+            let resp = tokio::time::timeout(
+                Duration::from_millis(100),
+                client
+                    .get(
+                        format!("http://localhost:{qcmp_port}/network-coordinates")
+                            .parse()
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap()
+                    .into_body()
+                    .collect(),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .to_bytes();
+
+            let map = serde_json::from_slice::<HashMap<IcaoCode, Coordinates>>(&resp).unwrap();
+            assert!(map.contains_key(&icao_code));
         }
 
         let _ = tx.send(());

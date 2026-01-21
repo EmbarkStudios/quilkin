@@ -55,17 +55,17 @@ macro_rules! temp_file {
 
 pub use tracing::{Level, subscriber::DefaultGuard};
 
-pub fn init_logging(level: Level, test_pkg: &'static str) -> DefaultGuard {
+pub fn init_logging(level: Level, test_pkg: &'static str) {
     use tracing_subscriber::{Layer as _, layer::SubscriberExt as _};
     let layer = tracing_subscriber::fmt::layer()
         .with_test_writer()
         .with_filter(tracing_subscriber::filter::LevelFilter::from_level(level))
         .with_filter(tracing_subscriber::EnvFilter::new(format!(
-            "{test_pkg}=trace,qt=trace,quilkin=trace,xds=trace"
+            "{test_pkg}=trace,qt=trace,quilkin=trace,xds=trace,corrosion=trace"
         )));
     let sub = tracing_subscriber::Registry::default().with(layer);
     let disp = tracing::dispatcher::Dispatch::new(sub);
-    tracing::dispatcher::set_default(&disp)
+    tracing::dispatcher::set_global_default(disp).unwrap();
 }
 
 #[macro_export]
@@ -312,7 +312,7 @@ impl Pail {
 
 impl Pail {
     pub fn construct(spc: SandboxPailConfig, pails: &Pails, td: &std::path::Path) -> Self {
-        let pail = match spc.config {
+        match spc.config {
             PailConfig::Server(sspc) => {
                 let (packet_tx, packet_rx) = mpsc::channel::<String>(10);
                 let socket = quilkin::net::DualStackEpollSocket::new(0)
@@ -368,6 +368,7 @@ impl Pail {
                 let config_path = path.clone();
 
                 let (shutdown, shutdown_rx) = quilkin::signal::channel();
+                let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
 
                 let providers = quilkin::Providers::default().fs().fs_path(path);
                 let svc = quilkin::Service::default()
@@ -376,12 +377,13 @@ impl Pail {
                     .mds()
                     .mds_port(mds_port);
 
-                let config = Arc::new(crate::Config::new(
+                let config = crate::Config::new_rc(
                     Some("test-relay".into()),
                     Default::default(),
                     &providers,
                     &svc,
-                ));
+                    pail_token,
+                );
 
                 *config.dyn_cfg.id.lock() = spc.name.into();
                 let healthy = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -452,6 +454,7 @@ impl Pail {
                     .collect::<Vec<_>>();
 
                 let (shutdown, shutdown_rx) = quilkin::signal::channel();
+                let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
 
                 let port = quilkin::net::socket_port(
                     &quilkin::net::raw_socket_with_reuse(0).expect("failed to bind qcmp socket"),
@@ -464,12 +467,13 @@ impl Pail {
                     .fs_path(path)
                     .grpc_push_endpoints(relay_servers);
 
-                let config = Arc::new(crate::Config::new(
+                let config = crate::Config::new_rc(
                     Some("test-agent".into()),
                     apc.icao_code,
                     &providers,
                     &svc,
-                ));
+                    pail_token,
+                );
 
                 *config.dyn_cfg.id.lock() = spc.name.into();
                 let acfg = config.clone();
@@ -539,12 +543,16 @@ impl Pail {
                     .phoenix_port(phoenix_port)
                     .termination_timeout(None);
 
-                let config = Arc::new(crate::Config::new(
+                let (shutdown, shutdown_rx) = quilkin::signal::channel();
+                let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
+
+                let config = crate::Config::new_rc(
                     Some("test-proxy".into()),
                     Default::default(),
                     &Default::default(),
                     &svc,
-                ));
+                    pail_token,
+                );
 
                 if let Some(cfg) = ppc.config {
                     if !cfg.clusters.is_empty() {
@@ -581,7 +589,6 @@ impl Pail {
                 *config.dyn_cfg.id.lock() = spc.name.into();
 
                 let (rttx, rtrx) = tokio::sync::mpsc::unbounded_channel();
-                let (shutdown, shutdown_rx) = quilkin::signal::channel();
 
                 let healthy = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 let provider_task = providers.spawn_providers(
@@ -610,8 +617,7 @@ impl Pail {
                     delta_applies: Some(rtrx),
                 })
             }
-        };
-        pail
+        }
     }
 }
 

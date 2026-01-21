@@ -33,7 +33,7 @@ async fn metrics_server() {
         .port();
 
     // create server configuration
-    let server_config = std::sync::Arc::new(TestHelper::new_config());
+    let server_config = TestHelper::new_config();
     server_config
         .dyn_cfg
         .clusters()
@@ -48,7 +48,7 @@ async fn metrics_server() {
         .await;
 
     // create a local client
-    let client_config = std::sync::Arc::new(TestHelper::new_config());
+    let client_config = TestHelper::new_config();
     client_config
         .dyn_cfg
         .clusters()

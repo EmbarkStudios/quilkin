@@ -24,14 +24,11 @@ fn embed_commit_hash() -> IoResult<()> {
         .map_err(|e| Error::new(e.kind(), "failed to run `git`"))?;
 
     if !output.status.success() {
-        return Err(Error::new(
-            ErrorKind::Other,
-            format!(
-                "`git` failed with status {}: {}",
-                output.status,
-                std::str::from_utf8(&output.stderr).unwrap_or("stderr output was not utf-8")
-            ),
-        ));
+        return Err(Error::other(format!(
+            "`git` failed with status {}: {}",
+            output.status,
+            std::str::from_utf8(&output.stderr).unwrap_or("stderr output was not utf-8")
+        )));
     }
 
     let commit = String::from_utf8(output.stdout)

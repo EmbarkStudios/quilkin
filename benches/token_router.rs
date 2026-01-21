@@ -16,7 +16,7 @@ fn token_router(b: Bencher<'_, '_>, token_kind: &str) {
     // Calculate the amount of bytes for all the tokens
     for eps in cm.iter() {
         for ep in &eps.value().endpoints {
-            for tok in &ep.metadata.known.tokens {
+            for tok in ep.metadata.known.tokens.iter() {
                 tokens.push(tok.clone());
             }
         }

@@ -292,14 +292,15 @@ impl TestHelper {
         addr.into()
     }
 
-    pub fn new_config() -> Config {
+    pub fn new_config() -> Arc<Config> {
         let providers = crate::Providers::default();
         let service = crate::Service::builder().udp().qcmp();
-        crate::Config::new(
+        crate::Config::new_rc(
             Some("test-server".into()),
             Default::default(),
             &providers,
             &service,
+            tokio_util::sync::CancellationToken::new(),
         )
     }
 
@@ -314,7 +315,13 @@ impl TestHelper {
         let ready = <_>::default();
 
         if let Some(address) = with_admin {
-            crate::components::admin::server(config.clone(), ready, shutdown_tx.clone(), address);
+            crate::components::admin::serve(
+                config.clone(),
+                ready,
+                shutdown_tx.clone(),
+                shutdown_rx.clone(),
+                address,
+            );
         }
 
         let server = server.unwrap_or_else(|| {

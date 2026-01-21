@@ -24,7 +24,7 @@ mod tests {
     use tokio::time::timeout;
 
     #[tokio::test]
-    /// This test exists to test that we can connect to an Agones GameServer directly.
+    /// This test exists to test that we can connect to an Agones `GameServer` directly.
     /// Useful in case one is not sure if an issue is Quilkin or general connectivity issues, such
     /// as a firewall settings, or an issue with Agones itself.
     async fn gameserver_no_sidecar() {
@@ -57,7 +57,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// Testing Quilkin running as a sidecar next to a GameServer
+    /// Testing Quilkin running as a sidecar next to a `GameServer`
     async fn gameserver_sidecar() {
         let client = Client::new().await;
         let config_maps: Api<ConfigMap> = client.namespaced_api();

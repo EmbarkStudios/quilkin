@@ -74,11 +74,15 @@ impl LeaderLock {
     }
 }
 
+pub type BadNodeInformer = tokio::sync::mpsc::UnboundedSender<std::net::SocketAddr>;
+
 base64_serde_type!(pub Base64Standard, base64::engine::general_purpose::STANDARD);
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 pub struct Config {
     pub dyn_cfg: DynamicConfig,
+    bad_node_informer: Option<BadNodeInformer>,
+    cancellation_token: Option<tokio_util::sync::CancellationToken>,
 }
 
 #[cfg(test)]
@@ -119,7 +123,10 @@ impl DynamicConfig {
     }
 
     pub(crate) fn init_leader_lock(&self) -> LeaderLock {
-        self.typemap.get::<LeaderLock>().unwrap().clone()
+        self.typemap
+            .get::<LeaderLock>()
+            .expect("LeaderLock not in typemap")
+            .clone()
     }
 
     pub(crate) fn leader_lock(&self) -> Option<&LeaderLock> {
@@ -331,6 +338,13 @@ impl quilkin_xds::config::Configuration for Config {
                 dc.remove(ip);
             });
         }
+        if let Some(cl) = self.dyn_cfg.clusters() {
+            cl.modify(|cl| {
+                // Make sure we remove this agent as a contributor to any locality that it has
+                // contributed endpoints for
+                cl.remove_contributor(Some(ip));
+            });
+        }
     }
 }
 
@@ -356,7 +370,18 @@ fn resolve_id(id: Option<String>) -> String {
         .unwrap_or_else(uuid)
 }
 
+impl Drop for Config {
+    fn drop(&mut self) {
+        if let Some(token) = &self.cancellation_token {
+            token.cancel();
+        }
+    }
+}
+
 impl Config {
+    /// Creates and initializes a new Config
+    ///
+    /// This constructor is mainly intended for tests
     pub fn new(
         id: Option<String>,
         icao_code: IcaoCode,
@@ -370,15 +395,85 @@ impl Config {
                 icao_code: NotifyingIcaoCode::new(icao_code),
                 typemap: default_typemap(),
             },
+            bad_node_informer: None,
+            cancellation_token: None,
         };
+        insert_default::<crate::config::LeaderLock>(&mut config.dyn_cfg.typemap);
         providers.init_config(&mut config);
         service.init_config(&mut config);
 
         config
     }
 
+    /// Creates and initializes a new Arc<Config>
+    ///
+    /// Spawns a tokio task as a side effect that will be stopped when the cancellation token is
+    /// cancelled. The token _will_ be cancelled when Config is dropped, so make sure to pass in a
+    /// child token if the token is intended to live longer than the Config.
+    pub fn new_rc(
+        id: Option<String>,
+        icao_code: IcaoCode,
+        providers: &crate::Providers,
+        service: &crate::Service,
+        cancellation_token: tokio_util::sync::CancellationToken,
+    ) -> Arc<Self> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<std::net::SocketAddr>();
+
+        let mut config = Self::new(id, icao_code, providers, service);
+        config.cancellation_token = Some(cancellation_token);
+        config.bad_node_informer = Some(tx);
+
+        let config = Arc::new(config);
+        config
+            .spawn_janitor(rx)
+            .expect("spawn_janitor() from new_rc() should not fail");
+
+        config
+    }
+
+    /// Spawns a janitor task to help out with cleaning stale Datacenter entries from the Config
+    fn spawn_janitor(
+        self: &Arc<Config>,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<std::net::SocketAddr>,
+    ) -> eyre::Result<()> {
+        let cancellation_token = self
+            .cancellation_token
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("cancellation token not set"))?
+            .clone();
+
+        // Ensure that we don't keep an owning reference to Arc<Config> so that Drop can occurr
+        let janitor_config_ref = Arc::downgrade(self);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = cancellation_token.cancelled() => {
+                        break;
+                    }
+                    node = rx.recv() => {
+                        if let Some(node) = node {
+                            let ip = node.ip();
+                            if let Some(config) = janitor_config_ref.upgrade() {
+                                if let Some(datacenters) = config.dyn_cfg.datacenters() {
+                                    datacenters.modify(|wg| {
+                                        tracing::warn!(%ip, "removing datacenter from local state");
+                                        wg.remove(ip);
+                                    });
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            tracing::trace!("Stopping janitor task");
+        });
+        Ok(())
+    }
+
     pub fn read_config(
-        &mut self,
+        self: &Arc<Self>,
         config_path: &std::path::Path,
         locality: Option<crate::net::endpoint::Locality>,
     ) -> Result<(), eyre::Error> {
@@ -394,7 +489,6 @@ impl Config {
                 Ok(file) => break file,
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                     tracing::debug!(path = %path.display(), "config path not found");
-                    continue;
                 }
                 Err(err) => {
                     tracing::error!(path = %path.display(), error = ?err, "failed to read path");
@@ -407,6 +501,10 @@ impl Config {
         self.update_from_json(json, locality)?;
 
         Ok(())
+    }
+
+    pub fn bad_node_informer(&self) -> Option<BadNodeInformer> {
+        self.bad_node_informer.clone()
     }
 
     /// Given a list of subscriptions and the current state of the calling client,
@@ -450,33 +548,56 @@ impl Config {
                     });
                 }
                 ResourceType::Datacenter => {
+                    // The Datacenter xDS resource has two distinct propagation
+                    // scenarios.
+                    //
+                    // Normally, the xDS resource `name` will be set to the ip
+                    // address of the datacenter. However, when quilkin wants
+                    // to propagate 'self' as a Datacenter, it doesn't have
+                    // access to its own external IP address. Then the
+                    // QUILKIN_SERVICE_ID (defaults to hostname) is used as the
+                    // `name` instead.
+                    //
+                    // The `name` is used as the key in the version map on the
+                    // xDS client, so as long as they are unique this should be
+                    // ok.
+
+                    #[inline]
+                    fn resource_version(icao_code: &str, qcmp_port: u16) -> String {
+                        format!("{icao_code}-{qcmp_port}")
+                    }
+
                     if let Some(qport) = self.dyn_cfg.qcmp_port() {
-                        let name = self.dyn_cfg.icao_code.load().to_string();
+                        let id = self.dyn_cfg.id.lock().to_string();
+                        let icao_code = self.dyn_cfg.icao_code.load().to_string();
                         let qcmp_port = qport.load();
-                        let port_s = qcmp_port.to_string();
+                        let version = resource_version(icao_code.as_str(), qcmp_port);
 
-                        let resource =
-                            xds::Resource::Datacenter(crate::net::cluster::proto::Datacenter {
-                                qcmp_port: qcmp_port as _,
-                                icao_code: name.clone(),
-                                host: String::new(),
+                        if !client_state.version_matches(&id, &version) {
+                            let resource =
+                                xds::Resource::Datacenter(crate::net::cluster::proto::Datacenter {
+                                    qcmp_port: qcmp_port as _,
+                                    icao_code: icao_code.clone(),
+                                    host: String::new(),
+                                });
+
+                            resources.push(XdsResource {
+                                name: id,
+                                version,
+                                resource: Some(resource.try_encode()?),
+                                aliases: Vec::new(),
+                                ttl: None,
+                                cache_control: None,
                             });
-
-                        resources.push(XdsResource {
-                            name,
-                            version: port_s,
-                            resource: Some(resource.try_encode()?),
-                            aliases: Vec::new(),
-                            ttl: None,
-                            cache_control: None,
-                        });
+                        }
                     }
 
                     if let Some(datacenters) = self.dyn_cfg.datacenters() {
                         for entry in datacenters.read().iter() {
                             let host = entry.key().to_string();
                             let qcmp_port = entry.qcmp_port;
-                            let version = format!("{}-{qcmp_port}", entry.icao_code);
+                            let version =
+                                resource_version(entry.icao_code.to_string().as_str(), qcmp_port);
 
                             if client_state.version_matches(&host, &version) {
                                 continue;
@@ -486,12 +607,12 @@ impl Config {
                                 crate::net::cluster::proto::Datacenter {
                                     qcmp_port: qcmp_port as _,
                                     icao_code: entry.icao_code.to_string(),
-                                    host,
+                                    host: host.clone(),
                                 },
                             );
 
                             resources.push(XdsResource {
-                                name: entry.icao_code.to_string(),
+                                name: host,
                                 version,
                                 resource: Some(resource.try_encode()?),
                                 aliases: Vec::new(),
@@ -781,16 +902,11 @@ impl Config {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, Serialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, Serialize, JsonSchema, PartialEq, Default)]
 pub enum Version {
     #[serde(rename = "v1alpha1")]
+    #[default]
     V1Alpha1,
-}
-
-impl Default for Version {
-    fn default() -> Self {
-        Self::V1Alpha1
-    }
 }
 
 pub(crate) fn default_typemap() -> ConfigMap {

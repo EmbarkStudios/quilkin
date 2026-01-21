@@ -6,7 +6,8 @@ use crate::{components::proxy::SessionPool, config::Config, signal::ShutdownHand
 #[derive(Debug, clap::Parser)]
 #[command(next_help_heading = "Service Options")]
 pub struct Service {
-    /// The identifier for an instance.
+    /// The identifier for an instance. Defaults to $HOSTNAME if unset, or a UUID4 if $HOSTNAME is
+    /// empty.
     #[arg(long = "service.id", env = "QUILKIN_SERVICE_ID")]
     pub id: Option<String>,
     /// Whether to serve mDS requests.
@@ -356,11 +357,19 @@ impl Service {
         };
 
         tracing::info!(port=%self.qcmp_port, "starting phoenix service");
-        let phoenix = crate::net::TcpListener::bind(Some(self.phoenix_port))?;
+        let phoenix = {
+            let mut builder =
+                crate::net::phoenix::Phoenix::builder(crate::codec::qcmp::QcmpTransceiver::new()?);
+            if let Some(informer) = config.bad_node_informer() {
+                builder = builder.inform_bad_nodes(informer);
+            }
+            builder.build()
+        };
+        let phoenix_listener = crate::net::TcpListener::bind(Some(self.phoenix_port))?;
         let finalizer = crate::net::phoenix::spawn(
-            phoenix,
+            phoenix_listener,
             datacenters.clone(),
-            crate::net::phoenix::Phoenix::new(crate::codec::qcmp::QcmpTransceiver::new()?),
+            phoenix,
             shutdown.shutdown_rx(),
         )?;
 
@@ -369,9 +378,7 @@ impl Service {
         tokio::spawn(async move {
             let _ = srx.changed().await;
 
-            tokio::task::spawn_blocking(|| {
-                finalizer();
-            });
+            finalizer();
 
             drop(finished.send(Ok(())));
         });
@@ -609,14 +616,14 @@ impl Service {
             loop {
                 sessions_check.tick().await;
                 let elapsed = start.elapsed();
-                if let Some(tt) = &termination_timeout {
-                    if elapsed > **tt {
-                        tracing::info!(
-                            ?elapsed,
-                            "termination timeout was reached before all sessions expired"
-                        );
-                        break;
-                    }
+                if let Some(tt) = &termination_timeout
+                    && elapsed > **tt
+                {
+                    tracing::info!(
+                        ?elapsed,
+                        "termination timeout was reached before all sessions expired"
+                    );
+                    break;
                 }
 
                 if sessions.sessions().is_empty() {

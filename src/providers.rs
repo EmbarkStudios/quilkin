@@ -58,9 +58,7 @@ pub struct Providers {
     )]
     k8s_namespace: String,
 
-    /// When enabled, Quilkin will watch for `agones.dev/v1/GameServer` CRD
-    /// objects in the environment and allow them to be available for routing
-    /// and metrics through Quilkin.
+    /// Enable leader election via k8s lease
     #[arg(
         long = "provider.k8s.leader-election",
         env = "QUILKIN_PROVIDERS_K8S_LEADER_ELECTION",
@@ -68,8 +66,21 @@ pub struct Providers {
     )]
     k8s_leader_election: bool,
 
-    #[arg(env = "HOSTNAME", default_value_t = uuid::Uuid::new_v4().to_string())]
-    k8s_leader_id: String,
+    /// Override the ID used for k8s leader election (defaults to service.id)
+    #[arg(
+        long = "provider.k8s.leader-election.id",
+        env = "QUILKIN_PROVIDERS_K8S_LEADER_ELECTION_ID",
+        requires("k8s_leader_election")
+    )]
+    k8s_leader_id: Option<String>,
+
+    /// The name of the k8s Lease resource used for leader election
+    #[arg(
+        long = "provider.k8s.leader-election.lease-name",
+        env = "QUILKIN_PROVIDERS_K8S_LEADER_ELECTION_LEASE_NAME",
+        default_value_t = String::from("quilkin"),
+    )]
+    k8s_leader_lease_name: String,
 
     #[arg(
         long = "provider.k8s.agones",
@@ -91,6 +102,7 @@ pub struct Providers {
         long = "provider.k8s.agones.namespaces",
         env = "QUILKIN_PROVIDERS_K8S_AGONES_NAMESPACES",
         default_values_t = [String::from("default")],
+        value_delimiter = ',',
         requires("agones_enabled"),
         conflicts_with("agones_namespace"),
     )]
@@ -99,14 +111,14 @@ pub struct Providers {
     /// If specified, filters the available gameserver addresses to the one that
     /// matches the specified type
     #[arg(
-        long = "provider.k8s.agones.address_type",
+        long = "provider.k8s.agones.address-type",
         env = "QUILKIN_PROVIDERS_K8S_AGONES_ADDRESS_TYPE",
         requires("agones_enabled")
     )]
     pub address_type: Option<String>,
     /// If specified, additionally filters the gameserver address by its ip kind
     #[arg(
-        long = "provider.k8s.agones.ip_kind",
+        long = "provider.k8s.agones.ip-kind",
         env = "QUILKIN_PROVIDERS_K8S_AGONES_IP_KIND",
         requires("address_type"),
         value_enum
@@ -131,7 +143,8 @@ pub struct Providers {
     /// One or more `quilkin relay` endpoints to push configuration changes to.
     #[clap(
         long = "provider.mds.endpoints",
-        env = "QUILKIN_PROVIDERS_MDS_ENDPOINTS"
+        env = "QUILKIN_PROVIDERS_MDS_ENDPOINTS",
+        value_delimiter = ','
     )]
     relay: Vec<tonic::transport::Endpoint>,
     /// The remote URL or local file path to retrieve the Maxmind database.
@@ -143,14 +156,15 @@ pub struct Providers {
     /// One or more socket addresses to forward packets to.
     #[clap(
         long = "provider.static.endpoints",
-        env = "QUILKIN_PROVIDERS_STATIC_ENDPOINTS"
+        env = "QUILKIN_PROVIDERS_STATIC_ENDPOINTS",
+        value_delimiter = ','
     )]
     endpoints: Vec<SocketAddr>,
     /// Assigns dynamic tokens to each address in the `--to` argument
     ///
     /// Format is `<number of unique tokens>:<length of token suffix for each packet>`
     #[clap(
-        long = "provider.static.endpoint_tokens",
+        long = "provider.static.endpoint-tokens",
         env = "QUILKIN_PROVIDERS_STATIC_ENDPOINT_TOKENS",
         requires("endpoints")
     )]
@@ -158,7 +172,8 @@ pub struct Providers {
     /// One or more xDS service endpoints to listen for config changes.
     #[clap(
         long = "provider.xds.endpoints",
-        env = "QUILKIN_PROVIDERS_XDS_ENDPOINTS"
+        env = "QUILKIN_PROVIDERS_XDS_ENDPOINTS",
+        value_delimiter = ','
     )]
     xds_endpoints: Vec<tonic::transport::Endpoint>,
 }
@@ -315,15 +330,15 @@ impl Providers {
                 .iter()
                 .enumerate()
                 .map(|(ind, sa)| {
-                    let mut tokens = std::collections::BTreeSet::new();
                     let start = ind as u64 * count;
-                    for i in start..(start + count) {
-                        tokens.insert(i.to_le_bytes()[..tt.length].to_vec());
-                    }
 
                     crate::net::endpoint::Endpoint::with_metadata(
                         (*sa).into(),
-                        crate::net::endpoint::Metadata { tokens },
+                        crate::net::endpoint::Metadata {
+                            tokens: (start..(start + count))
+                                .map(|i| i.to_le_bytes()[..tt.length].to_vec())
+                                .collect(),
+                        },
                     )
                 })
                 .collect()
@@ -367,11 +382,8 @@ impl Providers {
         let agones_enabled = self.agones_enabled;
         let k8s_enabled = self.k8s_enabled;
         let k8s_leader_election = self.k8s_leader_election;
-        let k8s_leader_id = self
-            .k8s_leader_id
-            .is_empty()
-            .then(|| uuid::Uuid::new_v4().to_string())
-            .unwrap_or_else(|| self.k8s_leader_id.clone());
+        let k8s_leader_id = self.k8s_leader_id.clone().unwrap_or_else(|| config.id());
+        let k8s_leader_lease_name = self.k8s_leader_lease_name.clone();
         let k8s_namespace = self.k8s_namespace.clone();
 
         let selector = self
@@ -396,6 +408,7 @@ impl Providers {
                 let agones_namespaces = agones_namespaces.clone();
                 let k8s_namespace: String = k8s_namespace.clone();
                 let k8s_leader_id: String = k8s_leader_id.clone();
+                let k8s_leader_lease_name: String = k8s_leader_lease_name.clone();
                 let selector = selector.clone();
                 let locality = locality.clone();
                 let health_check = health_check.clone();
@@ -426,6 +439,7 @@ impl Providers {
                         either::Left(tokio::spawn(k8s::update_leader_lock(
                             client.clone(),
                             k8s_namespace,
+                            k8s_leader_lease_name,
                             k8s_leader_id,
                             ll,
                         )))
@@ -506,21 +520,25 @@ impl Providers {
         &self,
         config: Arc<config::Config>,
         health_check: Arc<AtomicBool>,
+        locality: Option<crate::net::endpoint::Locality>,
         shutdown: tokio::sync::watch::Receiver<()>,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let config = config.clone();
         let endpoints = self.relay.clone();
+        let control_plane_id = locality.map_or_else(|| config.id(), |l| l.region().to_string());
         Self::task("mds_provider".into(), health_check.clone(), move || {
             let config = config.clone();
             let endpoints = endpoints.clone();
+            let control_plane_id = control_plane_id.clone();
             let health_check = health_check.clone();
             let shutdown = shutdown.clone();
             async move {
-                let stream = crate::net::xds::client::MdsClient::connect(config.id(), endpoints)
-                    .await?
-                    .delta_stream(config.clone(), health_check.clone(), shutdown)
-                    .await
-                    .map_err(|_err| eyre::eyre!("failed to acquire delta stream"))?;
+                let stream =
+                    crate::net::xds::client::MdsClient::connect(control_plane_id, endpoints)
+                        .await?
+                        .delta_stream(config.clone(), health_check.clone(), shutdown)
+                        .await
+                        .map_err(|_err| eyre::eyre!("failed to acquire delta stream"))?;
 
                 health_check.store(true, Ordering::SeqCst);
 
@@ -642,6 +660,7 @@ impl Providers {
             providers.spawn(self.spawn_mds_provider(
                 config.clone(),
                 health_check.clone(),
+                locality.clone(),
                 shutdown,
             ));
         }

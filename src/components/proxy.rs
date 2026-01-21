@@ -175,11 +175,10 @@ impl Proxy {
                         .iter()
                         .enumerate()
                         .map(|(ind, sa)| {
-                            let mut tokens = std::collections::BTreeSet::new();
                             let start = ind as u64 * count;
-                            for i in start..(start + count) {
-                                tokens.insert(i.to_le_bytes()[..tt.length].to_vec());
-                            }
+                            let tokens = (start..(start + count))
+                                .map(|i| i.to_le_bytes()[..tt.length].to_vec())
+                                .collect();
 
                             crate::net::endpoint::Endpoint::with_metadata(
                                 (*sa).into(),

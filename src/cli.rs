@@ -63,7 +63,7 @@ pub struct LocalityCli {
     /// The `sub_zone` in the `zone` in the `region` to set in the cluster map
     /// for any provider endpoints discovered.
     #[clap(
-        long = "locality.region.sub_zone",
+        long = "locality.region.sub-zone",
         requires("zone"),
         env = "QUILKIN_LOCALITY_SUB_ZONE"
     )]
@@ -257,23 +257,29 @@ impl Cli {
         tracing::debug!(cli = ?self, "config parameters");
 
         let locality = self.locality.locality();
+        let shutdown_handler = crate::signal::spawn_handler();
+        let drive_token = crate::signal::cancellation_token(shutdown_handler.shutdown_rx());
 
-        let mut config = crate::Config::new(
+        let config = crate::Config::new_rc(
             self.service.id.clone(),
             self.locality.icao_code,
             &self.providers,
             &self.service,
+            drive_token.child_token(),
         );
         config.read_config(&self.config, locality.clone())?;
-        let config = Arc::new(config);
+
+        crate::metrics::with_mut_registry(|mut registry| {
+            crate::metrics::register_metrics(&mut registry, config.id());
+        });
 
         let ready = Arc::<std::sync::atomic::AtomicBool>::default();
-        let shutdown_handler = crate::signal::spawn_handler();
         if self.admin.enabled {
-            crate::components::admin::server(
+            crate::components::admin::serve(
                 config.clone(),
                 ready.clone(),
                 shutdown_handler.shutdown_tx(),
+                shutdown_handler.shutdown_rx(),
                 self.admin.address,
             );
         }

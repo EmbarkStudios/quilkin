@@ -23,12 +23,15 @@ use prometheus::{
 
 pub use prometheus::Result;
 
+pub mod http;
+
 /// "event" is used as a label for Metrics that can apply to both Filter
 /// `read` and `write` executions.
 pub const DIRECTION_LABEL: &str = "event";
 
 pub(crate) const READ: Direction = Direction::Read;
 pub(crate) const WRITE: Direction = Direction::Write;
+#[allow(dead_code)]
 pub(crate) const ASN_LABEL: &str = "asn";
 
 /// Label value for [`DIRECTION_LABEL`] for `read` events
@@ -38,10 +41,72 @@ pub const WRITE_DIRECTION_LABEL: &str = "write";
 
 /// Returns the [`Registry`] containing all the metrics registered in Quilkin.
 pub fn registry() -> &'static Registry {
-    static REGISTRY: Lazy<Registry> =
-        Lazy::new(|| Registry::new_custom(Some("quilkin".into()), None).unwrap());
+    static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
     &REGISTRY
+}
+
+fn registry2() -> &'static std::sync::RwLock<prometheus_client::registry::Registry> {
+    static PROMETHEUS_CLIENT_REGISTRY: Lazy<
+        std::sync::RwLock<prometheus_client::registry::Registry>,
+    > = Lazy::new(|| std::sync::RwLock::new(<_>::default()));
+
+    &PROMETHEUS_CLIENT_REGISTRY
+}
+
+pub fn with_registry<F>(func: F)
+where
+    F: FnOnce(std::sync::RwLockReadGuard<'_, prometheus_client::registry::Registry>),
+{
+    let guard = match registry2().read() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("recovered from poisoned rwlock");
+            poisoned.into_inner()
+        }
+    };
+    func(guard);
+}
+
+pub fn with_mut_registry<F>(func: F)
+where
+    F: FnOnce(std::sync::RwLockWriteGuard<'_, prometheus_client::registry::Registry>),
+{
+    let guard = match registry2().write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("recovered from poisoned rwlock");
+            poisoned.into_inner()
+        }
+    };
+    func(guard);
+}
+
+static INFO_APP_ID: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
+
+pub fn register_metrics(registry: &mut prometheus_client::registry::Registry, id: String) {
+    use prometheus_client::metrics::{family::Family, gauge::ConstGauge};
+    INFO_APP_ID.set(id).expect("APP_ID has already been set");
+
+    // TODO this should be a prometheus_client::metrics::info::Info but that metric type is new
+    // and not guaranteed to be widely supported by scrapers
+    let quilkin_info_family =
+        Family::<Vec<(&str, &str)>, ConstGauge>::new_with_constructor(|| ConstGauge::new(1));
+    registry.register(
+        "quilkin_info",
+        "Static information about the quilkin instance",
+        quilkin_info_family.clone(),
+    );
+    drop(quilkin_info_family.get_or_create(&vec![
+        ("id", INFO_APP_ID.get().unwrap().as_str()),
+        ("version", clap::crate_version!()),
+        (
+            "commit",
+            crate::net::endpoint::metadata::build::GIT_COMMIT_HASH.unwrap_or("none"),
+        ),
+    ]));
+
+    http::register_metrics(registry);
 }
 
 /// Start the histogram bucket at a quarter of a millisecond, as number below a millisecond are
@@ -60,7 +125,7 @@ pub(crate) fn leader_election(is_leader: bool) {
     static METRIC: Lazy<IntGauge> = Lazy::new(|| {
         prometheus::register_int_gauge_with_registry! {
             prometheus::opts! {
-                "provider_leader_election",
+                "quilkin_provider_leader_election",
                 "Whether the current instance is considered the leader of the replicas.",
             },
             registry(),
@@ -78,7 +143,7 @@ pub(crate) mod k8s {
         static METRIC: Lazy<IntGauge> = Lazy::new(|| {
             prometheus::register_int_gauge_with_registry! {
                 prometheus::opts! {
-                    "provider_k8s_active",
+                    "quilkin_provider_k8s_active",
                     "Whether the kubernetes configuration provider is active or not (either 1 or 0).",
                 },
                 registry(),
@@ -93,7 +158,7 @@ pub(crate) mod k8s {
         static METRIC: Lazy<IntGauge> = Lazy::new(|| {
             prometheus::register_int_gauge_with_registry! {
                 prometheus::opts! {
-                    "provider_k8s_filters",
+                    "quilkin_provider_k8s_filters",
                     "Whether the kubernetes configuration provider has set the filter chain.",
                 },
                 registry(),
@@ -108,7 +173,7 @@ pub(crate) mod k8s {
         static METRIC: Lazy<IntCounterVec> = Lazy::new(|| {
             prometheus::register_int_counter_vec_with_registry! {
                 prometheus::opts! {
-                    "provider_k8s_events_total",
+                    "quilkin_provider_k8s_events_total",
                     "Total number of kubernetes events by `type` for a given resource (`kind`)",
                 },
                 &["kind", "type"],
@@ -124,7 +189,7 @@ pub(crate) mod k8s {
         static METRIC: Lazy<IntCounterVec> = Lazy::new(|| {
             prometheus::register_int_counter_vec_with_registry! {
                 prometheus::opts! {
-                    "provider_k8s_gameservers_total",
+                    "quilkin_provider_k8s_gameservers_total",
                     "Total number of gameservers applied (or failed to) by events and by `kind` (either `invalid`, `unallocated`, or `valid`) ",
                 },
                 &["kind"],
@@ -155,7 +220,7 @@ pub(crate) mod k8s {
         static METRIC: Lazy<IntCounterVec> = Lazy::new(|| {
             prometheus::register_int_counter_vec_with_registry! {
                 prometheus::opts! {
-                    "provider_k8s_gameservers_deletions_total",
+                    "quilkin_provider_k8s_gameservers_deletions_total",
                     "Total number of gameserver applied deletion events by `success` (either `true` or `false`) ",
                 },
                 &["kind"],
@@ -171,7 +236,7 @@ pub(crate) mod k8s {
         static METRIC: Lazy<IntCounterVec> = Lazy::new(|| {
             prometheus::register_int_counter_vec_with_registry! {
                 prometheus::opts! {
-                    "providers_k8s_errors_total",
+                    "quilkin_providers_k8s_errors_total",
                     "total number of errors the kubernetes provider has encountered",
                 },
                 &["kind", "reason"],
@@ -191,7 +256,7 @@ pub(crate) mod qcmp {
         static METRIC: Lazy<IntGauge> = Lazy::new(|| {
             prometheus::register_int_gauge_with_registry! {
                 prometheus::opts! {
-                    "service_qcmp_active",
+                    "quilkin_service_qcmp_active",
                     "Whether the QCMP service is currently running, either 1 for running or 0 for not.",
                 },
                 registry(),
@@ -206,7 +271,7 @@ pub(crate) mod qcmp {
         static METRIC: Lazy<IntCounterVec> = Lazy::new(|| {
             prometheus::register_int_counter_vec_with_registry! {
                 prometheus::opts! {
-                    "service_qcmp_bytes_total",
+                    "quilkin_service_qcmp_bytes_total",
                     "Total number of bytes processed through QCMP",
                 },
                 &["kind"],
@@ -222,7 +287,7 @@ pub(crate) mod qcmp {
         static METRIC: Lazy<IntCounterVec> = Lazy::new(|| {
             prometheus::register_int_counter_vec_with_registry! {
                 prometheus::opts! {
-                    "service_qcmp_errors_total",
+                    "quilkin_service_qcmp_errors_total",
                     "total number of errors QCMP has encountered",
                 },
                 &["reason"],
@@ -238,7 +303,7 @@ pub(crate) mod qcmp {
         static METRIC: Lazy<IntCounterVec> = Lazy::new(|| {
             prometheus::register_int_counter_vec_with_registry! {
                 prometheus::opts! {
-                    "service_qcmp_packets_total",
+                    "quilkin_service_qcmp_packets_total",
                     "Total number of packets processed through QCMP",
                 },
                 &["kind"],
@@ -319,7 +384,7 @@ pub(crate) fn shutdown_initiated() -> &'static IntGauge {
     static SHUTDOWN_INITATED: Lazy<IntGauge> = Lazy::new(|| {
         prometheus::register_int_gauge_with_registry! {
             prometheus::opts! {
-                "shutdown_initiated",
+                "quilkin_shutdown_initiated",
                 "Shutdown process has been started",
             },
             registry(),
@@ -334,7 +399,7 @@ pub(crate) fn game_traffic_tasks() -> &'static IntCounter {
     static GAME_TRAFFIC_TASKS: Lazy<IntCounter> = Lazy::new(|| {
         prometheus::register_int_counter_with_registry! {
             prometheus::opts! {
-                "game_traffic_tasks",
+                "quilkin_game_traffic_tasks",
                 "The amount of game traffic tasks that have spawned",
             },
             registry(),
@@ -349,7 +414,7 @@ pub(crate) fn game_traffic_task_closed() -> &'static IntCounter {
     static GAME_TRAFFIC_TASK_CLOSED: Lazy<IntCounter> = Lazy::new(|| {
         prometheus::register_int_counter_with_registry! {
             prometheus::opts! {
-                "game_traffic_task_closed",
+                "quilkin_game_traffic_task_closed",
                 "The amount of game traffic tasks that have shutdown",
             },
             registry(),
@@ -360,21 +425,6 @@ pub(crate) fn game_traffic_task_closed() -> &'static IntCounter {
     &GAME_TRAFFIC_TASK_CLOSED
 }
 
-pub(crate) fn phoenix_requests() -> &'static IntCounter {
-    static PHOENIX_REQUESTS: Lazy<IntCounter> = Lazy::new(|| {
-        prometheus::register_int_counter_with_registry! {
-            prometheus::opts! {
-                "phoenix_requests",
-                "The amount of phoenix requests",
-            },
-            registry(),
-        }
-        .unwrap()
-    });
-
-    &PHOENIX_REQUESTS
-}
-
 pub(crate) fn phoenix_measurement_seconds(
     icao: crate::config::IcaoCode,
     direction: &str,
@@ -382,7 +432,7 @@ pub(crate) fn phoenix_measurement_seconds(
     static PHOENIX_MEASUREMENT: Lazy<HistogramVec> = Lazy::new(|| {
         prometheus::register_histogram_vec_with_registry! {
             prometheus::histogram_opts! {
-                "phoenix_measurement_seconds",
+                "quilkin_phoenix_measurement_seconds",
                 "Histogram of phoenix measurements for a given node",
                 prometheus::DEFAULT_BUCKETS.to_vec()
             },
@@ -399,7 +449,7 @@ pub(crate) fn phoenix_measurement_errors(icao: crate::config::IcaoCode) -> IntCo
     static PHOENIX_MEASUREMENT_ERRORS: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
-                "phoenix_measurement_errors_total",
+                "quilkin_phoenix_measurement_errors_total",
                 "The number of measurement errors",
             },
             &["icao"],
@@ -415,7 +465,7 @@ pub(crate) fn phoenix_distance(icao: crate::config::IcaoCode) -> Gauge {
     static PHOENIX_DISTANCE: Lazy<GaugeVec> = Lazy::new(|| {
         prometheus::register_gauge_vec_with_registry! {
             prometheus::opts! {
-                "phoenix_distance",
+                "quilkin_phoenix_distance",
                 "The distance from this instance to another node in the network",
             },
             &["icao"],
@@ -431,7 +481,7 @@ pub(crate) fn phoenix_coordinates(icao: crate::config::IcaoCode, axis: &str) -> 
     static PHOENIX_COORDINATES: Lazy<GaugeVec> = Lazy::new(|| {
         prometheus::register_gauge_vec_with_registry! {
             prometheus::opts! {
-                "phoenix_coordinates",
+                "quilkin_phoenix_coordinates",
                 "The phoenix coordinates relative to this node",
             },
             &["icao", "axis"],
@@ -447,7 +497,7 @@ pub(crate) fn phoenix_coordinates_alpha(icao: crate::config::IcaoCode) -> Gauge 
     static PHOENIX_COORDINATES_ALPHA: Lazy<GaugeVec> = Lazy::new(|| {
         prometheus::register_gauge_vec_with_registry! {
             prometheus::opts! {
-                "phoenix_coordinates_alpha",
+                "quilkin_phoenix_coordinates_alpha",
                 "The alpha used when adjusting coordinates",
             },
             &["icao"],
@@ -463,7 +513,7 @@ pub(crate) fn phoenix_distance_error_estimate(icao: crate::config::IcaoCode) -> 
     static PHOENIX_DISTANCE_ERROR_ESTIMATE: Lazy<GaugeVec> = Lazy::new(|| {
         prometheus::register_gauge_vec_with_registry! {
             prometheus::opts! {
-                "phoenix_distance_error_estimate",
+                "quilkin_phoenix_distance_error_estimate",
                 "The distance from this instance to another node in the network",
             },
             &["icao"],
@@ -475,42 +525,11 @@ pub(crate) fn phoenix_distance_error_estimate(icao: crate::config::IcaoCode) -> 
     PHOENIX_DISTANCE_ERROR_ESTIMATE.with_label_values(&[icao.as_ref()])
 }
 
-pub(crate) fn phoenix_task_closed() -> &'static IntGauge {
-    static PHOENIX_TASK_CLOSED: Lazy<IntGauge> = Lazy::new(|| {
-        prometheus::register_int_gauge_with_registry! {
-            prometheus::opts! {
-                "phoenix_task_closed",
-                "Whether the phoenix task has shutdown",
-            },
-            registry(),
-        }
-        .unwrap()
-    });
-
-    &PHOENIX_TASK_CLOSED
-}
-
-pub(crate) fn phoenix_server_errors(error: &str) -> IntCounter {
-    static PHOENIX_SERVER_ERRORS: Lazy<IntCounterVec> = Lazy::new(|| {
-        prometheus::register_int_counter_vec_with_registry! {
-            prometheus::opts! {
-                "phoenix_server_errors",
-                "The amount of errors attempting to spawn the phoenix HTTP server",
-            },
-            &["error"],
-            registry(),
-        }
-        .unwrap()
-    });
-
-    PHOENIX_SERVER_ERRORS.with_label_values(&[error])
-}
-
 pub(crate) fn processing_time(direction: Direction) -> Histogram {
     static PROCESSING_TIME: Lazy<HistogramVec> = Lazy::new(|| {
         prometheus::register_histogram_vec_with_registry! {
             prometheus::histogram_opts! {
-                "packets_processing_duration_seconds",
+                "quilkin_packets_processing_duration_seconds",
                 "Total processing time for a packet",
                 prometheus::exponential_buckets(BUCKET_START, BUCKET_FACTOR, BUCKET_COUNT).unwrap(),
             },
@@ -523,95 +542,95 @@ pub(crate) fn processing_time(direction: Direction) -> Histogram {
     PROCESSING_TIME.with_label_values(&[direction.label()])
 }
 
-pub(crate) fn bytes_total(direction: Direction, asn: &AsnInfo<'_>) -> IntCounter {
+pub(crate) fn bytes_total(direction: Direction, _asn: &AsnInfo<'_>) -> IntCounter {
     static BYTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
-                "bytes_total",
+                "quilkin_bytes_total",
                 "total number of bytes",
             },
-            &[Direction::LABEL, ASN_LABEL],
+            &[Direction::LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    BYTES_TOTAL.with_label_values(&[direction.label(), asn.asn])
+    BYTES_TOTAL.with_label_values(&[direction.label()])
 }
 
-pub(crate) fn errors_total(direction: Direction, display: &str, asn: &AsnInfo<'_>) -> IntCounter {
+pub(crate) fn errors_total(direction: Direction, display: &str, _asn: &AsnInfo<'_>) -> IntCounter {
     static ERRORS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
-                "errors_total",
+                "quilkin_errors_total",
                 "total number of errors sending packets",
             },
-            &[Direction::LABEL, "display", ASN_LABEL],
+            &[Direction::LABEL, "display"],
             registry(),
         }
         .unwrap()
     });
 
-    ERRORS_TOTAL.with_label_values(&[direction.label(), display, asn.asn])
+    ERRORS_TOTAL.with_label_values(&[direction.label(), display])
 }
 
-pub(crate) fn packet_jitter(direction: Direction, asn: &AsnInfo<'_>) -> IntGauge {
+pub(crate) fn packet_jitter(direction: Direction, _asn: &AsnInfo<'_>) -> IntGauge {
     static PACKET_JITTER: Lazy<IntGaugeVec> = Lazy::new(|| {
         prometheus::register_int_gauge_vec_with_registry! {
             prometheus::opts! {
-                "packet_jitter",
+                "quilkin_packet_jitter",
                 "The time between new packets",
             },
-            &[Direction::LABEL, ASN_LABEL],
+            &[Direction::LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    PACKET_JITTER.with_label_values(&[direction.label(), asn.asn])
+    PACKET_JITTER.with_label_values(&[direction.label()])
 }
 
-pub(crate) fn packets_total(direction: Direction, asn: &AsnInfo<'_>) -> IntCounter {
+pub(crate) fn packets_total(direction: Direction, _asn: &AsnInfo<'_>) -> IntCounter {
     static PACKETS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
-                "packets_total",
+                "quilkin_packets_total",
                 "Total number of packets",
             },
-            &[Direction::LABEL, ASN_LABEL],
+            &[Direction::LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    PACKETS_TOTAL.with_label_values(&[direction.label(), asn.asn])
+    PACKETS_TOTAL.with_label_values(&[direction.label()])
 }
 
 pub(crate) fn packets_dropped_total(
     direction: Direction,
     source: &str,
-    asn: &AsnInfo<'_>,
+    _asn: &AsnInfo<'_>,
 ) -> IntCounter {
     static PACKETS_DROPPED: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
-                "packets_dropped_total",
+                "quilkin_packets_dropped_total",
                 "Total number of dropped packets",
             },
-            &[Direction::LABEL, "source", ASN_LABEL],
+            &[Direction::LABEL, "source"],
             registry(),
         }
         .unwrap()
     });
 
-    PACKETS_DROPPED.with_label_values(&[direction.label(), source, asn.asn])
+    PACKETS_DROPPED.with_label_values(&[direction.label(), source])
 }
 
 pub(crate) fn provider_task_failures_total(provider_task: &str) -> IntCounter {
     static PROVIDER_TASK_FAILURES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
-                "provider_task_failures_total",
+                "quilkin_provider_task_failures_total",
                 "The number of times a provider task has failed and had to be restarted",
             },
             &["task"],
@@ -626,7 +645,9 @@ pub(crate) fn provider_task_failures_total(provider_task: &str) -> IntCounter {
 /// Create a generic metrics options.
 /// Use `filter_opts` instead if the intended target is a filter.
 pub fn opts(name: &str, subsystem: &str, description: &str) -> Opts {
-    Opts::new(name, description).subsystem(subsystem)
+    Opts::new(name, description)
+        .subsystem(subsystem)
+        .namespace("quilkin")
 }
 
 pub fn histogram_opts(

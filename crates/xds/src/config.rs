@@ -53,22 +53,6 @@ impl LocalVersions {
             panic!("unable to retrieve `{ty}` versions, available versions are {versions:?}");
         }
     }
-
-    #[inline]
-    pub fn clear<C: crate::config::Configuration>(
-        &self,
-        config: &Arc<C>,
-        remote_addr: Option<std::net::IpAddr>,
-    ) {
-        for (type_url, map) in &self.versions {
-            let mut map = map.lock();
-            let remove = map.keys().cloned().collect::<Vec<_>>();
-            if let Err(error) = config.apply_delta(type_url, vec![], &remove, remote_addr) {
-                tracing::warn!(%error, count = remove.len(), type_url, "failed to remove resources upon connection loss");
-            }
-            map.clear();
-        }
-    }
 }
 
 pub struct ClientState {
@@ -302,11 +286,10 @@ pub fn handle_delta_discovery_responses<C: Configuration>(
                 res
             };
 
-            if let Some(note) = &notifier {
-                if note.send(type_url.clone()).is_err() {
+            if let Some(note) = &notifier
+                && note.send(type_url.clone()).is_err() {
                     notifier = None;
                 }
-            }
 
             let error_detail = if let Err(error) = result {
                 crate::metrics::nacks(control_plane_identifier, &type_url).inc();

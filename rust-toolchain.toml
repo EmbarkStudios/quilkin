@@ -13,5 +13,5 @@
 # limitations under the License.
 
 [toolchain]
-channel = "1.85.0"
+channel = "1.92.0"
 components = ["rustfmt", "clippy"]

@@ -99,13 +99,54 @@ impl TlsIdentity {
     }
 }
 
+const RESPONSE_PROPAGATION_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Buffers response broadcasts so they can be propagated at a set interval instead of every time
+/// something has changed.
+#[derive(Debug, Default)]
+struct ResponseBroadcastPropagationBuffer {
+    changed_resources: std::sync::Mutex<std::collections::HashSet<String>>,
+}
+
+impl ResponseBroadcastPropagationBuffer {
+    /// Ingest a resource broadcast message
+    fn ingest(
+        &self,
+        result: Result<&str, tokio::sync::broadcast::error::RecvError>,
+    ) -> Result<(), tokio::sync::broadcast::error::RecvError> {
+        result.map(|resource| {
+            let mut guard = match self.changed_resources.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    let guard = poisoned.into_inner();
+                    tracing::warn!("recovered from poisoned mutex");
+                    guard
+                }
+            };
+            guard.insert(resource.into());
+        })
+    }
+
+    /// Flush all changed resources and reset the buffer
+    fn flush(&self) -> Vec<String> {
+        let mut guard = match self.changed_resources.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                let guard = poisoned.into_inner();
+                tracing::warn!("recovered from poisoned mutex");
+                guard
+            }
+        };
+        guard.drain().collect()
+    }
+}
+
 const VERSION_INFO: &str = "9";
 
 pub struct ControlPlane<C> {
     pub config: Arc<C>,
     pub idle_request_interval: Duration,
     tx: tokio::sync::broadcast::Sender<&'static str>,
-    pub is_relay: bool,
     pub shutdown: ShutdownSignal,
 }
 
@@ -115,7 +156,6 @@ impl<C> Clone for ControlPlane<C> {
             config: self.config.clone(),
             idle_request_interval: self.idle_request_interval,
             tx: self.tx.clone(),
-            is_relay: self.is_relay,
             shutdown: self.shutdown.clone(),
         }
     }
@@ -133,7 +173,6 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
             config,
             idle_request_interval,
             tx,
-            is_relay: false,
             shutdown,
         }
     }
@@ -145,11 +184,10 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
     }
 
     pub fn management_server(
-        mut self,
+        self,
         listener: TcpListener,
         tls: Option<TlsIdentity>,
     ) -> eyre::Result<impl std::future::Future<Output = crate::Result<()>>> {
-        self.is_relay = false;
         let srx = self.shutdown.clone();
         tokio::spawn({
             let this = self.clone();
@@ -177,11 +215,10 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
     }
 
     pub fn relay_server(
-        mut self,
+        self,
         listener: TcpListener,
         tls: Option<TlsIdentity>,
     ) -> eyre::Result<impl std::future::Future<Output = crate::Result<()>>> {
-        self.is_relay = true;
         let srx = self.shutdown.clone();
         tokio::spawn({
             let this = self.clone();
@@ -213,7 +250,6 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         tracing::debug!(
             %resource_type,
             id = self.config.identifier(),
-            is_relay = self.is_relay,
             "pushing update"
         );
         crate::metrics::actions_total(KIND_SERVER, "push").inc();
@@ -255,7 +291,6 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
             id,
             client = node_id,
             count = self.tx.receiver_count(),
-            is_relay = self.is_relay,
             "subscribed to config updates"
         );
 
@@ -378,38 +413,45 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         let stream = async_stream::try_stream! {
             yield response;
 
+            // Buffer changes so we only propagate at a set and controlled interval. This reduces
+            // the network load when we have a high rate of change due to high cluster load.
+            let buffer = ResponseBroadcastPropagationBuffer::default();
+            let mut lag_amount: u64 = 0;
+            let mut propagation_interval = tokio::time::interval(RESPONSE_PROPAGATION_INTERVAL);
+            propagation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
             loop {
                 tokio::select! {
-                    // The resource(s) have changed, inform the connected client, but only
+                    // Inform the connected client if any of the resources have changed, but only
                     // send the changed resources that the client doesn't already have
+                    _ = propagation_interval.tick() => {
+                        // Fetch the changed resources
+                        let mut resources = buffer.flush();
+                        // If we've been lagging on updates, collect everything instead
+                        if lag_amount > 0 {
+                            tracing::warn!(lag_amount, "lagged while receiving response broadcasts");
+                            resources = client_tracker.tracked_resources().collect();
+                        }
+                        lag_amount = 0;
+                        for rt in resources {
+                            match responder(None, &rt, &mut client_tracker) {
+                                Ok(Some(res)) => yield res,
+                                Ok(None) => {},
+                                Err(error) => {
+                                    crate::metrics::errors_total(KIND_SERVER, "respond").inc();
+                                    tracing::error!(%error, "responder failed to generate response");
+                                }
+                            }
+                        }
+                    }
+                    // A resource has changed, buffer it for propagation
                     res = rx.recv() => {
-                        match res {
-                            Ok(rt) => {
-                                match responder(None, rt, &mut client_tracker) {
-                                    Ok(Some(res)) => yield res,
-                                    Ok(None) => {}
-                                    Err(error) => {
-                                        crate::metrics::errors_total(KIND_SERVER, "respond").inc();
-                                        tracing::error!(%error, "responder failed to generate response");
-                                        continue;
-                                    },
-                                }
-                            }
+                        match buffer.ingest(res) {
+                            Ok(_) => {},
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                                let tracked_resources: Vec<_> = client_tracker.tracked_resources().collect();
-                                for rt in tracked_resources {
-                                    match responder(None, &rt, &mut client_tracker) {
-                                        Ok(Some(res)) => yield res,
-                                        Ok(None) => {},
-                                        Err(error) => {
-                                            crate::metrics::errors_total(KIND_SERVER, "respond").inc();
-                                            tracing::error!(%error, "responder failed to generate response");
-                                            continue;
-                                        }
-                                    }
-                                }
-                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(amount)) => {
+                                lag_amount += amount;
+                            },
                         }
                     }
                     client_request = streaming.next() => {
@@ -586,7 +628,6 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                     config.interested_resources(&server_version).collect(),
                     &local,
                 )
-                .await
                 .map_err(|error| tonic::Status::internal(error.to_string()))?;
 
                 let mut response_stream = crate::config::handle_delta_discovery_responses(
@@ -607,7 +648,8 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                             match nr {
                                 Ok(Some(Ok(ack))) => {
                                     tracing::trace!("sending ack request");
-                                    ds.send_response(ack).await.map_err(|_err| {
+                                    ds.ack_response(ack).map_err(|_err| {
+                                        crate::metrics::errors_total(KIND_SERVER, "ack_failed").inc();
                                         tonic::Status::internal("this should not be reachable")
                                     })?;
                                 }
@@ -628,7 +670,6 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                                         config.interested_resources(&server_version).collect(),
                                         &local,
                                     )
-                                    .await
                                     .map_err(|error| tonic::Status::internal(error.to_string()))?;
                                 }
                             }
@@ -642,8 +683,6 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                 if res.is_ok() {
                     tracing::info!("xds stream terminated");
                 }
-
-                local.clear(&config, Some(remote_addr));
 
                 res
             }
@@ -678,7 +717,6 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
             return Err(tonic::Status::invalid_argument("Node identifier required"));
         };
 
-        let is_relay = self.is_relay;
         let mut rx = self.tx.subscribe();
         let id = self.config.identifier();
         let mut shutdown = self.shutdown.clone();
@@ -687,7 +725,6 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
             id,
             client = node_id,
             count = self.tx.receiver_count(),
-            is_relay,
             "subscribed to config updates"
         );
 
@@ -808,36 +845,45 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
         let stream = async_stream::try_stream! {
             yield response;
 
+            // Buffer changes so we only propagate at a set and controlled interval. This reduces
+            // the network load when we have a high rate of change due to high cluster load.
+            let buffer = ResponseBroadcastPropagationBuffer::default();
+            let mut lag_amount: u64 = 0;
+            let mut propagation_interval = tokio::time::interval(RESPONSE_PROPAGATION_INTERVAL);
+            propagation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
             loop {
                 tokio::select! {
-                    // The resource(s) have changed, inform the connected client, but only
+                    // Inform the connected client if any of the resources have changed, but only
                     // send the changed resources that the client doesn't already have
+                    _ = propagation_interval.tick() => {
+                        // Fetch the changed resources
+                        let mut resources = buffer.flush();
+                        // If we've been lagging on updates, collect everything instead
+                        if lag_amount > 0 {
+                            tracing::warn!(lag_amount, "lagged while receiving response broadcasts");
+                            resources = client_tracker.tracked_resources().collect();
+                        }
+                        lag_amount = 0;
+                        for rt in resources {
+                            match responder(None, &rt, &mut client_tracker) {
+                                Ok(Some(res)) => yield res,
+                                Ok(None) => {},
+                                Err(error) => {
+                                    crate::metrics::errors_total(KIND_SERVER, "respond").inc();
+                                    tracing::error!(%error, "responder failed to generate response");
+                                }
+                            }
+                        }
+                    }
+                    // A resource has changed, buffer it for propagation
                     res = rx.recv() => {
-                        match res {
-                            Ok(rt) => {
-                                match responder(None, rt, &mut client_tracker) {
-                                    Ok(Some(res)) => yield res,
-                                    Ok(None) => {}
-                                    Err(error) => {
-                                        tracing::error!(%error, "responder failed to generate response");
-                                        continue;
-                                    },
-                                }
-                            }
+                        match buffer.ingest(res) {
+                            Ok(_) => {},
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                                let tracked_resources: Vec<_> = client_tracker.tracked_resources().collect();
-                                for rt in tracked_resources {
-                                    match responder(None, &rt, &mut client_tracker) {
-                                        Ok(Some(res)) => yield res,
-                                        Ok(None) => {},
-                                        Err(error) => {
-                                            tracing::error!(%error, "responder failed to generate response");
-                                            continue;
-                                        }
-                                    }
-                                }
-                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(amount)) => {
+                                lag_amount += amount;
+                            },
                         }
                     }
                     client_request = requests.next() => {
