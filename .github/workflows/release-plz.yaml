@@ -20,6 +20,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          path: .
       - &install-rust
         name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
