@@ -14,12 +14,10 @@ jobs:
     name: Release-plz
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: Checkout repository
+        uses: actions/checkout@v6
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@v0.5
         env:
