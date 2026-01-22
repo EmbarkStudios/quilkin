@@ -4176,6 +4176,7 @@ dependencies = [
  "prost-types",
  "quilkin-macros",
  "quilkin-proto",
+ "quilkin-system",
  "quilkin-types",
  "quilkin-xdp",
  "quilkin-xds",
@@ -4234,6 +4235,21 @@ dependencies = [
  "prost-types",
  "tonic",
  "tonic-prost",
+]
+
+[[package]]
+name = "quilkin-system"
+version = "0.10.0"
+dependencies = [
+ "axum",
+ "futures",
+ "hyper-util",
+ "once_cell",
+ "prometheus-client",
+ "socket2 0.6.1",
+ "tokio",
+ "tower",
+ "tracing",
 ]
 
 [[package]]

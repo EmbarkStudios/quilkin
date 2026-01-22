@@ -23,8 +23,6 @@ use prometheus::{
 
 pub use prometheus::Result;
 
-pub mod http;
-
 /// "event" is used as a label for Metrics that can apply to both Filter
 /// `read` and `write` executions.
 pub const DIRECTION_LABEL: &str = "event";
@@ -106,7 +104,7 @@ pub fn register_metrics(registry: &mut prometheus_client::registry::Registry, id
         ),
     ]));
 
-    http::register_metrics(registry);
+    quilkin_system::register_metrics(registry);
 }
 
 /// Start the histogram bucket at a quarter of a millisecond, as number below a millisecond are

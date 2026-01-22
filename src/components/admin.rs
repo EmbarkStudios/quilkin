@@ -44,7 +44,7 @@ pub fn serve(
     shutdown_tx: crate::signal::ShutdownTx,
     shutdown_rx: crate::signal::ShutdownRx,
     address: Option<std::net::SocketAddr>,
-) -> std::thread::JoinHandle<std::io::Result<()>> {
+) -> std::thread::JoinHandle<()> {
     let address = address.unwrap_or_else(|| (std::net::Ipv6Addr::UNSPECIFIED, PORT).into());
     let health = Health::new(shutdown_tx);
     tracing::info!(address = %address, "Starting admin endpoint");
@@ -60,16 +60,20 @@ pub fn serve(
         .name("admin-http".into())
         .spawn(move || {
             let runtime = Admin::runtime();
-            runtime.block_on(async move {
-                let listener = tokio::net::TcpListener::bind(address).await?;
-                crate::net::http::serve(
-                    "admin",
-                    listener,
-                    router,
-                    crate::signal::await_shutdown(shutdown_rx),
-                )
-                .await
-            })
+            runtime
+                .block_on(async move {
+                    let listener = quilkin_system::net::default_nonblocking_tcp_listener(address)?;
+                    let tokio_listener = tokio::net::TcpListener::from_std(listener)?;
+
+                    quilkin_system::http::serve(
+                        "admin",
+                        tokio_listener,
+                        router,
+                        crate::signal::await_shutdown(shutdown_rx),
+                    )
+                    .await
+                })
+                .expect("failed to serve admin server");
         })
         .expect("failed to spawn admin-http thread")
 }

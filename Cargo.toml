@@ -79,6 +79,7 @@ test = false
 # Local
 quilkin-macros = { version = "0.10.0", path = "./crates/macros" }
 quilkin-proto.workspace = true
+quilkin-system.workspace = true
 quilkin-types.workspace = true
 quilkin-xds.workspace = true
 
@@ -160,11 +161,8 @@ gxhash = "3.5.0"
 kube-leader-election = "0.42.0"
 rustls = { version = "0.23", default-features = false }
 tracing-appender.workspace = true
-axum = { version = "0.8.8", features = ["macros"] }
-
-[dependencies.hyper-util]
-version = "0.1"
-features = ["client", "client-legacy"]
+axum.workspace = true
+hyper-util.workspace = true
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemalloc_pprof = { workspace = true, optional = true }
@@ -205,6 +203,7 @@ members = [
     #"crates/nmap-service-probes",
     "crates/proto-gen",
     "crates/quilkin-proto",
+    "crates/system",
     "crates/test",
     "crates/types",
     "crates/xdp",
@@ -220,6 +219,7 @@ version = "0.10.0"
 arc-swap = { version = "1.8.0", features = ["serde"] }
 async-stream = "0.3.6"
 async-trait = "0.1.89"
+axum = { version = "0.8.8", features = ["macros"] }
 base64 = "0.22.1"
 bytes = { version = "1.11.0", features = ["serde"] }
 cached = { version = "0.56", default-features = false }
@@ -229,6 +229,7 @@ eyre = "0.6.12"
 enum-map = "2.7.3"
 futures = "0.3.31"
 futures-util = "0.3.31"
+hyper-util = { version = "0.1", features = ["client", "client-legacy"] }
 jemalloc_pprof = { version = "0.8", features = ["symbolize"] }
 kube = { version = "2.0", features = [
     "runtime",
@@ -246,9 +247,10 @@ prometheus-client = { version = "0.24" }
 prost = "0.14"
 prost-types = "0.14"
 quilkin = { path = "." }
-quilkin-proto = {version = "0.10.0", path = "crates/quilkin-proto" }
+quilkin-proto = { version = "0.10.0", path = "crates/quilkin-proto" }
+quilkin-system = { version = "0.10.0", path = "crates/system" }
 quilkin-types = { version = "0.10.0", path = "crates/types" }
-quilkin-xds = {version = "0.10.0", path = "crates/xds" }
+quilkin-xds = { version = "0.10.0", path = "crates/xds" }
 rand = "0.9"
 regex = "1.12.2"
 serde = { version = "1.0.228", features = ["derive", "rc"] }

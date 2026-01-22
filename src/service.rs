@@ -365,9 +365,9 @@ impl Service {
             }
             builder.build()
         };
-        let phoenix_listener = crate::net::TcpListener::bind(Some(self.phoenix_port))?;
+
         let finalizer = crate::net::phoenix::spawn(
-            phoenix_listener,
+            (std::net::Ipv6Addr::UNSPECIFIED, self.phoenix_port),
             datacenters.clone(),
             phoenix,
             shutdown.shutdown_rx(),

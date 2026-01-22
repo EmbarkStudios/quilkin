@@ -2,6 +2,8 @@ use core::pin::pin;
 use futures::FutureExt as _;
 use tokio::sync::watch;
 
+pub mod metrics;
+
 /// Serves an axum http service.
 ///
 /// Heavily inspired by and very similar to `axum::serve().with_graceful_shutdown()`, but with added
@@ -67,8 +69,8 @@ async fn handle_connection<L: axum::serve::Listener>(
     let hyper_service = hyper_util::service::TowerToHyperService::new(router.clone());
 
     tokio::spawn(async move {
-        let conn_labels = crate::metrics::http::ConnectionLabels { service };
-        let _conn_guard = crate::metrics::http::connection_guard(&conn_labels);
+        let conn_labels = metrics::ConnectionLabels { service };
+        let _conn_guard = metrics::connection_guard(&conn_labels);
 
         let mut builder =
             hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
@@ -82,12 +84,7 @@ async fn handle_connection<L: axum::serve::Listener>(
             tokio::select! {
                 result = conn.as_mut() => {
                     if let Err(error) = result {
-                        // It is expected to receive std::io::ErrorKind::Interrupted with the
-                        // message "Cancelled" when an open connection is being closed after all
-                        // requests have been served
-                        if error.downcast_ref::<std::io::Error>().filter(|e| e.kind() != std::io::ErrorKind::Interrupted).is_some() {
-                            tracing::error!(%error, "failed to serve connection");
-                        }
+                        tracing::trace!(%error, "connection closed");
                     }
                     break;
                 }

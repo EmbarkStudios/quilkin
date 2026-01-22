@@ -48,7 +48,7 @@ use crate::{
 const BAD_NODE_THRESHOLD: u64 = 10;
 
 pub fn spawn(
-    listener: crate::net::TcpListener,
+    address: impl Into<SocketAddr>,
     datacenters: config::Watch<config::DatacenterMap>,
     phoenix: Phoenix<crate::codec::qcmp::QcmpTransceiver>,
     mut shutdown_rx: crate::signal::ShutdownRx,
@@ -58,6 +58,9 @@ pub fn spawn(
     phoenix.add_nodes_from_config(&datacenters);
 
     let mut dc_watcher = datacenters.watch();
+
+    let listener = quilkin_system::net::default_nonblocking_tcp_listener(address)?;
+    let tokio_listener = tokio::net::TcpListener::from_std(listener)?;
 
     let ph_thread = std::thread::Builder::new()
         .name("phoenix-http".into())
@@ -113,7 +116,7 @@ pub fn spawn(
                         async move { phoenix.background_update_task().await }
                     });
 
-                    tracing::info!(addr=%listener.local_addr(), "starting phoenix HTTP service");
+                    tracing::info!(addr=%tokio_listener.local_addr().expect("unbound listener"), "starting phoenix HTTP service");
                     let handler_node_latencies = node_latencies_response.clone();
                     let handler_network_coordinates = network_coordinates_response.clone();
 
@@ -122,11 +125,10 @@ pub fn spawn(
                         tokio::spawn(async move {
                             let router =
                                 http_router(handler_network_coordinates, handler_node_latencies);
-                            let listener = listener.into_tokio()?;
 
-                            crate::net::http::serve(
+                            quilkin_system::http::serve(
                                 "phoenix",
-                                listener,
+                                tokio_listener,
                                 router,
                                 crate::signal::await_shutdown(http_task_shutdown_rx),
                             )
@@ -206,7 +208,7 @@ fn http_router(
             }),
         )
         .layer(
-            crate::metrics::http::HttpMetricsLayer::new_with_path_buckets(
+            quilkin_system::http::metrics::HttpMetricsLayer::new_with_path_buckets(
                 "phoenix".to_string(),
                 ["/", "/network-coordinates"],
             ),
@@ -1022,8 +1024,12 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(target_os = "macos", ignore)]
     async fn http_server() {
-        let qcmp_listener = crate::net::TcpListener::bind(None).expect("failed to bind listener");
-        let qcmp_port = qcmp_listener.port();
+        let (tx, rx) = crate::signal::channel();
+        let socket = raw_socket_with_reuse(0).unwrap();
+        let qcmp_port = socket.local_addr().unwrap().as_socket().unwrap().port();
+        let pc = crate::codec::qcmp::port_channel();
+        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
 
@@ -1038,12 +1044,6 @@ mod tests {
             },
         );
 
-        let (tx, rx) = crate::signal::channel();
-        let socket = raw_socket_with_reuse(qcmp_port).unwrap();
-        let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
-        tokio::time::sleep(Duration::from_millis(150)).await;
-
         let measurement =
             crate::codec::qcmp::QcmpTransceiver::with_artificial_delay(Duration::from_millis(50))
                 .unwrap();
@@ -1052,7 +1052,13 @@ mod tests {
             .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
             .build();
 
-        let end = super::spawn(qcmp_listener, datacenters, phoenix, rx).unwrap();
+        let end = super::spawn(
+            (std::net::Ipv6Addr::UNSPECIFIED, qcmp_port),
+            datacenters,
+            phoenix,
+            rx,
+        )
+        .unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let client =
@@ -1098,8 +1104,12 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(target_os = "macos", ignore)]
     async fn get_network_coordinates() {
-        let qcmp_listener = crate::net::TcpListener::bind(None).expect("failed to bind listener");
-        let qcmp_port = qcmp_listener.port();
+        let (tx, rx) = crate::signal::channel();
+        let socket = raw_socket_with_reuse(0).unwrap();
+        let qcmp_port = socket.local_addr().unwrap().as_socket().unwrap().port();
+        let pc = crate::codec::qcmp::port_channel();
+        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
 
@@ -1114,12 +1124,6 @@ mod tests {
             },
         );
 
-        let (tx, rx) = crate::signal::channel();
-        let socket = raw_socket_with_reuse(qcmp_port).unwrap();
-        let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
-        tokio::time::sleep(Duration::from_millis(150)).await;
-
         let measurement =
             crate::codec::qcmp::QcmpTransceiver::with_artificial_delay(Duration::from_millis(50))
                 .unwrap();
@@ -1128,7 +1132,13 @@ mod tests {
             .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
             .build();
 
-        let end = super::spawn(qcmp_listener, datacenters, phoenix, rx).unwrap();
+        let end = super::spawn(
+            (std::net::Ipv6Addr::UNSPECIFIED, qcmp_port),
+            datacenters,
+            phoenix,
+            rx,
+        )
+        .unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let client =
