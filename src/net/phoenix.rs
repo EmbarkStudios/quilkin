@@ -59,7 +59,7 @@ pub fn spawn(
 
     let mut dc_watcher = datacenters.watch();
 
-    let listener = quilkin_system::net::default_nonblocking_tcp_listener(address)?;
+    let listener = quilkin_system::net::tcp::default_nonblocking_listener(address)?;
     let tokio_listener = tokio::net::TcpListener::from_std(listener)?;
 
     let ph_thread = std::thread::Builder::new()
@@ -126,7 +126,7 @@ pub fn spawn(
                             let router =
                                 http_router(handler_network_coordinates, handler_node_latencies);
 
-                            quilkin_system::http::serve(
+                            quilkin_system::net::http::serve(
                                 "phoenix",
                                 tokio_listener,
                                 router,
@@ -192,6 +192,8 @@ fn http_router(
     network_coordinates: Arc<arc_swap::ArcSwap<serde_json::Map<String, serde_json::Value>>>,
     node_latencies: Arc<arc_swap::ArcSwap<serde_json::Map<String, serde_json::Value>>>,
 ) -> axum::Router {
+    use quilkin_system::net::http::metrics::HttpMetricsLayer;
+
     axum::Router::new()
         .route(
             "/",
@@ -207,12 +209,10 @@ fn http_router(
                 axum::response::Json(network_coordinates.load().clone())
             }),
         )
-        .layer(
-            quilkin_system::http::metrics::HttpMetricsLayer::new_with_path_buckets(
-                "phoenix".to_string(),
-                ["/", "/network-coordinates"],
-            ),
-        )
+        .layer(HttpMetricsLayer::new_with_path_buckets(
+            "phoenix".to_string(),
+            ["/", "/network-coordinates"],
+        ))
 }
 
 #[derive(Copy, Clone)]

@@ -62,10 +62,10 @@ pub fn serve(
             let runtime = Admin::runtime();
             runtime
                 .block_on(async move {
-                    let listener = quilkin_system::net::default_nonblocking_tcp_listener(address)?;
+                    let listener = quilkin_system::net::tcp::default_nonblocking_listener(address)?;
                     let tokio_listener = tokio::net::TcpListener::from_std(listener)?;
 
-                    quilkin_system::http::serve(
+                    quilkin_system::net::http::serve(
                         "admin",
                         tokio_listener,
                         router,

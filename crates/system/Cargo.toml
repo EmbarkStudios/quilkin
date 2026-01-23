@@ -8,9 +8,9 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["http", "net"]
+default = ["http", "sockets"]
 http = ["dep:axum", "dep:futures", "dep:hyper-util", "dep:tokio", "dep:tower"]
-net = ["dep:socket2"]
+sockets = ["dep:socket2"]
 
 [dependencies]
 axum = { workspace = true, optional = true }

@@ -1,12 +1,9 @@
 //! A collection of modules with opinionated standard components to provide a foundation for
 //! running a production-ready application
 
-#[cfg(feature = "http")]
-pub mod http;
-#[cfg(feature = "net")]
 pub mod net;
 
 pub fn register_metrics(registry: &mut prometheus_client::registry::Registry) {
     #[cfg(feature = "http")]
-    http::metrics::register_metrics(registry);
+    net::http::metrics::register_metrics(registry);
 }

@@ -3,7 +3,7 @@ use std::net::{SocketAddr, TcpListener};
 use std::time::Duration;
 
 /// Creates and binds a TCP socket with some sane defaults for an HTTP server
-pub fn default_tcp_socket(socket_addr: impl Into<SocketAddr>) -> std::io::Result<Socket> {
+pub fn default_socket(socket_addr: impl Into<SocketAddr>) -> std::io::Result<Socket> {
     let socket_addr: SocketAddr = socket_addr.into();
 
     let domain = if socket_addr.is_ipv6() {
@@ -44,10 +44,10 @@ pub fn default_tcp_socket(socket_addr: impl Into<SocketAddr>) -> std::io::Result
 }
 
 /// Creates a non-blocking `TcpListener` with some sane defaults for the underlying socket
-pub fn default_nonblocking_tcp_listener(
+pub fn default_nonblocking_listener(
     socket_addr: impl Into<SocketAddr>,
 ) -> std::io::Result<TcpListener> {
-    let listener: TcpListener = default_tcp_socket(socket_addr)?.into();
+    let listener: TcpListener = default_socket(socket_addr)?.into();
     listener.set_nonblocking(true)?;
 
     tracing::debug!(?listener, "tcp listener configured");
