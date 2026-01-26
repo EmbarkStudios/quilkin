@@ -10,11 +10,7 @@ change depending on the underlying hardware, number of filters, configurations a
 We highly recommend you run your own load tests on your platform and configuration, matching your production
 workload and configuration as close as possible.
 
-Our [iperf3](https://iperf.fr/) based performance test in the
-[examples' folder](https://github.com/EmbarkStudios/quilkin/tree/{{GITHUB_REF_NAME}}/examples/iperf3) is a good starting point.
-
-Since this is still an alpha project, we have plans on investigating further performance improvements in upcoming
-releases, both from an optimisation and observability perspective as well.
+We are always investigating further performance improvements in upcoming releases, both from an optimisation and observability perspective as well.
 
 ## Can I integrate Quilkin with C++ code?
 
@@ -40,16 +36,3 @@ comment on this directly.
 That being said, we have an [Unreal Engine](./sdks/unreal-engine.md) for games
 in circumstances where compiling Rust or providing a separate Quilkin binary as
 an executable is not an option.
-
-## Any reason you didn't contribute this into/extend Envoy?
-
-This is an excellent question! [Envoy](https://www.envoyproxy.io/) is an amazing project, and has set many of the
-standards for how [proxies are written and orchestrated](./services/xds.md), and was an inspiration for many of
-the decisions made on Quilkin.
-
-However, we decided to build this project separately:
-
-* Envoy seems primarily focused on web/mobile network workloads (which makes total sense), whereas we wanted
-  something specialised on gaming UDP communication, so having a leaner, more focused codebase would allow us to move
-  faster.
-* We found the Rust and Cargo ecosystem easier to work with than Bazel and C++, and figured our users would as well.

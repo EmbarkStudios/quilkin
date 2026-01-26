@@ -51,29 +51,8 @@ mimalloc = ["dep:mimalloc"]
 heap-stats = ["dep:crossbeam-utils"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl", "dep:jemalloc_pprof"]
 
-
 [lints]
 workspace = true
-
-[[bench]]
-name = "read_write"
-harness = false
-test = false
-
-# [[bench]]
-# name = "cluster_map"
-# harness = false
-# test = false
-
-# [[bench]]
-# name = "misc"
-# harness = false
-# test = false
-
-[[bench]]
-name = "token_router"
-harness = false
-test = false
 
 [dependencies]
 # Local
