@@ -45,6 +45,7 @@ jobs:
     steps:
       - *checkout
       - *install-rust
+      - run: git config --global --add safe.directory $PWD
       - name: Run release-plz
         uses: release-plz/action@v0.5
         with:
