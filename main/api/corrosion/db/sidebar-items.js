@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["update_schema"],"mod":["read","write"],"struct":["InitializedDb"]};

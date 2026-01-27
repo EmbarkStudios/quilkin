@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAGIC"],"enum":["ClientHandshake","ExecResult","HandshakeError","LengthReadError","ServerChange","ServerHandshake"],"fn":["read_length_prefixed","read_length_prefixed_jsonb","write_length_prefixed","write_length_prefixed_jsonb"],"mod":["client","server"],"struct":["ClientHandshakeRequestV1","ServerHandshakeResponseV1","ServerUpdate","ServerUpsert"]};
+window.SIDEBAR_ITEMS = {"enum":["ErrorCode","ExecResult"],"mod":["client","executor","proto","server"],"struct":["ExecResponse"]};

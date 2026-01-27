@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["VERSION"],"struct":["Server"],"trait":["AgentExecutor"]};
+window.SIDEBAR_ITEMS = {"constant":["VERSION"],"struct":["Server"],"trait":["Mutator","SubManager"]};

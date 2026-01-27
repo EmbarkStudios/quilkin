@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["delta_subscribe"],"struct":["Client"],"trait":["ServiceClient"],"type":["AdsClient","MdsClient"]};
+window.SIDEBAR_ITEMS = {"fn":["delta_subscribe"],"struct":["Client"],"trait":["HealthState","ServiceClient"],"type":["AdsClient","MdsClient"]};

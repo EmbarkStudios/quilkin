@@ -12,21 +12,20 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="../../favicon.svg">
-        <link rel="shortcut icon" href="../../favicon.png">
-        <link rel="stylesheet" href="../../css/variables.css">
-        <link rel="stylesheet" href="../../css/general.css">
-        <link rel="stylesheet" href="../../css/chrome.css">
-        <link rel="stylesheet" href="../../css/print.css" media="print">
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-2459343d.css">
+        <link rel="stylesheet" href="../../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="../../fonts/fonts.css">
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="highlight-css" href="../../highlight.css">
-        <link rel="stylesheet" id="tomorrow-night-css" href="../../tomorrow-night.css">
-        <link rel="stylesheet" id="ayu-highlight-css" href="../../ayu-highlight.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -36,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex.js";
+            window.path_to_searchindex_js = "../../searchindex-68bbd6e1.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc.js"></script>
+        <script src="../../toc-66b8cac1.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -53,7 +52,7 @@
             </div>
         </div>
     </div>
-    <div id="body-container">
+    <div id="mdbook-body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
             try {
@@ -82,12 +81,12 @@
             html.classList.add("js");
         </script>
 
-        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
             let sidebar = null;
-            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
@@ -102,39 +101,39 @@
             }
         </script>
 
-        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
                 <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
             </noscript>
-            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
             </div>
         </nav>
 
-        <div id="page-wrapper" class="page-wrapper">
+        <div id="mdbook-page-wrapper" class="page-wrapper">
 
             <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
-                <div id="menu-bar" class="menu-bar sticky">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
-                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
-                            <i class="fa fa-bars"></i>
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
                         </label>
-                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
-                            <i class="fa fa-paint-brush"></i>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
                         </button>
-                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
-                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
-                            <i class="fa fa-search"></i>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
                         </button>
                     </div>
 
@@ -142,38 +141,38 @@
 
                     <div class="right-buttons">
                         <a href="../../print.html" title="Print this book" aria-label="Print this book">
-                            <i id="print-button" class="fa fa-print"></i>
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
 
                     </div>
                 </div>
 
-                <div id="search-wrapper" class="hidden">
-                    <form id="searchbar-outer" class="searchbar-outer">
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
                         <div class="search-wrapper">
-                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
                             <div class="spinner-wrapper">
-                                <i class="fa fa-spinner fa-spin"></i>
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
                             </div>
                         </div>
                     </form>
-                    <div id="searchresults-outer" class="searchresults-outer hidden">
-                        <div id="searchresults-header" class="searchresults-header"></div>
-                        <ul id="searchresults">
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
                         </ul>
                     </div>
                 </div>
 
                 <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
                 <script>
-                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
-                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
-                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
                         link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
                     });
                 </script>
 
-                <div id="content" class="content">
+                <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="quickstart-quilkin-with-agones-and-xonotic-xds"><a class="header" href="#quickstart-quilkin-with-agones-and-xonotic-xds">Quickstart: Quilkin with Agones and Xonotic (xDS)</a></h1>
 <h2 id="requirements"><a class="header" href="#requirements">Requirements</a></h2>
@@ -183,24 +182,24 @@
 <li>A running <a href="https://agones.dev/">Agones</a> Kubernetes cluster
 <ul>
 <li><a href="https://agones.dev/site/docs/installation/">Installation instructions</a></li>
-<li>If you aren't familiar with Agones, we recommend working through their
+<li>If you aren’t familiar with Agones, we recommend working through their
 <a href="https://agones.dev/site/docs/getting-started/">Getting Started</a> guides.</li>
 </ul>
 </li>
-<li>A local copy of the <a href="https://github.com/googleforgames/quilkin/releases">Quilkin Binary</a>.</li>
+<li>A local copy of the <a href="https://github.com/EmbarkStudios/quilkin/releases">Quilkin Binary</a>.</li>
 </ul>
 <h2 id="1-overview"><a class="header" href="#1-overview">1. Overview</a></h2>
-<p>In this quickstart, we'll be setting up an example <a href="https://xonotic.org/">Xonotic</a> <a href="https://agones.dev/">Agones</a>
+<p>In this quickstart, we’ll be setting up an example <a href="https://xonotic.org/">Xonotic</a> <a href="https://agones.dev/">Agones</a>
 Fleet, that will only be accessible through Quilkin that is hosted within the same cluster, utilising the
 <a href="../../services/proxy/filters/token_router.html">TokenRouter</a> Filter to provide routing and access control to the Allocated <code>GameServer</code> instances.</p>
-<p>To do this, we'll take advantage of the Quilkin <a href="../../services/xds/providers/agones.html">Agones xDS Provider</a> to provide
-an out-of-the-box control plane for integration between Agones and <a href="../../services/xds.html">Quilkin's xDS configuration API</a> with
+<p>To do this, we’ll take advantage of the Quilkin <a href="../../services/xds/providers/agones.html">Agones xDS Provider</a> to provide
+an out-of-the-box control plane for integration between Agones and <a href="../../services/xds.html">Quilkin’s xDS configuration API</a> with
 minimal effort.</p>
 <h2 id="2-install-quilkin-agones-xds-provider"><a class="header" href="#2-install-quilkin-agones-xds-provider">2. Install Quilkin Agones xDS Provider</a></h2>
 <p>To install Quilkin as an Agones integrated xDS control plane, we can create a deployment of Quilkin running with
 <code>provider.k8s.agones</code>, with the appropriate permissions.</p>
 <p>Run the following:</p>
-<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/googleforgames/quilkin/main/examples/agones-xonotic-xds/xds-control-plane.yaml
+<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-xds/xds-control-plane.yaml
 </code></pre>
 <p>This applies several resources to your cluster:</p>
 <ol>
@@ -228,7 +227,7 @@ quilkin-manage-agones   ClusterIP   10.104.2.72   &lt;none&gt;        80/TCP    
 <h2 id="3-install-quilkin-proxy-pool"><a class="header" href="#3-install-quilkin-proxy-pool">3. Install Quilkin Proxy Pool</a></h2>
 <p>To install the Quilkin Proxy pool which connects to the above xDS provider, we can create a Deployment of Quilkin
 proxy instances that point to the aforementioned Service, like so:</p>
-<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/googleforgames/quilkin/main/examples/agones-xonotic-xds/proxy-pool.yaml
+<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-xds/proxy-pool.yaml
 </code></pre>
 <p>This will set up three instances of Quilkin running as <code>quilkin proxy --management-server http://quilkin-manage-agones:80</code>
 all connected to the <code>quilkin-manage-agones</code> service.</p>
@@ -240,7 +239,7 @@ quilkin-proxies-78965c446d-dqvjg        1/1     Running   0          6s
 quilkin-proxies-78965c446d-fr6zs        1/1     Running   0          6s
 quilkin-proxies-78965c446d-m4rr7        1/1     Running   0          6s
 </code></pre>
-<p>Let's take this one step further, and check the configuration of the proxies that should have come from the <code>quilkin manage agones</code> instance.</p>
+<p>Let’s take this one step further, and check the configuration of the proxies that should have come from the <code>quilkin manage agones</code> instance.</p>
 <p>In another terminal, run:  <code>kubectl port-forward deployments/quilkin-proxies 8001:8000</code>, to port forward the
 <a href="../admin.html">admin endpoint</a> locally to port 8001, which we can then query.</p>
 <p>Go back to your original terminal and run <code>curl -s http://localhost:8001/config</code></p>
@@ -280,14 +279,14 @@ nicely formatted JSON output.</p>
 </code></pre>
 <p>This shows us the current configuration of the proxies coming from the xDS server created via <code>quilkin manage agones</code>. The most interesting part that we see here, is that we have a matching set of
 <a href="../../services/proxy/filters.html">Filters</a> that are found in the <code>ConfigMap</code> in the
-<a href="https://github.com/googleforgames/quilkin/blob/main/examples/agones-xonotic-xds/xds-control-plane.yaml">xds-control-plane.yaml</a>
+<a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples/agones-xonotic-xds/xds-control-plane.yaml">xds-control-plane.yaml</a>
 we installed earlier.</p>
 <h2 id="4-create-the-agones-fleet"><a class="header" href="#4-create-the-agones-fleet">4. Create the Agones Fleet</a></h2>
 <p>Now we will create an <a href="https://agones.dev/site/docs/reference/fleet/">Agones Fleet</a> to spin up all our Xonotic
 game servers.</p>
 <p>Thankfully, Agones Fleets require no specific configuration to work with Quilkin proxies, so this yaml is a
-<a href="https://github.com/googleforgames/quilkin/blob/main/examples/agones-xonotic-xds/fleet.yaml">standard Agones Fleet configuration</a></p>
-<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/googleforgames/quilkin/main/examples/agones-xonotic-xds/fleet.yaml
+<a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples/agones-xonotic-xds/fleet.yaml">standard Agones Fleet configuration</a></p>
+<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-xds/fleet.yaml
 </code></pre>
 <p>Run <code>kubectl get gameservers</code> until all the <code>GameServer</code> records show that they are <code>Ready</code> and able to take players.</p>
 <pre><code class="language-shell">$ kubectl get gameservers
@@ -301,13 +300,13 @@ xonotic-d7rfx-sn5d6   Ready   34.168.170.51   7036   gke-agones-default-534a3f8d
 <code>quilkin.dev/tokens</code> annotation to an allocated <code>GameServer</code>, with the token content as its value.</p>
 <blockquote>
 <p>This token would normally get generated by some kind of  player authentication service and passed to the client
-via the matchmaking service - but for demonstrative purposes, we've hardcoded it into the example
+via the matchmaking service - but for demonstrative purposes, we’ve hardcoded it into the example
 <code>GameServerAllocation</code>.</p>
 </blockquote>
 <p>Since you can add annotations to <code>GameServers</code> at
 <a href="https://agones.dev/site/docs/reference/gameserverallocation/">allocation time</a>, we can both allocate a <code>GameServer</code>
 and apply the annotation at the same time!</p>
-<pre><code class="language-shell">kubectl create -f https://raw.githubusercontent.com/googleforgames/quilkin/main/examples/agones-xonotic-xds/gameserverallocation.yaml
+<pre><code class="language-shell">kubectl create -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-xds/gameserverallocation.yaml
 </code></pre>
 <p>If we check our <code>GameServers</code> now, we should see that one of them has moved to the <code>Allocated</code> state, marking it as
 having players playing on it, and therefore it is protected by Agones until the game session ends.</p>
@@ -318,7 +317,7 @@ xonotic-d7rfx-nx7xr   Ready       34.168.170.51   7984   gke-agones-default-534a
 xonotic-d7rfx-sn5d6   Ready       34.168.170.51   7036   gke-agones-default-534a3f8d-ifpc   23m
 </code></pre>
 <blockquote>
-<p>Don't do this more than once, as then multiple allocated <code>GameServers</code> will have the same routing token!</p>
+<p>Don’t do this more than once, as then multiple allocated <code>GameServers</code> will have the same routing token!</p>
 </blockquote>
 <p>If we <code>kubectl describe gameserver &lt;allocated-gameserver&gt;</code> and have a look at the annotations section, we
 should see something similar to this:</p>
@@ -336,11 +335,11 @@ Kind:         GameServer
 ...
 </code></pre>
 <p>Where we can see that there is now an annotation of <code>quilkin.dev/tokens</code> with the base64 encoded version of <code>456</code> as
-our authentication and routing token ("NDU2").</p>
+our authentication and routing token (“NDU2”).</p>
 <blockquote>
 <p>You should use something more cryptographically random than <code>456</code> in your application.</p>
 </blockquote>
-<p>Let's run <code>curl -s http://localhost:8001/config</code> again, so we can see what has changed!</p>
+<p>Let’s run <code>curl -s http://localhost:8001/config</code> again, so we can see what has changed!</p>
 <pre><code class="language-shell">❯ curl -s http://localhost:8001/config | jq
 {
   "clusters": [
@@ -386,22 +385,22 @@ our authentication and routing token ("NDU2").</p>
 <p>Looking under <code>clusters</code> &gt; <code>endpoints</code> we can see an address and token that matches up with the
 <code>GameServer</code> record we created above!</p>
 <p>The xDS process saw that allocated <code>GameServer</code>, turned it into a Quilkin <code>Endpoint</code> and applied the set the routing
-token appropriately -- without you having to write a line of xDS compliant code!</p>
+token appropriately – without you having to write a line of xDS compliant code!</p>
 <h2 id="connecting-client-side"><a class="header" href="#connecting-client-side">Connecting Client Side</a></h2>
-<p>Instead of connecting to Xonotic or an Agones <code>GameServer</code> directly, we'll want to grab the IP and exposed port of
-the <code>Service</code> that fronts all our Quilkin proxies and connect to that instead -- but we'll have to append our
+<p>Instead of connecting to Xonotic or an Agones <code>GameServer</code> directly, we’ll want to grab the IP and exposed port of
+the <code>Service</code> that fronts all our Quilkin proxies and connect to that instead – but we’ll have to append our
 routing token <code>456</code> from before, to ensure our traffic gets routed to the correct Xonotic <code>GameServer</code> address.</p>
 <p>Run <code>kubectl get service quilkin-proxies</code> to get the <code>EXTERNAL-IP</code> of the Service you created.</p>
 <pre><code class="language-shell">$ kubectl get service quilkin-proxies
 NAME              TYPE           CLUSTER-IP    EXTERNAL-IP     PORT(S)          AGE
 quilkin-proxies   LoadBalancer   10.109.0.12   35.246.94.14    7777:30174/UDP   3h22m
 </code></pre>
-<p>We have a <a href="https://github.com/googleforgames/quilkin/blob/main/examples/agones-xonotic-xds/client-token.yaml">Quilkin config yaml</a>
+<p>We have a <a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples/agones-xonotic-xds/client-token.yaml">Quilkin config yaml</a>
 file all ready for you, that is configured to append the routing token <code>456</code> to each
 packet that passes through it, via the power of a
 <a href="../../services/proxy/filters/concatenate.html">Concatenate</a> Filter.</p>
 <p>Download <code>client-token.yaml</code> locally, so you can edit it:</p>
-<pre><code class="language-shell">curl https://raw.githubusercontent.com/googleforgames/quilkin/main/examples/agones-xonotic-xds/client-token.yaml --output client-token.yaml
+<pre><code class="language-shell">curl https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-xds/client-token.yaml --output client-token.yaml
 </code></pre>
 <p>We then take the EXTERNAL-IP and port from the <code>quilkin-proxies</code> service, and replace the<code>${LOADBALANCER_IP}</code>
 with it in <code>client-token.yaml</code>.</p>
@@ -413,12 +412,12 @@ with it in <code>client-token.yaml</code>.</p>
 2023-10-04T20:09:07.322576Z  INFO quilkin::cli::proxy: src/cli/proxy.rs: Quilkin is ready
 2023-10-04T20:09:07.322692Z  INFO qcmp_task{v4_addr=0.0.0.0:7600 v6_addr=[::]:7600}: quilkin::protocol: src/protocol.rs: awaiting qcmp packets v4_addr=0.0.0.0:7600 v6_addr=[::]:7600
 </code></pre>
-<p>Now connect to the local client proxy on "[::1]:7777" via the "Multiplayer &gt; Address" field in the
+<p>Now connect to the local client proxy on “[::1]:7777” via the “Multiplayer &gt; Address” field in the
 Xonotic client, and Quilkin will take care of appending the routing token to all your UDP packets, which the Quilkin
 proxies will route to the Allocated GameServer, and you can play a gamee!</p>
-<p><img src="xonotic-address-v6.png" alt="xonotic-address-v6.png" /></p>
-<p>...And you didn't have to change the client or the dedicated game server 🤸</p>
-<h2 id="whats-next"><a class="header" href="#whats-next">What's Next?</a></h2>
+<p><img src="xonotic-address-v6.png" alt="xonotic-address-v6.png"></p>
+<p>…And you didn’t have to change the client or the dedicated game server 🤸</p>
+<h2 id="whats-next"><a class="header" href="#whats-next">What’s Next?</a></h2>
 <ul>
 <li>Check out the variety of <a href="../../services/proxy/filters.html">Filters</a> that are possible with Quilkin.</li>
 <li>Read into the <a href="../../services/xds.html">xDS Management API</a>.</li>
@@ -429,11 +428,11 @@ proxies will route to the Allocated GameServer, and you can play a gamee!</p>
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
                             <a rel="prev" href="../../deployment/quickstarts/agones-xonotic-sidecar.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                                <i class="fa fa-angle-left"></i>
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
                             <a rel="next prefetch" href="../../deployment/quickstarts/agones-xonotic-relay.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
-                                <i class="fa fa-angle-right"></i>
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
                         <div style="clear: both"></div>
@@ -443,16 +442,21 @@ proxies will route to the Allocated GameServer, and you can play a gamee!</p>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
                     <a rel="prev" href="../../deployment/quickstarts/agones-xonotic-sidecar.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                        <i class="fa fa-angle-left"></i>
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
                     <a rel="next prefetch" href="../../deployment/quickstarts/agones-xonotic-relay.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
-                        <i class="fa fa-angle-right"></i>
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
 
         </div>
 
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
 
 
 
@@ -461,13 +465,13 @@ proxies will route to the Allocated GameServer, and you can play a gamee!</p>
         </script>
 
 
-        <script src="../../elasticlunr.min.js"></script>
-        <script src="../../mark.min.js"></script>
-        <script src="../../searcher.js"></script>
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-c2a407aa.js"></script>
 
-        <script src="../../clipboard.min.js"></script>
-        <script src="../../highlight.js"></script>
-        <script src="../../book.js"></script>
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
 

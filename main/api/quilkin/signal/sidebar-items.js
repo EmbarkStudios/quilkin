@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["cancellation_token","channel","spawn_handler"],"struct":["ShutdownHandler"],"type":["ShutdownRx","ShutdownTx"]};
+window.SIDEBAR_ITEMS = {"fn":["await_shutdown","cancellation_token","channel","spawn_handler"],"struct":["ShutdownHandler"],"type":["ShutdownRx","ShutdownTx"]};

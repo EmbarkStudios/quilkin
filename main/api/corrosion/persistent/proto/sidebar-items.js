@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAGIC","VERSION"],"enum":["Error","ExecResult","Request","Response"],"mod":["v1"],"struct":["ExecResponse","VersionedBuf"],"trait":["VersionedRequest","VersionedResponse"]};

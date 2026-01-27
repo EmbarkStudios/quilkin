@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["DIRECTION_LABEL","EMPTY","READ_DIRECTION_LABEL","WRITE_DIRECTION_LABEL"],"enum":["Direction"],"fn":["histogram_opts","opts","register","registry"],"struct":["AsnInfo"],"trait":["CollectorExt"],"type":["Result"]};
+window.SIDEBAR_ITEMS = {"constant":["DIRECTION_LABEL","EMPTY","READ_DIRECTION_LABEL","WRITE_DIRECTION_LABEL"],"enum":["Direction"],"fn":["histogram_opts","opts","register","register_metrics","registry","with_mut_registry","with_registry"],"struct":["AsnInfo"],"trait":["CollectorExt"],"type":["Result"]};

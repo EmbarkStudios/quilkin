@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["PORT"],"fn":["server"]};
+window.SIDEBAR_ITEMS = {"constant":["PORT","PORT_LABEL"],"fn":["serve"]};
