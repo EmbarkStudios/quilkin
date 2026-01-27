@@ -35,7 +35,6 @@ uuid.workspace = true
 
 corro-agent.workspace = true
 corro-api-types.workspace = true
-corro-client.workspace = true
 corro-types.workspace = true
 spawn.workspace = true
 sqlite-pool.workspace = true

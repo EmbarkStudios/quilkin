@@ -6,7 +6,6 @@ edition.workspace = true
 
 [dependencies]
 thiserror.workspace = true
-tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 xdp.workspace = true

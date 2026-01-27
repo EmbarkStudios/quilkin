@@ -26,11 +26,9 @@ workspace = true
 [dependencies]
 # Packet creation/parsing to validate the packet processing for XDP
 etherparse = "0.19"
-insta = { version = "1.46", features = ["json"] }
 once_cell.workspace = true
 quilkin.workspace = true
 quilkin-xds.workspace = true
-corrosion.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 socket2.workspace = true
@@ -38,6 +36,9 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[dev-dependencies]
+insta = { version = "1.46", features = ["json"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 xdp = { workspace = true, features = ["__debug"] }

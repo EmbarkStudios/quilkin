@@ -661,18 +661,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bd91ee7b2422bcb158d90ef4d14f75ef67f340943fc4149891dcce8f8b972a3"
 
 [[package]]
-name = "cached"
-version = "0.56.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "801927ee168e17809ab8901d9f01f700cd7d8d6a6527997fee44e4b0327a253c"
-dependencies = [
- "hashbrown 0.15.5",
- "once_cell",
- "thiserror 2.0.17",
- "web-time",
-]
-
-[[package]]
 name = "camino"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -760,7 +748,6 @@ dependencies = [
  "anstyle",
  "clap_lex",
  "strsim",
- "terminal_size",
 ]
 
 [[package]]
@@ -828,12 +815,6 @@ checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
 ]
-
-[[package]]
-name = "condtype"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baf0a07a401f374238ab8e2f11a104d2851bf9ce711ec69804834de8af45c7af"
 
 [[package]]
 name = "config"
@@ -1029,30 +1010,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "corro-client"
-version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#60ceaafd09dde42461d151792e05a1a0eee42f0b"
-dependencies = [
- "bytes",
- "corro-api-types",
- "corro-utils",
- "futures",
- "hickory-resolver",
- "http",
- "http-body",
- "pin-project-lite",
- "reqwest",
- "serde",
- "serde_json",
- "sqlite-pool",
- "thiserror 2.0.17",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "corro-pg"
 version = "0.1.0"
 source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#60ceaafd09dde42461d151792e05a1a0eee42f0b"
@@ -1159,7 +1116,6 @@ dependencies = [
  "compact_str",
  "corro-agent",
  "corro-api-types",
- "corro-client",
  "corro-types",
  "data-encoding",
  "eyre",
@@ -1520,31 +1476,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "divan"
-version = "0.1.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a405457ec78b8fe08b0e32b4a3570ab5dff6dd16eb9e76a5ee0a9d9cbd898933"
-dependencies = [
- "cfg-if",
- "clap",
- "condtype",
- "divan-macros",
- "libc",
- "regex-lite",
-]
-
-[[package]]
-name = "divan-macros"
-version = "0.1.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9556bc800956545d6420a640173e5ba7dfa82f38d3ea5a167eb555bc69ac3323"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.114",
-]
-
-[[package]]
 name = "dtoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1611,26 +1542,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1e6a265c649f3f5979b601d26f1d05ada116434c87741c9493cb56218f76cbc"
 dependencies = [
  "heck",
- "proc-macro2",
- "quote",
- "syn 2.0.114",
-]
-
-[[package]]
-name = "enum-map"
-version = "2.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6866f3bfdf8207509a033af1a75a7b08abda06bbaaeae6669323fd5a097df2e9"
-dependencies = [
- "enum-map-derive",
-]
-
-[[package]]
-name = "enum-map-derive"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f282cfdfe92516eb26c2af8589c274c7c17681f5ecc03c18255fe741c6aa64eb"
-dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.114",
@@ -2627,9 +2538,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.46.0"
+version = "1.46.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b66886d14d18d420ab5052cbff544fc5d34d0b2cdd35eb5976aaa10a4a472e5"
+checksum = "248b42847813a1550dafd15296fd9748c651d0c32194559dbc05d804d54b21e8"
 dependencies = [
  "console",
  "once_cell",
@@ -4089,7 +4000,6 @@ dependencies = [
 name = "qt"
 version = "0.1.0"
 dependencies = [
- "corrosion",
  "etherparse",
  "insta",
  "once_cell",
@@ -4132,14 +4042,11 @@ dependencies = [
  "base64",
  "base64-serde",
  "bytes",
- "cached",
  "cfg-if",
  "clap",
  "crossbeam-utils",
  "dashmap",
- "divan",
  "either",
- "enum-map",
  "enum_dispatch",
  "eyre",
  "fixedstr",
@@ -4184,11 +4091,9 @@ dependencies = [
  "regex",
  "rustls",
  "schemars",
- "seahash",
  "serde",
  "serde_json",
  "serde_regex",
- "serde_stacker",
  "serde_yaml",
  "slab",
  "socket2 0.6.1",
@@ -4215,7 +4120,6 @@ dependencies = [
  "typemap_rev",
  "url",
  "uuid",
- "xxhash-rust",
 ]
 
 [[package]]
@@ -4258,7 +4162,6 @@ version = "0.10.0"
 dependencies = [
  "compact_str",
  "data-encoding",
- "eyre",
  "schemars",
  "serde",
  "serde_json",
@@ -4272,7 +4175,6 @@ dependencies = [
  "aya-log",
  "libc",
  "thiserror 2.0.17",
- "tracing",
  "xdp",
 ]
 
@@ -4280,10 +4182,7 @@ dependencies = [
 name = "quilkin-xds"
 version = "0.10.0"
 dependencies = [
- "arc-swap",
  "async-stream",
- "cached",
- "enum-map",
  "eyre",
  "fixedstr",
  "forwarded-header-value",
@@ -5084,17 +4983,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_stacker"
-version = "0.1.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4936375d50c4be7eff22293a9344f8e46f323ed2b3c243e52f89138d9bb0f4a"
-dependencies = [
- "serde",
- "serde_core",
- "stacker",
-]
-
-[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5568,16 +5456,6 @@ dependencies = [
  "dirs-next",
  "rustversion",
  "winapi",
-]
-
-[[package]]
-name = "terminal_size"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60b8cb979cb11c32ce1603f8137b22262a9d131aaa5c37b5678025f22b8becd0"
-dependencies = [
- "rustix",
- "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6894,12 +6772,6 @@ name = "xdp"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "855057bf4a9d1ebf97492e12cf96c93c66b6c832c44c0e65541aea9a72ac475a"
-
-[[package]]
-name = "xxhash-rust"
-version = "0.8.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
 
 [[package]]
 name = "yansi"

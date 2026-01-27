@@ -13,10 +13,7 @@ test = true
 [dependencies]
 quilkin-proto.workspace = true
 
-arc-swap.workspace = true
 async-stream.workspace = true
-cached.workspace = true
-enum-map.workspace = true
 eyre.workspace = true
 fixedstr.workspace = true
 forwarded-header-value = "0.1.1"
