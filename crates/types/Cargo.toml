@@ -1,5 +1,6 @@
 [package]
 name = "quilkin-types"
+description = "Shared types for the quilkin ecosystem"
 version.workspace = true
 license.workspace = true
 edition.workspace = true
