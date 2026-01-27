@@ -45,11 +45,12 @@ jobs:
     steps:
       - *checkout
       - *install-rust
+      - run: ls -lah /home/runner/work/quilkin/quilkin/
       - name: Run release-plz
         uses: release-plz/action@v0.5
         with:
           command: release-pr
-          manifest_path: $GITHUB_WORKSPACE/Cargo.toml
+          manifest_path: /home/runner/work/quilkin/quilkin/Cargo.toml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
