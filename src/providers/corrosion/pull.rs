@@ -1,5 +1,6 @@
 use super::*;
 
+use corrosion::persistent;
 use rand::Rng;
 
 struct Sub {
@@ -141,9 +142,12 @@ pub(super) async fn corrosion_subscribe(
 /// Attempts to connect to and subscribe to the queries to keep this proxy up to
 /// date with cluster status
 async fn connect_and_sub(addr: net::SocketAddr, change_ids: &ChangeIds) -> crate::Result<SubState> {
-    let root = client::Client::connect_insecure(addr)
-        .await
-        .context("failed to connect")?;
+    let root = client::Client::connect_insecure(
+        addr,
+        persistent::Metrics::new(crate::metrics::registry()),
+    )
+    .await
+    .context("failed to connect")?;
 
     let mut js = tokio::task::JoinSet::new();
     js.spawn({
@@ -212,66 +216,25 @@ async fn process_subscription_events(
     mut sstate: SubState,
     change_ids: &mut ChangeIds,
 ) -> crate::Result<()> {
-    use corrosion::db::read as db;
+    use corrosion::{db::read as db, pubsub::SubscriptionStream};
     use pubsub::{ChangeType, QueryEvent};
 
-    let process_server_event = |event: Option<QueryEvent>,
-                                cid: &mut Option<ChangeId>|
-     -> crate::Result<()> {
-        let event = event.context("subscription was closed")?;
-        let Some(servers) = state.dyn_cfg.servers() else {
-            // TODO: Don't subscribe if we don't have this
-            return Ok(());
+    let process_server_events =
+        |events: Option<SubscriptionStream>, cid: &mut Option<ChangeId>| -> crate::Result<()> {
+            let events = events.context("subscription was closed")?;
+            let Some(servers) = state.dyn_cfg.clusters() else {
+                // TODO: Don't subscribe if we don't have this
+                return Ok(());
+            };
+
+            *cid = Some(servers.write().corrosion_apply(events));
+            Ok(())
         };
 
-        match event {
-            // The state of row that matches our query changed
-            QueryEvent::Change(ct, _rid, row, id) => {
-                let server = db::ServerRow::from_sql(&row)?;
-
-                match ct {
-                    ChangeType::Insert | ChangeType::Update => {
-                        servers.upsert(server.endpoint, server.icao, server.tokens);
-                    }
-                    ChangeType::Delete => {
-                        if let Some((micao, mtoken_set)) = servers.remove(&server.endpoint) {
-                            let diffs = server.tokens.0.symmetric_difference(&mtoken_set.0).count();
-                            if server.icao != micao || diffs != 0 {
-                                tracing::warn!(endpoint = %server.endpoint, our_icao = %micao, remote_icao = %server.icao, token_set_diffs = diffs, "received removal event for endpoint which differed from the local version");
-                            }
-                        } else {
-                            tracing::warn!(endpoint = %server.endpoint, "received removal event for endpoint not in local server set");
-                        }
-                    }
-                }
-
-                *cid = Some(id);
-            }
-            // The state of a row in the initial query
-            QueryEvent::Row(_rid, row) => {
-                let server = db::ServerRow::from_sql(&row)?;
-                servers.upsert(server.endpoint, server.icao, server.tokens);
-            }
-            QueryEvent::Error(error) => {
-                tracing::error!(%error, "error from 'servers' subscription");
-            }
-            // Marks the end of the initial query to catch us up to the current state of the server
-            QueryEvent::EndOfQuery { time, change_id } => {
-                tracing::debug!(elapsed = ?Duration::from_secs_f64(time), ?change_id, "received initial state of 'servers'");
-                *cid = change_id;
-            }
-            QueryEvent::Columns(_) => {
-                // irrelevant
-            }
-        }
-
-        Ok(())
-    };
-
-    let process_cluster_event = |event: Option<QueryEvent>,
-                                 cid: &mut Option<ChangeId>|
+    let process_cluster_events = |events: Option<SubscriptionStream>,
+                                  cid: &mut Option<ChangeId>|
      -> crate::Result<()> {
-        let event = event.context("subscription was closed")?;
+        let events = events.context("subscription was closed")?;
         let Some(dcs) = state.dyn_cfg.datacenters() else {
             // TODO: Don't subscribe if we don't have this
             return Ok(());
@@ -279,65 +242,75 @@ async fn process_subscription_events(
 
         use crate::config::Datacenter;
 
-        match event {
-            // The state of row that matches our query changed
-            QueryEvent::Change(ct, _rid, row, id) => {
-                let dc = db::DatacenterRow::from_sql(&row)?;
-
-                match ct {
-                    ChangeType::Insert | ChangeType::Update => {
-                        dcs.modify(|dcs| {
-                            dcs.insert(
-                                dc.ip,
-                                Datacenter {
-                                    qcmp_port: dc.qcmp_port,
-                                    icao_code: dc.icao,
-                                },
-                            );
-                        });
-                    }
-                    ChangeType::Delete => {
-                        dcs.modify(|dcs| {
-                            dcs.remove(dc.ip);
-                        });
-                    }
+        for event in events {
+            let event = match event {
+                Ok(e) => e,
+                Err(error) => {
+                    tracing::error!(%error, "failed to deserialize event");
+                    continue;
                 }
+            };
 
-                *cid = Some(id);
-            }
-            // The state of a row in the initial query
-            QueryEvent::Row(_rid, row) => {
-                let dc = db::DatacenterRow::from_sql(&row)?;
-                dcs.modify(|dcs| {
-                    dcs.insert(
-                        dc.ip,
-                        Datacenter {
-                            qcmp_port: dc.qcmp_port,
-                            icao_code: dc.icao,
-                        },
-                    );
-                });
-            }
-            QueryEvent::Error(error) => {
-                tracing::error!(%error, "error from 'clusters' subscription");
-            }
-            // Marks the end of the initial query to catch us up to the current state of the server
-            QueryEvent::EndOfQuery { time, change_id } => {
-                tracing::debug!(elapsed = ?Duration::from_secs_f64(time), ?change_id, "received initial state of 'clusters'");
-                *cid = change_id;
-            }
-            QueryEvent::Columns(_) => {
-                // irrelevant
+            match event {
+                // The state of row that matches our query changed
+                QueryEvent::Change(ct, _rid, row, id) => {
+                    let dc = db::DatacenterRow::from_sql(&row)?;
+
+                    match ct {
+                        ChangeType::Insert | ChangeType::Update => {
+                            dcs.modify(|dcs| {
+                                dcs.insert(
+                                    dc.ip,
+                                    Datacenter {
+                                        qcmp_port: dc.qcmp_port,
+                                        icao_code: dc.icao,
+                                    },
+                                );
+                            });
+                        }
+                        ChangeType::Delete => {
+                            dcs.modify(|dcs| {
+                                dcs.remove(dc.ip);
+                            });
+                        }
+                    }
+
+                    *cid = Some(id);
+                }
+                // The state of a row in the initial query
+                QueryEvent::Row(_rid, row) => {
+                    let dc = db::DatacenterRow::from_sql(&row)?;
+                    dcs.modify(|dcs| {
+                        dcs.insert(
+                            dc.ip,
+                            Datacenter {
+                                qcmp_port: dc.qcmp_port,
+                                icao_code: dc.icao,
+                            },
+                        );
+                    });
+                }
+                QueryEvent::Error(error) => {
+                    tracing::error!(%error, "error from 'clusters' subscription");
+                }
+                // Marks the end of the initial query to catch us up to the current state of the server
+                QueryEvent::EndOfQuery { time, change_id } => {
+                    tracing::debug!(elapsed = ?Duration::from_secs_f64(time), ?change_id, "received initial state of 'clusters'");
+                    *cid = change_id;
+                }
+                QueryEvent::Columns(_) => {
+                    // irrelevant
+                }
             }
         }
 
         Ok(())
     };
 
-    let process_filter_event = |event: Option<QueryEvent>,
-                                cid: &mut Option<ChangeId>|
+    let process_filter_events = |events: Option<SubscriptionStream>,
+                                 cid: &mut Option<ChangeId>|
      -> crate::Result<()> {
-        let event = event.context("subscription was closed")?;
+        let events = events.context("subscription was closed")?;
         let Some(fcf) = state.dyn_cfg.filters() else {
             // TODO: Don't subscribe if we don't have this
             return Ok(());
@@ -357,35 +330,45 @@ async fn process_subscription_events(
             Ok(())
         };
 
-        match event {
-            // The state of row that matches our query changed
-            QueryEvent::Change(ct, _rid, row, id) => {
-                match ct {
-                    ChangeType::Insert | ChangeType::Update => {
-                        update_filter(&row)?;
-                    }
-                    ChangeType::Delete => {
-                        // TODO: what do we actually want to do here?
-                        tracing::warn!("ignoring `filter` deletion event");
-                    }
+        for event in events {
+            let event = match event {
+                Ok(e) => e,
+                Err(error) => {
+                    tracing::error!(%error, "failed to deserialize event");
+                    continue;
                 }
+            };
 
-                *cid = Some(id);
-            }
-            // The state of a row in the initial query
-            QueryEvent::Row(_rid, row) => {
-                update_filter(&row)?;
-            }
-            QueryEvent::Error(error) => {
-                tracing::error!(%error, "error from 'filter' subscription");
-            }
-            // Marks the end of the initial query to catch us up to the current state of the server
-            QueryEvent::EndOfQuery { time, change_id } => {
-                tracing::debug!(elapsed = ?Duration::from_secs_f64(time), ?change_id, "received initial state of 'filter'");
-                *cid = change_id;
-            }
-            QueryEvent::Columns(_) => {
-                // irrelevant
+            match event {
+                // The state of row that matches our query changed
+                QueryEvent::Change(ct, _rid, row, id) => {
+                    match ct {
+                        ChangeType::Insert | ChangeType::Update => {
+                            update_filter(&row)?;
+                        }
+                        ChangeType::Delete => {
+                            // TODO: what do we actually want to do here?
+                            tracing::warn!("ignoring `filter` deletion event");
+                        }
+                    }
+
+                    *cid = Some(id);
+                }
+                // The state of a row in the initial query
+                QueryEvent::Row(_rid, row) => {
+                    update_filter(&row)?;
+                }
+                QueryEvent::Error(error) => {
+                    tracing::error!(%error, "error from 'filter' subscription");
+                }
+                // Marks the end of the initial query to catch us up to the current state of the server
+                QueryEvent::EndOfQuery { time, change_id } => {
+                    tracing::debug!(elapsed = ?Duration::from_secs_f64(time), ?change_id, "received initial state of 'filter'");
+                    *cid = change_id;
+                }
+                QueryEvent::Columns(_) => {
+                    // irrelevant
+                }
             }
         }
 
@@ -395,13 +378,19 @@ async fn process_subscription_events(
     loop {
         let res = tokio::select! {
             sc = sstate.servers.stream.rx.recv() => {
-                process_server_event(sc, &mut change_ids[Which::Servers]).context("processing 'servers' event")
+                let span = tracing::info_span!("servers");
+                let _s = span.enter();
+                process_server_events(sc, &mut change_ids[Which::Servers]).context("processing 'servers' event")
             }
             dc = sstate.clusters.stream.rx.recv() => {
-                process_cluster_event(dc, &mut change_ids[Which::Clusters]).context("processing 'clusters' event")
+                let span = tracing::info_span!("clusters");
+                let _s = span.enter();
+                process_cluster_events(dc, &mut change_ids[Which::Clusters]).context("processing 'clusters' event")
             }
             fc = sstate.filter.stream.rx.recv() => {
-                process_filter_event(fc, &mut change_ids[Which::Filter]).context("processing 'filter' event")
+                let span = tracing::info_span!("filter");
+                let _s = span.enter();
+                process_filter_events(fc, &mut change_ids[Which::Filter]).context("processing 'filter' event")
             }
         };
 

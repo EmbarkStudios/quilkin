@@ -908,6 +908,8 @@ pub fn read_length_prefixed_bytes(b: &mut Bytes) -> Option<Bytes> {
 
 /// The read side of a [`BufferingSubStream`]
 ///
+/// This is an iterator over the events in a discrete block of events
+///
 /// This is intentionally sans-io for easier testing
 pub struct SubscriptionStream {
     buf: Bytes,

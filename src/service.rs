@@ -851,6 +851,7 @@ impl Service {
             (std::net::Ipv6Addr::UNSPECIFIED, self.corrosion_port).into(),
             btx,
             ps_ctx,
+            corrosion::persistent::Metrics::new(crate::metrics::registry()),
         )?;
 
         let finished = shutdown.push("corrosion_server");

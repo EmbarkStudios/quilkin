@@ -18,6 +18,7 @@ eyre.workspace = true
 futures.workspace = true
 indexmap = "2.13"
 parking_lot.workspace = true
+prometheus.workspace = true
 quilkin-types.workspace = true
 quinn = "0.11"
 quinn-plaintext = "0.3"

@@ -1,5 +1,5 @@
 use super::*;
-use corrosion::persistent::{client, proto::v1};
+use corrosion::persistent::{self, client, proto::v1};
 use quilkin_types::{Endpoint, IcaoCode, TokenSet};
 use rand::Rng;
 use std::{collections::BTreeMap, sync::Arc};
@@ -475,9 +475,12 @@ impl Pusher {
 }
 
 async fn connect(addr: net::SocketAddr, info: AgentInfo) -> crate::Result<client::MutationClient> {
-    let root = client::Client::connect_insecure(addr)
-        .await
-        .context("failed to connect")?;
+    let root = client::Client::connect_insecure(
+        addr,
+        persistent::Metrics::new(crate::metrics::registry()),
+    )
+    .await
+    .context("failed to connect")?;
 
     Ok(client::MutationClient::connect(root, info.qcmp, info.icao).await?)
 }
