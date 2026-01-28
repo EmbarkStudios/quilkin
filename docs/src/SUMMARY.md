@@ -11,35 +11,27 @@
 
 # Services
 
-- [Proxy](./services/proxy.md)
-    - [Configuration File](./services/proxy/configuration.md)
-    - [Filters](./services/proxy/filters.md)
-        - [Capture](./services/proxy/filters/capture.md)
-        - [Concatenate](./services/proxy/filters/concatenate.md)
-        - [Debug](./services/proxy/filters/debug.md)
-        - [Drop](./services/proxy/filters/drop.md)
-        - [Firewall](./services/proxy/filters/firewall.md)
-        - [Load Balancer](./services/proxy/filters/load_balancer.md)
-        - [Local Rate Limit](./services/proxy/filters/local_rate_limit.md)
-        - [Match](./services/proxy/filters/match.md)
-        - [Pass](./services/proxy/filters/pass.md)
-        - [Timestamp](./services/proxy/filters/timestamp.md)
-        - [Token Router](./services/proxy/filters/token_router.md)
-    - [Control Message Protocol](./services/proxy/qcmp.md)
-    - [Metrics](./services/proxy/metrics.md)
+- [QCMP](./services/qcmp.md)
+- [UDP](./services/udp.md)
 
----
+# Providers
 
-- [Control Plane](./services/xds.md)
-    - [Providers]()
-        - [Agones](./services/xds/providers/agones.md)
-        - [Filesystem](./services/xds/providers/filesystem.md)
-    - [Protobuf Reference](./services/xds/proto/index.md)
----
+- [Agones](./providers/agones.md)
+- [Filesystem](./providers/filesystem.md)
 
-- [Relay](./services/relay.md)
-    - [Metrics]()
-    - [Agents](./services/agent.md)
+# Filters
+- [Overview](./filters.md)
+- [Capture](./filters/capture.md)
+- [Concatenate](./filters/concatenate.md)
+- [Debug](./filters/debug.md)
+- [Drop](./filters/drop.md)
+- [Firewall](./filters/firewall.md)
+- [Load Balancer](./filters/load_balancer.md)
+- [Local Rate Limit](./filters/local_rate_limit.md)
+- [Match](./filters/match.md)
+- [Pass](./filters/pass.md)
+- [Timestamp](./filters/timestamp.md)
+- [Token Router](./filters/token_router.md)
 
 # SDKs
 
@@ -47,6 +39,8 @@
 
 # Deployment
 
+- [Configuration File](./deployment/configuration.md)
+- [Metrics](./deployment/metrics.md)
 - [Administration](./deployment/admin.md)
 - [Architecture Examples](./deployment/examples.md)
 

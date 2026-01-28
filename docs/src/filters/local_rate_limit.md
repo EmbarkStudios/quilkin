@@ -38,8 +38,8 @@ To configure a rate limiter, we specify the maximum rate at which the proxy is a
 
 > Packets that that exceeds the maximum configured rate are dropped.
 
-## Configuration Options ([Rust Doc](../../../../api/quilkin/filters/local_rate_limit/struct.Config.html))
+## Configuration Options ([Rust Doc](../../api/quilkin/filters/local_rate_limit/struct.Config.html))
 
 ```yaml
-{{#include ../../../../../target/quilkin.filters.local_rate_limit.v1alpha1.yaml}}
+{{#include ../../../target/quilkin.filters.local_rate_limit.v1alpha1.yaml}}
 ```

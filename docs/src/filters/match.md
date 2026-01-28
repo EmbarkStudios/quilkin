@@ -40,13 +40,13 @@ filters:
 ```
 <!--  ANCHOR_END: example -->
 
-## Configuration Options ([Rust Doc](../../../../api/quilkin/filters/match/struct.Config.html))
+## Configuration Options ([Rust Doc](../../api/quilkin/filters/match/struct.Config.html))
 
 ```yaml
-{{#include ../../../../../target/quilkin.filters.match.v1alpha1.yaml}}
+{{#include ../../../target/quilkin.filters.match.v1alpha1.yaml}}
 ```
 
-View the [Match](../../../../api/quilkin/filters/match/struct.Config.html) filter documentation for more details.
+View the [Match](../../api/quilkin/filters/match/struct.Config.html) filter documentation for more details.
 
 ## Metrics
 

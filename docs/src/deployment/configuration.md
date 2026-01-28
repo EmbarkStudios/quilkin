@@ -19,7 +19,7 @@ Example of a full configuration for `quilkin proxy` that utlisies a static
 endpoint configuration to specify two endpoints with `token` metadata attached to each:
 
 ```yaml
-{{#include ../../../../examples/proxy.yaml:17:100}}
+{{#include ../../examples/proxy.yaml:17:100}}
 ```
 
 This is a great use of a static configuration file, as we only get a singular `--to` endpoint address via the

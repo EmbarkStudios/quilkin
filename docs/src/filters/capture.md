@@ -48,10 +48,10 @@ clusters:
 # assert_eq!(config.filters.load().len(), 1);
 ```
 
-## Configuration Options ([Rust Doc](../../../../api/quilkin/filters/capture/struct.Config.html))
+## Configuration Options ([Rust Doc](../../../api/quilkin/filters/capture/struct.Config.html))
 
 ```yaml
-{{#include ../../../../../target/quilkin.filters.capture.v1alpha1.yaml}}
+{{#include ../../../target/quilkin.filters.capture.v1alpha1.yaml}}
 ```
 
 [filter-dynamic-metadata]: ../filters.md#filter-dynamic-metadata

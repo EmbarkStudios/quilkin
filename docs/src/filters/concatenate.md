@@ -26,8 +26,8 @@ clusters:
 # assert_eq!(config.filters.load().len(), 1);
 ```
 
-## Configuration Options ([Rust Doc](../../../../api/quilkin/filters/concatenate/struct.Config.html))
+## Configuration Options ([Rust Doc](../../api/quilkin/filters/concatenate/struct.Config.html))
 
 ```yaml
-{{#include ../../../../../target/quilkin.filters.concatenate.v1alpha1.yaml}}
+{{#include ../../../target/quilkin.filters.concatenate.v1alpha1.yaml}}
 ```

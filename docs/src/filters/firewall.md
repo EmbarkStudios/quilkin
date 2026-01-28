@@ -36,10 +36,10 @@ clusters:
 # assert_eq!(config.filters.load().len(), 1);
 ```
 
-## Configuration Options ([Rust Doc](../../../../api/quilkin/filters/firewall/struct.Config.html))
+## Configuration Options ([Rust Doc](../../api/quilkin/filters/firewall/struct.Config.html))
 
 ```yaml
-{{#include ../../../../../target/quilkin.filters.firewall.v1alpha1.yaml}}
+{{#include ../../../target/quilkin.filters.firewall.v1alpha1.yaml}}
 ```
 
 ### Rule Evaluation

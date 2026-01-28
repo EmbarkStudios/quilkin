@@ -144,7 +144,8 @@ pub struct Providers {
     #[clap(
         long = "provider.mds.endpoints",
         env = "QUILKIN_PROVIDERS_MDS_ENDPOINTS",
-        value_delimiter = ','
+        value_delimiter = ',',
+        hide = true
     )]
     relay: Vec<tonic::transport::Endpoint>,
     /// The remote URL or local file path to retrieve the Maxmind database.
@@ -173,7 +174,8 @@ pub struct Providers {
     #[clap(
         long = "provider.xds.endpoints",
         env = "QUILKIN_PROVIDERS_XDS_ENDPOINTS",
-        value_delimiter = ','
+        value_delimiter = ',',
+        hide = true
     )]
     xds_endpoints: Vec<tonic::transport::Endpoint>,
 }

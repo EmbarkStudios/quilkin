@@ -17,11 +17,7 @@ language = "en"
 src = "src"
 title = "Quilkin Book"
 
-[preprocessor.links]
-after = ["quilkin"]
-
-[preprocessor.quilkin]
-command = "./preprocessor.sh"
+[preprocessor.mermaid]
 
 [preprocessor.variables]
 use_env = true
@@ -32,3 +28,4 @@ use_env = true
 create-missing = false
 
 [output.html]
+additional-js = ["mermaid.min.js", "mermaid-init.js"]

@@ -48,7 +48,7 @@ Endpoint data.
 For example:
 
 ```yaml
-{{#include ../../../../../examples/agones-xonotic-xds/xds-control-plane.yaml:config-map}}
+{{#include ../../../examples/agones-xonotic-xds/xds-control-plane.yaml:config-map}}
 ```
 
 By default the Agones xDS provider will look in the `default` namespace for this `ConfigMap`, but it can be

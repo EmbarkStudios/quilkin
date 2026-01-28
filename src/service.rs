@@ -14,14 +14,16 @@ pub struct Service {
     #[arg(
         long = "service.mds",
         env = "QUILKIN_SERVICE_MDS",
-        default_value_t = false
+        default_value_t = false,
+        hide = true
     )]
     mds_enabled: bool,
     /// The TCP port to listen to serve xDS requests.
     #[clap(
         long = "service.mds.port",
         env = "QUILKIN_SERVICE_MDS_PORT",
-        default_value_t = 7900
+        default_value_t = 7900,
+        hide = true
     )]
     mds_port: u16,
     /// Whether to serve UDP requests.
@@ -75,35 +77,40 @@ pub struct Service {
     #[arg(
         long = "service.xds",
         env = "QUILKIN_SERVICE_XDS",
-        default_value_t = false
+        default_value_t = false,
+        hide = true
     )]
     xds_enabled: bool,
     /// The TCP port to listen to serve xDS requests.
     #[clap(
         long = "service.xds.port",
         env = "QUILKIN_SERVICE_XDS_PORT",
-        default_value_t = 7800
+        default_value_t = 7800,
+        hide = true
     )]
     xds_port: u16,
     /// Whether to serve xDS and/or mDS requests.
     #[arg(
         long = "service.grpc",
         env = "QUILKIN_SERVICE_GRPC",
-        default_value_t = false
+        default_value_t = false,
+        hide = true
     )]
     grpc_enabled: bool,
     /// A PEM encoded certificate, if supplied, applies to the mds and xds service(s)
     #[clap(
         long = "service.tls.cert",
         env = "QUILKIN_SERVICE_TLS_CERT",
-        requires("tls_key")
+        requires("tls_key"),
+        hide = true
     )]
     tls_cert: Option<Vec<u8>>,
     /// The private key for the cert
     #[clap(
         long = "service.tls.key",
         env = "QUILKIN_SERVICE_TLS_KEY",
-        requires("tls_cert")
+        requires("tls_cert"),
+        hide = true
     )]
     tls_key: Option<Vec<u8>>,
     /// Path to a PEM encoded certificate, if supplied, applies to the mds and xds service(s)
@@ -111,7 +118,8 @@ pub struct Service {
         long = "service.tls.cert-path",
         env = "QUILKIN_SERVICE_TLS_CERT_PATH",
         requires("tls_key_path"),
-        conflicts_with("tls_cert")
+        conflicts_with("tls_cert"),
+        hide = true
     )]
     tls_cert_path: Option<std::path::PathBuf>,
     /// Path to the private key for the cert
@@ -119,7 +127,8 @@ pub struct Service {
         long = "service.tls.key-path",
         env = "QUILKIN_SERVICE_TLS_KEY_PATH",
         requires("tls_cert_path"),
-        conflicts_with("tls_key")
+        conflicts_with("tls_key"),
+        hide = true
     )]
     tls_key_path: Option<std::path::PathBuf>,
     #[clap(long = "termination-timeout")]

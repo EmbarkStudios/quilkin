@@ -39,10 +39,10 @@ clusters:
 
 View the [CaptureBytes](capture.md) filter documentation for more details.
 
-## Configuration Options ([Rust Doc](../../../../api/quilkin/filters/token_router/struct.Config.html))
+## Configuration Options ([Rust Doc](../../api/quilkin/filters/token_router/struct.Config.html))
 
 ```yaml
-{{#include ../../../../../target/quilkin.filters.token_router.v1alpha1.yaml}}
+{{#include ../../../target/quilkin.filters.token_router.v1alpha1.yaml}}
 ```
 
 ## Metrics
@@ -53,7 +53,7 @@ View the [CaptureBytes](capture.md) filter documentation for more details.
     * `NoEndpointMatch` - The token provided via the Filter dynamic metadata does not match any Endpoint's tokens.
     * `NoTokenFound` - No token has been found in the Filter dynamic metadata.
     * `InvalidToken` - The data found for the token in the Filter dynamic metadata is not of the correct data type
-       (Vec<u8>)
+       (`Vec<u8>`)
 
 ## Sample Applications
 

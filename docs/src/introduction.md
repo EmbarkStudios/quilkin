@@ -55,19 +55,16 @@ architecture-beta
     group config(cloud)[Configuration]
 
     service udp(internet)[UDP] in public
-    service qcmp(internet)[QCMP UDP] in public
+    service qcmp(internet)[QCMP] in public
     junction sp1 in services
     junction sp3 in services
 
-    service metrics(internet)[Administration] in private
-    service grpc(internet)[gRPC] in private
     service http(internet)[HTTP] in private
     junction sp2 in services
     junction sp4 in services
 
     service k8s(cloud)[Kubernetes] in providers
     service fs(disk)[Filesystem] in providers
-    service xds(cloud)[gRPC] in providers
     service cli(disk)[CLI] in providers
     junction p1 in providers
     junction p2 in providers
@@ -86,9 +83,6 @@ architecture-beta
     sp1:B -- T:sp3
 
     sp2:T -- B:sp3
-    sp2:L -- R:grpc
-    sp2:B -- R:metrics
-    sp4:L -- R:metrics
     sp4:B -- R:http
     sp4:T -- B:sp2
     sp3:R -- L:quilkin
@@ -97,7 +91,6 @@ architecture-beta
     p1:T -- L:fs
     p1:R -- L:k8s
     p1:B -- T:p2
-    p2:R -- L:xds
     p2:B -- L:cli
     c2:L -- R:mmdb
     c2:R -- L:gameservers

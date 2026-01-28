@@ -1,7 +1,9 @@
 [tools]
 cargo-insta = "latest"
+"cargo:mdbook-variables" = "latest"
 gcloud = "latest"
 "github:EmbarkStudios/cargo-about" = "latest"
+"github:badboy/mdbook-mermaid" = "latest"
 "github:nextest-rs/nextest" = { version = "latest", version_prefix = "cargo-nextest-" }
 "github:pseudomuto/protoc-gen-doc" = "latest"
 helm = "latest"
