@@ -15,7 +15,7 @@ use corro_types::{
     updates::Handle,
 };
 pub use corro_types::{
-    api::{ChangeId, QueryEvent, TypedQueryEvent},
+    api::{ChangeId, QueryEvent, TypedQueryEvent, sqlite::ChangeType},
     pubsub::{MatchCandidates, MatcherError, MatcherHandle, SubsManager},
 };
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,8 @@ pub enum CatchUpError {
 pub type BodySender = mpsc::Sender<Bytes>;
 
 pub const SERVER_QUERY: &str = "SELECT endpoint,icao,tokens FROM servers";
+pub const DC_QUERY: &str = "SELECT ip,port,icao FROM dc";
+pub const FILTER_QUERY: &str = "SELECT filter FROM filter";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SubParamsv1 {
@@ -64,7 +66,7 @@ pub struct SubParamsv1 {
     ///
     /// If events are buffered below this threshold, they will be emitted on
     /// the next `max_time` interval
-    #[serde(default, rename = "mb")]
+    #[serde(default = "max_buffer", rename = "mb")]
     pub max_buffer: u16,
     /// The maximum amount of time that buffered events beneath the `max_buffer`
     /// threshold will be kept before being sent
@@ -90,19 +92,44 @@ pub struct SubParamsv1 {
     pub change_threshold: usize,
 }
 
-/// The default [`SubParams::process_interval`]
+impl SubParamsv1 {
+    /// Creates [`Self`] with the specified query and the rest of the items
+    /// set to their default
+    pub fn new(query: &str) -> Self {
+        Self {
+            query: query.into(),
+            from: None,
+            skip_rows: false,
+            max_buffer: max_buffer(),
+            max_time: max_time(),
+            process_interval: process_interval(),
+            change_threshold: change_threshold(),
+        }
+    }
+}
+
+/// The default [`SubParamsv1::process_interval`]
+#[inline]
 pub const fn process_interval() -> Duration {
     Duration::from_millis(600)
 }
 
-/// The default [`SubParams::change_threshold`]
+/// The default [`SubParamsv1::change_threshold`]
+#[inline]
 pub const fn change_threshold() -> usize {
     1000
 }
 
-/// The default [`SubParams::max_time`]
+/// The default [`SubParamsv1::max_time`]
+#[inline]
 pub const fn max_time() -> Duration {
     Duration::from_millis(10)
+}
+
+/// The default [`SubParamsv1::max_buffer`]
+#[inline]
+pub const fn max_buffer() -> u16 {
+    1500 /* Ethernet MTU */ - 20 /* max size of a quic header */
 }
 
 async fn expand_sql(sp: &SplitPool, stmt: &Statement) -> Result<String, MatcherUpsertError> {
@@ -145,6 +172,7 @@ async fn expand_sql(sp: &SplitPool, stmt: &Statement) -> Result<String, MatcherU
         .ok_or(MatcherUpsertError::CouldNotExpand)
 }
 
+#[inline]
 fn handle_sub_event(
     max_size: u16,
     buf: &mut PrefixedBuf,
@@ -688,6 +716,28 @@ pub struct PubsubContext {
 }
 
 impl PubsubContext {
+    /// Creates a new [`Self`], attempting to restore subscriptions
+    pub async fn new(
+        subs: SubsManager,
+        path: PathBuf,
+        pool: SplitPool,
+        schema: Arc<Schema>,
+        tripwire: Tripwire,
+        loop_config: MatcherLoopConfig,
+    ) -> eyre::Result<Self> {
+        let cache =
+            restore_subscriptions(&subs, &path, &pool, &schema, &tripwire, loop_config).await?;
+
+        Ok(Self {
+            subs,
+            path,
+            pool,
+            schema,
+            tripwire,
+            cache,
+        })
+    }
+
     /// Creates a subscription for the specified [`PubusbContext`]
     ///
     /// Database mutations that match the query specified in the params will
@@ -718,42 +768,17 @@ impl PubsubContext {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::persistent::server::SubManager for PubsubContext {
+    async fn subscribe(&self, subp: SubParamsv1) -> Result<Subscription, MatcherUpsertError> {
+        self.subscribe(subp).await
+    }
+}
+
 pub struct Subscription {
     pub id: Uuid,
     pub query_hash: String,
     pub rx: mpsc::Receiver<SubscriptionEvent>,
-}
-
-/// Creates a subscription for the specified [`PubusbContext`]
-///
-/// Database mutations that match the query specified in the params will
-/// cause subscription events to be emitted to the receiver
-pub async fn subscribe(
-    params: SubParamsv1,
-    ctx: &PubsubContext,
-) -> Result<Subscription, MatcherUpsertError> {
-    let query = expand_sql(&ctx.pool, &params.query).await?;
-    let mut bcast_write = ctx.cache.write().await;
-
-    let (handle, created) = ctx.subs.get_or_insert(
-        &query,
-        &ctx.path,
-        &ctx.schema,
-        &ctx.pool,
-        ctx.tripwire.clone(),
-        MatcherLoopConfig {
-            changes_threshold: params.change_threshold,
-            process_buffer_interval: params.process_interval,
-            ..Default::default()
-        },
-    )?;
-
-    let (tx, rx) = mpsc::channel(MAX_EVENTS_BUFFER_SIZE);
-
-    let query_hash = handle.hash().to_owned();
-    let id = upsert_sub(handle, created, &ctx.subs, &mut bcast_write, params, tx).await?;
-
-    Ok(Subscription { id, query_hash, rx })
 }
 
 /// An async stream that buffers events, used by senders to batch changes
@@ -803,6 +828,15 @@ impl BufferingSubStream {
         }
 
         self.buffer.freeze()
+    }
+
+    #[inline]
+    pub fn pop(&mut self) -> Option<Bytes> {
+        self.rx
+            .try_recv()
+            .ok()
+            .and_then(|event| handle_sub_event(0, &mut self.buffer, event, &mut self.change_id))
+            .or_else(|| self.buffer.freeze())
     }
 }
 
@@ -862,7 +896,7 @@ pub fn read_length_prefixed_bytes(b: &mut Bytes) -> Option<Bytes> {
         return None;
     }
 
-    let len = (b[0] as u16 | ((b[1] as u16) << 8)) as usize;
+    let len = u16::from_le_bytes([b[0], b[1]]) as usize;
 
     if len > b.len() - 2 {
         return None;
@@ -873,6 +907,8 @@ pub fn read_length_prefixed_bytes(b: &mut Bytes) -> Option<Bytes> {
 }
 
 /// The read side of a [`BufferingSubStream`]
+///
+/// This is an iterator over the events in a discrete block of events
 ///
 /// This is intentionally sans-io for easier testing
 pub struct SubscriptionStream {
