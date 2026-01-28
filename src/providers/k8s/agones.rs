@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::net::endpoint::Endpoint;
 
-const QUILKIN_TOKEN_LABEL: &str = "quilkin.dev/tokens";
+pub const QUILKIN_TOKEN_LABEL: &str = "quilkin.dev/tokens";
 
 /// Auto-generated derived type for [`GameServerSpec`] via `CustomResource`
 #[derive(Clone, Debug, JsonSchema)]

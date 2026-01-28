@@ -14,7 +14,7 @@
  *  limitations under the License.
  */
 
-mod corrosion;
+pub mod corrosion;
 pub mod fs;
 pub mod k8s;
 
@@ -26,7 +26,7 @@ use std::{
     },
 };
 
-use crate::{config, metrics::provider_task_failures_total};
+use crate::{config, metrics::provider_task_failures_total, providers::k8s::EventProcessor};
 use eyre::Context;
 use futures::TryStreamExt;
 
@@ -389,7 +389,7 @@ impl Providers {
         health_check: Arc<AtomicBool>,
         locality: Option<crate::net::endpoint::Locality>,
         config: &super::Config,
-        mutator: Option<crate::providers::corrosion::Mutator>,
+        mutator: Option<crate::providers::corrosion::ServerMutator>,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let agones_namespaces = if !self.agones_namespace.is_empty() {
             tracing::warn!(
@@ -474,15 +474,20 @@ impl Providers {
                     if let Some(Some(clusters)) = agones_enabled.then(|| config.dyn_cfg.clusters())
                     {
                         for namespace in agones_namespaces {
+                            let processor = EventProcessor {
+                                clusters: clusters.clone(),
+                                mutator: mutator.clone(),
+                                address_selector: selector.clone(),
+                                locality: locality.clone(),
+                                servers: Default::default(),
+                            };
+
                             gs_streams.spawn(Self::result_stream(
                                 health_check.clone(),
                                 k8s::update_endpoints_from_gameservers(
                                     client.clone(),
                                     namespace.clone(),
-                                    clusters.clone(),
-                                    locality.clone(),
-                                    selector.clone(),
-                                    mutator.clone(),
+                                    processor,
                                 ),
                             ));
                         }

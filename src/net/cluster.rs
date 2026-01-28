@@ -15,16 +15,17 @@
  */
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fmt,
     sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
 };
 
+use corrosion::pubsub::ChangeId;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
-use crate::net::endpoint::{Endpoint, EndpointAddress, Locality};
+use crate::net::endpoint::{Endpoint, EndpointAddress, EndpointMetadata, Locality, Metadata};
 
 const HASH_SEED: i64 = 0xdeadbeef;
 
@@ -106,23 +107,22 @@ impl std::str::FromStr for EndpointSetVersion {
     }
 }
 
+type InnerMap = BTreeMap<EndpointAddress, EndpointMetadata>;
+
 #[derive(Debug, Clone)]
 pub struct EndpointSet {
-    pub endpoints: BTreeSet<Endpoint>,
+    pub endpoints: InnerMap,
     pub token_map: TokenAddressMap,
     /// The hash of all of the endpoints in this set
     hash: u64,
+    change_id: ChangeId,
 }
 
 impl EndpointSet {
     /// Creates a new endpoint set, calculating a unique version hash for it
     #[inline]
     pub fn new(endpoints: BTreeSet<Endpoint>) -> Self {
-        let mut this = Self {
-            endpoints,
-            token_map: <_>::default(),
-            hash: 0,
-        };
+        let mut this = Self::from_set(endpoints);
 
         this.update();
         this
@@ -135,14 +135,51 @@ impl EndpointSet {
     /// across machines
     #[inline]
     pub fn with_version(endpoints: BTreeSet<Endpoint>, hash: EndpointSetVersion) -> Self {
-        let mut this = Self {
-            endpoints,
-            token_map: <_>::default(),
-            hash: hash.number(),
-        };
+        let mut this = Self::from_set(endpoints);
+        this.hash = hash.number();
 
         this.build_token_map();
         this
+    }
+
+    #[inline]
+    fn from_set(endpoints: BTreeSet<Endpoint>) -> Self {
+        Self {
+            endpoints: endpoints
+                .into_iter()
+                .map(|ep| (ep.address, ep.metadata))
+                .collect(),
+            token_map: Default::default(),
+            hash: 0,
+            change_id: ChangeId(0),
+        }
+    }
+
+    /// For testing, converts to an endpoint -> tokenset map
+    #[inline]
+    pub fn to_map(
+        &self,
+    ) -> std::collections::BTreeMap<quilkin_types::Endpoint, quilkin_types::TokenSet> {
+        self.endpoints
+            .iter()
+            .map(|(addr, md)| {
+                (
+                    quilkin_types::Endpoint {
+                        address: addr.host.clone(),
+                        port: addr.port,
+                    },
+                    md.known.tokens.clone(),
+                )
+            })
+            .collect()
+    }
+
+    #[inline]
+    pub fn endpoint_iter(&self) -> impl Iterator<Item = Endpoint> {
+        self.endpoints.iter().map(|(addr, md)| Endpoint {
+            address: addr.clone(),
+            metadata: md.clone(),
+        })
     }
 
     #[inline]
@@ -157,13 +194,19 @@ impl EndpointSet {
 
     #[inline]
     pub fn contains(&self, ep: &Endpoint) -> bool {
-        self.endpoints.contains(ep)
+        self.endpoints.contains_key(&ep.address)
     }
 
     /// Unique version for this endpoint set
     #[inline]
     pub fn version(&self) -> EndpointSetVersion {
         EndpointSetVersion::from_number(self.hash)
+    }
+
+    /// Returns the latest change id seen from a remote server
+    #[inline]
+    pub fn change_id(&self) -> ChangeId {
+        self.change_id
     }
 
     /// Bumps the version, calculating a hash for the entire endpoint set
@@ -175,15 +218,13 @@ impl EndpointSet {
         let mut hasher = gxhash::GxHasher::with_seed(HASH_SEED);
         let mut token_map = TokenAddressMap::default();
 
-        for ep in &self.endpoints {
-            ep.hash(&mut hasher);
+        for (addr, md) in &self.endpoints {
+            addr.hash(&mut hasher);
+            md.known.tokens.hash(&mut hasher);
 
-            for tok in ep.metadata.known.tokens.iter() {
+            for tok in md.known.tokens.iter() {
                 let hash = gxhash::gxhash64(tok, HASH_SEED);
-                token_map
-                    .entry(hash)
-                    .or_default()
-                    .insert(ep.address.clone());
+                token_map.entry(hash).or_default().insert(addr.clone());
             }
         }
 
@@ -197,13 +238,10 @@ impl EndpointSet {
         let mut token_map = TokenAddressMap::default();
 
         // This is only called on proxies, so calculate a token map
-        for ep in &self.endpoints {
-            for tok in ep.metadata.known.tokens.iter() {
+        for (addr, md) in &self.endpoints {
+            for tok in md.known.tokens.iter() {
                 let hash = gxhash::gxhash64(tok, HASH_SEED);
-                token_map
-                    .entry(hash)
-                    .or_default()
-                    .insert(ep.address.clone());
+                token_map.entry(hash).or_default().insert(addr.clone());
             }
         }
 
@@ -216,7 +254,7 @@ impl EndpointSet {
         replacement: Self,
     ) -> (
         usize,
-        std::collections::HashMap<u64, Option<Vec<EndpointAddress>>>,
+        std::collections::HashMap<u64, Option<BTreeSet<EndpointAddress>>>,
     ) {
         let old_len = std::mem::replace(&mut self.endpoints, replacement.endpoints).len();
 
@@ -252,11 +290,153 @@ impl EndpointSet {
     }
 }
 
+impl EndpointSet {
+    pub fn corrosion_apply(
+        &mut self,
+        ss: corrosion::pubsub::SubscriptionStream,
+        token_map: &DashMap<u64, BTreeSet<EndpointAddress>>,
+    ) -> ChangeId {
+        use corrosion::{
+            api::{TypedQueryEvent as tqe, sqlite::ChangeType},
+            db::read::{self, FromSqlValue},
+        };
+
+        for eve in ss {
+            let eve = match eve {
+                Ok(e) => e,
+                Err(error) => {
+                    tracing::warn!(%error, "received error in server subscription stream");
+                    continue;
+                }
+            };
+
+            let (cty, row, row_id) = match eve {
+                tqe::Change(cty, rid, row, cid) => {
+                    // It's possible? to get a change id that is smaller than the current one,
+                    // we still apply it, but we only ever keep the highest one
+                    self.change_id = ChangeId(cid.0.max(self.change_id.0));
+
+                    (cty, row, rid)
+                }
+                tqe::Row(rid, row) => (ChangeType::Insert, row, rid),
+                _ => continue,
+            };
+
+            let row = match read::ServerRow::from_sql(&row) {
+                Ok(sr) => sr,
+                Err(error) => {
+                    tracing::warn!(%error, row_id = row_id.0, "failed to deserialize server row");
+                    continue;
+                }
+            };
+
+            let insert = |this: &mut TokenAddressMap, addr: &EndpointAddress, tok: &[u8]| {
+                let tok = Token::new(tok);
+
+                {
+                    let mut tm = token_map.entry(tok.0).or_default();
+                    tm.insert(addr.clone());
+                }
+
+                this.entry(tok.0).or_default().insert(addr.clone());
+            };
+
+            let remove = |this: &mut TokenAddressMap, addr: &EndpointAddress, tok: &[u8]| {
+                let tok = Token::new(tok);
+
+                let remove = if let Some(mut tm) = token_map.get_mut(&tok.0) {
+                    tm.remove(addr);
+                    tm.is_empty()
+                } else {
+                    false
+                };
+
+                if remove {
+                    token_map.remove(&tok.0);
+                }
+
+                if let Some(old) = this.get_mut(&tok.0) {
+                    old.remove(addr);
+                    if old.is_empty() {
+                        this.remove(&tok.0);
+                    }
+                }
+            };
+
+            match cty {
+                ChangeType::Insert => {
+                    let address = EndpointAddress {
+                        host: row.endpoint.address,
+                        port: row.endpoint.port,
+                    };
+
+                    for tok in row.tokens.iter() {
+                        insert(&mut self.token_map, &address, tok);
+                    }
+
+                    self.endpoints.insert(
+                        address,
+                        EndpointMetadata {
+                            known: Metadata { tokens: row.tokens },
+                            unknown: Default::default(),
+                        },
+                    );
+                }
+                ChangeType::Update => {
+                    let address = EndpointAddress {
+                        host: row.endpoint.address,
+                        port: row.endpoint.port,
+                    };
+
+                    let Some(tokens) = self
+                        .endpoints
+                        .get_mut(&address)
+                        .map(|md| &md.known.tokens.0)
+                    else {
+                        tracing::warn!(%address, "address not found for update");
+                        continue;
+                    };
+
+                    // Remove old tokens
+                    for old in tokens.difference(&row.tokens.0) {
+                        remove(&mut self.token_map, &address, old);
+                    }
+
+                    // Add new tokens
+                    for new in row.tokens.0.difference(&tokens) {
+                        insert(&mut self.token_map, &address, new);
+                    }
+                }
+                ChangeType::Delete => {
+                    let address = EndpointAddress {
+                        host: row.endpoint.address,
+                        port: row.endpoint.port,
+                    };
+
+                    let Some(md) = self.endpoints.remove(&address) else {
+                        tracing::warn!(%address, "address not found for removal");
+                        continue;
+                    };
+
+                    // We could pedantically check if the local token set matches
+                    // the one in the deletion
+
+                    for tok in md.known.tokens {
+                        remove(&mut self.token_map, &address, &tok);
+                    }
+                }
+            }
+        }
+
+        self.change_id
+    }
+}
+
 /// Represents a full snapshot of all clusters.
 pub struct ClusterMap<S = gxhash::GxBuildHasher> {
     map: DashMap<Option<Locality>, EndpointSet, S>,
     localities: DashMap<Option<Locality>, Option<std::net::IpAddr>>,
-    token_map: DashMap<u64, Vec<EndpointAddress>>,
+    token_map: DashMap<u64, BTreeSet<EndpointAddress>>,
     num_endpoints: AtomicUsize,
     version: AtomicU64,
 }
@@ -380,7 +560,7 @@ where
             for mut entry in self.map.iter_mut() {
                 let set = entry.value_mut();
 
-                if set.endpoints.remove(needle) {
+                if set.endpoints.remove(&needle.address).is_some() {
                     set.update();
                     self.num_endpoints.fetch_sub(1, Relaxed);
                     self.version.fetch_add(1, Relaxed);
@@ -400,17 +580,16 @@ where
     }
 
     #[inline]
-    pub fn remove_endpoint_if(&self, closure: impl Fn(&Endpoint) -> bool) -> bool {
+    pub fn remove_endpoint_if(&self, closure: impl Fn(&EndpointMetadata) -> bool) -> bool {
         let locality = 'l: {
             for mut entry in self.map.iter_mut() {
                 let set = entry.value_mut();
-                if let Some(endpoint) = set
+                if let Some(address) = set
                     .endpoints
                     .iter()
-                    .find(|endpoint| (closure)(endpoint))
-                    .cloned()
+                    .find_map(|(addr, md)| (closure)(md).then(|| addr.clone()))
                 {
-                    set.endpoints.remove(&endpoint);
+                    set.endpoints.remove(&address);
                     set.update();
                     self.num_endpoints.fetch_sub(1, Relaxed);
                     self.version.fetch_add(1, Relaxed);
@@ -448,7 +627,14 @@ where
         }
 
         if let Some(mut set) = self.map.get_mut(&locality) {
-            let replaced = set.endpoints.replace(endpoint);
+            let replaced = set
+                .endpoints
+                .remove(&endpoint.address)
+                .map(|metadata| Endpoint {
+                    address: endpoint.address.clone(),
+                    metadata,
+                });
+            set.endpoints.insert(endpoint.address, endpoint.metadata);
             set.update();
             self.version.fetch_add(1, Relaxed);
 
@@ -468,7 +654,15 @@ where
         let mut endpoints = Vec::with_capacity(self.num_of_endpoints());
 
         for set in self.map.iter() {
-            endpoints.extend(set.value().endpoints.iter().cloned());
+            endpoints.extend(
+                set.value()
+                    .endpoints
+                    .iter()
+                    .map(|(address, metadata)| Endpoint {
+                        address: address.clone(),
+                        metadata: metadata.clone(),
+                    }),
+            );
         }
 
         endpoints
@@ -478,25 +672,16 @@ where
         for set in self.iter() {
             let set = &set.value().endpoints;
             if index < set.len() {
-                return set.iter().nth(index).cloned();
+                return set.iter().nth(index).map(|(address, metadata)| Endpoint {
+                    address: address.clone(),
+                    metadata: metadata.clone(),
+                });
             } else {
                 index -= set.len();
             }
         }
 
         None
-    }
-
-    pub fn filter_endpoints(&self, f: impl Fn(&Endpoint) -> bool) -> Vec<Endpoint> {
-        let mut endpoints = Vec::new();
-
-        for set in self.iter() {
-            for endpoint in set.endpoints.iter().filter(|e| (f)(e)) {
-                endpoints.push(endpoint.clone());
-            }
-        }
-
-        endpoints
     }
 
     #[inline]
@@ -581,6 +766,25 @@ where
     }
 }
 
+impl<S> ClusterMap<S>
+where
+    S: Default + std::hash::BuildHasher + Clone,
+{
+    /// Applies a stream of events to this cluster map
+    ///
+    /// This adds, updates, and/or removes endpoints from a 'corrosion' locality
+    /// that is temporarily used during the transition period
+    pub fn corrosion_apply(&self, ss: corrosion::pubsub::SubscriptionStream) -> ChangeId {
+        static CORRO: std::sync::LazyLock<Locality> =
+            std::sync::LazyLock::new(|| Locality::new("corrosion", "", ""));
+
+        self.map
+            .entry(Some((*CORRO).clone()))
+            .or_insert_with(|| EndpointSet::new(BTreeSet::default()))
+            .corrosion_apply(ss, &self.token_map)
+    }
+}
+
 impl<S> crate::config::watch::Watchable for ClusterMap<S> {
     #[inline]
     fn mark(&self) -> crate::config::watch::Marker {
@@ -662,7 +866,7 @@ impl From<(Option<Locality>, &EndpointSet)> for EndpointWithLocality {
     fn from((locality, endpoint_set): (Option<Locality>, &EndpointSet)) -> Self {
         Self {
             locality,
-            endpoints: endpoint_set.endpoints.clone(),
+            endpoints: endpoint_set.endpoint_iter().collect(),
             version: Some(endpoint_set.version().number()),
         }
     }
@@ -754,7 +958,7 @@ where
     fn from(map: DashMap<Option<Locality>, EndpointSet, S>) -> Self {
         let num_endpoints = AtomicUsize::new(map.iter().map(|kv| kv.value().len()).sum());
 
-        let token_map = DashMap::<u64, Vec<EndpointAddress>>::default();
+        let token_map = DashMap::<u64, BTreeSet<EndpointAddress>>::default();
         let localities = DashMap::default();
         for es in &map {
             for (token_hash, addrs) in &es.value().token_map {

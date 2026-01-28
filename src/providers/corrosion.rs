@@ -6,9 +6,9 @@ use std::{
 };
 use tracing_futures::Instrument as _;
 mod pull;
-mod push;
+pub mod push;
 
-pub use push::Mutator;
+pub use push::ServerMutator;
 
 type CorrosionAddrs = Vec<std::net::SocketAddr>;
 type HealthCheck = Arc<atomic::AtomicBool>;
@@ -57,7 +57,7 @@ impl super::Providers {
         config: &State,
         health_check: &HealthCheck,
         providers: &mut tokio::task::JoinSet<crate::Result<()>>,
-    ) -> Option<Mutator> {
+    ) -> Option<ServerMutator> {
         let Some(mode) = self.corrosion_mode else {
             tracing::debug!("corrosion is not enabled");
             return None;

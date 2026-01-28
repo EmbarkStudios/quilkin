@@ -67,7 +67,7 @@ impl InstaPrinter {
 }
 
 #[async_trait::async_trait]
-impl server::Mutator for InstaPrinter {
+impl server::DbMutator for InstaPrinter {
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
         let mut dc = smallvec::SmallVec::<[_; 1]>::new();
         {
