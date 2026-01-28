@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-029dd2dd.js";
+            window.path_to_searchindex_js = "searchindex-28e7a9cb.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-66b8cac1.js"></script>
+        <script src="toc-740ee2a1.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -213,7 +213,7 @@ depending on how deep an integration you wish for your system.</li>
 <li><strong>Services</strong> provide the the core business logic for handling UDP traffic as well meta control-plane functionality.</li>
 <li><strong>Configuration</strong> controls what a given instance is able to do, what services it runs, and providers it pulls from.</li>
 </ul>
-<pre><code class="language-mermaid">architecture-beta
+<pre class="mermaid">architecture-beta
     group services(cloud)[Services]
     group public(cloud)[Public Client API] in services
     group private(cloud)[Internal Service API] in services
@@ -221,19 +221,16 @@ depending on how deep an integration you wish for your system.</li>
     group config(cloud)[Configuration]
 
     service udp(internet)[UDP] in public
-    service qcmp(internet)[QCMP UDP] in public
+    service qcmp(internet)[QCMP] in public
     junction sp1 in services
     junction sp3 in services
 
-    service metrics(internet)[Administration] in private
-    service grpc(internet)[gRPC] in private
     service http(internet)[HTTP] in private
     junction sp2 in services
     junction sp4 in services
 
     service k8s(cloud)[Kubernetes] in providers
     service fs(disk)[Filesystem] in providers
-    service xds(cloud)[gRPC] in providers
     service cli(disk)[CLI] in providers
     junction p1 in providers
     junction p2 in providers
@@ -252,9 +249,6 @@ depending on how deep an integration you wish for your system.</li>
     sp1:B -- T:sp3
 
     sp2:T -- B:sp3
-    sp2:L -- R:grpc
-    sp2:B -- R:metrics
-    sp4:L -- R:metrics
     sp4:B -- R:http
     sp4:T -- B:sp2
     sp3:R -- L:quilkin
@@ -263,7 +257,6 @@ depending on how deep an integration you wish for your system.</li>
     p1:T -- L:fs
     p1:R -- L:k8s
     p1:B -- T:p2
-    p2:R -- L:xds
     p2:B -- L:cli
     c2:L -- R:mmdb
     c2:R -- L:gameservers
@@ -271,7 +264,8 @@ depending on how deep an integration you wish for your system.</li>
     c1:R -- L:endpoints
     c1:L -- R:filters
     c1:B -- T:quilkin
-</code></pre>
+</pre>
+
 <h2 id="what-next"><a class="header" href="#what-next">What Next?</a></h2>
 <p>Quilkin provides a variety of different services depending on your use-case.
 The primary service is <a href="./services/proxy.html"><code>proxy</code></a>, which runs a reverse UDP
@@ -285,8 +279,7 @@ proxy. To see a basic usage of the command-line interface run through the
 for deploying quilkin for your game network.</li>
 </ul>
 <pre><code class="language-shell">$ quilkin --help
-{"timestamp":"2026-01-27T13:39:34.108194Z","level":"INFO","fields":{"message":"Starting Quilkin","version":"0.10.0","commit":"ce720605cfe06eb63080e33108f985d3f50801cf"},"target":"quilkin::cli","filename":"src/cli.rs","threadId":"ThreadId(1)"}
-{"timestamp":"2026-01-27T13:39:34.108362Z","level":"ERROR","fields":{"message":"fatal error","error":"no service, provider, or command specified, shutting down"},"target":"quilkin","filename":"src/main.rs","threadId":"ThreadId(1)"}
+{{#include ../../target/quilkin.commands}}
 </code></pre>
 
                     </main>
@@ -334,6 +327,8 @@ for deploying quilkin for your game network.</li>
         <script src="book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
+        <script src="mermaid-eefea253.min.js"></script>
+        <script src="mermaid-init-ccf746f1.js"></script>
 
 
 
