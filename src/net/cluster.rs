@@ -403,7 +403,7 @@ impl EndpointSet {
                     }
 
                     // Add new tokens
-                    for new in row.tokens.0.difference(&tokens) {
+                    for new in row.tokens.0.difference(tokens) {
                         insert(&mut self.token_map, &address, new);
                     }
 

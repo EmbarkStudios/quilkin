@@ -86,13 +86,11 @@ impl ServerMutator {
                     self.send(Mutation::Remove(std::mem::replace(&mut v.0, endpoint)));
                     v.1 = ts;
                     self.send(Mutation::Upsert(id));
+                } else if v.1 == ts {
+                    tracing::debug!(%id, %endpoint, "ignoring server upsert, token set is the same");
                 } else {
-                    if v.1 == ts {
-                        tracing::debug!(%id, %endpoint, "ignoring server upsert, token set is the same");
-                    } else {
-                        v.1 = ts;
-                        self.send(Mutation::Update(id));
-                    }
+                    v.1 = ts;
+                    self.send(Mutation::Update(id));
                 }
             }
         }
@@ -188,6 +186,7 @@ impl Accumulator {
 
     /// Resets the accumulator, returning any mutations
     #[inline]
+    #[allow(clippy::type_complexity)]
     pub fn take(
         &mut self,
     ) -> (
