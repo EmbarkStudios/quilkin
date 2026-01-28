@@ -58,7 +58,7 @@ pub(super) async fn corrosion_subscribe(
             );
 
             // Attempt to connect to multiple servers in parallel, otherwise
-            // down/slow servers in the list can unneccessarily delay connections
+            // down/slow servers in the list can unnecessarily delay connections
             // to healthy servers.
             //
             // Currently we just go with the first server that we can successfully

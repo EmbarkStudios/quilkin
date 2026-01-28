@@ -2,7 +2,7 @@ use super::*;
 use corrosion::persistent::{client, proto::v1};
 use quilkin_types::{Endpoint, IcaoCode, TokenSet};
 use rand::Rng;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{broadcast, mpsc};
 
 pub(super) fn corrosion_mutate(
@@ -10,7 +10,7 @@ pub(super) fn corrosion_mutate(
     icao: &crate::config::NotifyingIcaoCode,
     endpoints: CorrosionAddrs,
     hc: HealthCheck,
-) -> (Mutator, Pusher) {
+) -> (ServerMutator, Pusher) {
     let (tx, rx) = mpsc::unbounded_channel();
     let ls = Arc::new(LocalState::default());
 
@@ -20,7 +20,7 @@ pub(super) fn corrosion_mutate(
     };
 
     (
-        Mutator {
+        ServerMutator {
             state: ls.clone(),
             tx,
         },
@@ -42,20 +42,33 @@ struct AgentInfo {
     icao: IcaoCode,
 }
 
-enum Mutation {
+pub enum Mutation {
     Upsert(uuid::Uuid),
     Update(uuid::Uuid),
     Remove(Endpoint),
 }
 
-/// Mutator that keeps track of state, publishing changes to a remote corrosion database
+/// Keeps track of server state, publishing changes to a remote corrosion database
+///
+/// Unlike the xDS version of tracking, this specializes for the k8s usecase, so
+/// servers are locally uniquely identified by their [uid](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids)
+/// rather than their endpoint
 #[derive(Clone)]
-pub struct Mutator {
+pub struct ServerMutator {
     state: Arc<LocalState>,
     tx: mpsc::UnboundedSender<Mutation>,
 }
 
-impl Mutator {
+impl ServerMutator {
+    /// Creates a mutator for tests
+    #[inline]
+    pub fn testing(state: Arc<LocalState>) -> (Self, mpsc::UnboundedReceiver<Mutation>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (Self { state, tx }, rx)
+    }
+
+    /// Upserts the server, updating it if it already exists and 1 or more details
+    /// differ from the current state, or adding it if it doesn't exist
     #[inline]
     pub fn upsert_server(&self, id: uuid::Uuid, endpoint: Endpoint, ts: TokenSet) {
         match self.state.servers.entry(id) {
@@ -67,19 +80,51 @@ impl Mutator {
                 let v = oc.get_mut();
                 // This would indicate we got a new pod with a different endpoint
                 // address with the same uuid as a different pod that wasn't deleted
-                // which should be impossible
-                assert_eq!(v.0, endpoint);
-
-                if v.1 == ts {
-                    tracing::debug!(%id, %endpoint, "ignoring server upsert, token set is the same");
-                } else {
+                // which should be impossible, honor it, but emit a warning
+                if v.0 != endpoint {
+                    tracing::warn!(%id, old = %v.0, new = %endpoint, "uuid endpoint has changed, replacing the endpoint");
+                    self.send(Mutation::Remove(std::mem::replace(&mut v.0, endpoint)));
                     v.1 = ts;
-                    self.send(Mutation::Update(id));
+                    self.send(Mutation::Upsert(id));
+                } else {
+                    if v.1 == ts {
+                        tracing::debug!(%id, %endpoint, "ignoring server upsert, token set is the same");
+                    } else {
+                        v.1 = ts;
+                        self.send(Mutation::Update(id));
+                    }
                 }
             }
         }
     }
 
+    /// Does a full replacement of the local state
+    ///
+    /// This is used when k8s does an `Init` -> `InitApply` -> `InitDone` which
+    /// is essentially a full state reset, so this can both add, update, and
+    /// delete servers
+    #[inline]
+    pub fn replace(&self, set: BTreeMap<uuid::Uuid, (Endpoint, TokenSet)>) {
+        // Remove servers that aren't part of the replacement set
+        let mut to_remove = Vec::new();
+        for entry in self.state.servers.iter() {
+            if !set.contains_key(entry.key()) {
+                to_remove.push(*entry.key());
+            }
+        }
+
+        for uid in to_remove {
+            dbg!(uid);
+            self.remove_server(uid);
+        }
+
+        for (uid, (ep, ts)) in set {
+            dbg!(uid);
+            self.upsert_server(uid, ep, ts);
+        }
+    }
+
+    /// Removes the server with the specified `UUID`
     #[inline]
     pub fn remove_server(&self, id: uuid::Uuid) {
         let Some((_, v)) = self.state.servers.remove(&id) else {
@@ -95,11 +140,88 @@ impl Mutator {
     }
 }
 
+/// Accumulates mutations to the local state so we can batch mutations when
+/// sending to a remote server
+pub struct Accumulator {
+    upserts: Vec<v1::ServerUpsert>,
+    updates: Vec<v1::ServerUpdate>,
+    removes: Vec<Endpoint>,
+    icao: IcaoCode,
+}
+
+impl Accumulator {
+    #[inline]
+    pub fn new(icao: IcaoCode) -> Self {
+        Self {
+            upserts: Vec::new(),
+            updates: Vec::new(),
+            removes: Vec::new(),
+            icao,
+        }
+    }
+
+    /// Adds this mutation if it is still valid
+    #[inline]
+    pub fn accumulate(&mut self, state: &LocalState, mutation: Mutation) {
+        match mutation {
+            Mutation::Upsert(id) => {
+                if let Some(server) = state.servers.get(&id) {
+                    self.upserts.push(v1::ServerUpsert {
+                        endpoint: server.0.clone(),
+                        icao: self.icao,
+                        tokens: server.1.clone(),
+                    });
+                }
+            }
+            Mutation::Update(id) => {
+                if let Some(server) = state.servers.get(&id) {
+                    self.updates.push(v1::ServerUpdate {
+                        endpoint: server.0.clone(),
+                        tokens: Some(server.1.clone()),
+                        icao: None,
+                    });
+                }
+            }
+            Mutation::Remove(ep) => {
+                self.removes.push(ep);
+            }
+        }
+    }
+
+    /// Resets the accumulator, returning any mutations
+    #[inline]
+    pub fn take(
+        &mut self,
+    ) -> (
+        Option<Vec<v1::ServerUpsert>>,
+        Option<Vec<v1::ServerUpdate>>,
+        Option<Vec<Endpoint>>,
+    ) {
+        let up = (!self.upserts.is_empty()).then_some(std::mem::take(&mut self.upserts));
+        let u = (!self.updates.is_empty()).then_some(std::mem::take(&mut self.updates));
+        let r = (!self.removes.is_empty()).then_some(std::mem::take(&mut self.removes));
+
+        (up, u, r)
+    }
+}
+
 #[derive(Default)]
-struct LocalState {
+pub struct LocalState {
     servers: dashmap::DashMap<uuid::Uuid, (Endpoint, TokenSet)>,
 }
 
+impl LocalState {
+    /// For testing, converts the current state to and endpoint -> tokenset map
+    #[inline]
+    pub fn to_map(&self) -> BTreeMap<Endpoint, TokenSet> {
+        self.servers
+            .iter()
+            .map(|srv| (srv.0.clone(), srv.1.clone()))
+            .collect()
+    }
+}
+
+/// Pushes changes to a remote server
 pub struct Pusher {
     hc: HealthCheck,
     endpoints: CorrosionAddrs,
@@ -248,9 +370,7 @@ impl Pusher {
             }
         }
 
-        let mut upserts = Vec::new();
-        let mut updates = Vec::new();
-        let mut removes = Vec::new();
+        let mut accumulator = Accumulator::new(icao);
 
         // Try to batch updates
         let mut update_interval = tokio::time::interval(std::time::Duration::from_millis(100));
@@ -307,41 +427,21 @@ impl Pusher {
                         return;
                     };
 
-                    match change {
-                        Mutation::Upsert(id) => {
-                            if let Some(server) = self.state.servers.get(&id) {
-                                upserts.push(v1::ServerUpsert {
-                                    endpoint: server.0.clone(),
-                                    icao,
-                                    tokens: server.1.clone(),
-                                });
-                            }
-                        }
-                        Mutation::Update(id) => {
-                            if let Some(server) = self.state.servers.get(&id) {
-                                updates.push(v1::ServerUpdate {
-                                    endpoint: server.0.clone(),
-                                    tokens: Some(server.1.clone()),
-                                    icao: None,
-                                });
-                            }
-                        }
-                        Mutation::Remove(ep) => {
-                            removes.push(ep);
-                        }
-                    }
+                    accumulator.accumulate(&self.state, change);
                 }
                 _ = update_interval.tick() => {
-                    if !upserts.is_empty() {
-                        send!(v1::ServerChange::Upsert(std::mem::take(&mut upserts)));
+                    let (up, u, r) = accumulator.take();
+
+                    if let Some(upserts) = up {
+                        send!(v1::ServerChange::Upsert(upserts));
                     }
 
-                    if !removes.is_empty() {
-                        send!(v1::ServerChange::Remove(std::mem::take(&mut removes)));
+                    if let Some(removes) = r {
+                        send!(v1::ServerChange::Remove(removes));
                     }
 
-                    if !updates.is_empty() {
-                        send!(v1::ServerChange::Update(std::mem::take(&mut updates)));
+                    if let Some(updates) = u {
+                        send!(v1::ServerChange::Update(updates));
                     }
                 }
                 qcmp = self.qcmp.recv() => {
@@ -364,6 +464,7 @@ impl Pusher {
                     };
                     if self.agent_info.icao != icao {
                         self.agent_info.icao = icao;
+                        accumulator.icao = icao;
                         send!(v1::ServerChange::UpdateMutator(v1::MutatorUpdate {
                             icao: Some(icao),
                             qcmp_port: None,

@@ -208,7 +208,7 @@ pub mod v1 {
     }
 
     /// A DB mutation request to upsert a server
-    #[derive(Deserialize, Serialize)]
+    #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
     pub struct ServerUpsert {
         /// The unique server endpoint to upsert
         #[serde(rename = "a")]
@@ -279,7 +279,7 @@ pub mod v1 {
 
     impl<'i> IterChange<'i> {
         #[inline]
-        fn new(sc: &'i ServerChange, index: usize) -> Option<Self> {
+        pub fn new(sc: &'i ServerChange, index: usize) -> Option<Self> {
             match sc {
                 ServerChange::Upsert(up) => {
                     (index < up.len()).then_some(Self::Upsert(&up[index..]))
@@ -323,6 +323,7 @@ pub mod v1 {
     }
 
     impl ServerIter {
+        #[inline]
         pub fn new(sc: ServerChange) -> Result<Self, ServerChange> {
             if matches!(sc, ServerChange::UpdateMutator(_)) {
                 Err(sc)

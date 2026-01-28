@@ -17,7 +17,7 @@ pub const VERSION: u16 = 1;
 
 /// Trait used by a server implementation to perform database mutations
 #[async_trait::async_trait]
-pub trait Mutator: Sync + Send + Clone {
+pub trait DbMutator: Sync + Send + Clone {
     /// A new mutation client has connected
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16);
     /// A mutation client wants to perform 1 or more database mutations
@@ -93,7 +93,7 @@ impl From<IoLoopError> for ErrorCode {
 impl Server {
     pub fn new_unencrypted(
         addr: SocketAddr,
-        mutator: impl Mutator + 'static,
+        mutator: impl DbMutator + 'static,
         subs: impl SubManager + 'static,
     ) -> std::io::Result<Self> {
         let endpoint = quinn::Endpoint::server(quinn_plaintext::server_config(), addr)?;
@@ -195,7 +195,7 @@ impl Server {
     /// Handles a single request (really, stream)
     async fn handle_request(
         req: ValidRequest,
-        mutator: impl Mutator + 'static,
+        mutator: impl DbMutator + 'static,
         subs: impl SubManager + 'static,
     ) {
         let ValidRequest {
@@ -262,7 +262,7 @@ mod v1_impl {
         peer: Peer,
         send: &mut SendStream,
         recv: &mut RecvStream,
-        mutator: impl Mutator + 'static,
+        mutator: impl DbMutator + 'static,
     ) -> Result<(), IoLoopError> {
         mutator.connected(peer, req.icao, req.qcmp_port).await;
 
@@ -381,7 +381,7 @@ mod v1_impl {
         peer: Peer,
         send: &mut SendStream,
         recv: &mut RecvStream,
-        mutator: impl Mutator + 'static,
+        mutator: impl DbMutator + 'static,
         subs: impl SubManager + 'static,
     ) -> Result<(), IoLoopError> {
         match request {

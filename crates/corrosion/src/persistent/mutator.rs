@@ -159,7 +159,7 @@ impl BroadcastingTransactor {
 }
 
 #[async_trait::async_trait]
-impl super::server::Mutator for BroadcastingTransactor {
+impl super::server::DbMutator for BroadcastingTransactor {
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
         let mut dc = smallvec::SmallVec::<[_; 1]>::new();
         {

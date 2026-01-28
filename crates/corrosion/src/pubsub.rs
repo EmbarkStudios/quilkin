@@ -172,6 +172,7 @@ async fn expand_sql(sp: &SplitPool, stmt: &Statement) -> Result<String, MatcherU
         .ok_or(MatcherUpsertError::CouldNotExpand)
 }
 
+#[inline]
 fn handle_sub_event(
     max_size: u16,
     buf: &mut PrefixedBuf,
@@ -192,7 +193,7 @@ fn handle_sub_event(
         } else if change_id < *last_change_id {
             warn!(?change_id, ?last_change_id, "smaller change id received");
         }
-        *last_change_id = change_id;
+        *last_change_id = dbg!(change_id);
     }
 
     buf.extend_capped(&event.buff, max_size)
@@ -780,38 +781,6 @@ pub struct Subscription {
     pub rx: mpsc::Receiver<SubscriptionEvent>,
 }
 
-/// Creates a subscription for the specified [`PubusbContext`]
-///
-/// Database mutations that match the query specified in the params will
-/// cause subscription events to be emitted to the receiver
-pub async fn subscribe(
-    params: SubParamsv1,
-    ctx: &PubsubContext,
-) -> Result<Subscription, MatcherUpsertError> {
-    let query = expand_sql(&ctx.pool, &params.query).await?;
-    let mut bcast_write = ctx.cache.write().await;
-
-    let (handle, created) = ctx.subs.get_or_insert(
-        &query,
-        &ctx.path,
-        &ctx.schema,
-        &ctx.pool,
-        ctx.tripwire.clone(),
-        MatcherLoopConfig {
-            changes_threshold: params.change_threshold,
-            process_buffer_interval: params.process_interval,
-            ..Default::default()
-        },
-    )?;
-
-    let (tx, rx) = mpsc::channel(MAX_EVENTS_BUFFER_SIZE);
-
-    let query_hash = handle.hash().to_owned();
-    let id = upsert_sub(handle, created, &ctx.subs, &mut bcast_write, params, tx).await?;
-
-    Ok(Subscription { id, query_hash, rx })
-}
-
 /// An async stream that buffers events, used by senders to batch changes
 ///
 /// This buffers up to a maximum size, or a certain amount of time has passed
@@ -859,6 +828,15 @@ impl BufferingSubStream {
         }
 
         self.buffer.freeze()
+    }
+
+    #[inline]
+    pub fn pop(&mut self) -> Option<Bytes> {
+        self.rx
+            .try_recv()
+            .ok()
+            .and_then(|event| handle_sub_event(0, &mut self.buffer, event, &mut self.change_id))
+            .or_else(|| self.buffer.freeze())
     }
 }
 
@@ -918,7 +896,7 @@ pub fn read_length_prefixed_bytes(b: &mut Bytes) -> Option<Bytes> {
         return None;
     }
 
-    let len = (b[0] as u16 | ((b[1] as u16) << 8)) as usize;
+    let len = u16::from_le_bytes([b[0], b[1]]) as usize;
 
     if len > b.len() - 2 {
         return None;
