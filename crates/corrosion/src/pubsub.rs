@@ -193,7 +193,7 @@ fn handle_sub_event(
         } else if change_id < *last_change_id {
             warn!(?change_id, ?last_change_id, "smaller change id received");
         }
-        *last_change_id = dbg!(change_id);
+        *last_change_id = change_id;
     }
 
     buf.extend_capped(&event.buff, max_size)

@@ -88,8 +88,6 @@ impl PrefixedBuf {
             None
         };
 
-        dbg!(rb.is_some(), buf.len());
-
         self.inner.extend_from_slice(buf);
         rb
     }
