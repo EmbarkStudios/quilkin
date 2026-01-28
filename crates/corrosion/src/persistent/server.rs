@@ -5,7 +5,7 @@ use std::net::{IpAddr, SocketAddr};
 use tokio_stream::StreamExt;
 use tracing::Instrument as _;
 
-use super::error::ErrorCode;
+use super::{error::ErrorCode, update_metric};
 
 /// The current version of the server stream
 ///
@@ -95,6 +95,7 @@ impl Server {
         addr: SocketAddr,
         mutator: impl DbMutator + 'static,
         subs: impl SubManager + 'static,
+        metrics: super::Metrics,
     ) -> std::io::Result<Self> {
         let endpoint = quinn::Endpoint::server(quinn_plaintext::server_config(), addr)?;
 
@@ -110,6 +111,7 @@ impl Server {
                 let peer_ip = inc.remote_address();
                 let mutator = mutator.clone();
                 let usbs = subs.clone();
+                let metrics = metrics.clone();
 
                 tokio::spawn(async move {
                     let peer = match inc.remote_address().ip() {
@@ -128,6 +130,24 @@ impl Server {
                         }
                     };
 
+                    metrics.active.with_label_values::<&str>(&[]).inc();
+
+                    // Periodically update the tx/rx stats of this connection
+                    let mut metrics_update = tokio::time::interval(std::time::Duration::from_secs(10));
+
+                    let stats = connection.stats();
+
+                    let mut tx_count = 0;
+                    let mut tx_bytes = 0;
+                    let mut rx_count = 0;
+                    let mut rx_bytes = 0;
+
+                    update_metric(&metrics.tx_count, &mut tx_count, stats.udp_tx.datagrams);
+                    update_metric(&metrics.tx_bytes, &mut tx_bytes, stats.udp_tx.bytes);
+                    update_metric(&metrics.rx_count, &mut rx_count, stats.udp_rx.datagrams);
+                    update_metric(&metrics.rx_bytes, &mut rx_bytes, stats.udp_rx.bytes);
+
+
                     loop {
                         tokio::select! {
                             res = Self::read_request(peer, &connection) => {
@@ -144,12 +164,21 @@ impl Server {
                                     }
                                 }
                             }
+                            _ = metrics_update.tick() => {
+                                let stats = connection.stats();
+                                update_metric(&metrics.tx_count, &mut tx_count, stats.udp_tx.datagrams);
+                                update_metric(&metrics.tx_bytes, &mut tx_bytes, stats.udp_tx.bytes);
+                                update_metric(&metrics.rx_count, &mut rx_count, stats.udp_rx.datagrams);
+                                update_metric(&metrics.rx_bytes, &mut rx_bytes, stats.udp_rx.bytes);
+                            }
                             reason = connection.closed() => {
                                 tracing::info!(%reason, "peer closed connection");
                                 break;
                             }
                         }
                     }
+
+                    metrics.active.with_label_values::<&str>(&[]).dec();
                 }.instrument(tracing::info_span!("remote connection", %peer_ip))
                 );
             }
