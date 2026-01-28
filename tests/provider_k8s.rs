@@ -67,9 +67,6 @@ fn corrosion_matches_xds() {
         {
             let xds_map = {
                 let read = clusters.read();
-                // for r in read.iter() {
-                //     dbg!(r.key(), r.value());
-                // }
                 let set = read.get(&None).unwrap();
 
                 set.to_map()
@@ -401,6 +398,8 @@ async fn applies_changes() {
         0,
         0,
     );
+    const PORT: u16 = 4567;
+    let icao = IcaoCode::new_testing([b'Y'; 4]);
 
     let (trip, _w, _s) = ::corrosion::Tripwire::new_simple();
     let ctx = pubsub::PubsubContext::new(
@@ -438,7 +437,7 @@ async fn applies_changes() {
         pusher: &mut Pusher,
         db: &BroadcastingTransactor,
         mutation: impl FnOnce(&mut corrosion::ServerMutator),
-    ) -> u64 {
+    ) {
         mutation(&mut pusher.mutator);
 
         while let Ok(change) = pusher.rx.try_recv() {
@@ -447,44 +446,23 @@ async fn applies_changes() {
 
         let (upserts, updates, removes) = pusher.acc.take();
 
-        let mut change_id = 0;
-
         if let Some(up) = upserts {
-            change_id = change_id.max(
-                db.execute(PEER, &[v1::ServerChange::Upsert(up)])
-                    .await
-                    .version
-                    .unwrap_or_default(),
-            );
+            db.execute(PEER, &[v1::ServerChange::Upsert(up)]).await;
         }
 
         if let Some(up) = updates {
-            change_id = change_id.max(
-                db.execute(PEER, &[v1::ServerChange::Update(up)])
-                    .await
-                    .version
-                    .unwrap_or_default(),
-            );
+            db.execute(PEER, &[v1::ServerChange::Update(up)]).await;
         }
 
         if let Some(rm) = removes {
-            change_id = change_id.max(
-                db.execute(PEER, &[v1::ServerChange::Remove(rm)])
-                    .await
-                    .version
-                    .unwrap_or_default(),
-            );
+            db.execute(PEER, &[v1::ServerChange::Remove(rm)]).await;
         }
-
-        panic!("{change_id}");
-        change_id
     }
 
     async fn apply_state(
         bss: &mut pubsub::BufferingSubStream,
         local: &quilkin::config::Watch<quilkin::net::ClusterMap>,
-        change_id: u64,
-    ) {
+    ) -> u64 {
         fn apply(
             mut block: bytes::Bytes,
             local: &quilkin::config::Watch<quilkin::net::ClusterMap>,
@@ -495,11 +473,22 @@ async fn applies_changes() {
             cm.corrosion_apply(ss).0
         }
 
-        while let Some(block) = bss.next().await {
-            if apply(block, local) >= change_id {
-                break;
-            }
+        let mut cid = local
+            .read()
+            .get(&Some(quilkin::net::endpoint::Locality::new(
+                "corrosion",
+                "",
+                "",
+            )))
+            .map_or(0, |es| es.change_id().0);
+
+        while let Ok(Some(block)) =
+            tokio::time::timeout(std::time::Duration::from_millis(100), bss.next()).await
+        {
+            cid = cid.max(apply(block, local));
         }
+
+        cid
     }
 
     async fn end2end(
@@ -508,9 +497,9 @@ async fn applies_changes() {
         bss: &mut pubsub::BufferingSubStream,
         local: &quilkin::config::Watch<quilkin::net::ClusterMap>,
         mutation: impl FnOnce(&mut corrosion::ServerMutator),
-    ) {
-        let change_id = update_db(pusher, db, mutation).await;
-        apply_state(bss, local, change_id).await;
+    ) -> u64 {
+        update_db(pusher, db, mutation).await;
+        let changes = apply_state(bss, local).await;
 
         assert_eq!(
             pusher.state.to_map(),
@@ -524,7 +513,11 @@ async fn applies_changes() {
                 .unwrap()
                 .to_map()
         );
+
+        changes
     }
+
+    btx.connected(PEER, icao, PORT).await;
 
     // Initialize the set
     end2end(&mut pusher, &btx, &mut bss, &local, |mutator| {
@@ -542,19 +535,65 @@ async fn applies_changes() {
     .await;
 
     // Do an update of 1/2 and remove the rest
+    end2end(&mut pusher, &btx, &mut bss, &local, |mutator| {
+        for i in 0..N {
+            if i % 2 == 0 {
+                mutator.upsert_server(
+                    uuid::Uuid::from_u128(i as _),
+                    Endpoint {
+                        address: std::net::Ipv4Addr::from_bits(i as u32).into(),
+                        port: i as u16,
+                    },
+                    std::iter::once(vec![i as u8; 4]).collect(),
+                );
+            } else {
+                mutator.remove_server(uuid::Uuid::from_u128(i as _));
+            }
+        }
+    })
+    .await;
 
-    // while let Ok(change) = rx.try_recv() {
-    //     acc.accumulate(&state, change);
-    // }
-
-    // // Upsert the ones we removed
-
-    // while let Ok(change) = rx.try_recv() {
-    //     acc.accumulate(&state, change);
-    // }
+    // Upsert the ones we removed
+    let cid = end2end(&mut pusher, &btx, &mut bss, &local, |mutator| {
+        for i in 0..N {
+            if i % 2 != 0 {
+                mutator.upsert_server(
+                    uuid::Uuid::from_u128(i as _),
+                    Endpoint {
+                        address: std::net::Ipv4Addr::from_bits(i as u32).into(),
+                        port: i as u16,
+                    },
+                    std::iter::once(vec![i as u8; 4]).collect(),
+                );
+            }
+        }
+    })
+    .await;
 
     // Pretend as if the pusher completely goes away
+    btx.disconnected(PEER).await;
+    assert_eq!(
+        cid,
+        end2end(&mut pusher, &btx, &mut bss, &local, |_mutator| {}).await
+    );
 
     // Redo all our upserts as if we reconnected, which should result in no
     // changes sent to subscribers since we only soft deleted the DB entries
+    btx.connected(PEER, icao, PORT).await;
+    assert_eq!(
+        cid,
+        end2end(&mut pusher, &btx, &mut bss, &local, |mutator| {
+            for i in 0..N {
+                mutator.upsert_server(
+                    uuid::Uuid::from_u128(i as _),
+                    Endpoint {
+                        address: std::net::Ipv4Addr::from_bits(i as u32).into(),
+                        port: i as u16,
+                    },
+                    std::iter::once(vec![i as u8; 4]).collect(),
+                );
+            }
+        })
+        .await
+    );
 }

@@ -391,7 +391,7 @@ impl EndpointSet {
                     let Some(tokens) = self
                         .endpoints
                         .get_mut(&address)
-                        .map(|md| &md.known.tokens.0)
+                        .map(|md| &mut md.known.tokens.0)
                     else {
                         tracing::warn!(%address, "address not found for update");
                         continue;
@@ -406,6 +406,8 @@ impl EndpointSet {
                     for new in row.tokens.0.difference(&tokens) {
                         insert(&mut self.token_map, &address, new);
                     }
+
+                    drop(std::mem::replace(tokens, row.tokens.0));
                 }
                 ChangeType::Delete => {
                     let address = EndpointAddress {
@@ -1059,13 +1061,25 @@ mod tests {
         let not_expected: std::collections::BTreeSet<_> =
             [Endpoint::new((Ipv4Addr::new(20, 20, 20, 20), 1234).into())].into();
 
+        fn set_to_map(set: BTreeSet<Endpoint>) -> BTreeMap<EndpointAddress, EndpointMetadata> {
+            set.into_iter()
+                .map(|ep| (ep.address, ep.metadata))
+                .collect()
+        }
+
         cluster.insert(Some(nl02.into()), Some(nl1.clone()), not_expected.clone());
-        assert_eq!(cluster.get(&Some(nl1.clone())).unwrap().endpoints, expected);
+        assert_eq!(
+            cluster.get(&Some(nl1.clone())).unwrap().endpoints,
+            set_to_map(expected)
+        );
 
         cluster.remove_locality(Some(nl01.into()), &Some(nl1.clone()));
 
         cluster.insert(Some(nl02.into()), Some(nl1.clone()), not_expected.clone());
-        assert_eq!(cluster.get(&Some(nl1)).unwrap().endpoints, not_expected);
+        assert_eq!(
+            cluster.get(&Some(nl1)).unwrap().endpoints,
+            set_to_map(not_expected)
+        );
     }
 
     #[test]

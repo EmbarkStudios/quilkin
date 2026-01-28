@@ -114,12 +114,10 @@ impl ServerMutator {
         }
 
         for uid in to_remove {
-            dbg!(uid);
             self.remove_server(uid);
         }
 
         for (uid, (ep, ts)) in set {
-            dbg!(uid);
             self.upsert_server(uid, ep, ts);
         }
     }
