@@ -199,6 +199,7 @@ base64 = "0.22.1"
 bytes = { version = "1.11.0", features = ["serde"] }
 compact_str = "0.7"
 corrosion = { path = "crates/corrosion" }
+data-encoding = "2.10"
 eyre = "0.6.12"
 fixedstr = { version = "0.5", features = ["flex-str"] }
 futures = "0.3.31"
