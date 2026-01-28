@@ -21,7 +21,7 @@ pub struct Metrics {
 
 impl Metrics {
     pub fn new(registry: &'static prometheus::Registry) -> Self {
-        const THIS: std::sync::OnceLock<Metrics> = std::sync::OnceLock::new();
+        static THIS: std::sync::OnceLock<Metrics> = std::sync::OnceLock::new();
 
         THIS.get_or_init(|| {
             let active = prometheus::register_int_gauge_vec_with_registry! {
