@@ -262,174 +262,130 @@
 <a href=#262 id=262 data-nosnippet>262</a>    <span class="kw">if </span>!cmd.status().expect(<span class="string">"proto-gen was not installed"</span>).success() {
 <a href=#263 id=263 data-nosnippet>263</a>        <span class="macro">panic!</span>(<span class="string">"proto-gen {which} failed"</span>);
 <a href=#264 id=264 data-nosnippet>264</a>    }
-<a href=#265 id=265 data-nosnippet>265</a>
-<a href=#266 id=266 data-nosnippet>266</a>    <span class="kw">if </span>which == <span class="string">"generate" </span>{
-<a href=#267 id=267 data-nosnippet>267</a>        docs(files);
-<a href=#268 id=268 data-nosnippet>268</a>    }
-<a href=#269 id=269 data-nosnippet>269</a>}
-<a href=#270 id=270 data-nosnippet>270</a>
-<a href=#271 id=271 data-nosnippet>271</a><span class="kw">fn </span>docs(files: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span>str, <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>str])]) {
-<a href=#272 id=272 data-nosnippet>272</a>    <span class="kw">let </span><span class="kw-2">mut </span>cmd = Command::new(<span class="string">"protoc"</span>);
-<a href=#273 id=273 data-nosnippet>273</a>
-<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">let </span>quilkin_protos: Vec&lt;<span class="kw-2">&amp;</span>(<span class="kw-2">&amp;</span>str, <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>str])&gt; = files
-<a href=#275 id=275 data-nosnippet>275</a>        .iter()
-<a href=#276 id=276 data-nosnippet>276</a>        .filter(|item| item.<span class="number">0 </span>== <span class="string">"proto/quilkin"</span>)
-<a href=#277 id=277 data-nosnippet>277</a>        .collect();
-<a href=#278 id=278 data-nosnippet>278</a>    <span class="kw">let </span>includes: Vec&lt;<span class="kw-2">&amp;</span>(<span class="kw-2">&amp;</span>str, <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>str])&gt; = files
-<a href=#279 id=279 data-nosnippet>279</a>        .iter()
-<a href=#280 id=280 data-nosnippet>280</a>        .filter(|item| item.<span class="number">0 </span>!= <span class="string">"proto/quilkin"</span>)
-<a href=#281 id=281 data-nosnippet>281</a>        .collect();
-<a href=#282 id=282 data-nosnippet>282</a>
-<a href=#283 id=283 data-nosnippet>283</a>    <span class="kw">for </span>(dir, files) <span class="kw">in </span>includes {
-<a href=#284 id=284 data-nosnippet>284</a>        <span class="kw">if </span>files.is_empty() {
-<a href=#285 id=285 data-nosnippet>285</a>            cmd.args([<span class="string">"-I"</span>, dir]);
-<a href=#286 id=286 data-nosnippet>286</a>        } <span class="kw">else </span>{
-<a href=#287 id=287 data-nosnippet>287</a>            <span class="kw">for </span>file <span class="kw">in </span><span class="kw-2">*</span>files {
-<a href=#288 id=288 data-nosnippet>288</a>                cmd.args([<span class="string">"-I"</span>.into(), <span class="macro">format!</span>(<span class="string">"{dir}/{file}.proto"</span>)]);
-<a href=#289 id=289 data-nosnippet>289</a>            }
-<a href=#290 id=290 data-nosnippet>290</a>        }
-<a href=#291 id=291 data-nosnippet>291</a>    }
-<a href=#292 id=292 data-nosnippet>292</a>
-<a href=#293 id=293 data-nosnippet>293</a>    cmd.args([<span class="string">"--doc_out"</span>, <span class="string">"./docs/src/services/xds/proto"</span>]);
-<a href=#294 id=294 data-nosnippet>294</a>    cmd.args([<span class="string">"--doc_opt"</span>, <span class="string">"markdown,index.md"</span>]);
-<a href=#295 id=295 data-nosnippet>295</a>
-<a href=#296 id=296 data-nosnippet>296</a>    <span class="kw">for </span>(dir, files) <span class="kw">in </span>quilkin_protos {
-<a href=#297 id=297 data-nosnippet>297</a>        <span class="kw">for </span>file <span class="kw">in </span><span class="kw-2">*</span>files {
-<a href=#298 id=298 data-nosnippet>298</a>            cmd.arg(<span class="macro">format!</span>(<span class="string">"{dir}/{file}.proto"</span>));
-<a href=#299 id=299 data-nosnippet>299</a>        }
-<a href=#300 id=300 data-nosnippet>300</a>    }
-<a href=#301 id=301 data-nosnippet>301</a>
-<a href=#302 id=302 data-nosnippet>302</a>    <span class="kw">if </span>!cmd
-<a href=#303 id=303 data-nosnippet>303</a>        .status()
-<a href=#304 id=304 data-nosnippet>304</a>        .expect(<span class="string">"protoc-gen-doc was not installed"</span>)
-<a href=#305 id=305 data-nosnippet>305</a>        .success()
-<a href=#306 id=306 data-nosnippet>306</a>    {
-<a href=#307 id=307 data-nosnippet>307</a>        <span class="macro">panic!</span>(<span class="string">"protoc-gen-doc failed"</span>);
-<a href=#308 id=308 data-nosnippet>308</a>    }
-<a href=#309 id=309 data-nosnippet>309</a>}
-<a href=#310 id=310 data-nosnippet>310</a>
-<a href=#311 id=311 data-nosnippet>311</a><span class="kw">fn </span>copy() {
-<a href=#312 id=312 data-nosnippet>312</a>    <span class="kw">struct </span>Source {
-<a href=#313 id=313 data-nosnippet>313</a>        name: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
-<a href=#314 id=314 data-nosnippet>314</a>        repo: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
-<a href=#315 id=315 data-nosnippet>315</a>        rev: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
-<a href=#316 id=316 data-nosnippet>316</a>        root: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
-<a href=#317 id=317 data-nosnippet>317</a>        target: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
-<a href=#318 id=318 data-nosnippet>318</a>    }
-<a href=#319 id=319 data-nosnippet>319</a>
-<a href=#320 id=320 data-nosnippet>320</a>    <span class="kw">impl </span>Source {
-<a href=#321 id=321 data-nosnippet>321</a>        <span class="kw">fn </span>sync(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; PathBuf {
-<a href=#322 id=322 data-nosnippet>322</a>            <span class="kw">let </span>path = <span class="self">self</span>.path();
-<a href=#323 id=323 data-nosnippet>323</a>
-<a href=#324 id=324 data-nosnippet>324</a>            <span class="kw">if </span>path.exists() {
-<a href=#325 id=325 data-nosnippet>325</a>                <span class="kw">return </span>path;
-<a href=#326 id=326 data-nosnippet>326</a>            }
-<a href=#327 id=327 data-nosnippet>327</a>
-<a href=#328 id=328 data-nosnippet>328</a>            <span class="kw">if </span>!Command::new(<span class="string">"git"</span>)
-<a href=#329 id=329 data-nosnippet>329</a>                .arg(<span class="string">"clone"</span>)
-<a href=#330 id=330 data-nosnippet>330</a>                .arg(<span class="self">self</span>.repo)
-<a href=#331 id=331 data-nosnippet>331</a>                .arg(<span class="kw-2">&amp;</span>path)
-<a href=#332 id=332 data-nosnippet>332</a>                .status()
-<a href=#333 id=333 data-nosnippet>333</a>                .expect(<span class="string">"git not installed"</span>)
-<a href=#334 id=334 data-nosnippet>334</a>                .success()
-<a href=#335 id=335 data-nosnippet>335</a>            {
-<a href=#336 id=336 data-nosnippet>336</a>                <span class="macro">panic!</span>(<span class="string">"failed to clone {} from {}"</span>, <span class="self">self</span>.name, <span class="self">self</span>.repo);
-<a href=#337 id=337 data-nosnippet>337</a>            }
-<a href=#338 id=338 data-nosnippet>338</a>
-<a href=#339 id=339 data-nosnippet>339</a>            <span class="kw">if </span>!Command::new(<span class="string">"git"</span>)
-<a href=#340 id=340 data-nosnippet>340</a>                .arg(<span class="string">"-C"</span>)
-<a href=#341 id=341 data-nosnippet>341</a>                .arg(<span class="kw-2">&amp;</span>path)
-<a href=#342 id=342 data-nosnippet>342</a>                .arg(<span class="string">"checkout"</span>)
-<a href=#343 id=343 data-nosnippet>343</a>                .arg(<span class="self">self</span>.rev)
-<a href=#344 id=344 data-nosnippet>344</a>                .status()
-<a href=#345 id=345 data-nosnippet>345</a>                .unwrap()
-<a href=#346 id=346 data-nosnippet>346</a>                .success()
-<a href=#347 id=347 data-nosnippet>347</a>            {
-<a href=#348 id=348 data-nosnippet>348</a>                <span class="macro">panic!</span>(<span class="string">"failed to checkout {} from {}"</span>, <span class="self">self</span>.rev, <span class="self">self</span>.repo);
-<a href=#349 id=349 data-nosnippet>349</a>            }
-<a href=#350 id=350 data-nosnippet>350</a>
-<a href=#351 id=351 data-nosnippet>351</a>            path
-<a href=#352 id=352 data-nosnippet>352</a>        }
-<a href=#353 id=353 data-nosnippet>353</a>
-<a href=#354 id=354 data-nosnippet>354</a>        <span class="kw">fn </span>path(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; PathBuf {
-<a href=#355 id=355 data-nosnippet>355</a>            <span class="macro">format!</span>(<span class="string">"/tmp/{}-{}"</span>, <span class="self">self</span>.name, <span class="kw-2">&amp;</span><span class="self">self</span>.rev[..<span class="number">7</span>]).into()
-<a href=#356 id=356 data-nosnippet>356</a>        }
-<a href=#357 id=357 data-nosnippet>357</a>    }
-<a href=#358 id=358 data-nosnippet>358</a>
-<a href=#359 id=359 data-nosnippet>359</a>    <span class="kw">const </span>REPOS: <span class="kw-2">&amp;</span>[Source] = <span class="kw-2">&amp;</span>[
-<a href=#360 id=360 data-nosnippet>360</a>        Source {
-<a href=#361 id=361 data-nosnippet>361</a>            name: <span class="string">"envoy"</span>,
-<a href=#362 id=362 data-nosnippet>362</a>            repo: <span class="string">"https://github.com/envoyproxy/data-plane-api"</span>,
-<a href=#363 id=363 data-nosnippet>363</a>            rev: <span class="string">"a04278879ba6eb9264d755936942b23cbf552a04"</span>,
-<a href=#364 id=364 data-nosnippet>364</a>            root: <span class="string">"envoy"</span>,
-<a href=#365 id=365 data-nosnippet>365</a>            target: <span class="string">"envoy"</span>,
-<a href=#366 id=366 data-nosnippet>366</a>        },
-<a href=#367 id=367 data-nosnippet>367</a>        Source {
-<a href=#368 id=368 data-nosnippet>368</a>            name: <span class="string">"xds"</span>,
-<a href=#369 id=369 data-nosnippet>369</a>            repo: <span class="string">"https://github.com/cncf/xds"</span>,
-<a href=#370 id=370 data-nosnippet>370</a>            rev: <span class="string">"4a2b9fdd466b16721f8c058d7cadf5a54e229d66"</span>,
-<a href=#371 id=371 data-nosnippet>371</a>            root: <span class="string">"xds"</span>,
-<a href=#372 id=372 data-nosnippet>372</a>            target: <span class="string">"xds"</span>,
-<a href=#373 id=373 data-nosnippet>373</a>        },
-<a href=#374 id=374 data-nosnippet>374</a>    ];
+<a href=#265 id=265 data-nosnippet>265</a>}
+<a href=#266 id=266 data-nosnippet>266</a>
+<a href=#267 id=267 data-nosnippet>267</a><span class="kw">fn </span>copy() {
+<a href=#268 id=268 data-nosnippet>268</a>    <span class="kw">struct </span>Source {
+<a href=#269 id=269 data-nosnippet>269</a>        name: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#270 id=270 data-nosnippet>270</a>        repo: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#271 id=271 data-nosnippet>271</a>        rev: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#272 id=272 data-nosnippet>272</a>        root: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#273 id=273 data-nosnippet>273</a>        target: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#274 id=274 data-nosnippet>274</a>    }
+<a href=#275 id=275 data-nosnippet>275</a>
+<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">impl </span>Source {
+<a href=#277 id=277 data-nosnippet>277</a>        <span class="kw">fn </span>sync(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; PathBuf {
+<a href=#278 id=278 data-nosnippet>278</a>            <span class="kw">let </span>path = <span class="self">self</span>.path();
+<a href=#279 id=279 data-nosnippet>279</a>
+<a href=#280 id=280 data-nosnippet>280</a>            <span class="kw">if </span>path.exists() {
+<a href=#281 id=281 data-nosnippet>281</a>                <span class="kw">return </span>path;
+<a href=#282 id=282 data-nosnippet>282</a>            }
+<a href=#283 id=283 data-nosnippet>283</a>
+<a href=#284 id=284 data-nosnippet>284</a>            <span class="kw">if </span>!Command::new(<span class="string">"git"</span>)
+<a href=#285 id=285 data-nosnippet>285</a>                .arg(<span class="string">"clone"</span>)
+<a href=#286 id=286 data-nosnippet>286</a>                .arg(<span class="self">self</span>.repo)
+<a href=#287 id=287 data-nosnippet>287</a>                .arg(<span class="kw-2">&amp;</span>path)
+<a href=#288 id=288 data-nosnippet>288</a>                .status()
+<a href=#289 id=289 data-nosnippet>289</a>                .expect(<span class="string">"git not installed"</span>)
+<a href=#290 id=290 data-nosnippet>290</a>                .success()
+<a href=#291 id=291 data-nosnippet>291</a>            {
+<a href=#292 id=292 data-nosnippet>292</a>                <span class="macro">panic!</span>(<span class="string">"failed to clone {} from {}"</span>, <span class="self">self</span>.name, <span class="self">self</span>.repo);
+<a href=#293 id=293 data-nosnippet>293</a>            }
+<a href=#294 id=294 data-nosnippet>294</a>
+<a href=#295 id=295 data-nosnippet>295</a>            <span class="kw">if </span>!Command::new(<span class="string">"git"</span>)
+<a href=#296 id=296 data-nosnippet>296</a>                .arg(<span class="string">"-C"</span>)
+<a href=#297 id=297 data-nosnippet>297</a>                .arg(<span class="kw-2">&amp;</span>path)
+<a href=#298 id=298 data-nosnippet>298</a>                .arg(<span class="string">"checkout"</span>)
+<a href=#299 id=299 data-nosnippet>299</a>                .arg(<span class="self">self</span>.rev)
+<a href=#300 id=300 data-nosnippet>300</a>                .status()
+<a href=#301 id=301 data-nosnippet>301</a>                .unwrap()
+<a href=#302 id=302 data-nosnippet>302</a>                .success()
+<a href=#303 id=303 data-nosnippet>303</a>            {
+<a href=#304 id=304 data-nosnippet>304</a>                <span class="macro">panic!</span>(<span class="string">"failed to checkout {} from {}"</span>, <span class="self">self</span>.rev, <span class="self">self</span>.repo);
+<a href=#305 id=305 data-nosnippet>305</a>            }
+<a href=#306 id=306 data-nosnippet>306</a>
+<a href=#307 id=307 data-nosnippet>307</a>            path
+<a href=#308 id=308 data-nosnippet>308</a>        }
+<a href=#309 id=309 data-nosnippet>309</a>
+<a href=#310 id=310 data-nosnippet>310</a>        <span class="kw">fn </span>path(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; PathBuf {
+<a href=#311 id=311 data-nosnippet>311</a>            <span class="macro">format!</span>(<span class="string">"/tmp/{}-{}"</span>, <span class="self">self</span>.name, <span class="kw-2">&amp;</span><span class="self">self</span>.rev[..<span class="number">7</span>]).into()
+<a href=#312 id=312 data-nosnippet>312</a>        }
+<a href=#313 id=313 data-nosnippet>313</a>    }
+<a href=#314 id=314 data-nosnippet>314</a>
+<a href=#315 id=315 data-nosnippet>315</a>    <span class="kw">const </span>REPOS: <span class="kw-2">&amp;</span>[Source] = <span class="kw-2">&amp;</span>[
+<a href=#316 id=316 data-nosnippet>316</a>        Source {
+<a href=#317 id=317 data-nosnippet>317</a>            name: <span class="string">"envoy"</span>,
+<a href=#318 id=318 data-nosnippet>318</a>            repo: <span class="string">"https://github.com/envoyproxy/data-plane-api"</span>,
+<a href=#319 id=319 data-nosnippet>319</a>            rev: <span class="string">"a04278879ba6eb9264d755936942b23cbf552a04"</span>,
+<a href=#320 id=320 data-nosnippet>320</a>            root: <span class="string">"envoy"</span>,
+<a href=#321 id=321 data-nosnippet>321</a>            target: <span class="string">"envoy"</span>,
+<a href=#322 id=322 data-nosnippet>322</a>        },
+<a href=#323 id=323 data-nosnippet>323</a>        Source {
+<a href=#324 id=324 data-nosnippet>324</a>            name: <span class="string">"xds"</span>,
+<a href=#325 id=325 data-nosnippet>325</a>            repo: <span class="string">"https://github.com/cncf/xds"</span>,
+<a href=#326 id=326 data-nosnippet>326</a>            rev: <span class="string">"4a2b9fdd466b16721f8c058d7cadf5a54e229d66"</span>,
+<a href=#327 id=327 data-nosnippet>327</a>            root: <span class="string">"xds"</span>,
+<a href=#328 id=328 data-nosnippet>328</a>            target: <span class="string">"xds"</span>,
+<a href=#329 id=329 data-nosnippet>329</a>        },
+<a href=#330 id=330 data-nosnippet>330</a>    ];
+<a href=#331 id=331 data-nosnippet>331</a>
+<a href=#332 id=332 data-nosnippet>332</a>    <span class="kw">let </span>args: Vec&lt;<span class="kw">_</span>&gt; = std::env::args().skip(<span class="number">2</span>).collect();
+<a href=#333 id=333 data-nosnippet>333</a>    <span class="kw">let </span>name = args.first().expect(<span class="string">"must provide source name"</span>);
+<a href=#334 id=334 data-nosnippet>334</a>    <span class="kw">let </span>path = args.get(<span class="number">1</span>).expect(<span class="string">"must provide path"</span>);
+<a href=#335 id=335 data-nosnippet>335</a>
+<a href=#336 id=336 data-nosnippet>336</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(ri) = REPOS.iter().find(|r| r.name == name) <span class="kw">else </span>{
+<a href=#337 id=337 data-nosnippet>337</a>        <span class="macro">panic!</span>(<span class="string">"unknown repo '{name}'"</span>)
+<a href=#338 id=338 data-nosnippet>338</a>    };
+<a href=#339 id=339 data-nosnippet>339</a>
+<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">let </span><span class="kw-2">mut </span>pb = ri.sync();
+<a href=#341 id=341 data-nosnippet>341</a>    pb.push(ri.root);
+<a href=#342 id=342 data-nosnippet>342</a>    pb.push(path);
+<a href=#343 id=343 data-nosnippet>343</a>
+<a href=#344 id=344 data-nosnippet>344</a>    <span class="kw">if </span>!pb.exists() {
+<a href=#345 id=345 data-nosnippet>345</a>        <span class="macro">panic!</span>(<span class="string">"failed to find {pb:?}"</span>);
+<a href=#346 id=346 data-nosnippet>346</a>    }
+<a href=#347 id=347 data-nosnippet>347</a>
+<a href=#348 id=348 data-nosnippet>348</a>    <span class="kw">let </span>tp = path.replace(<span class="string">"type"</span>, <span class="string">"kind"</span>);
+<a href=#349 id=349 data-nosnippet>349</a>
+<a href=#350 id=350 data-nosnippet>350</a>    <span class="kw">let </span><span class="kw-2">mut </span>tbp = PathBuf::new();
+<a href=#351 id=351 data-nosnippet>351</a>    tbp.push(<span class="string">"proto"</span>);
+<a href=#352 id=352 data-nosnippet>352</a>    tbp.push(ri.target);
+<a href=#353 id=353 data-nosnippet>353</a>    tbp.push(tp);
+<a href=#354 id=354 data-nosnippet>354</a>
+<a href=#355 id=355 data-nosnippet>355</a>    {
+<a href=#356 id=356 data-nosnippet>356</a>        <span class="kw">let </span>parent = tbp.parent().unwrap();
+<a href=#357 id=357 data-nosnippet>357</a>        <span class="kw">if </span>!parent.exists()
+<a href=#358 id=358 data-nosnippet>358</a>            &amp;&amp; <span class="kw">let </span><span class="prelude-val">Err</span>(err) = std::fs::create_dir_all(parent)
+<a href=#359 id=359 data-nosnippet>359</a>        {
+<a href=#360 id=360 data-nosnippet>360</a>            <span class="macro">panic!</span>(<span class="string">"failed to create directory {parent:?}: {err}"</span>);
+<a href=#361 id=361 data-nosnippet>361</a>        }
+<a href=#362 id=362 data-nosnippet>362</a>    }
+<a href=#363 id=363 data-nosnippet>363</a>
+<a href=#364 id=364 data-nosnippet>364</a>    <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = std::fs::copy(<span class="kw-2">&amp;</span>pb, <span class="kw-2">&amp;</span>tbp) {
+<a href=#365 id=365 data-nosnippet>365</a>        <span class="macro">panic!</span>(<span class="string">"failed to copy {pb:?} -&gt; {tbp:?}: {err}"</span>);
+<a href=#366 id=366 data-nosnippet>366</a>    } <span class="kw">else </span>{
+<a href=#367 id=367 data-nosnippet>367</a>        <span class="macro">println!</span>(<span class="string">"copied {pb:?} -&gt; {tbp:?}"</span>);
+<a href=#368 id=368 data-nosnippet>368</a>    }
+<a href=#369 id=369 data-nosnippet>369</a>}
+<a href=#370 id=370 data-nosnippet>370</a>
+<a href=#371 id=371 data-nosnippet>371</a><span class="kw">fn </span>main() {
+<a href=#372 id=372 data-nosnippet>372</a>    <span class="kw">let </span>subcmd = std::env::args()
+<a href=#373 id=373 data-nosnippet>373</a>        .nth(<span class="number">1</span>)
+<a href=#374 id=374 data-nosnippet>374</a>        .expect(<span class="string">"expected a subcommand to execute"</span>);
 <a href=#375 id=375 data-nosnippet>375</a>
-<a href=#376 id=376 data-nosnippet>376</a>    <span class="kw">let </span>args: Vec&lt;<span class="kw">_</span>&gt; = std::env::args().skip(<span class="number">2</span>).collect();
-<a href=#377 id=377 data-nosnippet>377</a>    <span class="kw">let </span>name = args.first().expect(<span class="string">"must provide source name"</span>);
-<a href=#378 id=378 data-nosnippet>378</a>    <span class="kw">let </span>path = args.get(<span class="number">1</span>).expect(<span class="string">"must provide path"</span>);
+<a href=#376 id=376 data-nosnippet>376</a>    <span class="kw">if </span>!<span class="macro">matches!</span>(subcmd.as_str(), <span class="string">"generate" </span>| <span class="string">"validate" </span>| <span class="string">"copy"</span>) {
+<a href=#377 id=377 data-nosnippet>377</a>        <span class="macro">panic!</span>(<span class="string">"unexpected subcommmand '{subcmd}', expected 'generate', 'validate', or 'copy'"</span>);
+<a href=#378 id=378 data-nosnippet>378</a>    }
 <a href=#379 id=379 data-nosnippet>379</a>
-<a href=#380 id=380 data-nosnippet>380</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(ri) = REPOS.iter().find(|r| r.name == name) <span class="kw">else </span>{
-<a href=#381 id=381 data-nosnippet>381</a>        <span class="macro">panic!</span>(<span class="string">"unknown repo '{name}'"</span>)
-<a href=#382 id=382 data-nosnippet>382</a>    };
-<a href=#383 id=383 data-nosnippet>383</a>
-<a href=#384 id=384 data-nosnippet>384</a>    <span class="kw">let </span><span class="kw-2">mut </span>pb = ri.sync();
-<a href=#385 id=385 data-nosnippet>385</a>    pb.push(ri.root);
-<a href=#386 id=386 data-nosnippet>386</a>    pb.push(path);
-<a href=#387 id=387 data-nosnippet>387</a>
-<a href=#388 id=388 data-nosnippet>388</a>    <span class="kw">if </span>!pb.exists() {
-<a href=#389 id=389 data-nosnippet>389</a>        <span class="macro">panic!</span>(<span class="string">"failed to find {pb:?}"</span>);
-<a href=#390 id=390 data-nosnippet>390</a>    }
-<a href=#391 id=391 data-nosnippet>391</a>
-<a href=#392 id=392 data-nosnippet>392</a>    <span class="kw">let </span>tp = path.replace(<span class="string">"type"</span>, <span class="string">"kind"</span>);
-<a href=#393 id=393 data-nosnippet>393</a>
-<a href=#394 id=394 data-nosnippet>394</a>    <span class="kw">let </span><span class="kw-2">mut </span>tbp = PathBuf::new();
-<a href=#395 id=395 data-nosnippet>395</a>    tbp.push(<span class="string">"proto"</span>);
-<a href=#396 id=396 data-nosnippet>396</a>    tbp.push(ri.target);
-<a href=#397 id=397 data-nosnippet>397</a>    tbp.push(tp);
-<a href=#398 id=398 data-nosnippet>398</a>
-<a href=#399 id=399 data-nosnippet>399</a>    {
-<a href=#400 id=400 data-nosnippet>400</a>        <span class="kw">let </span>parent = tbp.parent().unwrap();
-<a href=#401 id=401 data-nosnippet>401</a>        <span class="kw">if </span>!parent.exists()
-<a href=#402 id=402 data-nosnippet>402</a>            &amp;&amp; <span class="kw">let </span><span class="prelude-val">Err</span>(err) = std::fs::create_dir_all(parent)
-<a href=#403 id=403 data-nosnippet>403</a>        {
-<a href=#404 id=404 data-nosnippet>404</a>            <span class="macro">panic!</span>(<span class="string">"failed to create directory {parent:?}: {err}"</span>);
-<a href=#405 id=405 data-nosnippet>405</a>        }
-<a href=#406 id=406 data-nosnippet>406</a>    }
-<a href=#407 id=407 data-nosnippet>407</a>
-<a href=#408 id=408 data-nosnippet>408</a>    <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = std::fs::copy(<span class="kw-2">&amp;</span>pb, <span class="kw-2">&amp;</span>tbp) {
-<a href=#409 id=409 data-nosnippet>409</a>        <span class="macro">panic!</span>(<span class="string">"failed to copy {pb:?} -&gt; {tbp:?}: {err}"</span>);
-<a href=#410 id=410 data-nosnippet>410</a>    } <span class="kw">else </span>{
-<a href=#411 id=411 data-nosnippet>411</a>        <span class="macro">println!</span>(<span class="string">"copied {pb:?} -&gt; {tbp:?}"</span>);
-<a href=#412 id=412 data-nosnippet>412</a>    }
-<a href=#413 id=413 data-nosnippet>413</a>}
-<a href=#414 id=414 data-nosnippet>414</a>
-<a href=#415 id=415 data-nosnippet>415</a><span class="kw">fn </span>main() {
-<a href=#416 id=416 data-nosnippet>416</a>    <span class="kw">let </span>subcmd = std::env::args()
-<a href=#417 id=417 data-nosnippet>417</a>        .nth(<span class="number">1</span>)
-<a href=#418 id=418 data-nosnippet>418</a>        .expect(<span class="string">"expected a subcommand to execute"</span>);
-<a href=#419 id=419 data-nosnippet>419</a>
-<a href=#420 id=420 data-nosnippet>420</a>    <span class="kw">if </span>!<span class="macro">matches!</span>(subcmd.as_str(), <span class="string">"generate" </span>| <span class="string">"validate" </span>| <span class="string">"copy"</span>) {
-<a href=#421 id=421 data-nosnippet>421</a>        <span class="macro">panic!</span>(<span class="string">"unexpected subcommmand '{subcmd}', expected 'generate', 'validate', or 'copy'"</span>);
-<a href=#422 id=422 data-nosnippet>422</a>    }
-<a href=#423 id=423 data-nosnippet>423</a>
-<a href=#424 id=424 data-nosnippet>424</a>    <span class="kw">if </span>subcmd == <span class="string">"copy" </span>{
-<a href=#425 id=425 data-nosnippet>425</a>        copy();
-<a href=#426 id=426 data-nosnippet>426</a>        <span class="kw">return</span>;
-<a href=#427 id=427 data-nosnippet>427</a>    }
-<a href=#428 id=428 data-nosnippet>428</a>
-<a href=#429 id=429 data-nosnippet>429</a>    <span class="comment">// Check if proto-gen is available and install it if not
-<a href=#430 id=430 data-nosnippet>430</a>    </span>install();
-<a href=#431 id=431 data-nosnippet>431</a>    <span class="comment">// We _also_ need to see if protoc is installed
-<a href=#432 id=432 data-nosnippet>432</a>    </span>install_protoc();
-<a href=#433 id=433 data-nosnippet>433</a>    execute(<span class="kw-2">&amp;</span>subcmd);
-<a href=#434 id=434 data-nosnippet>434</a>}
+<a href=#380 id=380 data-nosnippet>380</a>    <span class="kw">if </span>subcmd == <span class="string">"copy" </span>{
+<a href=#381 id=381 data-nosnippet>381</a>        copy();
+<a href=#382 id=382 data-nosnippet>382</a>        <span class="kw">return</span>;
+<a href=#383 id=383 data-nosnippet>383</a>    }
+<a href=#384 id=384 data-nosnippet>384</a>
+<a href=#385 id=385 data-nosnippet>385</a>    <span class="comment">// Check if proto-gen is available and install it if not
+<a href=#386 id=386 data-nosnippet>386</a>    </span>install();
+<a href=#387 id=387 data-nosnippet>387</a>    <span class="comment">// We _also_ need to see if protoc is installed
+<a href=#388 id=388 data-nosnippet>388</a>    </span>install_protoc();
+<a href=#389 id=389 data-nosnippet>389</a>    execute(<span class="kw-2">&amp;</span>subcmd);
+<a href=#390 id=390 data-nosnippet>390</a>}
 </code></pre></div></section></main></body></html>
