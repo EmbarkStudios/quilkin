@@ -297,7 +297,9 @@ impl Pail {
                 .xds()
                 .xds_port(rp.xds_port)
                 .mds()
-                .mds_port(rp.mds_port);
+                .mds_port(rp.mds_port)
+                .grpc()
+                .corrosion_port(0);
             let (tx, rx) = quilkin::signal::channel();
             let sh = quilkin::signal::ShutdownHandler::new(tx.clone(), rx);
             let task = svc.spawn_services(&rp.config, sh).await.unwrap();
