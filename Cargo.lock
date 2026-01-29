@@ -492,7 +492,7 @@ dependencies = [
 [[package]]
 name = "backoff"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "rand 0.9.2",
 ]
@@ -845,7 +845,7 @@ dependencies = [
 [[package]]
 name = "consul-client"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "camino",
  "http",
@@ -906,7 +906,7 @@ dependencies = [
 [[package]]
 name = "corro-agent"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "antithesis_sdk",
  "arc-swap",
@@ -973,7 +973,7 @@ dependencies = [
 [[package]]
 name = "corro-api-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "camino",
  "compact_str",
@@ -992,7 +992,7 @@ dependencies = [
 [[package]]
 name = "corro-base-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "camino",
  "compact_str",
@@ -1012,7 +1012,7 @@ dependencies = [
 [[package]]
 name = "corro-pg"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "bytes",
  "chrono",
@@ -1047,7 +1047,7 @@ dependencies = [
 [[package]]
 name = "corro-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "antithesis_sdk",
  "arc-swap",
@@ -1101,7 +1101,7 @@ dependencies = [
 [[package]]
 name = "corro-utils"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "eyre",
  "tokio",
@@ -5181,7 +5181,7 @@ dependencies = [
 [[package]]
 name = "spawn"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "futures",
  "parking_lot",
@@ -5235,7 +5235,7 @@ dependencies = [
 [[package]]
 name = "sqlite-functions"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -5244,7 +5244,7 @@ dependencies = [
 [[package]]
 name = "sqlite-pool"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "arc-swap",
  "deadpool",
@@ -5973,7 +5973,7 @@ dependencies = [
 [[package]]
 name = "tripwire"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#f96dfc1e2c351fedbf7232d05260ed303556c4eb"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=minor#61ce95887d729930e8cf1d1322cbea526ec735ea"
 dependencies = [
  "futures",
  "futures-util",
