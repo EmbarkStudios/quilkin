@@ -89,7 +89,9 @@ jobs:
     name: Build
     strategy:
       matrix:
-        os: [windows-2022, macos-14]
+        os:
+          - macos-14
+          #- windows-2022
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
