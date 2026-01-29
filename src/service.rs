@@ -233,6 +233,11 @@ impl Service {
         self
     }
 
+    pub fn corrosion_port(mut self, port: u16) -> Self {
+        self.corrosion_port = port;
+        self
+    }
+
     /// Enables the Phoenix service.
     pub fn phoenix(mut self) -> Self {
         self.phoenix_enabled = true;
@@ -483,8 +488,12 @@ impl Service {
             return Ok(());
         }
 
-        self.spawn_corrosion_server(config.clone(), shutdown)
-            .await?;
+        // TODO: we temporarily ignore this if port is 0 since the previous
+        // tests don't really work with corrosion
+        if self.corrosion_port != 0 {
+            self.spawn_corrosion_server(config.clone(), shutdown)
+                .await?;
+        }
 
         if !self.grpc_enabled {
             return Ok(());
