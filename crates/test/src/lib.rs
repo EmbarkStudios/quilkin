@@ -72,7 +72,7 @@ pub fn init_logging(level: Level, test_pkg: &'static str) {
 macro_rules! trace_test {
     ($(#[$attr:meta])* $name:ident, $body:block) => {
         $(#[$attr])*
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
         async fn $name() {
             // Get the module name
             let fname = $crate::func_name!();
