@@ -376,6 +376,7 @@ impl Pail {
                     .xds_port(xds_port)
                     .mds()
                     .mds_port(mds_port)
+                    .grpc()
                     .corrosion_port(0);
 
                 let config = crate::Config::new_rc(
