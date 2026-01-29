@@ -34,17 +34,6 @@ deny = [
     { crate = "openssl", use-instead = "rustls" },
     { crate = "aws-lc-sys", use-instead = "ring" },
     { crate = "cmake", use-instead = "cc" },
-    # Ideally this is banned, but there are just far too many users of it :(
-    # { crate = "chrono", use-instead = "time", wrappers = [
-    #     "expect-json",
-    #     "k8s-openapi",
-    #     "kube-client",
-    #     "kube-core",
-    #     "kube-leader-election",
-    #     # 
-    #     "postgres-types",
-    #     "rusqlite",
-    # ] },
 ]
 multiple-versions = "deny"
 skip = [

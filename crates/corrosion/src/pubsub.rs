@@ -5,8 +5,7 @@
 use crate::codec::PrefixedBuf;
 use bytes::Bytes;
 use camino::{Utf8Path as Path, Utf8PathBuf as PathBuf};
-pub use corro_agent::api::public::pubsub::MatcherUpsertError;
-pub use corro_agent::api::public::pubsub::SubscriptionEvent;
+pub use corro_agent::api::public::pubsub::{MatcherUpsertError, SubscriptionEvent};
 use corro_api_types::{QueryEventMeta, Statement};
 use corro_types::{
     agent::SplitPool,

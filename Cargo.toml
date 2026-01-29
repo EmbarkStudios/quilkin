@@ -263,14 +263,21 @@ xdp = "0.7.1"
 # Corrosion libraries. The libraries that corrosion transitively depends on that
 # we also need to depend on should be kept in line with the versions used by corrosion
 camino = "1.2"
-corro-agent = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-corro-client = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-corro-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-rusqlite = "=0.33"
-spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-sqlite-pool = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+corro-agent = { git = "https://github.com/EmbarkStudios/corrosion", branch = "minor" }
+corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "minor" }
+corro-client = { git = "https://github.com/EmbarkStudios/corrosion", branch = "minor" }
+corro-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "minor" }
+spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "minor" }
+sqlite-pool = { git = "https://github.com/EmbarkStudios/corrosion", branch = "minor" }
+tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "minor" }
+# corro-agent = { path = "../corrosion/crates/corro-agent" }
+# corro-api-types = { path = "../corrosion/crates/corro-api-types" }
+# corro-client = { path = "../corrosion/crates/corro-client" }
+# corro-types = { path = "../corrosion/crates/corro-types" }
+# spawn = { path = "../corrosion/crates/spawn" }
+# sqlite-pool = { path = "../corrosion/crates/sqlite-pool" }
+# tripwire = { path = "../corrosion/crates/tripwire" }
+rusqlite = "=0.38"
 uhlc = "0.7"
 
 [workspace.lints.clippy]
