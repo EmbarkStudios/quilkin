@@ -3,7 +3,6 @@ use eyre::ContextCompat;
 use std::sync::Arc;
 
 use crate::{
-    //components::proxy::SessionPool,
     config::{Config, filter::CachedFilterChain},
     signal::ShutdownHandler,
 };
