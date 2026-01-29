@@ -85,5 +85,12 @@ exceptions = [
     { crate = "enquote", allow = ["Unlicense"] },
 ]
 
+[[licenses.clarify]]
+crate = "webpki"
+expression = "ISC"
+license-files = [
+    { path = "LICENSE", hash = 0x001c7e6c },
+]
+
 [sources.allow-org]
 github = ["EmbarkStudios"]
