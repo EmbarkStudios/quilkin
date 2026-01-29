@@ -300,7 +300,7 @@ impl Pail {
                 .mds_port(rp.mds_port);
             let (tx, rx) = quilkin::signal::channel();
             let sh = quilkin::signal::ShutdownHandler::new(tx.clone(), rx);
-            let task = svc.spawn_services(&rp.config, sh).unwrap();
+            let task = svc.spawn_services(&rp.config, sh).await.unwrap();
 
             rp.shutdown = tx;
             rp.task = Some(task);
@@ -311,7 +311,7 @@ impl Pail {
 }
 
 impl Pail {
-    pub fn construct(spc: SandboxPailConfig, pails: &Pails, td: &std::path::Path) -> Self {
+    pub async fn construct(spc: SandboxPailConfig, pails: &Pails, td: &std::path::Path) -> Self {
         match spc.config {
             PailConfig::Server(sspc) => {
                 let (packet_tx, packet_rx) = mpsc::channel::<String>(10);
@@ -399,6 +399,7 @@ impl Pail {
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
                     )
+                    .await
                     .unwrap();
 
                 Self::Relay(RelayPail {
@@ -490,6 +491,7 @@ impl Pail {
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
                     )
+                    .await
                     .unwrap();
 
                 Self::Agent(AgentPail {
@@ -603,6 +605,7 @@ impl Pail {
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
                     )
+                    .await
                     .unwrap();
 
                 Self::Proxy(ProxyPail {
@@ -700,7 +703,7 @@ impl SandboxConfig {
         let mut pails = Pails::new();
         for pc in self.pails {
             let name = pc.name;
-            let pail = Pail::construct(pc, &pails, td.path());
+            let pail = Pail::construct(pc, &pails, td.path()).await;
 
             if pails.insert(name, pail).is_some() {
                 panic!("{name} already existed");
