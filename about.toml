@@ -42,9 +42,7 @@ accepted = ["BSL-1.0"]
 accepted = ["Unlicense"]
 
 [webpki.clarify]
-license = "ISC AND Apache-2.0 AND BSD-3-Clause"
+license = "ISC"
 files = [
     { path = "LICENSE", checksum = "5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a", license = "ISC" },
-    { path = "third-party/bettertls/LICENSE", checksum = "0cec06e0e55fbc3dc5cee4fca9b607f66cb8f4e4dbcf3b3c013594dd156732e9", license = "Apache-2.0" },
-    { path = "third-party/chromium/LICENSE", checksum = "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308", license = "BSD-3-Clause" },
 ]
