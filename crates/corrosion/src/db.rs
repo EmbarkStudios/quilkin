@@ -4,6 +4,7 @@ use corro_types::{
     schema::Schema,
     sqlite::CrConn,
 };
+use eyre::WrapErr as _;
 use std::sync::Arc;
 
 pub mod read;
@@ -26,6 +27,14 @@ impl InitializedDb {
     /// it if it doesn't exist
     pub async fn setup(db_path: &crate::Path, schema: &str) -> eyre::Result<Self> {
         let partial_schema = corro_types::schema::parse_sql(schema)?;
+
+        // We need to create the intermediate directories for the DB path, otherwise
+        // rusqlite::Connection::open will fail if not all of them are there
+        if let Some(dir) = db_path.parent()
+            && !dir.exists()
+        {
+            std::fs::create_dir_all(dir).context("failed to create DB directory")?;
+        }
 
         let actor_id = {
             // we need to set auto_vacuum before any tables are created

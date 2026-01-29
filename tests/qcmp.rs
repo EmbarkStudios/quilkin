@@ -26,10 +26,9 @@ async fn proxy_ping() {
     let mut t = TestHelper::default();
     let qcmp = quilkin::net::raw_socket_with_reuse(0).unwrap();
     let qcmp_port = quilkin::net::socket_port(&qcmp);
-    let server_proxy = quilkin::components::proxy::Proxy {
+    let server_proxy = quilkin::test::TestProxy {
         qcmp,
-        to: vec![(Ipv4Addr::UNSPECIFIED, 0).into()],
-        ..<_>::default()
+        ..Default::default()
     };
     let server_config = TestHelper::new_config();
     t.run_server(server_config, Some(server_proxy), None).await;

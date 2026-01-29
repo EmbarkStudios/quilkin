@@ -302,28 +302,28 @@ impl Providers {
                     eyre::bail!("--to-tokens `{tt}` is invalid, it must have a `:` separator")
                 };
 
-                let count = count.parse()?;
+                let count: usize = count.parse()?;
                 let length = length.parse()?;
 
-                Ok(crate::components::proxy::ToTokens { count, length })
+                Ok((count, length))
             })
             .transpose()?;
 
-        let endpoints = if let Some(tt) = endpoint_tokens {
-            let (unique, overflow) = 256u64.overflowing_pow(tt.length as _);
+        let endpoints = if let Some((count, length)) = endpoint_tokens {
+            let (unique, overflow) = 256u64.overflowing_pow(length as _);
             if overflow {
                 panic!(
                     "can't generate {} tokens of length {} maximum is {}",
-                    self.endpoints.len() * tt.count,
-                    tt.length,
+                    self.endpoints.len() * count,
+                    length,
                     u64::MAX,
                 );
             }
 
-            if unique < (self.endpoints.len() * tt.count) as u64 {
+            if unique < (self.endpoints.len() * count) as u64 {
                 panic!(
                     "we require {} unique tokens but only {unique} can be generated",
-                    self.endpoints.len() * tt.count,
+                    self.endpoints.len() * count,
                 );
             }
 
@@ -334,7 +334,7 @@ impl Providers {
                         metadata_key: crate::filters::capture::CAPTURED_BYTES.into(),
                         strategy: crate::filters::capture::Strategy::Suffix(
                             crate::filters::capture::Suffix {
-                                size: tt.length as _,
+                                size: length as _,
                                 remove: true,
                             },
                         ),
@@ -344,7 +344,7 @@ impl Providers {
                 config.filters.store(filter_chain);
             }
 
-            let count = tt.count as u64;
+            let count = count as u64;
 
             self.endpoints
                 .iter()
@@ -356,7 +356,7 @@ impl Providers {
                         (*sa).into(),
                         crate::net::endpoint::Metadata {
                             tokens: (start..(start + count))
-                                .map(|i| i.to_le_bytes()[..tt.length].to_vec())
+                                .map(|i| i.to_le_bytes()[..length].to_vec())
                                 .collect(),
                         },
                     )

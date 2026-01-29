@@ -3,7 +3,7 @@ use eyre::ContextCompat;
 use std::sync::Arc;
 
 use crate::{
-    components::proxy::SessionPool,
+    //components::proxy::SessionPool,
     config::{Config, filter::CachedFilterChain},
     signal::ShutdownHandler,
 };
@@ -326,14 +326,14 @@ impl Service {
     ///
     /// When called will spawn any and all enabled services, if successful
     /// returning a future that can be await to wait on services to be cancelled.
-    pub fn spawn_services(
+    pub async fn spawn_services(
         mut self,
         config: &Arc<Config>,
         mut shutdown: ShutdownHandler,
     ) -> crate::Result<tokio::task::JoinHandle<(ShutdownHandler, crate::Result<()>)>> {
         {
             let shutdown = &mut shutdown;
-            self.publish_mds(config, shutdown)?;
+            self.publish_mds(config, shutdown).await?;
             self.publish_phoenix(config, shutdown)?;
             // We need to call this before qcmp since if we use XDP we handle QCMP
             // internally without a separate task
@@ -474,7 +474,7 @@ impl Service {
     }
 
     /// Spawns an xDS server and/or corrosion server if enabled
-    fn publish_mds(
+    async fn publish_mds(
         &self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
@@ -483,8 +483,8 @@ impl Service {
             return Ok(());
         }
 
-        tokio::runtime::Handle::current()
-            .block_on(async { self.spawn_corrosion_server(config.clone(), shutdown).await })?;
+        self.spawn_corrosion_server(config.clone(), shutdown)
+            .await?;
 
         if !self.grpc_enabled {
             return Ok(());
@@ -636,7 +636,11 @@ impl Service {
             .cached_filter_chain()
             .context("a cached FilterChain should have been configured")?;
 
-        let sessions = SessionPool::new(session_sends, buffer_pool.clone(), cached_filters);
+        let sessions = crate::net::sessions::SessionPool::new(
+            session_sends,
+            buffer_pool.clone(),
+            cached_filters,
+        );
         crate::net::packet::spawn_receivers(config, socket, worker_sends, &sessions, buffer_pool)?;
 
         let finished = shutdown.push("udp");
