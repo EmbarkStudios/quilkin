@@ -108,3 +108,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: deny check
         uses: EmbarkStudios/cargo-deny-action@v2
+
+  test_success:
+    runs-on: ubuntu-24.04
+    needs: [lint, test, build, deny-check, validate-proto-bufs]
+    steps:
+      - run: echo "All test jobs passed"
