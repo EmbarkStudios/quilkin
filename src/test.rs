@@ -310,16 +310,15 @@ impl TestHelper {
         server: Option<crate::components::proxy::Proxy>,
         with_admin: Option<Option<SocketAddr>>,
     ) -> u16 {
-        let (shutdown_tx, shutdown_rx) = crate::signal::channel();
-        self.server_shutdown_tx.push(Some(shutdown_tx.clone()));
+        let shutdown = crate::signal::ShutdownHandler::new();
+        self.server_shutdown_tx.push(Some(shutdown.shutdown_tx()));
         let ready = <_>::default();
 
         if let Some(address) = with_admin {
             crate::components::admin::serve(
                 config.clone(),
                 ready,
-                shutdown_tx.clone(),
-                shutdown_rx.clone(),
+                shutdown.lifecycle(),
                 address,
             );
         }
@@ -338,7 +337,6 @@ impl TestHelper {
         });
 
         let (prox_tx, prox_rx) = tokio::sync::oneshot::channel();
-        let shutdown = crate::signal::ShutdownHandler::new(shutdown_tx, shutdown_rx);
 
         let port = crate::net::socket_port(server.socket.as_ref().unwrap());
 

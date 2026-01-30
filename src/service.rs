@@ -303,7 +303,7 @@ impl Service {
         mut self,
         config: &Arc<Config>,
         mut shutdown: ShutdownHandler,
-    ) -> crate::Result<tokio::task::JoinHandle<(ShutdownHandler, crate::Result<()>)>> {
+    ) -> crate::Result<tokio::task::JoinHandle<crate::Result<()>>> {
         {
             let shutdown = &mut shutdown;
             self.publish_mds(config, shutdown)?;
@@ -316,7 +316,7 @@ impl Service {
         }
 
         Ok(tokio::spawn(async move {
-            let (tx, rx, results) = shutdown.await_any_then_shutdown().await;
+            let results = shutdown.await_any_then_shutdown().await;
 
             let mut errors = 0;
             for (task, res) in &results {
@@ -344,7 +344,7 @@ impl Service {
                 }
             };
 
-            (ShutdownHandler::new(tx, rx), res)
+            res
         }))
     }
 
@@ -379,7 +379,7 @@ impl Service {
             (std::net::Ipv6Addr::UNSPECIFIED, self.phoenix_port),
             datacenters.clone(),
             phoenix,
-            shutdown.shutdown_rx(),
+            shutdown.lifecycle(),
         )?;
 
         let finished = shutdown.push("phoenix");

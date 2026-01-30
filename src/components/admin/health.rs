@@ -58,8 +58,8 @@ mod tests {
 
     #[test]
     fn panic_hook() {
-        let (shutdown_tx, _shutdown_rx) = crate::signal::channel();
-        let health = Health::new(shutdown_tx);
+        let (tx, _) = tokio::sync::watch::channel(());
+        let health = Health::new(tx);
 
         assert!(health.check_liveness());
 

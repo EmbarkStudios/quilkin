@@ -105,7 +105,7 @@ impl Proxy {
             shutdown,
         }: RunArgs<Ready>,
         initialized: Option<tokio::sync::oneshot::Sender<()>>,
-    ) -> crate::Result<tokio::task::JoinHandle<(crate::signal::ShutdownHandler, crate::Result<()>)>>
+    ) -> crate::Result<tokio::task::JoinHandle<crate::Result<()>>>
     {
         let _mmdb_task = self.mmdb.as_ref().map(|source| {
             let source = source.clone();

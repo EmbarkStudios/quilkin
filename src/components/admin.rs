@@ -41,12 +41,11 @@ pub(crate) const IDLE_REQUEST_INTERVAL: Duration = Duration::from_secs(30);
 pub fn serve(
     config: Arc<crate::Config>,
     ready: Arc<AtomicBool>,
-    shutdown_tx: crate::signal::ShutdownTx,
-    shutdown_rx: crate::signal::ShutdownRx,
+    lifecycle: quilkin_system::lifecycle::Lifecycle,
     address: Option<std::net::SocketAddr>,
 ) -> std::thread::JoinHandle<()> {
     let address = address.unwrap_or_else(|| (std::net::Ipv6Addr::UNSPECIFIED, PORT).into());
-    let health = Health::new(shutdown_tx);
+    let health = Health::new(lifecycle.shutdown_tx());
     tracing::info!(address = %address, "Starting admin endpoint");
 
     let router = Admin {
@@ -69,7 +68,7 @@ pub fn serve(
                         "admin",
                         tokio_listener,
                         router,
-                        crate::signal::await_shutdown(shutdown_rx),
+                        lifecycle.shutdown_future(),
                     )
                     .await
                 })
@@ -394,8 +393,8 @@ mod tests {
 
     #[tokio::test]
     async fn live() {
-        let (shutdown_tx, _shutdown_rx) = crate::signal::channel();
-        let health = Health::new(shutdown_tx);
+        let lifecycle = quilkin_system::lifecycle::Lifecycle::new();
+        let health = Health::new(lifecycle.shutdown_tx());
         let admin = Admin {
             config: crate::test::TestHelper::new_config(),
             ready: <_>::default(),

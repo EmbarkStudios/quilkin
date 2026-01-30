@@ -298,11 +298,11 @@ impl Pail {
                 .xds_port(rp.xds_port)
                 .mds()
                 .mds_port(rp.mds_port);
-            let (tx, rx) = quilkin::signal::channel();
-            let sh = quilkin::signal::ShutdownHandler::new(tx.clone(), rx);
+            // let (tx, rx) = quilkin::signal::channel();
+            let sh = quilkin::signal::ShutdownHandler::new();
             let task = svc.spawn_services(&rp.config, sh).unwrap();
 
-            rp.shutdown = tx;
+            rp.shutdown = sh.shutdown_tx();
             rp.task = Some(task);
         } else {
             unimplemented!();
@@ -366,9 +366,7 @@ impl Pail {
                 tc.write_to_file(&path);
 
                 let config_path = path.clone();
-
-                let (shutdown, shutdown_rx) = quilkin::signal::channel();
-                let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
+                let sh = quilkin::signal::ShutdownHandler::new();
 
                 let providers = quilkin::Providers::default().fs().fs_path(path);
                 let svc = quilkin::Service::default()
@@ -382,7 +380,7 @@ impl Pail {
                     Default::default(),
                     &providers,
                     &svc,
-                    pail_token,
+                    sh.shutdown_token(),
                 );
 
                 *config.dyn_cfg.id.lock() = spc.name.into();
@@ -392,14 +390,9 @@ impl Pail {
                     healthy.clone(),
                     None,
                     None,
-                    shutdown_rx.clone(),
+                    sh.shutdown_rx(),
                 );
-                let task = svc
-                    .spawn_services(
-                        &config,
-                        quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
-                    )
-                    .unwrap();
+                let task = svc.spawn_services(&config, sh).unwrap();
 
                 Self::Relay(RelayPail {
                     xds_port,
@@ -452,9 +445,7 @@ impl Pail {
                         )
                     })
                     .collect::<Vec<_>>();
-
-                let (shutdown, shutdown_rx) = quilkin::signal::channel();
-                let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
+                let sh = quilkin::signal::ShutdownHandler::new();
 
                 let port = quilkin::net::socket_port(
                     &quilkin::net::raw_socket_with_reuse(0).expect("failed to bind qcmp socket"),
@@ -472,7 +463,7 @@ impl Pail {
                     apc.icao_code,
                     &providers,
                     &svc,
-                    pail_token,
+                    sh.shutdown_token(),
                 );
 
                 *config.dyn_cfg.id.lock() = spc.name.into();
@@ -483,14 +474,9 @@ impl Pail {
                     healthy.clone(),
                     None,
                     None,
-                    shutdown_rx.clone(),
+                    sh.shutdown_rx(),
                 );
-                let task = svc
-                    .spawn_services(
-                        &config,
-                        quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
-                    )
-                    .unwrap();
+                let task = svc.spawn_services(&config, sh).unwrap();
 
                 Self::Agent(AgentPail {
                     qcmp_port: port,
@@ -542,16 +528,14 @@ impl Pail {
                     .phoenix()
                     .phoenix_port(phoenix_port)
                     .termination_timeout(None);
-
-                let (shutdown, shutdown_rx) = quilkin::signal::channel();
-                let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
+                let sh = quilkin::signal::ShutdownHandler::new();
 
                 let config = crate::Config::new_rc(
                     Some("test-proxy".into()),
                     Default::default(),
                     &Default::default(),
                     &svc,
-                    pail_token,
+                    sh.shutdown_token(),
                 );
 
                 if let Some(cfg) = ppc.config {
@@ -596,14 +580,9 @@ impl Pail {
                     healthy.clone(),
                     None,
                     Some(rttx),
-                    shutdown_rx.clone(),
+                    sh.shutdown_rx(),
                 );
-                let task = svc
-                    .spawn_services(
-                        &config,
-                        quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
-                    )
-                    .unwrap();
+                let task = svc.spawn_services(&config, sh).unwrap();
 
                 Self::Proxy(ProxyPail {
                     port,
