@@ -130,7 +130,9 @@ impl fmt::Display for AddressKind {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, PartialOrd, Eq, Ord, Hash,
+)]
 pub struct Endpoint {
     #[serde(rename = "a")]
     pub address: AddressKind,

@@ -72,7 +72,7 @@ pub fn init_logging(level: Level, test_pkg: &'static str) {
 macro_rules! trace_test {
     ($(#[$attr:meta])* $name:ident, $body:block) => {
         $(#[$attr])*
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
         async fn $name() {
             // Get the module name
             let fname = $crate::func_name!();
@@ -297,12 +297,14 @@ impl Pail {
                 .xds()
                 .xds_port(rp.xds_port)
                 .mds()
-                .mds_port(rp.mds_port);
-            // let (tx, rx) = quilkin::signal::channel();
-            let sh = quilkin::signal::ShutdownHandler::new();
-            let task = svc.spawn_services(&rp.config, sh).unwrap();
+                .mds_port(rp.mds_port)
+                .grpc()
+                .corrosion_port(0);
 
+            let sh = quilkin::signal::ShutdownHandler::new();
             rp.shutdown = sh.shutdown_tx();
+
+            let task = svc.spawn_services(&rp.config, sh).await.unwrap();
             rp.task = Some(task);
         } else {
             unimplemented!();
@@ -311,7 +313,7 @@ impl Pail {
 }
 
 impl Pail {
-    pub fn construct(spc: SandboxPailConfig, pails: &Pails, td: &std::path::Path) -> Self {
+    pub async fn construct(spc: SandboxPailConfig, pails: &Pails, td: &std::path::Path) -> Self {
         match spc.config {
             PailConfig::Server(sspc) => {
                 let (packet_tx, packet_rx) = mpsc::channel::<String>(10);
@@ -373,7 +375,9 @@ impl Pail {
                     .xds()
                     .xds_port(xds_port)
                     .mds()
-                    .mds_port(mds_port);
+                    .mds_port(mds_port)
+                    .grpc()
+                    .corrosion_port(0);
 
                 let config = crate::Config::new_rc(
                     Some("test-relay".into()),
@@ -392,7 +396,7 @@ impl Pail {
                     None,
                     sh.shutdown_rx(),
                 );
-                let task = svc.spawn_services(&config, sh).unwrap();
+                let task = svc.spawn_services(&config, sh).await.unwrap();
 
                 Self::Relay(RelayPail {
                     xds_port,
@@ -476,7 +480,7 @@ impl Pail {
                     None,
                     sh.shutdown_rx(),
                 );
-                let task = svc.spawn_services(&config, sh).unwrap();
+                let task = svc.spawn_services(&config, sh).await.unwrap();
 
                 Self::Agent(AgentPail {
                     qcmp_port: port,
@@ -582,7 +586,7 @@ impl Pail {
                     Some(rttx),
                     sh.shutdown_rx(),
                 );
-                let task = svc.spawn_services(&config, sh).unwrap();
+                let task = svc.spawn_services(&config, sh).await.unwrap();
 
                 Self::Proxy(ProxyPail {
                     port,
@@ -679,7 +683,7 @@ impl SandboxConfig {
         let mut pails = Pails::new();
         for pc in self.pails {
             let name = pc.name;
-            let pail = Pail::construct(pc, &pails, td.path());
+            let pail = Pail::construct(pc, &pails, td.path()).await;
 
             if pails.insert(name, pail).is_some() {
                 panic!("{name} already existed");

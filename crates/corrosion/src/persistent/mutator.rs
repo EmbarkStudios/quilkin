@@ -1,3 +1,6 @@
+//! Contains the [`BroadcastingTransactor`] used to process database mutations
+//! and send events to subscribers whose queries match the applied mutations
+
 use crate::{
     Peer, db,
     persistent::proto::{ExecResponse, ExecResult, v1 as p},
@@ -63,6 +66,11 @@ impl BroadcastingTransactor {
             id,
             tx,
         }
+    }
+
+    #[inline]
+    pub fn actor_id(&self) -> ActorId {
+        self.id
     }
 
     pub async fn make_broadcastable_changes<F, T>(
@@ -151,7 +159,7 @@ impl BroadcastingTransactor {
 }
 
 #[async_trait::async_trait]
-impl super::server::Mutator for BroadcastingTransactor {
+impl super::server::DbMutator for BroadcastingTransactor {
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
         let mut dc = smallvec::SmallVec::<[_; 1]>::new();
         {

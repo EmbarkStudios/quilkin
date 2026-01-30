@@ -33,7 +33,10 @@ use uuid::Uuid;
 
 use crate::{
     generated::envoy::service::discovery::v3::Resource as XdsResource,
-    net::cluster::{self, ClusterMap},
+    net::{
+        cluster::{self, ClusterMap},
+        servers::Servers,
+    },
     xds::{self, ResourceType},
 };
 
@@ -118,6 +121,11 @@ impl DynamicConfig {
         self.typemap.get::<ClusterMap>()
     }
 
+    #[inline]
+    pub fn servers(&self) -> Option<&Servers> {
+        self.typemap.get::<Servers>()
+    }
+
     pub fn datacenters(&self) -> Option<&Watch<DatacenterMap>> {
         self.typemap.get::<DatacenterMap>()
     }
@@ -164,6 +172,7 @@ mod test_impls {
                 && compare::<qcmp::QcmpPort>(&self.typemap, &other.typemap)
                 && compare::<ClusterMap>(&self.typemap, &other.typemap)
                 && compare::<DatacenterMap>(&self.typemap, &other.typemap)
+                && compare::<Servers>(&self.typemap, &other.typemap)
         }
     }
 
@@ -303,7 +312,7 @@ impl quilkin_xds::config::Configuration for Config {
                     tokio::select! {
                         i = icao_rx.recv() => {
                             match i {
-                                Ok(()) => cp.push_update(xds::DATACENTER_TYPE),
+                                Ok(_) => cp.push_update(xds::DATACENTER_TYPE),
                                 Err(error) => tracing::error!(%error, "error watching ICAO changes"),
                             }
                         }
@@ -648,7 +657,17 @@ impl Config {
                         let resource = crate::xds::Resource::Cluster(
                             quilkin_xds::generated::quilkin::config::v1alpha1::Cluster {
                                 locality: key.clone().map(|l| l.into()),
-                                endpoints: value.endpoints.iter().map(|ep| ep.into()).collect(),
+                                endpoints: value
+                                    .endpoints
+                                    .iter()
+                                    .map(|(addr, md)| {
+                                        crate::net::Endpoint {
+                                            address: addr.clone(),
+                                            metadata: md.clone(),
+                                        }
+                                        .into()
+                                    })
+                                    .collect(),
                             },
                         );
 

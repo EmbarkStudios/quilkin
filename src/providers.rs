@@ -14,6 +14,7 @@
  *  limitations under the License.
  */
 
+pub mod corrosion;
 pub mod fs;
 pub mod k8s;
 
@@ -25,7 +26,7 @@ use std::{
     },
 };
 
-use crate::{config, metrics::provider_task_failures_total};
+use crate::{config, metrics::provider_task_failures_total, providers::k8s::EventProcessor};
 use eyre::Context;
 use futures::TryStreamExt;
 
@@ -34,7 +35,6 @@ use futures::TryStreamExt;
 const RETRIES: u32 = u32::MAX;
 const BACKOFF_STEP: std::time::Duration = std::time::Duration::from_millis(250);
 const MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
-pub(crate) const NO_UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The available xDS source provider.
 #[derive(Clone, Debug, Default, clap::Args)]
@@ -178,6 +178,19 @@ pub struct Providers {
         hide = true
     )]
     xds_endpoints: Vec<tonic::transport::Endpoint>,
+    /// One or more `quilkin relay` endpoints to push or pull configuration changes to/from
+    #[clap(
+        long = "provider.corrosion.endpoints",
+        env = "QUILKIN_PROVIDERS_CORROSION_ENDPOINTS",
+        value_delimiter = ','
+    )]
+    corrosion_endpoints: Vec<SocketAddr>,
+    /// What mode to run corrosion in
+    #[clap(
+        long = "provider.corrosion.mode",
+        env = "QUILKIN_PROVIDERS_CORROSION_MODE"
+    )]
+    corrosion_mode: Option<corrosion::CorrosionMode>,
 }
 
 #[derive(Clone)]
@@ -270,6 +283,11 @@ impl Providers {
         self
     }
 
+    pub fn corrosion_endpoints(mut self, endpoints: impl Into<Vec<SocketAddr>>) -> Self {
+        self.corrosion_endpoints = endpoints.into();
+        self
+    }
+
     pub fn spawn_static_provider(
         &self,
         config: FiltersAndClusters,
@@ -284,28 +302,28 @@ impl Providers {
                     eyre::bail!("--to-tokens `{tt}` is invalid, it must have a `:` separator")
                 };
 
-                let count = count.parse()?;
+                let count: usize = count.parse()?;
                 let length = length.parse()?;
 
-                Ok(crate::components::proxy::ToTokens { count, length })
+                Ok((count, length))
             })
             .transpose()?;
 
-        let endpoints = if let Some(tt) = endpoint_tokens {
-            let (unique, overflow) = 256u64.overflowing_pow(tt.length as _);
+        let endpoints = if let Some((count, length)) = endpoint_tokens {
+            let (unique, overflow) = 256u64.overflowing_pow(length as _);
             if overflow {
                 panic!(
                     "can't generate {} tokens of length {} maximum is {}",
-                    self.endpoints.len() * tt.count,
-                    tt.length,
+                    self.endpoints.len() * count,
+                    length,
                     u64::MAX,
                 );
             }
 
-            if unique < (self.endpoints.len() * tt.count) as u64 {
+            if unique < (self.endpoints.len() * count) as u64 {
                 panic!(
                     "we require {} unique tokens but only {unique} can be generated",
-                    self.endpoints.len() * tt.count,
+                    self.endpoints.len() * count,
                 );
             }
 
@@ -316,7 +334,7 @@ impl Providers {
                         metadata_key: crate::filters::capture::CAPTURED_BYTES.into(),
                         strategy: crate::filters::capture::Strategy::Suffix(
                             crate::filters::capture::Suffix {
-                                size: tt.length as _,
+                                size: length as _,
                                 remove: true,
                             },
                         ),
@@ -326,7 +344,7 @@ impl Providers {
                 config.filters.store(filter_chain);
             }
 
-            let count = tt.count as u64;
+            let count = count as u64;
 
             self.endpoints
                 .iter()
@@ -338,7 +356,7 @@ impl Providers {
                         (*sa).into(),
                         crate::net::endpoint::Metadata {
                             tokens: (start..(start + count))
-                                .map(|i| i.to_le_bytes()[..tt.length].to_vec())
+                                .map(|i| i.to_le_bytes()[..length].to_vec())
                                 .collect(),
                         },
                     )
@@ -371,6 +389,7 @@ impl Providers {
         health_check: Arc<AtomicBool>,
         locality: Option<crate::net::endpoint::Locality>,
         config: &super::Config,
+        mutator: Option<crate::providers::corrosion::ServerMutator>,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let agones_namespaces = if !self.agones_namespace.is_empty() {
             tracing::warn!(
@@ -403,6 +422,7 @@ impl Providers {
             let selector = selector.clone();
             let locality = locality.clone();
             let health_check = health_check.clone();
+            let mutator = mutator.clone();
 
             move || {
                 let config = config.clone();
@@ -414,6 +434,7 @@ impl Providers {
                 let selector = selector.clone();
                 let locality = locality.clone();
                 let health_check = health_check.clone();
+                let mutator = mutator.clone();
 
                 async move {
                     let client = tokio::time::timeout(
@@ -453,14 +474,20 @@ impl Providers {
                     if let Some(Some(clusters)) = agones_enabled.then(|| config.dyn_cfg.clusters())
                     {
                         for namespace in agones_namespaces {
+                            let processor = EventProcessor {
+                                clusters: clusters.clone(),
+                                mutator: mutator.clone(),
+                                address_selector: selector.clone(),
+                                locality: locality.clone(),
+                                servers: Default::default(),
+                            };
+
                             gs_streams.spawn(Self::result_stream(
                                 health_check.clone(),
                                 k8s::update_endpoints_from_gameservers(
                                     client.clone(),
                                     namespace.clone(),
-                                    clusters.clone(),
-                                    locality.clone(),
-                                    selector.clone(),
+                                    processor,
                                 ),
                             ));
                         }
@@ -487,10 +514,10 @@ impl Providers {
     ) -> crate::Result<()> {
         tokio::pin!(stream);
         loop {
-            match stream.try_next().await {
-                Ok(Some(_)) => health_check.store(true, Ordering::SeqCst),
-                Ok(None) => break Err(eyre::eyre!("kubernetes watch stream terminated")),
-                Err(error) => break Err(error),
+            if stream.try_next().await?.is_some() {
+                health_check.store(true, Ordering::SeqCst);
+            } else {
+                eyre::bail!("kubernetes watch stream terminated");
             }
         }
     }
@@ -607,6 +634,11 @@ impl Providers {
         self.mmdb.is_some()
     }
 
+    pub fn corrosion_enabled(&self) -> bool {
+        self.corrosion_mode
+            .is_some_and(|_cm| !self.corrosion_endpoints.is_empty())
+    }
+
     pub fn any_provider_enabled(&self) -> bool {
         self.agones_enabled()
             || self.fs_enabled()
@@ -615,6 +647,7 @@ impl Providers {
             || self.k8s_enabled()
             || self.mmdb_enabled()
             || self.static_enabled()
+            || self.corrosion_enabled()
     }
 
     /// Adds the required typemap entries to the config depending on what providers are enabled
@@ -652,11 +685,24 @@ impl Providers {
             self.k8s_enabled().then_some("k8s"),
             self.mmdb_enabled().then_some("mmdb"),
             self.static_enabled().then_some("static"),
+            self.corrosion_enabled().then_some("corrosion"),
         ].into_iter().flatten().collect::<Vec<&str>>(), "starting configuration providers");
 
         if self.mmdb_enabled() {
             providers.spawn(self.spawn_mmdb_provider());
         }
+
+        let mutator = self.maybe_spawn_corrosion(config, &health_check, &mut providers);
+
+        if mutator.is_some() {
+            if self.fs_enabled() {
+                tracing::error!("corrosion mutation does not work with file system data");
+            }
+
+            if self.static_enabled() {
+                tracing::error!("corrosion mutation does not work with static data");
+            }
+        };
 
         if self.grpc_push_enabled() {
             providers.spawn(self.spawn_mds_provider(
@@ -672,6 +718,7 @@ impl Providers {
                 health_check.clone(),
                 locality.clone(),
                 config,
+                mutator,
             ));
         }
 

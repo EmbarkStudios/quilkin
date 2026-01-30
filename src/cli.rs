@@ -295,7 +295,10 @@ impl Cli {
         );
 
         let shutdown_tx = sh.shutdown_tx();
-        let mut service_task = self.service.spawn_services(&config, sh)?;
+        let mut service_task = self
+            .service
+            .spawn_services(&config, sh)
+            .await?;
 
         if provider_tasks.is_empty() {
             ready.store(true, std::sync::atomic::Ordering::SeqCst);

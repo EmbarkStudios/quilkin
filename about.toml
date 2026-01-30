@@ -30,10 +30,19 @@ accepted = [
     "Zlib",
     "CDLA-Permissive-2.0",
 ]
-workarounds = ["ring", "xxhash-rust"]
+workarounds = ["ring"]
 
 [ring]
-accepted = ["ISC", "OpenSSL"]
+accepted = ["OpenSSL"]
 
 [xxhash-rust]
 accepted = ["BSL-1.0"]
+
+[enquote]
+accepted = ["Unlicense"]
+
+[webpki.clarify]
+license = "ISC"
+files = [
+    { path = "LICENSE", checksum = "5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a", license = "ISC" },
+]
