@@ -28,8 +28,8 @@ use crate::{
     net::DualStackEpollSocket as DualStackLocalSocket,
     net::endpoint::metadata::Value,
     net::endpoint::{Endpoint, EndpointAddress},
-    signal::{ShutdownRx, ShutdownTx},
 };
+use quilkin_system::lifecycle::{ShutdownRx, ShutdownTx};
 
 static LOG_ONCE: Once = Once::new();
 
@@ -309,15 +309,19 @@ impl TestHelper {
         config: Arc<Config>,
         with_admin: Option<Option<SocketAddr>>,
     ) -> u16 {
-        let (shutdown_tx, shutdown_rx) = crate::signal::channel();
-        self.server_shutdown_tx.push(Some(shutdown_tx.clone()));
+        let shutdown = crate::signal::ShutdownHandler::new();
+        self.server_shutdown_tx
+            .push(Some(shutdown.lifecycle().shutdown_tx()));
         let ready = <_>::default();
 
         if let Some(address) = with_admin {
-            crate::components::admin::serve(config.clone(), ready, shutdown_tx.clone(), address);
+            crate::components::admin::serve(
+                config.clone(),
+                ready,
+                shutdown.lifecycle_owned(),
+                address,
+            );
         }
-
-        let shutdown = crate::signal::ShutdownHandler::new(shutdown_tx, shutdown_rx);
 
         let (task, ports) = crate::Service::default()
             .udp()
@@ -341,7 +345,7 @@ impl TestHelper {
         if let Some((_, rx)) = &self.shutdown_ch {
             rx.clone()
         } else {
-            let ch = crate::signal::channel();
+            let ch = tokio::sync::watch::channel(());
             let recv = ch.1.clone();
             self.shutdown_ch = Some(ch);
             recv

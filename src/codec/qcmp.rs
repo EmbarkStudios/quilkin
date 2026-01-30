@@ -384,7 +384,7 @@ pub fn spawn(
     shutdown: &mut crate::signal::ShutdownHandler,
 ) -> crate::Result<()> {
     let finished = shutdown.push("qcmp");
-    let shutdown_rx = shutdown.shutdown_rx();
+    let shutdown_rx = shutdown.lifecycle().shutdown_rx();
 
     let _qcmp_thread = std::thread::Builder::new()
         .name("qcmp".into())
@@ -958,9 +958,9 @@ mod tests {
         let socket = raw_socket_with_reuse(0).unwrap();
         let addr = socket.local_addr().unwrap().as_socket().unwrap();
 
-        let (_tx, rx) = crate::signal::channel();
+        let lifecycle = quilkin_system::lifecycle::Lifecycle::new();
         let pc = super::port_channel();
-        spawn_task(socket, pc.subscribe(), rx).unwrap();
+        spawn_task(socket, pc.subscribe(), lifecycle.shutdown_rx()).unwrap();
 
         let delay = Duration::from_millis(50);
         let node = QcmpTransceiver::with_artificial_delay(delay).unwrap();

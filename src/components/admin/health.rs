@@ -23,11 +23,11 @@ use std::sync::atomic::Ordering::Relaxed;
 #[derive(Clone)]
 pub struct Health {
     healthy: Arc<AtomicBool>,
-    shutdown_tx: crate::signal::ShutdownTx,
+    shutdown_tx: quilkin_system::lifecycle::ShutdownTx,
 }
 
 impl Health {
-    pub fn new(shutdown_tx: crate::signal::ShutdownTx) -> Self {
+    pub fn new(shutdown_tx: quilkin_system::lifecycle::ShutdownTx) -> Self {
         let health = Self {
             healthy: Arc::new(AtomicBool::new(true)),
             shutdown_tx,
@@ -58,8 +58,8 @@ mod tests {
 
     #[test]
     fn panic_hook() {
-        let (shutdown_tx, _shutdown_rx) = crate::signal::channel();
-        let health = Health::new(shutdown_tx);
+        let (tx, _) = tokio::sync::watch::channel(());
+        let health = Health::new(tx);
 
         assert!(health.check_liveness());
 

@@ -378,21 +378,6 @@ impl<'a> From<Option<&'a MetricsIpNetEntry>> for AsnInfo<'a> {
     }
 }
 
-pub(crate) fn shutdown_initiated() -> &'static IntGauge {
-    static SHUTDOWN_INITATED: Lazy<IntGauge> = Lazy::new(|| {
-        prometheus::register_int_gauge_with_registry! {
-            prometheus::opts! {
-                "quilkin_shutdown_initiated",
-                "Shutdown process has been started",
-            },
-            registry(),
-        }
-        .unwrap()
-    });
-
-    &SHUTDOWN_INITATED
-}
-
 pub(crate) fn game_traffic_tasks() -> &'static IntCounter {
     static GAME_TRAFFIC_TASKS: Lazy<IntCounter> = Lazy::new(|| {
         prometheus::register_int_counter_with_registry! {

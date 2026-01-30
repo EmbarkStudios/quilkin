@@ -8,17 +8,20 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["http", "sockets"]
+default = ["http", "sockets", "lifecycle"]
 http = ["dep:axum", "dep:futures", "dep:hyper-util", "dep:tokio", "dep:tower"]
 sockets = ["dep:socket2"]
+lifecycle = ["dep:tokio", "dep:tokio-util"]
 
 [dependencies]
+eyre.workspace = true
+prometheus-client.workspace = true
+tracing.workspace = true
+
 axum = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true, features = ["http1", "http2"] }
-once_cell.workspace = true
-prometheus-client.workspace = true
 socket2 = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }
-tracing.workspace = true

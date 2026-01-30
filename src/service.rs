@@ -351,10 +351,7 @@ impl Service {
         mut self,
         config: &Arc<Config>,
         mut shutdown: ShutdownHandler,
-    ) -> crate::Result<(
-        tokio::task::JoinHandle<(ShutdownHandler, crate::Result<()>)>,
-        ServicePorts,
-    )> {
+    ) -> crate::Result<(tokio::task::JoinHandle<crate::Result<()>>, ServicePorts)> {
         let mut ports = ServicePorts {
             mds: None,
             phoenix: None,
@@ -377,7 +374,7 @@ impl Service {
 
         Ok((
             tokio::spawn(async move {
-                let (tx, rx, results) = shutdown.await_any_then_shutdown().await;
+                let results = shutdown.await_any_then_shutdown().await;
 
                 let mut errors = 0;
                 for (task, res) in &results {
@@ -405,7 +402,7 @@ impl Service {
                     }
                 };
 
-                (ShutdownHandler::new(tx, rx), res)
+                res
             }),
             ports,
         ))
@@ -449,13 +446,13 @@ impl Service {
             listener,
             datacenters.clone(),
             phoenix,
-            shutdown.shutdown_rx(),
+            shutdown.lifecycle_owned(),
         )?;
 
         ports.phoenix = Some(port);
 
         let finished = shutdown.push("phoenix");
-        let mut srx = shutdown.shutdown_rx();
+        let mut srx = shutdown.lifecycle().shutdown_rx();
         tokio::spawn(async move {
             let _ = srx.changed().await;
 
@@ -511,7 +508,7 @@ impl Service {
         ports.xds = Some(listener.port());
 
         let finished = shutdown.push("xds");
-        let srx = shutdown.shutdown_rx();
+        let srx = shutdown.lifecycle().shutdown_rx();
 
         let xds_server = crate::net::xds::server::ControlPlane::from_arc(
             config.clone(),
@@ -553,7 +550,7 @@ impl Service {
         ports.mds = Some(listener.port());
 
         let finished = shutdown.push("mds");
-        let srx = shutdown.shutdown_rx();
+        let srx = shutdown.lifecycle().shutdown_rx();
 
         let mds_server = crate::net::xds::server::ControlPlane::from_arc(
             config.clone(),
@@ -598,7 +595,7 @@ impl Service {
                         ports.udp = Some(self.udp_port);
 
                         let finished = shutdown.push("xdp");
-                        let mut srx = shutdown.shutdown_rx();
+                        let mut srx = shutdown.lifecycle().shutdown_rx();
                         tokio::spawn(async move {
                             drop(srx.changed().await);
 
@@ -708,7 +705,7 @@ impl Service {
         crate::net::packet::spawn_receivers(config, socket, worker_sends, &sessions, buffer_pool)?;
 
         let finished = shutdown.push("udp");
-        let mut srx = shutdown.shutdown_rx();
+        let mut srx = shutdown.lifecycle().shutdown_rx();
         let testing = self.testing;
         let termination_timeout = self.termination_timeout;
 
@@ -856,7 +853,7 @@ impl Service {
             .zip(config.dyn_cfg.subscribe_filter_changes())
         {
             let finished = shutdown.push("corrosion_db_mutator");
-            let mut srx = shutdown.shutdown_rx();
+            let mut srx = shutdown.lifecycle().shutdown_rx();
 
             let btx = btx.clone();
 
@@ -936,7 +933,7 @@ impl Service {
         ports.corrosion = Some(udp_server.local_addr().port());
 
         let finished = shutdown.push("corrosion_server");
-        let mut srx = shutdown.shutdown_rx();
+        let mut srx = shutdown.lifecycle().shutdown_rx();
 
         tokio::spawn(async move {
             drop(srx.changed().await);

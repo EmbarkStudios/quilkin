@@ -23,8 +23,8 @@ use quilkin::codec::qcmp::Protocol;
 #[tokio::test]
 #[cfg_attr(target_os = "macos", ignore)]
 async fn proxy_ping() {
-    let shutdown_handler = quilkin::signal::spawn_handler();
-    let stx = shutdown_handler.shutdown_tx();
+    let shutdown_handler = quilkin::signal::ShutdownHandler::new();
+    let stx = shutdown_handler.lifecycle().shutdown_tx();
 
     let providers = quilkin::Providers::default();
 
@@ -42,7 +42,7 @@ async fn proxy_ping() {
 
     ping(ports.qcmp.expect("didn't spawn QCMP")).await;
     stx.send(()).unwrap();
-    task.await.unwrap().1.unwrap();
+    task.await.unwrap().unwrap();
 }
 
 async fn ping(port: u16) {

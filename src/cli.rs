@@ -257,15 +257,15 @@ impl Cli {
         tracing::debug!(cli = ?self, "config parameters");
 
         let locality = self.locality.locality();
-        let shutdown_handler = crate::signal::spawn_handler();
-        let drive_token = crate::signal::cancellation_token(shutdown_handler.shutdown_rx());
+        let sh = crate::signal::ShutdownHandler::new();
+        quilkin_system::lifecycle::spawn_signal_handler(sh.lifecycle().shutdown_tx());
 
         let config = crate::Config::new_rc(
             self.service.id.clone(),
             self.locality.icao_code,
             &self.providers,
             &self.service,
-            drive_token.child_token(),
+            sh.lifecycle().shutdown_token(),
         );
         config.read_config(&self.config, locality.clone())?;
 
@@ -278,14 +278,14 @@ impl Cli {
             crate::components::admin::serve(
                 config.clone(),
                 ready.clone(),
-                shutdown_handler.shutdown_tx(),
+                sh.lifecycle_owned(),
                 self.admin.address,
             );
         }
 
         crate::alloc::spawn_heap_stats_updates(
             std::time::Duration::from_secs(10),
-            shutdown_handler.shutdown_rx(),
+            sh.lifecycle().shutdown_rx(),
         );
 
         // Just call this early so there isn't a potential race when spawning xDS
@@ -296,14 +296,11 @@ impl Cli {
             ready.clone(),
             locality.clone(),
             None,
-            shutdown_handler.shutdown_rx(),
+            sh.lifecycle().shutdown_rx(),
         );
 
-        let shutdown_tx = shutdown_handler.shutdown_tx();
-        let (mut service_task, _) = self
-            .service
-            .spawn_services(&config, shutdown_handler)
-            .await?;
+        let shutdown_tx = sh.lifecycle().shutdown_tx();
+        let (mut service_task, _) = self.service.spawn_services(&config, sh).await?;
 
         if provider_tasks.is_empty() {
             ready.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -330,7 +327,7 @@ impl Cli {
                 },
                 result = &mut service_task => {
                     return match result {
-                        Ok((_, result)) => {
+                        Ok(result) => {
                             result
                         }
                         Err(join_error) => {
