@@ -22,7 +22,7 @@ pub mod metrics {
         let lifecycle_metrics = get_lifecycle_metrics();
         registry.register(
             "shutdown_initiated",
-            "The application is shutting down",
+            "Whether the application has started shutting down",
             lifecycle_metrics.shutdown_initiated.clone(),
         );
     }
@@ -56,13 +56,12 @@ pub fn spawn_signal_handler(shutdown_tx: ShutdownTx) {
     });
 }
 
-#[derive(Clone)]
+/// `Lifecycle` represents the lifecycle of an application
+#[derive(Clone, Debug)]
 pub struct Lifecycle {
     tx: ShutdownTx,
     rx: ShutdownRx,
     token: tokio_util::sync::CancellationToken,
-    // services:
-    //     std::collections::BTreeMap<&'static str, tokio::sync::oneshot::Receiver<eyre::Result<()>>>,
 }
 
 impl Default for Lifecycle {
@@ -99,7 +98,7 @@ impl Lifecycle {
         self.rx.clone()
     }
 
-    /// Returns a `CancellationToken` that will be canceled when shutdown is triggered
+    /// Returns a `CancellationToken` that will be cancelled when shutdown is triggered
     ///
     /// Cancelling this token will not trigger a shutdown, use `shutdown_tx()` instead
     #[inline]

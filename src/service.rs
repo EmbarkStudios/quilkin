@@ -410,11 +410,11 @@ impl Service {
             (std::net::Ipv6Addr::UNSPECIFIED, self.phoenix_port),
             datacenters.clone(),
             phoenix,
-            shutdown.lifecycle(),
+            shutdown.lifecycle_owned(),
         )?;
 
         let finished = shutdown.push("phoenix");
-        let mut srx = shutdown.shutdown_rx();
+        let mut srx = shutdown.lifecycle().shutdown_rx();
         tokio::spawn(async move {
             let _ = srx.changed().await;
 
@@ -460,7 +460,7 @@ impl Service {
         let listener = crate::net::TcpListener::bind(Some(self.xds_port))?;
 
         let finished = shutdown.push("xds");
-        let srx = shutdown.shutdown_rx();
+        let srx = shutdown.lifecycle().shutdown_rx();
 
         let xds_server = crate::net::xds::server::ControlPlane::from_arc(
             config.clone(),
@@ -502,7 +502,7 @@ impl Service {
         let listener = crate::net::TcpListener::bind(Some(self.mds_port))?;
 
         let finished = shutdown.push("mds");
-        let srx = shutdown.shutdown_rx();
+        let srx = shutdown.lifecycle().shutdown_rx();
 
         let mds_server = crate::net::xds::server::ControlPlane::from_arc(
             config.clone(),
@@ -540,7 +540,7 @@ impl Service {
                         self.qcmp_enabled = false;
 
                         let finished = shutdown.push("xdp");
-                        let mut srx = shutdown.shutdown_rx();
+                        let mut srx = shutdown.lifecycle().shutdown_rx();
                         tokio::spawn(async move {
                             drop(srx.changed().await);
 
@@ -652,7 +652,7 @@ impl Service {
         crate::net::packet::spawn_receivers(config, socket, worker_sends, &sessions, buffer_pool)?;
 
         let finished = shutdown.push("udp");
-        let mut srx = shutdown.shutdown_rx();
+        let mut srx = shutdown.lifecycle().shutdown_rx();
         let testing = self.testing;
         let termination_timeout = self.termination_timeout;
 
@@ -789,7 +789,7 @@ impl Service {
             .zip(config.dyn_cfg.subscribe_filter_changes())
         {
             let finished = shutdown.push("corrosion_db_mutator");
-            let mut srx = shutdown.shutdown_rx();
+            let mut srx = shutdown.lifecycle().shutdown_rx();
 
             let btx = btx.clone();
 
@@ -867,7 +867,7 @@ impl Service {
         )?;
 
         let finished = shutdown.push("corrosion_server");
-        let mut srx = shutdown.shutdown_rx();
+        let mut srx = shutdown.lifecycle().shutdown_rx();
 
         tokio::spawn(async move {
             drop(srx.changed().await);

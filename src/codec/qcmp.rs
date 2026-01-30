@@ -384,7 +384,7 @@ pub fn spawn(
     shutdown: &mut crate::signal::ShutdownHandler,
 ) -> crate::Result<()> {
     let finished = shutdown.push("qcmp");
-    let shutdown_rx = shutdown.shutdown_rx();
+    let shutdown_rx = shutdown.lifecycle().shutdown_rx();
 
     let _qcmp_thread = std::thread::Builder::new()
         .name("qcmp".into())

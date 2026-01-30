@@ -38,6 +38,7 @@ pub const PORT_LABEL: &str = "8000";
 
 pub(crate) const IDLE_REQUEST_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Start an admin server
 pub fn serve(
     config: Arc<crate::Config>,
     ready: Arc<AtomicBool>,
@@ -68,7 +69,13 @@ pub fn serve(
                         "admin",
                         tokio_listener,
                         router,
+                        // We want to continue serving things like /metrics while we are shutting
+                        // down, but in tests we probably want the server to shut down once the
+                        // lifecycle has initiated shutdown.
+                        #[cfg(test)]
                         lifecycle.shutdown_future(),
+                        #[cfg(not(test))]
+                        std::future::pending(),
                     )
                     .await
                 })

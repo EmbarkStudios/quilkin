@@ -4,9 +4,9 @@ use quilkin::{
     Config,
     collections::{BufferPool, PoolBuffer},
     net::TcpListener,
-    signal::ShutdownTx,
     test::TestConfig,
 };
+use quilkin_system::lifecycle::ShutdownTx;
 pub use serde_json::json;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
@@ -192,8 +192,7 @@ pub struct SandboxConfig {
     pub pails: Vec<SandboxPailConfig>,
 }
 
-pub type JoinHandle =
-    tokio::task::JoinHandle<(quilkin::signal::ShutdownHandler, quilkin::Result<()>)>;
+pub type JoinHandle = tokio::task::JoinHandle<quilkin::Result<()>>;
 pub type JoinSet = tokio::task::JoinSet<quilkin::Result<()>>;
 
 pub struct ServerPail {
@@ -280,7 +279,7 @@ impl Pail {
             if let Some(task) = rp.task.take() {
                 let _ = rp.shutdown.send(());
                 let result = task.await.unwrap();
-                tracing::info!(result = ?result.1, "task finished");
+                tracing::info!(?result, "task finished");
             }
         } else {
             unimplemented!();
@@ -302,7 +301,7 @@ impl Pail {
                 .corrosion_port(0);
 
             let sh = quilkin::signal::ShutdownHandler::new();
-            rp.shutdown = sh.shutdown_tx();
+            rp.shutdown = sh.lifecycle().shutdown_tx();
 
             let task = svc.spawn_services(&rp.config, sh).await.unwrap();
             rp.task = Some(task);
@@ -384,7 +383,7 @@ impl Pail {
                     Default::default(),
                     &providers,
                     &svc,
-                    sh.shutdown_token(),
+                    sh.lifecycle().shutdown_token(),
                 );
 
                 *config.dyn_cfg.id.lock() = spc.name.into();
@@ -394,8 +393,9 @@ impl Pail {
                     healthy.clone(),
                     None,
                     None,
-                    sh.shutdown_rx(),
+                    sh.lifecycle().shutdown_rx(),
                 );
+                let shutdown_tx = sh.lifecycle().shutdown_tx();
                 let task = svc.spawn_services(&config, sh).await.unwrap();
 
                 Self::Relay(RelayPail {
@@ -404,7 +404,7 @@ impl Pail {
                     task: Some(task),
                     provider_task,
                     healthy,
-                    shutdown,
+                    shutdown: shutdown_tx,
                     config_file: Some(ConfigFile {
                         path: config_path,
                         config: tc,
@@ -467,7 +467,7 @@ impl Pail {
                     apc.icao_code,
                     &providers,
                     &svc,
-                    sh.shutdown_token(),
+                    sh.lifecycle().shutdown_token(),
                 );
 
                 *config.dyn_cfg.id.lock() = spc.name.into();
@@ -478,8 +478,9 @@ impl Pail {
                     healthy.clone(),
                     None,
                     None,
-                    sh.shutdown_rx(),
+                    sh.lifecycle().shutdown_rx(),
                 );
+                let shutdown_tx = sh.lifecycle().shutdown_tx();
                 let task = svc.spawn_services(&config, sh).await.unwrap();
 
                 Self::Agent(AgentPail {
@@ -487,7 +488,7 @@ impl Pail {
                     task: Some(task),
                     provider_task,
                     healthy,
-                    shutdown,
+                    shutdown: shutdown_tx,
                     config_file: Some(ConfigFile {
                         path: config_path,
                         config: tc,
@@ -539,7 +540,7 @@ impl Pail {
                     Default::default(),
                     &Default::default(),
                     &svc,
-                    sh.shutdown_token(),
+                    sh.lifecycle().shutdown_token(),
                 );
 
                 if let Some(cfg) = ppc.config {
@@ -584,15 +585,16 @@ impl Pail {
                     healthy.clone(),
                     None,
                     Some(rttx),
-                    sh.shutdown_rx(),
+                    sh.lifecycle().shutdown_rx(),
                 );
+                let shutdown_tx = sh.lifecycle().shutdown_tx();
                 let task = svc.spawn_services(&config, sh).await.unwrap();
 
                 Self::Proxy(ProxyPail {
                     port,
                     qcmp_port,
                     phoenix_port,
-                    shutdown,
+                    shutdown: shutdown_tx,
                     task: Some(task),
                     provider_task,
                     healthy,

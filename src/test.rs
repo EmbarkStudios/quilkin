@@ -28,8 +28,8 @@ use crate::{
     net::DualStackEpollSocket as DualStackLocalSocket,
     net::endpoint::metadata::Value,
     net::endpoint::{Endpoint, EndpointAddress},
-    signal::{ShutdownRx, ShutdownTx},
 };
+use quilkin_system::lifecycle::{ShutdownRx, ShutdownTx};
 
 static LOG_ONCE: Once = Once::new();
 
@@ -165,7 +165,7 @@ pub struct TestHelper {
     /// Channel to subscribe to, and trigger the shutdown of created resources.
     shutdown_ch: Option<(ShutdownTx, ShutdownRx)>,
     server_shutdown_tx: Vec<Option<ShutdownTx>>,
-    handle: Option<tokio::task::JoinHandle<(crate::signal::ShutdownHandler, crate::Result<()>)>>,
+    handle: Option<tokio::task::JoinHandle<crate::Result<()>>>,
 }
 
 /// Returned from [creating a socket](TestHelper::open_socket_and_recv_single_packet)
@@ -332,14 +332,15 @@ impl TestHelper {
         with_admin: Option<Option<SocketAddr>>,
     ) -> u16 {
         let shutdown = crate::signal::ShutdownHandler::new();
-        self.server_shutdown_tx.push(Some(shutdown.shutdown_tx()));
+        self.server_shutdown_tx
+            .push(Some(shutdown.lifecycle().shutdown_tx()));
         let ready = <_>::default();
 
         if let Some(address) = with_admin {
             crate::components::admin::serve(
                 config.clone(),
                 ready,
-                shutdown.lifecycle(),
+                shutdown.lifecycle_owned(),
                 address,
             );
         }
@@ -393,7 +394,7 @@ impl TestHelper {
         if let Some((_, rx)) = &self.shutdown_ch {
             rx.clone()
         } else {
-            let ch = crate::signal::channel();
+            let ch = tokio::sync::watch::channel(());
             let recv = ch.1.clone();
             self.shutdown_ch = Some(ch);
             recv

@@ -1025,11 +1025,11 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(target_os = "macos", ignore)]
     async fn http_server() {
-        let sh = crate::signal::ShutdownHandler::new();
+        let lifecycle = quilkin_system::lifecycle::Lifecycle::new();
         let socket = raw_socket_with_reuse(0).unwrap();
         let qcmp_port = socket.local_addr().unwrap().as_socket().unwrap().port();
         let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), sh.shutdown_rx()).unwrap();
+        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), lifecycle.shutdown_rx()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
@@ -1057,7 +1057,7 @@ mod tests {
             (std::net::Ipv6Addr::UNSPECIFIED, qcmp_port),
             datacenters,
             phoenix,
-            sh.lifecycle(),
+            lifecycle.clone(),
         )
         .unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1098,18 +1098,18 @@ mod tests {
             );
         }
 
-        let _ = sh.shutdown_tx().send(());
+        let _ = lifecycle.shutdown_tx().send(());
         end();
     }
 
     #[tokio::test]
     #[cfg_attr(target_os = "macos", ignore)]
     async fn get_network_coordinates() {
-        let sh = crate::signal::ShutdownHandler::new();
+        let lifecycle = quilkin_system::lifecycle::Lifecycle::new();
         let socket = raw_socket_with_reuse(0).unwrap();
         let qcmp_port = socket.local_addr().unwrap().as_socket().unwrap().port();
         let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), sh.shutdown_rx()).unwrap();
+        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), lifecycle.shutdown_rx()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
@@ -1137,7 +1137,7 @@ mod tests {
             (std::net::Ipv6Addr::UNSPECIFIED, qcmp_port),
             datacenters,
             phoenix,
-            sh.lifecycle(),
+            lifecycle.clone(),
         )
         .unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1169,7 +1169,7 @@ mod tests {
             assert!(map.contains_key(&icao_code));
         }
 
-        let _ = sh.shutdown_tx().send(());
+        let _ = lifecycle.shutdown_tx().send(());
         end();
     }
 }

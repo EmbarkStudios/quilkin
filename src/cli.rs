@@ -258,14 +258,14 @@ impl Cli {
 
         let locality = self.locality.locality();
         let sh = crate::signal::ShutdownHandler::new();
-        quilkin_system::lifecycle::spawn_signal_handler(sh.shutdown_tx());
+        quilkin_system::lifecycle::spawn_signal_handler(sh.lifecycle().shutdown_tx());
 
         let config = crate::Config::new_rc(
             self.service.id.clone(),
             self.locality.icao_code,
             &self.providers,
             &self.service,
-            sh.shutdown_token(),
+            sh.lifecycle().shutdown_token(),
         );
         config.read_config(&self.config, locality.clone())?;
 
@@ -275,12 +275,12 @@ impl Cli {
 
         let ready = Arc::<std::sync::atomic::AtomicBool>::default();
         if self.admin.enabled {
-            crate::components::admin::serve(config.clone(), ready.clone(), sh.lifecycle(), self.admin.address);
+            crate::components::admin::serve(config.clone(), ready.clone(), sh.lifecycle_owned(), self.admin.address);
         }
 
         crate::alloc::spawn_heap_stats_updates(
             std::time::Duration::from_secs(10),
-            sh.shutdown_rx(),
+            sh.lifecycle().shutdown_rx(),
         );
 
         // Just call this early so there isn't a potential race when spawning xDS
@@ -291,10 +291,10 @@ impl Cli {
             ready.clone(),
             locality.clone(),
             None,
-            sh.shutdown_rx(),
+            sh.lifecycle().shutdown_rx(),
         );
 
-        let shutdown_tx = sh.shutdown_tx();
+        let shutdown_tx = sh.lifecycle().shutdown_tx();
         let mut service_task = self
             .service
             .spawn_services(&config, sh)

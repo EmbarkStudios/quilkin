@@ -23,11 +23,11 @@ use std::sync::atomic::Ordering::Relaxed;
 #[derive(Clone)]
 pub struct Health {
     healthy: Arc<AtomicBool>,
-    shutdown_tx: crate::signal::ShutdownTx,
+    shutdown_tx: quilkin_system::lifecycle::ShutdownTx,
 }
 
 impl Health {
-    pub fn new(shutdown_tx: crate::signal::ShutdownTx) -> Self {
+    pub fn new(shutdown_tx: quilkin_system::lifecycle::ShutdownTx) -> Self {
         let health = Self {
             healthy: Arc::new(AtomicBool::new(true)),
             shutdown_tx,

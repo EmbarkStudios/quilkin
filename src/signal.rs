@@ -1,11 +1,3 @@
-/// Receiver for a shutdown event.
-pub type ShutdownRx = quilkin_system::lifecycle::ShutdownRx;
-pub type ShutdownTx = quilkin_system::lifecycle::ShutdownTx;
-
-pub fn channel() -> (ShutdownTx, ShutdownRx) {
-    tokio::sync::watch::channel(())
-}
-
 pub struct ShutdownHandler {
     lifecycle: quilkin_system::lifecycle::Lifecycle,
     services:
@@ -30,61 +22,18 @@ impl ShutdownHandler {
     }
 
     #[inline]
-    pub fn shutdown_rx(&self) -> ShutdownRx {
-        self.lifecycle.shutdown_rx()
+    pub fn lifecycle(&self) -> &quilkin_system::lifecycle::Lifecycle {
+        &self.lifecycle
     }
 
     #[inline]
-    pub fn shutdown_tx(&self) -> ShutdownTx {
-        self.lifecycle.shutdown_tx()
-    }
-
-    #[inline]
-    pub fn shutdown_token(&self) -> tokio_util::sync::CancellationToken {
-        self.lifecycle.shutdown_token()
-    }
-
-    #[inline]
-    pub fn shutdown_future(&self) -> impl Future<Output = ()> + use<> {
-        self.lifecycle.shutdown_future()
-    }
-
-    #[inline]
-    pub fn lifecycle(&self) -> quilkin_system::lifecycle::Lifecycle {
+    pub fn lifecycle_owned(&self) -> quilkin_system::lifecycle::Lifecycle {
         self.lifecycle.clone()
     }
 
-    // #[inline]
-    // pub async fn wait_signal(
-    //     mut self,
-    // ) -> (
-    //     ShutdownTx,
-    //     ShutdownRx,
-    //     Vec<(&'static str, eyre::Result<()>)>,
-    // ) {
-    //     let _ = self.rx.changed().await;
-    //     let mut results = Vec::with_capacity(self.services.len());
-    //     let (t, r) = self.await_all(&mut results).await;
-    //     (t, r, results)
-    // }
-    //
-    // #[inline]
-    // pub async fn shutdown(
-    //     self,
-    // ) -> (
-    //     ShutdownTx,
-    //     ShutdownRx,
-    //     Vec<(&'static str, eyre::Result<()>)>,
-    // ) {
-    //     let _ = self.tx.send(());
-    //     let mut results = Vec::with_capacity(self.services.len());
-    //     let (t, r) = self.await_all(&mut results).await;
-    //     (t, r, results)
-    // }
-
     pub async fn await_any_then_shutdown(mut self) -> Vec<(&'static str, eyre::Result<()>)> {
         let (which, res) = {
-            let mut rx = self.shutdown_rx();
+            let mut rx = self.lifecycle.shutdown_rx();
             let mut completions = std::pin::pin!(&mut self.services);
             let mut srx = std::pin::pin!(rx.changed());
             std::future::poll_fn(move |cx| {
@@ -110,7 +59,7 @@ impl ShutdownHandler {
         // If the future completed due to a task exiting, signal shutdown to ensure
         // all the other tasks know to exit
         if !which.is_empty() {
-            let _ = self.shutdown_tx().send(());
+            let _ = self.lifecycle.shutdown_tx().send(());
             results.push((which, res));
         }
 
