@@ -28,10 +28,30 @@ use crate::{
     net::DualStackEpollSocket as DualStackLocalSocket,
     net::endpoint::metadata::Value,
     net::endpoint::{Endpoint, EndpointAddress},
-    signal::{ShutdownRx, ShutdownTx},
 };
+use quilkin_system::lifecycle::{ShutdownRx, ShutdownTx};
 
 static LOG_ONCE: Once = Once::new();
+
+pub struct TestProxy {
+    pub num_workers: std::num::NonZeroUsize,
+    pub socket: Option<socket2::Socket>,
+    pub qcmp: socket2::Socket,
+    pub phoenix: crate::net::TcpListener,
+}
+
+impl Default for TestProxy {
+    fn default() -> Self {
+        Self {
+            num_workers: std::num::NonZeroUsize::new(1).unwrap(),
+            socket: Some(
+                crate::net::raw_socket_with_reuse(0).expect("failed to create UDP socket"),
+            ),
+            qcmp: crate::net::raw_socket_with_reuse(0).expect("failed to create QCMP"),
+            phoenix: crate::net::TcpListener::bind(None).expect("failed to crate phoenix listener"),
+        }
+    }
+}
 
 /// Call to safely enable logging calls with a given tracing env filter, e.g. "quilkin=debug"
 /// This can be very useful when attempting to debug unit and integration tests.
@@ -145,6 +165,7 @@ pub struct TestHelper {
     /// Channel to subscribe to, and trigger the shutdown of created resources.
     shutdown_ch: Option<(ShutdownTx, ShutdownRx)>,
     server_shutdown_tx: Vec<Option<ShutdownTx>>,
+    handle: Option<tokio::task::JoinHandle<crate::Result<()>>>,
 }
 
 /// Returned from [creating a socket](TestHelper::open_socket_and_recv_single_packet)
@@ -307,56 +328,64 @@ impl TestHelper {
     pub async fn run_server(
         &mut self,
         config: Arc<Config>,
-        server: Option<crate::components::proxy::Proxy>,
+        server: Option<TestProxy>,
         with_admin: Option<Option<SocketAddr>>,
     ) -> u16 {
-        let (shutdown_tx, shutdown_rx) = crate::signal::channel();
-        self.server_shutdown_tx.push(Some(shutdown_tx.clone()));
+        let shutdown = crate::signal::ShutdownHandler::new();
+        self.server_shutdown_tx
+            .push(Some(shutdown.lifecycle().shutdown_tx()));
         let ready = <_>::default();
 
         if let Some(address) = with_admin {
             crate::components::admin::serve(
                 config.clone(),
                 ready,
-                shutdown_tx.clone(),
-                shutdown_rx.clone(),
+                shutdown.lifecycle_owned(),
                 address,
             );
         }
 
-        let server = server.unwrap_or_else(|| {
+        let mut server = server.unwrap_or_else(|| {
             let qcmp = crate::net::raw_socket_with_reuse(0).unwrap();
             let phoenix = crate::net::TcpListener::bind(None).unwrap();
 
-            crate::components::proxy::Proxy {
+            TestProxy {
                 num_workers: std::num::NonZeroUsize::new(1).unwrap(),
                 socket: Some(crate::net::raw_socket_with_reuse(0).unwrap()),
                 qcmp,
                 phoenix,
-                ..Default::default()
             }
         });
 
-        let (prox_tx, prox_rx) = tokio::sync::oneshot::channel();
-        let shutdown = crate::signal::ShutdownHandler::new(shutdown_tx, shutdown_rx);
+        let udp_server = server.socket.take().unwrap();
+        let udp_port = crate::net::socket_port(&udp_server);
 
-        let port = crate::net::socket_port(server.socket.as_ref().unwrap());
+        let qcmp_port = crate::net::socket_port(&std::mem::replace(
+            &mut server.qcmp,
+            crate::net::raw_socket_with_reuse(0).unwrap(),
+        ));
+        let phoenix_port = std::mem::replace(
+            &mut server.phoenix,
+            crate::net::TcpListener::bind(None).unwrap(),
+        )
+        .port();
 
-        tokio::spawn(async move {
-            server
-                .run(
-                    crate::components::RunArgs {
-                        config,
-                        ready: Default::default(),
-                        shutdown,
-                    },
-                    Some(prox_tx),
-                )
-                .unwrap();
-        });
+        self.handle = Some(
+            crate::Service::default()
+                .udp()
+                .udp_port(udp_port)
+                .xdp(Default::default())
+                .qcmp()
+                .qcmp_port(qcmp_port)
+                .phoenix()
+                .phoenix_port(phoenix_port)
+                .termination_timeout(None)
+                .spawn_services(&config, shutdown)
+                .await
+                .expect("failed to spawn services"),
+        );
 
-        prox_rx.await.unwrap();
-        port
+        udp_port
     }
 
     /// Returns a receiver subscribed to the helper's shutdown event.
@@ -365,7 +394,7 @@ impl TestHelper {
         if let Some((_, rx)) = &self.shutdown_ch {
             rx.clone()
         } else {
-            let ch = crate::signal::channel();
+            let ch = tokio::sync::watch::channel(());
             let recv = ch.1.clone();
             self.shutdown_ch = Some(ch);
             recv

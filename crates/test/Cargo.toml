@@ -28,6 +28,7 @@ workspace = true
 etherparse = "0.19"
 once_cell.workspace = true
 quilkin.workspace = true
+quilkin-system.workspace = true
 quilkin-xds.workspace = true
 rand.workspace = true
 serde_json.workspace = true

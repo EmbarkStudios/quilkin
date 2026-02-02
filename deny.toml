@@ -34,13 +34,6 @@ deny = [
     { crate = "openssl", use-instead = "rustls" },
     { crate = "aws-lc-sys", use-instead = "ring" },
     { crate = "cmake", use-instead = "cc" },
-    { crate = "chrono", use-instead = "time", wrappers = [
-        "expect-json",
-        "k8s-openapi",
-        "kube-client",
-        "kube-core",
-        "kube-leader-election",
-    ] },
 ]
 multiple-versions = "deny"
 skip = [
@@ -50,10 +43,15 @@ skip = [
     { crate = "miniz_oxide@0.7.4", reason = "pprof_util carries two different versions transitively" },
     { crate = "prost@0.13.5", reason = "pprof_util has an outdated version" },
     { crate = "prost-derive@0.13.5", reason = "pprof_util has an outdated version" },
+    { crate = "indexmap@1.9.3", reason = "several users of old version in corrosion crates" },
+    { crate = "fallible-iterator@0.2.0", reason = "several users of old version in corrosion crates" },
+    { crate = "bitflags@1.3.2", reason = "corrosion again" },
 ]
 skip-tree = [
     { crate = "thiserror@1.0.69", reason = "many crates use this old version" },
     { crate = "hashbrown@0.15.5", reason = "many crates this old version" },
+    { crate = "hashbrown@0.12.3", reason = "many crates this old version" },
+    { crate = "rand@0.8.5", reason = "several users of old version in corrosion crates" },
 ]
 
 [[bans.features]]
@@ -82,5 +80,17 @@ exceptions = [
     # This license should not really be used for code, but here we are
     { crate = "notify", allow = ["CC0-1.0"] },
     { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
-    { crate = "ar_archive_writer", allow = ["Apache-2.0 WITH LLVM-exception"] }
+    { crate = "ar_archive_writer", allow = ["Apache-2.0 WITH LLVM-exception"] },
+    { crate = "foca", allow = ["MPL-2.0"] },
+    { crate = "enquote", allow = ["Unlicense"] },
 ]
+
+[[licenses.clarify]]
+crate = "webpki"
+expression = "ISC"
+license-files = [
+    { path = "LICENSE", hash = 0x001c7e6c },
+]
+
+[sources.allow-org]
+github = ["EmbarkStudios"]

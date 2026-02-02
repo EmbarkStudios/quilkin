@@ -56,7 +56,7 @@ impl crate::net::io::Listener {
         let socket =
             crate::net::DualStackLocalSocket::new(port).context("failed to bind socket")?;
 
-        let io_loop = IoUringLoop::new(2000, socket)?;
+        let io_loop = IoUringLoop::new(if cfg!(debug_assertions) { 1 } else { 2000 }, socket)?;
         io_loop
             .spawn_io_loop(
                 format!("packet-router-{worker_id}"),

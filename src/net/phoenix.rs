@@ -51,7 +51,7 @@ pub fn spawn(
     address: impl Into<SocketAddr>,
     datacenters: config::Watch<config::DatacenterMap>,
     phoenix: Phoenix<crate::codec::qcmp::QcmpTransceiver>,
-    mut shutdown_rx: crate::signal::ShutdownRx,
+    lifecycle: quilkin_system::lifecycle::Lifecycle,
 ) -> crate::Result<crate::service::Finalizer> {
     use eyre::WrapErr as _;
 
@@ -79,6 +79,7 @@ pub fn spawn(
             let res = runtime.block_on({
                 let mut phoenix_watcher = phoenix.update_watcher();
                 let datacenters = datacenters.clone();
+                let lifecycle = lifecycle;
 
                 async move {
                     let node_latencies_response =
@@ -120,8 +121,8 @@ pub fn spawn(
                     let handler_node_latencies = node_latencies_response.clone();
                     let handler_network_coordinates = network_coordinates_response.clone();
 
-                    let http_task_shutdown_rx = shutdown_rx.clone();
                     let http_task: tokio::task::JoinHandle<std::io::Result<()>> = {
+                        let shutdown_signal = lifecycle.shutdown_future();
                         tokio::spawn(async move {
                             let router =
                                 http_router(handler_network_coordinates, handler_node_latencies);
@@ -130,7 +131,7 @@ pub fn spawn(
                                 "phoenix",
                                 tokio_listener,
                                 router,
-                                crate::signal::await_shutdown(http_task_shutdown_rx),
+                                shutdown_signal,
                             )
                             .await
                         })
@@ -140,7 +141,7 @@ pub fn spawn(
                         use eyre::WrapErr as _;
 
                         tokio::select! {
-                            _ = shutdown_rx.changed() => break Ok::<_, eyre::Error>(()),
+                            _ = lifecycle.shutdown_future() => break Ok::<_, eyre::Error>(()),
                             result = dc_watcher.changed() => if let Err(err) = result {
                                 break Err(err).context("config watcher sender dropped");
                             },
@@ -1024,11 +1025,11 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(target_os = "macos", ignore)]
     async fn http_server() {
-        let (tx, rx) = crate::signal::channel();
+        let lifecycle = quilkin_system::lifecycle::Lifecycle::new();
         let socket = raw_socket_with_reuse(0).unwrap();
         let qcmp_port = socket.local_addr().unwrap().as_socket().unwrap().port();
         let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), lifecycle.shutdown_rx()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
@@ -1056,7 +1057,7 @@ mod tests {
             (std::net::Ipv6Addr::UNSPECIFIED, qcmp_port),
             datacenters,
             phoenix,
-            rx,
+            lifecycle.clone(),
         )
         .unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1097,18 +1098,18 @@ mod tests {
             );
         }
 
-        let _ = tx.send(());
+        let _ = lifecycle.shutdown_tx().send(());
         end();
     }
 
     #[tokio::test]
     #[cfg_attr(target_os = "macos", ignore)]
     async fn get_network_coordinates() {
-        let (tx, rx) = crate::signal::channel();
+        let lifecycle = quilkin_system::lifecycle::Lifecycle::new();
         let socket = raw_socket_with_reuse(0).unwrap();
         let qcmp_port = socket.local_addr().unwrap().as_socket().unwrap().port();
         let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), lifecycle.shutdown_rx()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
@@ -1136,7 +1137,7 @@ mod tests {
             (std::net::Ipv6Addr::UNSPECIFIED, qcmp_port),
             datacenters,
             phoenix,
-            rx,
+            lifecycle.clone(),
         )
         .unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1168,7 +1169,7 @@ mod tests {
             assert!(map.contains_key(&icao_code));
         }
 
-        let _ = tx.send(());
+        let _ = lifecycle.shutdown_tx().send(());
         end();
     }
 }

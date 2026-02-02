@@ -1,4 +1,5 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
+
 use prometheus_client::{
     encoding::EncodeLabelSet,
     metrics::{counter::Counter, family::Family, gauge::Gauge, histogram::Histogram},
@@ -34,7 +35,7 @@ struct HttpMetrics {
 }
 
 fn get_http_metrics() -> &'static HttpMetrics {
-    static HTTP_METRICS: Lazy<HttpMetrics> = Lazy::new(|| HttpMetrics {
+    static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(|| HttpMetrics {
         connections: <_>::default(),
         inflight_requests: <_>::default(),
         requests: <_>::default(),

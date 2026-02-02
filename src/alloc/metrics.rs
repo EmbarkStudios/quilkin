@@ -150,7 +150,7 @@ cfg_if::cfg_if! {
             }
         }
 
-        pub fn spawn_heap_stats_updates(_period: std::time::Duration, _srx: crate::signal::ShutdownRx) {
+        pub fn spawn_heap_stats_updates(_period: std::time::Duration, _srx: quilkin_system::lifecycle::ShutdownRx) {
             match JemallocCollector::new() {
                 Ok(collector) => {
                     crate::metrics::with_mut_registry(|mut registry| {
@@ -162,7 +162,7 @@ cfg_if::cfg_if! {
         }
     } else if #[cfg(feature = "heap-stats")] {
         /// Spawns a task to periodically update the heap stat metrics from our tracking allocator
-        pub fn spawn_heap_stats_updates(period: std::time::Duration, mut srx: crate::signal::ShutdownRx) {
+        pub fn spawn_heap_stats_updates(period: std::time::Duration, mut srx: quilkin_system::lifecycle::ShutdownRx) {
             use crate::metrics::registry;
             use once_cell::sync::Lazy;
             use prometheus::{IntCounterVec, IntGaugeVec};

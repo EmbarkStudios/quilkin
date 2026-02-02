@@ -4,21 +4,37 @@ use corro_types::{
     schema::Schema,
     sqlite::CrConn,
 };
+use eyre::WrapErr as _;
 use std::sync::Arc;
 
 pub mod read;
 pub mod write;
 
 pub struct InitializedDb {
+    /// Pool used to interact with the DB
     pub pool: SplitPool,
+    /// The CRSQL clock
     pub clock: Arc<uhlc::HLC>,
+    /// The parsed and verified schema
     pub schema: Arc<Schema>,
+    /// The unique actor ID for this database connection, distinguishing it from
+    /// other actors that gossip DB changes
     pub actor_id: ActorId,
 }
 
 impl InitializedDb {
+    /// Attempts to initialize a CRSQL database with the specified schema, creating
+    /// it if it doesn't exist
     pub async fn setup(db_path: &crate::Path, schema: &str) -> eyre::Result<Self> {
         let partial_schema = corro_types::schema::parse_sql(schema)?;
+
+        // We need to create the intermediate directories for the DB path, otherwise
+        // rusqlite::Connection::open will fail if not all of them are there
+        if let Some(dir) = db_path.parent()
+            && !dir.exists()
+        {
+            std::fs::create_dir_all(dir).context("failed to create DB directory")?;
+        }
 
         let actor_id = {
             // we need to set auto_vacuum before any tables are created
@@ -64,7 +80,8 @@ impl InitializedDb {
     }
 }
 
-pub fn update_schema(
+/// We currently only support updating the schema at startup
+fn update_schema(
     conn: &mut WriteConn,
     old_schema: Schema,
     new_schema: Schema,
@@ -94,4 +111,62 @@ pub fn update_schema(
 
     tx.commit()?;
     Ok(new_schema)
+}
+
+use std::time::Duration;
+
+/// Spawns an async task that periodically prints out locks that have surpassed
+/// the desired limits
+#[inline]
+pub fn spawn_lock_contention_printer(
+    registry: crate::types::agent::LockRegistry,
+    warn_threshold: Duration,
+    error_threshold: Duration,
+    check_interval: Duration,
+) -> tokio::task::JoinHandle<()> {
+    assert!(error_threshold > warn_threshold);
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(check_interval);
+
+        let mut top = indexmap::IndexMap::<usize, corro_types::agent::LockMeta>::default();
+        loop {
+            interval.tick().await;
+
+            top.extend(
+                registry
+                    .map
+                    .read()
+                    .iter()
+                    .filter(|(_, meta)| meta.started_at.elapsed() >= warn_threshold)
+                    .take(10) // this is an ordered map, so taking the first few is gonna be the highest values
+                    .map(|(k, v)| (*k, v.clone())),
+            );
+
+            if top.is_empty() {
+                continue;
+            }
+
+            tracing::warn!(
+                held_locks = top.len(),
+                "lock registry shows locks held for a long time!"
+            );
+
+            for (id, lock) in top.drain(..) {
+                let duration = lock.started_at.elapsed();
+
+                if matches!(lock.state, corro_types::agent::LockState::Locked)
+                    && duration >= error_threshold
+                {
+                    tracing::error!(
+                        label = lock.label, id, kind = ?lock.kind, state = ?lock.state, ?duration, "lock exceeded error threshold"
+                    );
+                } else {
+                    tracing::warn!(
+                        label = lock.label, id, kind = ?lock.kind, state = ?lock.state, ?duration, "lock exceeded warning threshold"
+                    );
+                }
+            }
+        }
+    })
 }
