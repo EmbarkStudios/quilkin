@@ -28,6 +28,7 @@ rand.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+spiffe-rustls.workspace = true
 thiserror.workspace = true
 tokio-stream.workspace = true
 tokio.workspace = true
