@@ -4398,6 +4398,10 @@ dependencies = [
  "futures",
  "h2",
  "http",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
  "once_cell",
  "parking_lot",
  "prometheus",
@@ -4405,6 +4409,7 @@ dependencies = [
  "prost-types",
  "quilkin-proto",
  "rand 0.9.2",
+ "rustls",
  "schemars",
  "serde",
  "serde_json",
@@ -4413,6 +4418,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
+ "tonic-rustls",
  "tower",
  "tracing",
  "tracing-futures",
@@ -5429,14 +5435,14 @@ dependencies = [
 
 [[package]]
 name = "spiffe"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c56be390b25aefd5d63a5a9f8d814679c3cbe1542d5a4a020f3957d03f35553a"
+version = "0.12.0"
 dependencies = [
  "arc-swap",
  "base64ct",
  "fastrand",
+ "futures",
  "hyper-util",
+ "log",
  "pkcs8",
  "prost 0.14.3",
  "prost-types",
@@ -5445,11 +5451,11 @@ dependencies = [
  "thiserror 2.0.17",
  "time",
  "tokio",
- "tokio-stream",
  "tokio-util",
  "tonic",
  "tonic-prost",
  "tower",
+ "tracing",
  "url",
  "x509-parser",
  "zeroize",
@@ -5457,9 +5463,7 @@ dependencies = [
 
 [[package]]
 name = "spiffe-rustls"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3e810a2d1ee49ed10ac8cfe2c091acb546925664f3df5b869e07590b48b2d4d"
+version = "0.4.8"
 dependencies = [
  "oid-registry",
  "rustls",
@@ -6041,6 +6045,33 @@ dependencies = [
  "bytes",
  "prost 0.14.3",
  "tonic",
+]
+
+[[package]]
+name = "tonic-rustls"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b2874b26095e47313b6126f9e8144580a916af2151f778a4fec01a0120fed85"
+dependencies = [
+ "async-stream",
+ "bytes",
+ "h2",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-timeout",
+ "hyper-util",
+ "pin-project",
+ "socket2 0.5.10",
+ "tokio",
+ "tokio-rustls",
+ "tokio-stream",
+ "tonic",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "tracing",
 ]
 
 [[package]]

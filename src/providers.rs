@@ -584,23 +584,29 @@ impl Providers {
         health_check: Arc<AtomicBool>,
         locality: Option<crate::net::endpoint::Locality>,
         shutdown: tokio::sync::watch::Receiver<()>,
+        client_config: rustls::ClientConfig,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let config = config.clone();
         let endpoints = self.relay.clone();
         let control_plane_id = locality.map_or_else(|| config.id(), |l| l.region().to_string());
+        let client_connector = crate::net::xds::client::xds_client_connector(client_config);
         Self::task("mds_provider".into(), health_check.clone(), move || {
             let config = config.clone();
             let endpoints = endpoints.clone();
             let control_plane_id = control_plane_id.clone();
             let health_check = health_check.clone();
             let shutdown = shutdown.clone();
+            let client_connector = client_connector.clone();
             async move {
-                let stream =
-                    crate::net::xds::client::MdsClient::connect(control_plane_id, endpoints)
-                        .await?
-                        .delta_stream(config.clone(), health_check.clone(), shutdown)
-                        .await
-                        .map_err(|_err| eyre::eyre!("failed to acquire delta stream"))?;
+                let stream = crate::net::xds::client::MdsClient::connect(
+                    control_plane_id,
+                    endpoints,
+                    client_connector,
+                )
+                .await?
+                .delta_stream(config.clone(), health_check.clone(), shutdown)
+                .await
+                .map_err(|_err| eyre::eyre!("failed to acquire delta stream"))?;
 
                 health_check.store(true, Ordering::SeqCst);
 
@@ -614,21 +620,25 @@ impl Providers {
         config: Arc<config::Config>,
         health_check: Arc<AtomicBool>,
         notifier: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+        client_config: rustls::ClientConfig,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let config = config.clone();
         let endpoints = self.xds_endpoints.clone();
+        let client_connector = crate::net::xds::client::xds_client_connector(client_config);
 
         Self::task("xds_provider".into(), health_check.clone(), move || {
             let config = config.clone();
             let endpoints = endpoints.clone();
             let health_check = health_check.clone();
             let tx = notifier.clone();
+            let client_connector = client_connector.clone();
             async move {
                 let identifier = config.id();
                 let stream = crate::net::xds::delta_subscribe(
                     config,
                     identifier,
                     endpoints,
+                    client_connector,
                     health_check.clone(),
                     tx,
                     Self::SUBS,
@@ -701,8 +711,11 @@ impl Providers {
         locality: Option<crate::net::endpoint::Locality>,
         notifier: Option<tokio::sync::mpsc::UnboundedSender<String>>,
         shutdown: tokio::sync::watch::Receiver<()>,
+        client_config: rustls::ClientConfig,
     ) -> tokio::task::JoinSet<crate::Result<()>> {
         let mut providers = tokio::task::JoinSet::new();
+
+        tracing::info!(?client_config, "client config");
 
         if !self.any_provider_enabled() {
             tracing::info!("no configuration providers specified");
@@ -737,6 +750,7 @@ impl Providers {
                 health_check.clone(),
                 locality.clone(),
                 shutdown.clone(),
+                client_config.clone(),
             ));
         }
 
@@ -755,6 +769,7 @@ impl Providers {
                 config.clone(),
                 health_check.clone(),
                 notifier,
+                client_config,
             ));
         }
 
@@ -798,6 +813,7 @@ impl Providers {
             "bug: no provider tasks running when {:?} was specified",
             providers
         );
+        tracing::info!("returning from spawn_providers");
 
         providers
     }

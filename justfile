@@ -57,9 +57,21 @@ _check_agent_config:
 help:
     @echo -n "{{ _helptext }}"
 
+export SPIFFE_ENDPOINT_SOCKET := "unix:///tmp/spire.sock"
+
 # Start a quilkin relay
 start_relay:
     cargo run -- \
+        --admin.address=127.0.0.1:1800{{ id }} \
+        --service.id=relay-{{ id }} \
+        --service.qcmp --service.qcmp.port=1760{{ id }} \
+        --service.xds --service.xds.port=1780{{ id }} \
+        --service.mds --service.mds.port=1790{{ id }}
+
+start_relay_spiffe:
+    cargo run -- \
+        --spiffe.enabled \
+        --spiffe.server.trust-domain-policy.allowlist "spiffe://example.com" \
         --admin.address=127.0.0.1:1800{{ id }} \
         --service.id=relay-{{ id }} \
         --service.qcmp --service.qcmp.port=1760{{ id }} \
@@ -85,6 +97,16 @@ start_proxy relay_id="0":
         --service.udp \
         --provider.xds.endpoints=http://127.0.0.1:1780{{ relay_id }}
 
+start_proxy_spiffe relay_id="0":
+    cargo run -- \
+        --spiffe.enabled \
+        --admin.address=127.0.0.1:2800{{ id }} \
+        --service.id=proxy-{{ id }} \
+        --service.qcmp --service.qcmp.port=2760{{ id }} \
+        --service.phoenix --service.phoenix.port=2760{{ id }} \
+        --service.udp \
+        --provider.xds.endpoints=https://127.0.0.1:1780{{ relay_id }}
+
 start_proxy_corrosion relay_id="0":
     cargo run -- \
         --admin.address=127.0.0.1:2800{{ id }} \
@@ -105,6 +127,18 @@ start_agent relay_id="0": _check_agent_config
         --locality.region={{ region }} \
         --service.qcmp --service.qcmp.port=3760{{ id }} \
         --provider.mds.endpoints=http://localhost:1790{{ relay_id }}
+
+start_agent_spiffe relay_id="0": _check_agent_config
+    cargo run -- \
+        --spiffe.enabled \
+        --spiffe.server.trust-domain-policy.allowlist "spiffe://example.com" \
+        --admin.address 127.0.0.1:3800{{ id }} \
+        --service.id=agent-{{ id }} \
+        --config={{ _agent_config_path }} \
+        --locality.icao={{ icao }} \
+        --locality.region={{ region }} \
+        --service.qcmp --service.qcmp.port=3760{{ id }} \
+        --provider.mds.endpoints=https://localhost:1790{{ relay_id }}
 
 start_agent_corrosion relay_id="0":
     cargo run -- \

@@ -23,7 +23,7 @@ use std::{
 use eyre::ContextCompat;
 use futures::StreamExt;
 use rand::Rng;
-use tonic::transport::{Endpoint, channel::Channel as TonicChannel};
+use tonic::transport::Endpoint;
 use tracing::Instrument;
 use tryhard::{
     RetryFutureConfig, RetryPolicy,
@@ -41,8 +41,13 @@ use crate::{
     metrics::{KIND_CLIENT, KIND_SERVER},
 };
 
-type AdsGrpcClient = AggregatedDiscoveryServiceClient<TonicChannel>;
-type MdsGrpcClient = AggregatedControlPlaneDiscoveryServiceClient<TonicChannel>;
+type XdsClientConnector = hyper_util::client::legacy::Client<
+    hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+    tonic::body::Body,
+>;
+
+type AdsGrpcClient = AggregatedDiscoveryServiceClient<XdsClientConnector>;
+type MdsGrpcClient = AggregatedControlPlaneDiscoveryServiceClient<XdsClientConnector>;
 
 pub type AdsClient = Client<AdsGrpcClient>;
 pub type MdsClient = Client<MdsGrpcClient>;
@@ -67,6 +72,33 @@ impl HealthState for Arc<AtomicBool> {
     }
 }
 
+pub fn xds_client_connector(client_config: rustls::ClientConfig) -> XdsClientConnector {
+    let mut http = hyper_util::client::legacy::connect::HttpConnector::new();
+    http.enforce_http(false);
+    http.set_nodelay(true);
+    http.set_keepalive(Some(crate::HTTP2_KEEPALIVE_INTERVAL));
+    http.set_connect_timeout(Some(crate::HTTP2_KEEPALIVE_TIMEOUT));
+    let connector = tower::ServiceBuilder::new()
+        .layer_fn(move |s| {
+            let client_config = client_config.clone();
+
+            // From hyper_rustls docs:
+            // > The alpn_protocols field is required to be empty (or the function will panic) and
+            // > will be rewritten to match the enabled schemes (see enable_http1, enable_http2)
+            // > before the connector is built.
+            hyper_rustls::HttpsConnectorBuilder::new()
+                .with_tls_config(client_config)
+                .https_or_http()
+                .enable_http2()
+                .wrap_connector(s)
+        })
+        .service(http);
+    hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .http2_only(true)
+        // TODO options ???
+        .build(connector)
+}
+
 #[tonic::async_trait]
 pub trait ServiceClient: Clone + Sized + Send + 'static {
     type Request: Clone + Send + Sync + Sized + 'static + std::fmt::Debug;
@@ -74,6 +106,7 @@ pub trait ServiceClient: Clone + Sized + Send + 'static {
 
     async fn connect_to_endpoint(
         endpoint: tonic::transport::Endpoint,
+        client_connector: XdsClientConnector,
     ) -> Result<Self, tonic::transport::Error>;
     async fn stream_requests<S: tonic::IntoStreamingRequest<Message = Self::Request> + Send>(
         &mut self,
@@ -88,15 +121,14 @@ impl ServiceClient for AdsGrpcClient {
 
     async fn connect_to_endpoint(
         endpoint: tonic::transport::Endpoint,
+        client_connector: XdsClientConnector,
     ) -> Result<Self, tonic::transport::Error> {
-        Ok(AdsGrpcClient::connect(
-            endpoint
-                .tcp_keepalive(Some(crate::HTTP2_KEEPALIVE_INTERVAL))
-                .timeout(crate::HTTP2_KEEPALIVE_TIMEOUT),
+        let uri = endpoint.uri().clone();
+        Ok(
+            AggregatedDiscoveryServiceClient::with_origin(client_connector, uri)
+                .max_decoding_message_size(crate::config::max_grpc_message_size())
+                .max_encoding_message_size(crate::config::max_grpc_message_size()),
         )
-        .await?
-        .max_decoding_message_size(crate::config::max_grpc_message_size())
-        .max_encoding_message_size(crate::config::max_grpc_message_size()))
     }
 
     async fn stream_requests<S: tonic::IntoStreamingRequest<Message = Self::Request> + Send>(
@@ -114,15 +146,14 @@ impl ServiceClient for MdsGrpcClient {
 
     async fn connect_to_endpoint(
         endpoint: tonic::transport::Endpoint,
+        client_connector: XdsClientConnector,
     ) -> Result<Self, tonic::transport::Error> {
-        Ok(MdsGrpcClient::connect(
-            endpoint
-                .tcp_keepalive(Some(crate::HTTP2_KEEPALIVE_INTERVAL))
-                .timeout(crate::HTTP2_KEEPALIVE_TIMEOUT),
+        let uri = endpoint.uri().clone();
+        Ok(
+            AggregatedControlPlaneDiscoveryServiceClient::with_origin(client_connector, uri)
+                .max_decoding_message_size(crate::config::max_grpc_message_size())
+                .max_encoding_message_size(crate::config::max_grpc_message_size()),
         )
-        .await?
-        .max_decoding_message_size(crate::config::max_grpc_message_size())
-        .max_encoding_message_size(crate::config::max_grpc_message_size()))
     }
 
     async fn stream_requests<S: tonic::IntoStreamingRequest<Message = Self::Request> + Send>(
@@ -137,13 +168,18 @@ impl ServiceClient for MdsGrpcClient {
 #[derive(Clone)]
 pub struct Client<C: ServiceClient> {
     client: C,
+    client_connector: XdsClientConnector,
     identifier: Arc<str>,
     management_servers: Vec<Endpoint>,
 }
 
 impl<C: ServiceClient> Client<C> {
     #[tracing::instrument(skip_all, level = "trace", fields(servers = ?management_servers))]
-    pub async fn connect(identifier: String, management_servers: Vec<Endpoint>) -> Result<Self> {
+    pub async fn connect(
+        identifier: String,
+        management_servers: Vec<Endpoint>,
+        client_connector: XdsClientConnector,
+    ) -> Result<Self> {
         eyre::ensure!(
             !management_servers.is_empty(),
             "at least one endpoint must be specified"
@@ -155,15 +191,20 @@ impl<C: ServiceClient> Client<C> {
             eyre::ensure!(uri.host().is_some(), "endpoint {uri} has no host");
         }
 
-        let (client, _connected_endpoint) = Self::connect_with_backoff(&management_servers).await?;
+        let (client, _connected_endpoint) =
+            Self::connect_with_backoff(&management_servers, &client_connector).await?;
         Ok(Self {
             client,
+            client_connector,
             identifier: Arc::from(identifier),
             management_servers,
         })
     }
 
-    async fn connect_with_backoff(management_servers: &[Endpoint]) -> Result<(C, Endpoint)> {
+    async fn connect_with_backoff(
+        management_servers: &[Endpoint],
+        client_connector: &XdsClientConnector,
+    ) -> Result<(C, Endpoint)> {
         use crate::config::{
             BACKOFF_INITIAL_DELAY, BACKOFF_MAX_DELAY, BACKOFF_MAX_JITTER, CONNECTION_TIMEOUT,
         };
@@ -196,9 +237,10 @@ impl<C: ServiceClient> Client<C> {
             );
             for ms in management_servers {
                 let endpoint = ms.clone();
+                let client_connector = client_connector.clone();
 
                 js.spawn(async move {
-                    let res = C::connect_to_endpoint(endpoint.clone())
+                    let res = C::connect_to_endpoint(endpoint.clone(), client_connector)
                         .instrument(tracing::debug_span!(
                             "AggregatedDiscoveryServiceClient::connect_to_endpoint"
                         ))
@@ -364,7 +406,7 @@ impl MdsClient {
                             return Ok(());
                         }
 
-                        match MdsClient::connect_with_backoff(&self.management_servers)
+                        match MdsClient::connect_with_backoff(&self.management_servers, &self.client_connector)
                            .await {
                             Ok((client, _)) => {
                                 match DeltaServerStream::connect(client, identifier.clone()).await {
@@ -404,9 +446,10 @@ impl DeltaClientStream {
     async fn connect(
         endpoints: &[Endpoint],
         identifier: String,
+        client_connector: &XdsClientConnector,
     ) -> Result<(Self, tonic::Streaming<DeltaDiscoveryResponse>, Endpoint)> {
         crate::metrics::actions_total(KIND_CLIENT, "connect").inc();
-        if let Ok((mut client, ep)) = MdsClient::connect_with_backoff(endpoints).await {
+        if let Ok((mut client, ep)) = MdsClient::connect_with_backoff(endpoints, client_connector).await {
             let (dcs, requests_rx) = Self::new();
 
             // Since we are doing exploratory requests to see if the remote endpoint supports delta streams, we unfortunately
@@ -433,7 +476,7 @@ impl DeltaClientStream {
             }
         }
 
-        let (mut client, ep) = AdsClient::connect_with_backoff(endpoints).await?;
+        let (mut client, ep) = AdsClient::connect_with_backoff(endpoints, client_connector).await?;
 
         let (dcs, requests_rx) = Self::new();
 
@@ -532,6 +575,7 @@ impl DeltaServerStream {
             })
             .await?;
 
+        tracing::debug!("STARTING STREAM");
         let stream = client
             .delta_aggregated_resources(tokio_stream::wrappers::ReceiverStream::new(responses_rx))
             .in_current_span()
@@ -556,12 +600,13 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
     config: Arc<C>,
     identifier: String,
     endpoints: Vec<Endpoint>,
+    client_connector: XdsClientConnector,
     health: impl HealthState + Send + 'static,
     notifier: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     resources: &'static [(&'static str, &'static [(&'static str, Vec<String>)])],
 ) -> eyre::Result<tokio::task::JoinHandle<Result<()>>> {
     let (mut client, mut response_stream, mut connected_endpoint) =
-        DeltaClientStream::connect(&endpoints, identifier.clone())
+        DeltaClientStream::connect(&endpoints, identifier.clone(), &client_connector)
             .await
             .inspect_err(|error| {
                 crate::metrics::errors_total(KIND_CLIENT, "connect").inc();
@@ -714,7 +759,9 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
 
                 loop {
                     tracing::info!(%control_plane, "Lost connection to xDS, retrying");
-                    match DeltaClientStream::connect(&endpoints, identifier.clone()).await {
+                    match DeltaClientStream::connect(&endpoints, identifier.clone(), &client_connector)
+                        .await
+                    {
                         Ok(res) => {
                             (client, response_stream, connected_endpoint) = res;
                         }

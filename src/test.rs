@@ -325,7 +325,7 @@ impl TestHelper {
             .qcmp_port(0)
             .phoenix()
             .phoenix_port(0)
-            .spawn_services(&config, shutdown)
+            .spawn_services(&config, shutdown, None)
             .await
             .expect("failed to spawn services");
 
