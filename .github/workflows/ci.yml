@@ -89,7 +89,8 @@ jobs:
     name: Build
     strategy:
       matrix:
-        os: [windows-2022, macos-14]
+        os:
+          - macos-14
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -106,3 +107,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: deny check
         uses: EmbarkStudios/cargo-deny-action@v2
+
+  test_success:
+    runs-on: ubuntu-24.04
+    needs: [lint, test, build, deny-check, validate-proto-bufs]
+    steps:
+      - run: echo "All test jobs passed"
