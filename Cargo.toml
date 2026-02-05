@@ -194,7 +194,7 @@ async-stream = "0.3.6"
 async-trait = "0.1.89"
 axum = { version = "0.8.8", features = ["macros"] }
 base64 = "0.22.1"
-bytes = { version = "1.11.0", features = ["serde"] }
+bytes = { version = "1.11.1", features = ["serde"] }
 compact_str = "0.7"
 corrosion = { path = "crates/corrosion" }
 eyre = "0.6.12"
