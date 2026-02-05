@@ -315,13 +315,7 @@ impl TestHelper {
         let ready = <_>::default();
 
         if let Some(address) = with_admin {
-            crate::components::admin::serve(
-                config.clone(),
-                ready,
-                shutdown_tx.clone(),
-                shutdown_rx.clone(),
-                address,
-            );
+            crate::components::admin::serve(config.clone(), ready, shutdown_tx.clone(), address);
         }
 
         let server = server.unwrap_or_else(|| {

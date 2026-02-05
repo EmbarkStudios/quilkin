@@ -42,7 +42,6 @@ pub fn serve(
     config: Arc<crate::Config>,
     ready: Arc<AtomicBool>,
     shutdown_tx: crate::signal::ShutdownTx,
-    shutdown_rx: crate::signal::ShutdownRx,
     address: Option<std::net::SocketAddr>,
 ) -> std::thread::JoinHandle<()> {
     let address = address.unwrap_or_else(|| (std::net::Ipv6Addr::UNSPECIFIED, PORT).into());
@@ -69,7 +68,7 @@ pub fn serve(
                         "admin",
                         tokio_listener,
                         router,
-                        crate::signal::await_shutdown(shutdown_rx),
+                        std::future::pending(),
                     )
                     .await
                 })

@@ -279,7 +279,6 @@ impl Cli {
                 config.clone(),
                 ready.clone(),
                 shutdown_handler.shutdown_tx(),
-                shutdown_handler.shutdown_rx(),
                 self.admin.address,
             );
         }
