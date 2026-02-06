@@ -640,6 +640,21 @@ pub(crate) fn provider_task_failures_total(provider_task: &str) -> IntCounter {
     PROVIDER_TASK_FAILURES_TOTAL.with_label_values(&[provider_task])
 }
 
+pub(crate) fn allocated_xdp_packets() -> &'static IntGauge {
+    static ALLOCATED: Lazy<IntGauge> = Lazy::new(|| {
+        prometheus::register_int_gauge_with_registry! {
+            prometheus::opts! {
+                "quilkin_allocated_xdp_packets",
+                "The number of packets that are allocated from a UMEM",
+            },
+            registry(),
+        }
+        .unwrap()
+    });
+
+    &ALLOCATED
+}
+
 /// Create a generic metrics options.
 /// Use `filter_opts` instead if the intended target is a filter.
 pub fn opts(name: &str, subsystem: &str, description: &str) -> Opts {

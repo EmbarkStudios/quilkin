@@ -429,6 +429,9 @@ fn io_loop(
     let mut rx_slab = xdp::slab::StackSlab::<BATCH_SIZE>::new();
     let mut tx_slab = xdp::slab::StackSlab::<{ BATCH_SIZE << 2 }>::new();
     let mut pending_sends = 0;
+    let mut outstanding = umem.outstanding() as i64;
+
+    crate::metrics::allocated_xdp_packets().add(outstanding);
 
     // SAFETY: the cases of unsafe in this code block all concern the relationship
     // between frames and the Umem, the frames cannot outlive the Umem which is
@@ -492,6 +495,10 @@ fn io_loop(
             // Return frames that have completed sending
             pending_sends += enqueued_sends;
             pending_sends -= completion.dequeue(&mut umem, pending_sends);
+
+            let new = umem.outstanding() as i64;
+            crate::metrics::allocated_xdp_packets().add(new - outstanding);
+            outstanding = new;
         }
     }
 }
