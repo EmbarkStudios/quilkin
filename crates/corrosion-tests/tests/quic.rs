@@ -9,7 +9,7 @@ use corrosion::{
     Peer, db,
     persistent::{
         ErrorCode, client,
-        executor::BroadcastingTransactor,
+        mutator::BroadcastingTransactor,
         proto::{ExecResponse, ExecResult, v1 as p},
         server,
     },
@@ -67,7 +67,7 @@ impl InstaPrinter {
 }
 
 #[async_trait::async_trait]
-impl server::Mutator for InstaPrinter {
+impl server::DbMutator for InstaPrinter {
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
         let mut dc = smallvec::SmallVec::<[_; 1]>::new();
         {
@@ -164,15 +164,28 @@ async fn test_quic_stream() {
         ctx: db.pubsub_ctx(),
     };
 
-    let server =
-        server::Server::new_unencrypted((std::net::Ipv6Addr::LOCALHOST, 0).into(), ip.clone(), ss)
-            .unwrap();
+    static SERVER_REG: std::sync::OnceLock<prometheus::Registry> = std::sync::OnceLock::new();
+    let sreg = SERVER_REG.get_or_init(prometheus::Registry::new);
+
+    let server = server::Server::new_unencrypted(
+        (std::net::Ipv6Addr::LOCALHOST, 0).into(),
+        ip.clone(),
+        ss,
+        corrosion::persistent::Metrics::new(sreg),
+    )
+    .unwrap();
 
     let icao = IcaoCode::new_testing([b'Y'; 4]);
 
-    let client = client::Client::connect_insecure(server.local_addr())
-        .await
-        .unwrap();
+    static CLIENT_REG: std::sync::OnceLock<prometheus::Registry> = std::sync::OnceLock::new();
+    let creg = CLIENT_REG.get_or_init(prometheus::Registry::new);
+
+    let client = client::Client::connect_insecure(
+        server.local_addr(),
+        corrosion::persistent::Metrics::new(creg),
+    )
+    .await
+    .unwrap();
 
     let mutator = client::MutationClient::connect(client.clone(), 2001, icao)
         .await
@@ -237,7 +250,7 @@ async fn test_quic_stream() {
     };
 
     let mut process_sub = async || -> bool {
-        let change = tokio::time::timeout(Duration::from_millis(10000), srx.recv())
+        let changes = tokio::time::timeout(Duration::from_millis(10000), srx.recv())
             .await
             .expect("timed out waiting for server change")
             .expect("expected change");
@@ -247,27 +260,30 @@ async fn test_quic_stream() {
             db::read::{self, FromSqlValue},
         };
 
-        let (cty, row) = match change {
-            tqe::Change(cty, _, row, _) => (cty, row),
-            tqe::Row(_, row) => (ChangeType::Insert, row),
-            _ => return false,
-        };
+        for change in changes {
+            let change = change.unwrap();
+            let (cty, row) = match change {
+                tqe::Change(cty, _, row, _) => (cty, row),
+                tqe::Row(_, row) => (ChangeType::Insert, row),
+                _ => return false,
+            };
 
-        let row = read::ServerRow::from_sql(&row).expect("failed to deserialize row");
+            let row = read::ServerRow::from_sql(&row).expect("failed to deserialize row");
 
-        match cty {
-            ChangeType::Insert => {
-                actual.insert(row.endpoint, (row.icao, row.tokens));
-            }
-            ChangeType::Update => {
-                let r = actual
-                    .get_mut(&row.endpoint)
-                    .expect("expected endpoint not found");
-                r.0 = row.icao;
-                r.1 = row.tokens;
-            }
-            ChangeType::Delete => {
-                actual.remove(&row.endpoint);
+            match cty {
+                ChangeType::Insert => {
+                    actual.insert(row.endpoint, (row.icao, row.tokens));
+                }
+                ChangeType::Update => {
+                    let r = actual
+                        .get_mut(&row.endpoint)
+                        .expect("expected endpoint not found");
+                    r.0 = row.icao;
+                    r.1 = row.tokens;
+                }
+                ChangeType::Delete => {
+                    actual.remove(&row.endpoint);
+                }
             }
         }
 
