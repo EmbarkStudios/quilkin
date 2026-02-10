@@ -20,7 +20,10 @@ use std::collections::BTreeSet;
 
 use futures::Stream;
 use k8s_openapi::api::core::v1::ConfigMap;
-use kube::{core::DeserializeGuard, runtime::watcher::Event};
+use kube::{
+    core::DeserializeGuard,
+    runtime::{WatchStreamExt as _, watcher::Event},
+};
 
 use agones::GameServer;
 
@@ -160,11 +163,12 @@ fn configmap_events(
     let config_namespace = namespace.as_ref();
     let configmap: kube::Api<ConfigMap> = kube::Api::namespaced(client, config_namespace);
     let config_writer = kube::runtime::reflector::store::Writer::<ConfigMap>::default();
-    let configmap_stream = kube::runtime::watcher(
+    kube::runtime::watcher(
         configmap,
         kube::runtime::watcher::Config::default().labels("quilkin.dev/configmap=true"),
-    );
-    kube::runtime::reflector(config_writer, configmap_stream)
+    )
+    .default_backoff()
+    .reflect(config_writer)
 }
 
 fn gameserver_events(
@@ -184,8 +188,9 @@ fn gameserver_events(
     // Retreive unbounded results.
     config.page_size = None;
 
-    let gameserver_stream = kube::runtime::watcher(gameservers, config);
-    kube::runtime::reflector(gs_writer, gameserver_stream)
+    kube::runtime::watcher(gameservers, config)
+        .default_backoff()
+        .reflect(gs_writer)
 }
 
 fn validate_gameserver(
