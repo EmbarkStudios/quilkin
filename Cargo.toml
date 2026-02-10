@@ -167,13 +167,13 @@ axum-test = "18.6.0"
 debug = true
 
 [workspace]
+#"crates/nmap-service-probes",
 members = [
     ".",
     "crates/agones",
     "crates/corrosion",
     "crates/corrosion-tests",
     "crates/macros",
-    #"crates/nmap-service-probes",
     "crates/proto-gen",
     "crates/quilkin-proto",
     "crates/system",
