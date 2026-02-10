@@ -102,7 +102,7 @@ pub fn update_filters_from_configmap(
             let event = match event {
                 Ok(event) => event,
                 Err(error) => {
-                    metrics::k8s::errors_total(CONFIGMAP, &error).inc();
+                    metrics::k8s::errors_total(CONFIGMAP, "watch_error").inc();
                     yield Err(error.into());
                     continue;
                 }
@@ -218,7 +218,7 @@ fn validate_gameserver(
         }
         Err(error) => {
             tracing::debug!(error=%error.error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
-            metrics::k8s::errors_total(GAMESERVER, &error);
+            metrics::k8s::errors_total(GAMESERVER, "invalid_object").inc();
             None
         }
     }
@@ -240,6 +240,7 @@ pub fn update_endpoints_from_gameservers(
                 Ok(event) => event,
                 Err(error) => {
                     tracing::warn!(%error, "gameserver watch error");
+                    metrics::k8s::errors_total(GAMESERVER, "watch_error").inc();
                     continue;
                 }
             };
@@ -255,7 +256,9 @@ pub fn update_endpoints_from_gameservers(
                     metrics::k8s::gameservers_total_valid();
                     clusters.write().replace(None, locality.clone(), endpoint);
                 }
-                Event::Init => {},
+                Event::Init => {
+                    tracing::info!("Init");
+                },
                 Event::InitApply(result) => {
                     let span = tracing::trace_span!("k8s::gameservers::init_apply");
                     let _enter = span.enter();
@@ -263,7 +266,7 @@ pub fn update_endpoints_from_gameservers(
                         continue;
                     };
 
-                    tracing::trace!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "applying server");
+                    tracing::info!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "applying server");
                     metrics::k8s::gameservers_total_valid();
                     servers.insert(endpoint);
                 }
@@ -276,8 +279,17 @@ pub fn update_endpoints_from_gameservers(
                         endpoints=%serde_json::to_value(servers.clone()).unwrap(),
                         "Restarting with endpoints"
                     );
+                    let guard = clusters.write();
 
-                    clusters.write().insert(None, locality.clone(), std::mem::take(&mut servers));
+                    let old_endpoints: std::collections::BTreeSet<crate::net::Endpoint> = guard.endpoints().into_iter().collect();
+
+                    tracing::info!(old_num_endpoints=%old_endpoints.len(), new_num_endpoints=%servers.len(), "InitDone");
+
+                    for ep in old_endpoints.difference(&servers) {
+                        tracing::warn!(%ep.address,endpoint.metadata=serde_json::to_string(&ep.metadata).unwrap(), "potentially missing gameserver after InitDone");
+                    }
+
+                    guard.insert(None, locality.clone(), std::mem::take(&mut servers));
                 }
                 Event::Delete(result) => {
                     let span = tracing::trace_span!("k8s::gameservers::delete");
@@ -285,7 +297,7 @@ pub fn update_endpoints_from_gameservers(
                     let server = match result.0 {
                         Ok(server) => server,
                         Err(error) => {
-                            metrics::k8s::errors_total(GAMESERVER, &error);
+                            metrics::k8s::errors_total(GAMESERVER, "invalid_object").inc();
                             tracing::debug!(%error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
                             continue;
                         }
