@@ -295,7 +295,17 @@ pub fn update_endpoints_from_gameservers(
                         tracing::warn!(%namespace, %ep.address,endpoint.metadata=serde_json::to_string(&ep.metadata).unwrap(), "potentially missing gameserver after InitDone");
                     }
 
-                    guard.insert(None, locality.clone(), std::mem::take(&mut servers));
+                    for ep in servers.difference(&old_endpoints) {
+                        tracing::warn!(%namespace, %ep.address,endpoint.metadata=serde_json::to_string(&ep.metadata).unwrap(), "potentially deleted gameserver after InitDone");
+                    }
+
+                    // BEGIN temporary
+                    let merged: BTreeSet<crate::net::Endpoint> = old_endpoints.union(&servers).cloned().collect();
+
+                    guard.insert(None, locality.clone(), merged);
+                    servers = <_>::default(); // clear that would previously be done by std::mem::take
+                    // guard.insert(None, locality.clone(), std::mem::take(&mut servers));
+                    // END temporary
                 }
                 Event::Delete(result) => {
                     let span = tracing::trace_span!("k8s::gameservers::delete");
