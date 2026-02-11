@@ -21,7 +21,6 @@ use std::collections::BTreeSet;
 use futures::Stream;
 use k8s_openapi::api::core::v1::ConfigMap;
 use kube::{core::DeserializeGuard, runtime::watcher::Event};
-use kube_leader_election::{LeaseLock, LeaseLockParams};
 
 use agones::GameServer;
 
@@ -46,32 +45,50 @@ fn track_event<T>(kind: &'static str, event: Event<T>) -> Event<T> {
     event
 }
 
+const LEADER_LEASE_DURATION: kube_lease_manager::DurationSeconds = 3;
+const LEADER_LEASE_RENEW_INTERVAL: kube_lease_manager::DurationSeconds = 1;
+
 pub(crate) async fn update_leader_lock(
     client: kube::Client,
     namespace: impl AsRef<str>,
     lease_name: impl Into<String>,
     holder_id: impl Into<String>,
     leader_lock: config::LeaderLock,
+    mut shutdown: tokio::sync::watch::Receiver<()>,
 ) -> crate::Result<()> {
-    let leadership = LeaseLock::new(
-        client,
-        namespace.as_ref(),
-        LeaseLockParams {
-            holder_id: holder_id.into(),
-            lease_name: lease_name.into(),
-            lease_ttl: std::time::Duration::from_secs(1),
-        },
-    );
+    let manager = kube_lease_manager::LeaseManagerBuilder::new(client, lease_name)
+        .with_namespace(namespace.as_ref())
+        .with_identity(holder_id)
+        .with_grace(LEADER_LEASE_RENEW_INTERVAL)
+        .with_duration(LEADER_LEASE_DURATION)
+        .build()
+        .await?;
 
     loop {
-        match leadership.try_acquire_or_renew().await {
-            Ok(ll) => leader_lock.store(ll.acquired_lease),
-            Err(error) => tracing::warn!(%error),
+        tokio::select! {
+            lock_state = manager.changed() => {
+                match lock_state {
+                    Ok(state) => {
+                        leader_lock.store(state);
+                    },
+                    Err(error) => {
+                        tracing::error!(%error, "lease manager error");
+                    },
+                }
+            }
+            _ = shutdown.changed() => {
+                // Release lock gracefully
+                leader_lock.store(false);
+                if let Err(error) = manager.release().await {
+                    tracing::error!(%error, "error releasing lock");
+                }
+                break
+            }
         }
-
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
+    Ok(())
 }
+
 pub fn update_filters_from_configmap(
     client: kube::Client,
     namespace: impl AsRef<str>,
