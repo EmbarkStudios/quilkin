@@ -165,7 +165,9 @@ fn configmap_events(
     let config_writer = kube::runtime::reflector::store::Writer::<ConfigMap>::default();
     kube::runtime::watcher(
         configmap,
-        kube::runtime::watcher::Config::default().labels("quilkin.dev/configmap=true"),
+        kube::runtime::watcher::Config::default()
+            .labels("quilkin.dev/configmap=true")
+            .streaming_lists(),
     )
     .default_backoff()
     .reflect(config_writer)
@@ -182,6 +184,7 @@ fn gameserver_events(
     let gs_writer =
         kube::runtime::reflector::store::Writer::<DeserializeGuard<GameServer>>::default();
     let mut config = kube::runtime::watcher::Config::default()
+        .streaming_lists()
         // Default timeout is 5 minutes, far too slow for us to react.
         .timeout(15);
 
