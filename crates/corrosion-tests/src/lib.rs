@@ -1,6 +1,6 @@
 use corro_api_types::{self as api, Statement};
 use corro_types::{self as types, actor::ActorId, pubsub::MatcherLoopConfig, updates::Handle as _};
-use corrosion::{persistent::executor::BroadcastingTransactor, pubsub};
+use corrosion::{persistent::mutator::BroadcastingTransactor, pubsub};
 use std::sync::Arc;
 
 pub use prettytable::Cell;
@@ -62,33 +62,16 @@ impl TestSubsDb {
         let sub_path = root.join("subs");
         let db_path = root.join("db.db");
 
-        let actor_id = {
-            // we need to set auto_vacuum before any tables are created
-            let db_conn = rusqlite::Connection::open(&db_path).unwrap();
-            db_conn
-                .execute_batch("PRAGMA auto_vacuum = INCREMENTAL")
-                .unwrap();
-
-            let conn = types::sqlite::CrConn::init(db_conn).unwrap();
-            conn.query_row("SELECT crsql_site_id();", [], |row| {
-                row.get::<_, ActorId>(0)
-            })
-            .unwrap()
-        };
-
-        let pool =
-            types::agent::SplitPool::create(&db_path, Arc::new(tokio::sync::Semaphore::new(1)))
-                .await
-                .expect("failed to create DB pool");
-
-        let (schema, clock) = setup(schema, &pool).await;
+        let db = corrosion::db::InitializedDb::setup(&db_path, schema)
+            .await
+            .expect("failed to initialize DB");
 
         let subs = types::pubsub::SubsManager::default();
 
         let btx = BroadcastingTransactor::new(
-            actor_id,
-            clock.clone(),
-            pool.clone(),
+            db.actor_id,
+            db.clock.clone(),
+            db.pool.clone(),
             subs.clone(),
             Default::default(),
             None,
@@ -100,10 +83,10 @@ impl TestSubsDb {
             sub_path,
             db_path,
             subs,
-            schema: Arc::new(schema),
-            clock,
-            actor_id,
-            pool,
+            schema: db.schema,
+            clock: db.clock,
+            actor_id: db.actor_id,
+            pool: db.pool,
             matcher_conns: Default::default(),
             db_version: 0,
             btx,

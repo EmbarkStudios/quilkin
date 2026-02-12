@@ -1,3 +1,6 @@
+//! Code for clients that connect to a remote [`crate::server::Server`] and either
+//! send mutations, or subscribe to said mutations
+
 use crate::{
     codec,
     persistent::{
@@ -7,7 +10,7 @@ use crate::{
     pubsub,
 };
 use bytes::Bytes;
-use corro_api_types::{ExecResponse, ExecResult, QueryEvent};
+pub use corro_api_types::{ExecResponse, ExecResult, QueryEvent};
 use quilkin_types::IcaoCode;
 use std::net::SocketAddr;
 use tokio::sync::{mpsc, oneshot};
@@ -82,16 +85,22 @@ pub enum TransactionError {
     TaskShutdown,
 }
 
-/// A persistent connection to a corrosion agent
+/// A persistent connection to a corrosion server
 #[derive(Clone)]
 pub struct Client {
     conn: quinn::Connection,
     local_addr: SocketAddr,
+    /// A lazy notifying reference count
+    #[allow(dead_code)]
+    tx: mpsc::Sender<()>,
 }
 
 impl Client {
     /// Connects using a non-encrypted session
-    pub async fn connect_insecure(addr: SocketAddr) -> Result<Self, ConnectError> {
+    pub async fn connect_insecure(
+        addr: SocketAddr,
+        metrics: super::Metrics,
+    ) -> Result<Self, ConnectError> {
         let ep = quinn::Endpoint::client((std::net::Ipv6Addr::LOCALHOST, 0).into())?;
 
         let conn = ep
@@ -105,7 +114,54 @@ impl Client {
         // This is really infallible
         let local_addr = ep.local_addr()?;
 
-        Ok(Self { conn, local_addr })
+        // Spawn a task to periodically update the connection metrics
+        let mconn = conn.clone();
+        let (tx, mut rx) = mpsc::channel(1);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+
+            // TODO: might be more interesting to use active for streams instead
+            // of connections as there will (at the moment) only ever be 1
+            metrics.active.with_label_values::<&str>(&[]).inc();
+
+            let mut tx_count = 0;
+            let mut tx_bytes = 0;
+            let mut rx_count = 0;
+            let mut rx_bytes = 0;
+
+            use super::update_metric as um;
+
+            let stats = mconn.stats();
+            um(&metrics.tx_count, &mut tx_count, stats.udp_tx.datagrams);
+            um(&metrics.tx_bytes, &mut tx_bytes, stats.udp_tx.bytes);
+            um(&metrics.rx_count, &mut rx_count, stats.udp_rx.datagrams);
+            um(&metrics.rx_bytes, &mut rx_bytes, stats.udp_rx.bytes);
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let stats = mconn.stats();
+                        um(&metrics.tx_count, &mut tx_count, stats.udp_tx.datagrams);
+                        um(&metrics.tx_bytes, &mut tx_bytes,stats.udp_tx.bytes);
+                        um(&metrics.rx_count, &mut rx_count, stats.udp_rx.datagrams);
+                        um(&metrics.rx_bytes, &mut rx_bytes,stats.udp_rx.bytes);
+                    }
+                    over = rx.recv() => {
+                        if over.is_none() {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            metrics.active.with_label_values::<&str>(&[]).dec();
+        });
+
+        Ok(Self {
+            conn,
+            local_addr,
+            tx,
+        })
     }
 
     #[inline]
@@ -260,7 +316,11 @@ impl MutationClient {
         change: &[proto::v1::ServerChange],
     ) -> Result<ExecResponse, TransactionError> {
         let buf = codec::write_length_prefixed_jsonb(&change)?;
+        self.send_raw(buf).await
+    }
 
+    #[inline]
+    pub async fn send_raw(&self, buf: bytes::BytesMut) -> Result<ExecResponse, TransactionError> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send((buf.freeze(), tx))
@@ -295,7 +355,7 @@ pub struct SubClientStream {
     /// Dropping this will terminate the subscription on the remote server,
     /// but ideally one would call [`SubscriptionClient::shutdown`] to gracefully
     /// close the stream
-    pub rx: mpsc::UnboundedReceiver<QueryEvent>,
+    pub rx: mpsc::UnboundedReceiver<pubsub::SubscriptionStream>,
 }
 
 impl SubscriptionClient {
@@ -337,7 +397,7 @@ impl SubscriptionClient {
     async fn run_subscription_loop(
         mut recv: quinn::RecvStream,
         send: quinn::SendStream,
-        tx: mpsc::UnboundedSender<QueryEvent>,
+        tx: mpsc::UnboundedSender<pubsub::SubscriptionStream>,
         mut srx: oneshot::Receiver<ErrorCode>,
     ) -> Result<Option<quinn::VarInt>, StreamError> {
         tracing::info!("started subscription stream");
@@ -347,19 +407,11 @@ impl SubscriptionClient {
                 res = codec::read_length_prefixed(&mut recv) => {
                     match res {
                         Ok(buf) => {
-                            for item in pubsub::SubscriptionStream::new(buf) {
-                                match item {
-                                    Ok(item) => {
-                                        if tx.send(item).is_err() {
-                                            tracing::info!("subscription stream receiver closed, closing stream");
-                                            let _ = recv.stop(ErrorCode::Unknown.into());
-                                            break 'io;
-                                        }
-                                    }
-                                    Err(error) => {
-                                        tracing::error!(%error, "failed to deserialize event from subscription stream");
-                                    }
-                                }
+                            let stream = pubsub::SubscriptionStream::new(buf);
+                            if tx.send(stream).is_err() {
+                                tracing::info!("subscription stream receiver closed, closing stream");
+                                let _ = recv.stop(ErrorCode::Unknown.into());
+                                break 'io;
                             }
                         }
                         Err(_err) => {
