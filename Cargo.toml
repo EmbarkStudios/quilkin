@@ -104,6 +104,7 @@ schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_regex = "1.1.0"
+serde_with.workspace = true
 serde_yaml = "0.9.34"
 socket2.workspace = true
 stable-eyre = "0.2.2"
@@ -230,6 +231,7 @@ regex = "1.12.2"
 schemars = { version = "1.2", features = ["bytes1", "url2"] }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.149"
+serde_with = { version = "3.16.1", default-features = false , features = ["macros"] }
 socket2 = { version = "0.6", features = ["all"] }
 tempfile = "3.24.0"
 thiserror = "2.0.17"

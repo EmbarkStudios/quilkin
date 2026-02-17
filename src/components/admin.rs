@@ -84,9 +84,13 @@ struct Admin {
     ready: Arc<AtomicBool>,
 }
 
+use serde_with::{DurationSeconds, serde_as};
+
 #[cfg(target_os = "linux")]
+#[serde_as]
 #[derive(serde::Deserialize)]
 struct ProfileParams {
+    #[serde_as(as = "Option<DurationSeconds<u64>>")]
     seconds: Option<std::time::Duration>,
 }
 
