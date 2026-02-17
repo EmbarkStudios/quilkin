@@ -20,8 +20,10 @@ use std::collections::BTreeSet;
 
 use futures::Stream;
 use k8s_openapi::api::core::v1::ConfigMap;
-use kube::{core::DeserializeGuard, runtime::watcher::Event};
-use kube_leader_election::{LeaseLock, LeaseLockParams};
+use kube::{
+    core::DeserializeGuard,
+    runtime::{WatchStreamExt as _, watcher::Event},
+};
 
 use agones::GameServer;
 
@@ -46,32 +48,50 @@ fn track_event<T>(kind: &'static str, event: Event<T>) -> Event<T> {
     event
 }
 
+const LEADER_LEASE_DURATION: kube_lease_manager::DurationSeconds = 3;
+const LEADER_LEASE_RENEW_INTERVAL: kube_lease_manager::DurationSeconds = 1;
+
 pub(crate) async fn update_leader_lock(
     client: kube::Client,
     namespace: impl AsRef<str>,
     lease_name: impl Into<String>,
     holder_id: impl Into<String>,
     leader_lock: config::LeaderLock,
+    mut shutdown: tokio::sync::watch::Receiver<()>,
 ) -> crate::Result<()> {
-    let leadership = LeaseLock::new(
-        client,
-        namespace.as_ref(),
-        LeaseLockParams {
-            holder_id: holder_id.into(),
-            lease_name: lease_name.into(),
-            lease_ttl: std::time::Duration::from_secs(1),
-        },
-    );
+    let manager = kube_lease_manager::LeaseManagerBuilder::new(client, lease_name)
+        .with_namespace(namespace.as_ref())
+        .with_identity(holder_id)
+        .with_grace(LEADER_LEASE_RENEW_INTERVAL)
+        .with_duration(LEADER_LEASE_DURATION)
+        .build()
+        .await?;
 
     loop {
-        match leadership.try_acquire_or_renew().await {
-            Ok(ll) => leader_lock.store(ll.acquired_lease),
-            Err(error) => tracing::warn!(%error),
+        tokio::select! {
+            lock_state = manager.changed() => {
+                match lock_state {
+                    Ok(state) => {
+                        leader_lock.store(state);
+                    },
+                    Err(error) => {
+                        tracing::error!(%error, "lease manager error");
+                    },
+                }
+            }
+            _ = shutdown.changed() => {
+                // Release lock gracefully
+                leader_lock.store(false);
+                if let Err(error) = manager.release().await {
+                    tracing::error!(%error, "error releasing lock");
+                }
+                break
+            }
         }
-
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
+    Ok(())
 }
+
 pub fn update_filters_from_configmap(
     client: kube::Client,
     namespace: impl AsRef<str>,
@@ -85,7 +105,7 @@ pub fn update_filters_from_configmap(
             let event = match event {
                 Ok(event) => event,
                 Err(error) => {
-                    metrics::k8s::errors_total(CONFIGMAP, &error).inc();
+                    metrics::k8s::errors_total(CONFIGMAP, "watch_error").inc();
                     yield Err(error.into());
                     continue;
                 }
@@ -143,11 +163,12 @@ fn configmap_events(
     let config_namespace = namespace.as_ref();
     let configmap: kube::Api<ConfigMap> = kube::Api::namespaced(client, config_namespace);
     let config_writer = kube::runtime::reflector::store::Writer::<ConfigMap>::default();
-    let configmap_stream = kube::runtime::watcher(
+    kube::runtime::watcher(
         configmap,
         kube::runtime::watcher::Config::default().labels("quilkin.dev/configmap=true"),
-    );
-    kube::runtime::reflector(config_writer, configmap_stream)
+    )
+    .default_backoff()
+    .reflect(config_writer)
 }
 
 fn gameserver_events(
@@ -167,8 +188,9 @@ fn gameserver_events(
     // Retreive unbounded results.
     config.page_size = None;
 
-    let gameserver_stream = kube::runtime::watcher(gameservers, config);
-    kube::runtime::reflector(gs_writer, gameserver_stream)
+    kube::runtime::watcher(gameservers, config)
+        .default_backoff()
+        .reflect(gs_writer)
 }
 
 fn validate_gameserver(
@@ -201,7 +223,7 @@ fn validate_gameserver(
         }
         Err(error) => {
             tracing::debug!(error=%error.error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
-            metrics::k8s::errors_total(GAMESERVER, &error);
+            metrics::k8s::errors_total(GAMESERVER, "invalid_object").inc();
             None
         }
     }
@@ -209,7 +231,7 @@ fn validate_gameserver(
 
 pub fn update_endpoints_from_gameservers(
     client: kube::Client,
-    namespace: impl AsRef<str>,
+    namespace: String,
     clusters: config::Watch<ClusterMap>,
     locality: Option<Locality>,
     address_selector: Option<crate::config::AddressSelector>,
@@ -217,12 +239,13 @@ pub fn update_endpoints_from_gameservers(
     async_stream::stream! {
         let mut servers = BTreeSet::new();
 
-        for await event in gameserver_events(client, namespace) {
+        for await event in gameserver_events(client, namespace.clone()) {
             let ads = address_selector.as_ref();
             let event = match event {
                 Ok(event) => event,
                 Err(error) => {
-                    tracing::warn!(%error, "gameserver watch error");
+                    tracing::warn!(%namespace, %error, "gameserver watch error");
+                    metrics::k8s::errors_total(GAMESERVER, "watch_error").inc();
                     continue;
                 }
             };
@@ -234,11 +257,13 @@ pub fn update_endpoints_from_gameservers(
                     let Some(endpoint) = validate_gameserver(result, ads) else {
                         continue;
                     };
-                    tracing::debug!(endpoint=%serde_json::to_value(&endpoint).unwrap(), "Adding endpoint");
+                    tracing::debug!(%namespace, endpoint=%serde_json::to_value(&endpoint).unwrap(), "Adding endpoint");
                     metrics::k8s::gameservers_total_valid();
                     clusters.write().replace(None, locality.clone(), endpoint);
                 }
-                Event::Init => {},
+                Event::Init => {
+                    tracing::info!(%namespace, "Init");
+                },
                 Event::InitApply(result) => {
                     let span = tracing::trace_span!("k8s::gameservers::init_apply");
                     let _enter = span.enter();
@@ -246,21 +271,41 @@ pub fn update_endpoints_from_gameservers(
                         continue;
                     };
 
-                    tracing::trace!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "applying server");
+                    tracing::info!(%namespace, %endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "applying server");
                     metrics::k8s::gameservers_total_valid();
                     servers.insert(endpoint);
                 }
                 Event::InitDone => {
                     let span = tracing::trace_span!("k8s::gameservers::init_done");
                     let _enter = span.enter();
-                    tracing::debug!("received restart event from k8s");
+                    tracing::debug!(%namespace, "received restart event from k8s");
 
                     tracing::trace!(
+                        %namespace,
                         endpoints=%serde_json::to_value(servers.clone()).unwrap(),
                         "Restarting with endpoints"
                     );
+                    let guard = clusters.write();
 
-                    clusters.write().insert(None, locality.clone(), std::mem::take(&mut servers));
+                    let old_endpoints: std::collections::BTreeSet<crate::net::Endpoint> = guard.endpoints().into_iter().collect();
+
+                    tracing::info!(%namespace, old_num_endpoints=%old_endpoints.len(), new_num_endpoints=%servers.len(), "InitDone");
+
+                    for ep in old_endpoints.difference(&servers) {
+                        tracing::warn!(%namespace, %ep.address,endpoint.metadata=serde_json::to_string(&ep.metadata).unwrap(), "potentially missing gameserver after InitDone");
+                    }
+
+                    for ep in servers.difference(&old_endpoints) {
+                        tracing::warn!(%namespace, %ep.address,endpoint.metadata=serde_json::to_string(&ep.metadata).unwrap(), "potentially deleted gameserver after InitDone");
+                    }
+
+                    // BEGIN temporary
+                    let merged: BTreeSet<crate::net::Endpoint> = old_endpoints.union(&servers).cloned().collect();
+
+                    guard.insert(None, locality.clone(), merged);
+                    servers = <_>::default(); // clear that would previously be done by std::mem::take
+                    // guard.insert(None, locality.clone(), std::mem::take(&mut servers));
+                    // END temporary
                 }
                 Event::Delete(result) => {
                     let span = tracing::trace_span!("k8s::gameservers::delete");
@@ -268,17 +313,17 @@ pub fn update_endpoints_from_gameservers(
                     let server = match result.0 {
                         Ok(server) => server,
                         Err(error) => {
-                            metrics::k8s::errors_total(GAMESERVER, &error);
-                            tracing::debug!(%error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
+                            metrics::k8s::errors_total(GAMESERVER, "invalid_object").inc();
+                            tracing::debug!(%namespace, %error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
                             continue;
                         }
                     };
 
                     let found = if let Some(endpoint) = server.endpoint(ads) {
-                        tracing::debug!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "deleting by endpoint");
+                        tracing::debug!(%namespace, %endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "deleting by endpoint");
                         clusters.write().remove_endpoint(&endpoint)
                     } else {
-                        tracing::debug!(server.metadata.name=%server.metadata.name.clone().unwrap_or_default(), "deleting by server name");
+                        tracing::debug!(%namespace, server.metadata.name=%server.metadata.name.clone().unwrap_or_default(), "deleting by server name");
                         clusters.write().remove_endpoint_if(|endpoint| {
                             endpoint.metadata.unknown.get("name") == server.metadata.name.clone().map(From::from).as_ref()
                         })
@@ -287,12 +332,14 @@ pub fn update_endpoints_from_gameservers(
                     metrics::k8s::gameservers_deletions_total(found);
                     if !found {
                         tracing::debug!(
+                            %namespace,
                             endpoint=%serde_json::to_value(server.endpoint(ads)).unwrap(),
                             server.metadata.name=%serde_json::to_value(server.metadata.name).unwrap(),
                             "received unknown gameserver to delete from k8s"
                         );
                     } else {
                         tracing::debug!(
+                            %namespace,
                             endpoint=%serde_json::to_value(server.endpoint(ads)).unwrap(),
                             server.metadata.name=%serde_json::to_value(server.metadata.name).unwrap(),
                             "deleted gameserver"

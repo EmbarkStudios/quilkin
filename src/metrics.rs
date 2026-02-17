@@ -230,7 +230,7 @@ pub(crate) mod k8s {
         METRIC.with_label_values(&[&success.to_string()]).inc();
     }
 
-    pub(crate) fn errors_total(kind: &'static str, reason: &impl std::fmt::Display) -> IntCounter {
+    pub(crate) fn errors_total(kind: &'static str, reason: impl ToString) -> IntCounter {
         static METRIC: Lazy<IntCounterVec> = Lazy::new(|| {
             prometheus::register_int_counter_vec_with_registry! {
                 prometheus::opts! {
