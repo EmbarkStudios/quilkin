@@ -50,9 +50,14 @@ pub trait Packet: Sized {
 /// provides an abstraction over however the packet was received (epoll, io-uring, xdp)
 pub trait PacketMut: Sized + Packet {
     type FrozenPacket: Packet;
+
+    /// Truncates the head by the specified number of bytes
     fn remove_head(&mut self, length: usize);
+    /// Truncates the tail by the specified number of bytes
     fn remove_tail(&mut self, length: usize);
+    /// Prepend the specified bytes
     fn extend_head(&mut self, bytes: &[u8]);
+    /// Append the specified bytes
     fn extend_tail(&mut self, bytes: &[u8]);
     /// Returns an immutable version of the packet, this allows certain types
     /// return a type that can be more cheaply cloned and shared.

@@ -142,10 +142,10 @@ impl EventFdWriter {
     }
 }
 
-struct RecvPacket {
-    /// The buffer filled with data during `recv_from`
-    buffer: PoolBuffer,
-    /// The IP of the sender
+struct RecvPacket<'rb> {
+    /// The packet contents
+    buffer: super::ring::RingBuffer<'rb>,
+    /// The address of the source
     source: std::net::SocketAddr,
 }
 
@@ -219,28 +219,6 @@ impl LoopPacket {
     }
 
     #[inline]
-    fn finalize_recv(mut self, ret: usize) -> RecvPacket {
-        let LoopPacketInner::Recv(mut recv) = self.packet.take().unwrap() else {
-            unreachable!("finalized a send packet")
-        };
-
-        // SAFETY: we're initialising it with correctly sized data
-        let mut source = unsafe {
-            SockAddr::new(
-                self.addr,
-                std::mem::size_of::<libc::sockaddr_storage>() as _,
-            )
-        }
-        .as_socket()
-        .unwrap();
-        source.set_ip(source.ip().to_canonical());
-
-        recv.source = source;
-        recv.buffer.set_len(ret);
-        recv
-    }
-
-    #[inline]
     fn finalize_send(mut self) -> SendPacket {
         let LoopPacketInner::Send(send) = self.packet.take().unwrap() else {
             unreachable!("finalized a recv packet")
@@ -266,7 +244,7 @@ pub enum PacketProcessorCtx {
 fn process_packet(
     ctx: &mut PacketProcessorCtx,
     filters: &crate::filters::FilterChain,
-    packet: RecvPacket,
+    packet: RecvPacket<'_>,
     last_received_at: &mut Option<UtcTimestamp>,
 ) {
     match ctx {
@@ -310,22 +288,46 @@ fn empty_net_addr() -> std::net::SocketAddr {
     std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
 }
 
+// io-uring keeps many things private which is incredibly tedious
+const IORING_OP_RECVMSG: u8 = 10;
+
+mod flags {
+    pub type Enum = u32;
+
+    /// If set, the upper 16 bits of the flags field carries the buffer ID that was chosen for this request.
+    ///
+    /// The request must have been issued with `IOSQE_BUFFER_SELECT` set, and used with a request type that supports
+    /// buffer selection. Additionally, buffers must have been provided upfront either via the IORING_OP_PROVIDE_BUFFERS
+    /// or the IORING_REGISTER_PBUF_RING methods.
+    pub const IORING_CQE_F_BUFFER: Enum = 1 << 0;
+    /// If set, the application should expect more completions from the request.
+    ///
+    /// This is used for requests that can generate multiple completions, such as multi-shot requests, receive, or accept.
+    pub const IORING_CQE_F_MORE: Enum = 1 << 1;
+}
+
 enum Token {
     /// Packet received
     Recv { key: usize },
     /// Packet sent
     Send { key: usize },
     /// One or more packets are ready to be sent OR shutdown of the loop is requested
-    PendingsSends,
+    PendingSends,
 }
 
 struct LoopCtx<'uring> {
     sq: io_uring::squeue::SubmissionQueue<'uring, Entry>,
     backlog: std::collections::VecDeque<Entry>,
     socket_fd: Fd,
-    tokens: slab::Slab<Token>,
     /// Packets currently being received or sent in the io-uring loop
     loop_packets: slab::Slab<LoopPacket>,
+    /// The buffer ring for receives, it's our responsibility to return buffers
+    /// to this when we are done, otherwise we'll get an `-ENOBUFS` error
+    recv_ring: super::ring::BufferRing,
+    /// The msghdr for receives, for multishot this is only used for the `namelen`
+    /// and `controllen` fields, as the kernel will prepend the details for the
+    /// individual recvmsg into the buffer itself, followed by the actual payload
+    recv_hdr: libc::msghdr,
 }
 
 impl<'uring> LoopCtx<'uring> {
@@ -334,28 +336,51 @@ impl<'uring> LoopCtx<'uring> {
         self.sq.sync();
     }
 
-    /// Enqueues a `recv_from` on the socket
+    /// Enqueues a multishot [`IORING_OP_RECVMSG`](https://man.archlinux.org/man/io_uring_enter.2.en#IORING_OP_RECVMSG)
+    ///
+    /// For every receive, we need to check the flags of the CQE to potentially requeue the recv
     #[inline]
-    fn enqueue_recv(&mut self, buffer: crate::collections::PoolBuffer) {
-        let packet = LoopPacketInner::Recv(RecvPacket {
-            buffer,
-            source: empty_net_addr(),
-        });
+    fn enqueue_recvmsg(&mut self) {
+        self.push(
+            io_uring::opcode::RecvMsgMulti::new(self.socket_fd, &self.recv_hdr, BUFFER_RING)
+                .build()
+                .user_data((IORING_OP_RECVMSG as u64) << 56),
+        );
+    }
 
-        let (key, msghdr) = {
-            let entry = self.loop_packets.vacant_entry();
-            let key = entry.key();
-            let pp = entry.insert(LoopPacket::new());
-            pp.set_packet(packet);
-            (key, std::ptr::addr_of_mut!(pp.msghdr))
+    #[inline]
+    fn pop_recv(&mut self, cqe: io_uring::cqueue::Entry) -> Option {
+        let ret = cqe.result();
+
+        if ret < 0 {
+            let error = std::io::Error::from_raw_os_error(-ret);
+            tracing::error!(%error, "error receiving packet");
+            return None;
+        }
+
+        let flags = cqe.flags();
+
+        // This _should_ theoretically never happen
+        if flags & flags::IORING_CQE_F_BUFFER == 0 {
+            tracing::error!("failed to receive packet, a buffer was not selected");
+            return None;
+        }
+
+        let buffer_id = (flags >> 16) as u16;
+
+        let mut rb = self.recv_ring.dequeue(buffer_id);
+        let addr = match rb.extract(ret as _, &self.recv_hdr) {
+            Ok(addr) => addr,
+            Err(error) => {
+                tracing::error!(%error, "failed to extract source address");
+                return None;
+            }
         };
 
-        let token = self.tokens.insert(Token::Recv { key });
-        self.push(
-            io_uring::opcode::RecvMsg::new(self.socket_fd, msghdr)
-                .build()
-                .user_data(token as _),
-        );
+        // Requeue the recv if needed
+        if flags & flags::IORING_CQE_F_MORE == 0 {
+            self.enqueue_recvmsg();
+        }
     }
 
     /// Enqueues a `send_to` on the socket
@@ -386,11 +411,6 @@ impl<'uring> LoopCtx<'uring> {
                 .build()
                 .user_data(token as _),
         );
-    }
-
-    #[inline]
-    fn pop_packet(&mut self, key: usize) -> LoopPacket {
-        self.loop_packets.remove(key)
     }
 
     /// For now we have a backlog, but this would basically mean that we are receiving
@@ -436,16 +456,13 @@ impl<'uring> LoopCtx<'uring> {
             }
         }
     }
-
-    #[inline]
-    fn remove(&mut self, token: usize) -> Token {
-        self.tokens.remove(token)
-    }
 }
+
+const BUFFER_RING: u16 = 0xfeed;
 
 pub struct IoUringLoop {
     socket: crate::net::DualStackLocalSocket,
-    concurrent_sends: usize,
+    concurrent_sends: u32,
 }
 
 impl IoUringLoop {
@@ -472,19 +489,26 @@ impl IoUringLoop {
         let socket = self.socket;
         let concurrent_sends = self.concurrent_sends;
 
-        let mut ring = io_uring::IoUring::new((concurrent_sends + 3) as _)?;
+        let mut ring = io_uring::IoUring::builder()
+            .setup_cqsize(self.concurrent_sends)
+            .build(self.concurrent_sends >> 1)?;
 
         let mut pending_sends_event = pending_sends.1;
         let pending_sends = pending_sends.0;
+
+        let mut rb = super::ring::BufferRing::new(
+            concurrent_sends as u16,
+            // we only deal with non-fragmented UDP with a presumed MTU of 1500, though we also need to account for the extra metadata for multishot recvmsg, so just round up to the next power of 2
+            2048,
+            BUFFER_RING,
+        )
+        .map_err(|err| std::io::Error::other(err))?;
 
         std::thread::Builder::new()
             .name(thread_name)
             .spawn(move || {
                 crate::metrics::game_traffic_tasks().inc();
                 let _guard = tracing::dispatcher::set_default(&dispatcher);
-
-                let tokens = slab::Slab::with_capacity(concurrent_sends + 1 + 1);
-                let loop_packets = slab::Slab::with_capacity(concurrent_sends + 1);
 
                 // Just double buffer the pending writes for simplicity
                 let mut double_pending_sends = Vec::with_capacity(pending_sends.capacity());
@@ -502,13 +526,31 @@ impl IoUringLoop {
                     sq,
                     socket_fd: socket.raw_fd(),
                     backlog: Default::default(),
-                    loop_packets,
-                    tokens,
+                    recv_ring: rb,
+                    recv_hdr: libc::msghdr {
+                        // Reserve space for up to an IPv6 socket address, if we get
+                        // an IPv4 address it will 0 fill the remaining 8 bytes
+                        msg_namelen: std::mem::size_of::<libc::sockaddr_in6>() as _,
+                        // We don't use nor care about control length, but just being
+                        // explicit here for clarity as it is the only other relevant field
+                        // for multishot recvmsg
+                        msg_controllen: 0,
+                        ..unsafe { std::mem::zeroed() }
+                    },
                 };
 
-                loop_ctx.enqueue_recv(buffer_pool.clone().alloc());
-                loop_ctx
-                    .push_with_token(pending_sends_event.io_uring_entry(), Token::PendingsSends);
+                // SAFETY: we ensure the buffer ring lives as long as the io ring itself
+                unsafe {
+                    submitter.register_buf_ring_with_flags(
+                        loop_ctx.recv_ring.mmap.buf as u64,
+                        loop_ctx.recv_ring.count,
+                        BUFFER_RING,
+                        0 /* https://man.archlinux.org/man/extra/liburing/io_uring_register_buf_ring.3.en#IOU_PBUF_RING_INC is the only suppported flag */,
+                    )
+                };
+
+                loop_ctx.enqueue_recvmsg();
+                loop_ctx.push_with_token(pending_sends_event.io_uring_entry(), Token::PendingSends);
 
                 // Sync always needs to be called when entries have been pushed
                 // onto the submission queue for the loop to actually function (ie, similar to await on futures)
@@ -536,36 +578,25 @@ impl IoUringLoop {
                         break 'io;
                     }
 
+                    let filters = filter_chain.load();
+
                     // Now actually process all of the completed io requests
                     for cqe in &mut cq {
-                        let ret = cqe.result();
-                        let token_index = cqe.user_data() as usize;
+                        let ud = cqe.user_data();
 
-                        let token = loop_ctx.remove(token_index);
+                        let op = (ud >> 56) as u8;
                         match token {
-                            Token::Recv { key } => {
-                                // Pop the packet regardless of whether we failed or not so that
-                                // we don't consume a buffer slot forever
-                                let packet = loop_ctx.pop_packet(key);
-
-                                if ret < 0 {
-                                    let error = std::io::Error::from_raw_os_error(-ret);
-                                    tracing::error!(%error, "error receiving packet");
+                            IORING_OP_RECVMSG => {
+                                if let Some(packet) = loop_ctx.pop_recv(cqe) {
+                                    process_packet(&mut ctx, filters, packet, &mut last_received_at);
                                     loop_ctx.enqueue_recv(buffer_pool.clone().alloc());
-                                    continue;
                                 }
-
-                                let packet = packet.finalize_recv(ret as usize);
-                                let filters = filter_chain.load();
-                                process_packet(&mut ctx, filters, packet, &mut last_received_at);
-
-                                loop_ctx.enqueue_recv(buffer_pool.clone().alloc());
                             }
-                            Token::PendingsSends => {
+                            Token::PendingSends => {
                                 double_pending_sends = pending_sends.swap(double_pending_sends);
                                 loop_ctx.push_with_token(
                                     pending_sends_event.io_uring_entry(),
-                                    Token::PendingsSends,
+                                    Token::PendingSends,
                                 );
 
                                 for pending in
@@ -623,7 +654,7 @@ impl SessionPool {
         let _thread_span = uring_span!(tracing::debug_span!("session", id).or_current());
 
         let io_loop =
-            IoUringLoop::new(2000, crate::net::DualStackLocalSocket::from_raw(raw_socket))?;
+            IoUringLoop::new(2048, crate::net::DualStackLocalSocket::from_raw(raw_socket))?;
         let buffer_pool = pool.buffer_pool.clone();
 
         io_loop.spawn_io_loop(
