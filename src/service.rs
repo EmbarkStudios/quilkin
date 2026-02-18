@@ -586,7 +586,6 @@ impl Service {
 
         let socket = crate::net::raw_socket_with_reuse(self.udp_port)?;
         let workers = self.udp_workers.get();
-        let buffer_pool = Arc::new(crate::collections::BufferPool::new(workers, 2 * 1024));
 
         let mut worker_sends = Vec::with_capacity(workers);
         let mut session_sends = Vec::with_capacity(workers);
@@ -601,8 +600,8 @@ impl Service {
             .cached_filter_chain()
             .context("a cached FilterChain should have been configured")?;
 
-        let sessions = SessionPool::new(session_sends, buffer_pool.clone(), cached_filters);
-        crate::net::packet::spawn_receivers(config, socket, worker_sends, &sessions, buffer_pool)?;
+        let sessions = SessionPool::new(session_sends, cached_filters);
+        crate::net::packet::spawn_receivers(config, socket, worker_sends, &sessions)?;
 
         let finished = shutdown.push("udp");
         let mut srx = shutdown.shutdown_rx();

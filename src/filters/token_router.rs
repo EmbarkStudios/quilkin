@@ -316,7 +316,7 @@ mod tests {
 
     fn with_ctx(
         dest: &mut Vec<crate::net::EndpointAddress>,
-        test: impl FnOnce(ReadContext<'_, crate::collections::PoolBuffer>),
+        test: impl FnOnce(ReadContext<'_, bytes::BytesMut>),
     ) {
         let endpoint1 = Endpoint::with_metadata(
             "127.0.0.1:80".parse().unwrap(),
@@ -331,14 +331,12 @@ mod tests {
             },
         );
 
-        let pool = std::sync::Arc::new(crate::collections::BufferPool::new(1, 5));
-
         let endpoints = crate::net::cluster::ClusterMap::default();
         endpoints.insert_default([endpoint1, endpoint2].into());
         test(ReadContext::new(
             &endpoints,
             "127.0.0.1:100".parse().unwrap(),
-            pool.alloc_slice(b"hello"),
+            crate::test::alloc_buffer(b"hello"),
             dest,
         ));
     }

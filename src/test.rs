@@ -22,7 +22,6 @@ use tokio::sync::{mpsc, oneshot};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
-    collections::BufferPool,
     config::Config,
     filters::{FilterRegistry, prelude::*},
     net::DualStackEpollSocket as DualStackLocalSocket,
@@ -367,12 +366,9 @@ impl TestHelper {
     }
 }
 
-pub static BUFFER_POOL: once_cell::sync::Lazy<Arc<BufferPool>> =
-    once_cell::sync::Lazy::new(|| Arc::new(BufferPool::default()));
-
 #[inline]
-pub fn alloc_buffer(data: impl AsRef<[u8]>) -> crate::collections::PoolBuffer {
-    BUFFER_POOL.clone().alloc_slice(data.as_ref())
+pub fn alloc_buffer(data: impl AsRef<[u8]>) -> bytes::BytesMut {
+    bytes::BytesMut::from(data.as_ref())
 }
 
 /// assert that read makes no changes
@@ -388,7 +384,12 @@ where
     let source = "127.0.0.1:90".parse().unwrap();
     let contents = b"hello";
     let mut dest = Vec::new();
-    let mut context = ReadContext::new(&endpoints, source, alloc_buffer(contents), &mut dest);
+    let mut context = ReadContext::new(
+        &endpoints,
+        source,
+        bytes::BytesMut::from(&contents[..]),
+        &mut dest,
+    );
 
     filter.read(&mut context).unwrap();
     assert!(context.destinations.is_empty());
@@ -406,7 +407,7 @@ where
     let mut context = WriteContext::new(
         endpoint.address,
         "127.0.0.1:70".parse().unwrap(),
-        alloc_buffer(contents),
+        bytes::BytesMut::from(&contents[..]),
     );
 
     filter.write(&mut context).unwrap();

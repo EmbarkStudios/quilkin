@@ -27,10 +27,8 @@ use std::{
 
 use eyre::Context as _;
 use io_uring::{squeue::Entry, types::Fd};
-use socket2::SockAddr;
 
 use crate::{
-    collections::PoolBuffer,
     config::filter::CachedFilterChain,
     metrics,
     net::{PacketQueue, error::PipelineError, packet::queue::SendPacket, sessions::SessionPool},
@@ -50,13 +48,12 @@ impl crate::net::io::Listener {
             port,
             config,
             sessions,
-            buffer_pool,
         } = self;
 
         let socket =
             crate::net::DualStackLocalSocket::new(port).context("failed to bind socket")?;
 
-        let io_loop = IoUringLoop::new(2000, socket)?;
+        let io_loop = IoUringLoop::new(512, socket)?;
         io_loop
             .spawn_io_loop(
                 format!("packet-router-{worker_id}"),
@@ -67,7 +64,6 @@ impl crate::net::io::Listener {
                     destinations: Vec::with_capacity(1),
                 },
                 pending_sends,
-                buffer_pool,
                 filter_chain,
             )
             .context("failed to spawn io-uring loop")
@@ -149,82 +145,49 @@ struct RecvPacket<'rb> {
     source: std::net::SocketAddr,
 }
 
-enum LoopPacketInner {
-    Recv(RecvPacket),
-    Send(SendPacket),
-}
-
-/// A packet that is currently on the io-uring loop, either being received or sent
+/// A packet that is currently being sent
 ///
 /// The struct is expected to be pinned at a location in memory in a slab, as we
-/// give pointers to the internal data in the struct, which also contains
-/// referential pointers that need to stay pinned until the I/O is complete
-#[repr(C)]
-struct LoopPacket {
-    msghdr: libc::msghdr,
-    addr: socket2::SockAddrStorage,
-    packet: Option<LoopPacketInner>,
-    io_vec: libc::iovec,
+/// give pointers to the internal data in the struct that need to be stable and
+/// valid until the send is complete
+struct ZcSend {
+    addr: [u8; std::mem::size_of::<libc::sockaddr_in6>()],
+    inner: SendPacket,
 }
 
-impl LoopPacket {
+impl ZcSend {
     #[inline]
-    fn new() -> Self {
+    fn new(inner: SendPacket) -> Self {
         Self {
-            // SAFETY: msghdr is POD
-            msghdr: unsafe { std::mem::zeroed() },
-            packet: None,
-            io_vec: libc::iovec {
-                iov_base: std::ptr::null_mut(),
-                iov_len: 0,
-            },
-            addr: socket2::SockAddrStorage::zeroed(),
+            addr: [0u8; _],
+            inner,
         }
     }
 
     #[inline]
-    fn set_packet(&mut self, mut packet: LoopPacketInner) {
-        match &mut packet {
-            LoopPacketInner::Recv(recv) => {
-                // For receives, the length of the buffer is the total capacity
-                self.io_vec.iov_base = recv.buffer.as_mut_ptr().cast();
-                self.io_vec.iov_len = recv.buffer.capacity();
-            }
-            LoopPacketInner::Send(send) => {
-                // For sends, the length of the buffer is the actual number of initialized bytes,
-                // and note that iov_base is a *mut even though for sends the buffer is not actually
-                // mutated
-                self.io_vec.iov_base = (send.data.as_ptr() as *mut u8).cast();
-                self.io_vec.iov_len = send.data.len();
+    fn set_destination(&mut self) -> u32 {
+        unsafe {
+            match self.inner.destination {
+                std::net::SocketAddr::V4(v4) => {
+                    let addr = &mut *self.addr.as_mut_ptr().cast::<libc::sockaddr_in>();
+                    addr.sin_family = libc::AF_INET as _;
+                    addr.sin_addr.s_addr = v4.ip().to_bits().to_be();
+                    addr.sin_port = v4.port().to_be();
 
-                // SAFETY: both pointers are valid at this point, with the same size
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        send.destination.as_ptr().cast(),
-                        &mut self.addr,
-                        1,
-                    );
+                    std::mem::size_of::<libc::sockaddr_in>() as _
+                }
+                std::net::SocketAddr::V6(v6) => {
+                    let addr = &mut *self.addr.as_mut_ptr().cast::<libc::sockaddr_in6>();
+                    addr.sin6_family = libc::AF_INET6 as _;
+                    addr.sin6_addr.s6_addr = v6.ip().octets();
+                    addr.sin6_port = v6.port().to_be();
+                    addr.sin6_flowinfo = v6.flowinfo();
+                    addr.sin6_scope_id = v6.scope_id();
+
+                    std::mem::size_of::<libc::sockaddr_in6>() as _
                 }
             }
         }
-
-        // Increment the refcount of the buffer to ensure it stays alive for the
-        // duration of the I/O
-        self.packet = Some(packet);
-
-        self.msghdr.msg_iov = std::ptr::addr_of_mut!(self.io_vec);
-        self.msghdr.msg_iovlen = 1;
-        self.msghdr.msg_name = std::ptr::addr_of_mut!(self.addr).cast();
-        self.msghdr.msg_namelen = std::mem::size_of::<socket2::SockAddrStorage>() as _;
-    }
-
-    #[inline]
-    fn finalize_send(mut self) -> SendPacket {
-        let LoopPacketInner::Send(send) = self.packet.take().unwrap() else {
-            unreachable!("finalized a recv packet")
-        };
-
-        send
     }
 }
 
@@ -283,13 +246,10 @@ fn process_packet(
     }
 }
 
-#[inline]
-fn empty_net_addr() -> std::net::SocketAddr {
-    std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
-}
-
 // io-uring keeps many things private which is incredibly tedious
 const IORING_OP_RECVMSG: u8 = 10;
+const IORING_OP_READ: u8 = 22;
+const IORING_OP_SEND_ZC: u8 = 47;
 
 mod flags {
     pub type Enum = u32;
@@ -304,26 +264,18 @@ mod flags {
     ///
     /// This is used for requests that can generate multiple completions, such as multi-shot requests, receive, or accept.
     pub const IORING_CQE_F_MORE: Enum = 1 << 1;
-}
-
-enum Token {
-    /// Packet received
-    Recv { key: usize },
-    /// Packet sent
-    Send { key: usize },
-    /// One or more packets are ready to be sent OR shutdown of the loop is requested
-    PendingSends,
+    /// Set for notification CQEs.
+    /// 
+    /// Can be used to distinct them from sends.
+    pub const IORING_CQE_F_NOTIF: Enum = 1 << 3;
 }
 
 struct LoopCtx<'uring> {
     sq: io_uring::squeue::SubmissionQueue<'uring, Entry>,
     backlog: std::collections::VecDeque<Entry>,
     socket_fd: Fd,
-    /// Packets currently being received or sent in the io-uring loop
-    loop_packets: slab::Slab<LoopPacket>,
-    /// The buffer ring for receives, it's our responsibility to return buffers
-    /// to this when we are done, otherwise we'll get an `-ENOBUFS` error
-    recv_ring: super::ring::BufferRing,
+    /// Packets currently queued for sending
+    queued_sends: slab::Slab<ZcSend>,
     /// The msghdr for receives, for multishot this is only used for the `namelen`
     /// and `controllen` fields, as the kernel will prepend the details for the
     /// individual recvmsg into the buffer itself, followed by the actual payload
@@ -349,7 +301,7 @@ impl<'uring> LoopCtx<'uring> {
     }
 
     #[inline]
-    fn pop_recv(&mut self, cqe: io_uring::cqueue::Entry) -> Option {
+    fn pop_recv<'rb>(&mut self, cqe: io_uring::cqueue::Entry, br: &'rb super::ring::BufferRing) -> Option<RecvPacket<'rb>> {
         let ret = cqe.result();
 
         if ret < 0 {
@@ -360,6 +312,11 @@ impl<'uring> LoopCtx<'uring> {
 
         let flags = cqe.flags();
 
+        // Requeue the recv if needed
+        if flags & flags::IORING_CQE_F_MORE == 0 {
+            self.enqueue_recvmsg();
+        }
+
         // This _should_ theoretically never happen
         if flags & flags::IORING_CQE_F_BUFFER == 0 {
             tracing::error!("failed to receive packet, a buffer was not selected");
@@ -368,7 +325,7 @@ impl<'uring> LoopCtx<'uring> {
 
         let buffer_id = (flags >> 16) as u16;
 
-        let mut rb = self.recv_ring.dequeue(buffer_id);
+        let mut rb = br.dequeue(buffer_id);
         let addr = match rb.extract(ret as _, &self.recv_hdr) {
             Ok(addr) => addr,
             Err(error) => {
@@ -377,10 +334,10 @@ impl<'uring> LoopCtx<'uring> {
             }
         };
 
-        // Requeue the recv if needed
-        if flags & flags::IORING_CQE_F_MORE == 0 {
-            self.enqueue_recvmsg();
-        }
+        Some(RecvPacket {
+            buffer: rb,
+            source: addr,
+        })
     }
 
     /// Enqueues a `send_to` on the socket
@@ -388,7 +345,7 @@ impl<'uring> LoopCtx<'uring> {
     fn enqueue_send(&mut self, packet: SendPacket) {
         // We rely on sends using state with stable addresses, but realistically we should
         // never be at capacity
-        if self.loop_packets.capacity() - self.loop_packets.len() == 0 {
+        if self.queued_sends.capacity() - self.queued_sends.len() == 0 {
             metrics::errors_total(
                 metrics::WRITE,
                 "io-uring packet send slab is at capacity",
@@ -397,20 +354,36 @@ impl<'uring> LoopCtx<'uring> {
             return;
         }
 
-        let (key, msghdr) = {
-            let entry = self.loop_packets.vacant_entry();
+        let entry = {
+            let entry = self.queued_sends.vacant_entry();
             let key = entry.key();
-            let pp = entry.insert(LoopPacket::new());
-            pp.set_packet(LoopPacketInner::Send(packet));
-            (key, std::ptr::addr_of!(pp.msghdr))
+            let zs = entry.insert(ZcSend::new(packet));
+            let addr_len = zs.set_destination();
+
+            assert!(key < 0xff00000000000000);
+
+            let token = (IORING_OP_SEND_ZC as u64) << 56 | key as u64;
+
+            io_uring::opcode::SendZc::new(self.socket_fd, zs.inner.data.as_ptr(), zs.inner.data.len() as _)
+                .dest_addr(zs.addr.as_ptr().cast())
+                .dest_addr_len(addr_len)
+                .build()
+                .user_data(token)
         };
 
-        let token = self.tokens.insert(Token::Send { key });
         self.push(
-            io_uring::opcode::SendMsg::new(self.socket_fd, msghdr)
-                .build()
-                .user_data(token as _),
+            entry
         );
+    }
+
+    #[inline]
+    fn pop_send(&mut self, key: usize) -> Option<SendPacket> {
+        self.queued_sends.try_remove(key).map(|zs| zs.inner)
+    }
+
+    #[inline]
+    fn get_send(&self, key: usize) -> Option<&SendPacket> {
+        self.queued_sends.get(key).map(|zs| &zs.inner)
     }
 
     /// For now we have a backlog, but this would basically mean that we are receiving
@@ -438,12 +411,6 @@ impl<'uring> LoopCtx<'uring> {
         }
 
         Ok(())
-    }
-
-    #[inline]
-    fn push_with_token(&mut self, entry: Entry, token: Token) {
-        let token = self.tokens.insert(token);
-        self.push(entry.user_data(token as _));
     }
 
     #[inline]
@@ -481,7 +448,6 @@ impl IoUringLoop {
         thread_name: String,
         mut ctx: PacketProcessorCtx,
         pending_sends: PacketQueue,
-        buffer_pool: Arc<crate::collections::BufferPool>,
         mut filter_chain: CachedFilterChain,
     ) -> Result<(), PipelineError> {
         let dispatcher = tracing::dispatcher::get_default(|d| d.clone());
@@ -489,18 +455,17 @@ impl IoUringLoop {
         let socket = self.socket;
         let concurrent_sends = self.concurrent_sends;
 
-        let mut ring = io_uring::IoUring::builder()
+        let mut ring = io_uring::IoUring::<io_uring::squeue::Entry, io_uring::cqueue::Entry>::builder()
             .setup_cqsize(self.concurrent_sends)
             .build(self.concurrent_sends >> 1)?;
 
         let mut pending_sends_event = pending_sends.1;
         let pending_sends = pending_sends.0;
 
-        let mut rb = super::ring::BufferRing::new(
+        let rb = super::ring::BufferRing::new(
             concurrent_sends as u16,
             // we only deal with non-fragmented UDP with a presumed MTU of 1500, though we also need to account for the extra metadata for multishot recvmsg, so just round up to the next power of 2
             2048,
-            BUFFER_RING,
         )
         .map_err(|err| std::io::Error::other(err))?;
 
@@ -509,6 +474,8 @@ impl IoUringLoop {
             .spawn(move || {
                 crate::metrics::game_traffic_tasks().inc();
                 let _guard = tracing::dispatcher::set_default(&dispatcher);
+
+                let queued_sends = slab::Slab::with_capacity(concurrent_sends as usize);
 
                 // Just double buffer the pending writes for simplicity
                 let mut double_pending_sends = Vec::with_capacity(pending_sends.capacity());
@@ -526,7 +493,7 @@ impl IoUringLoop {
                     sq,
                     socket_fd: socket.raw_fd(),
                     backlog: Default::default(),
-                    recv_ring: rb,
+                    queued_sends,
                     recv_hdr: libc::msghdr {
                         // Reserve space for up to an IPv6 socket address, if we get
                         // an IPv4 address it will 0 fill the remaining 8 bytes
@@ -542,15 +509,15 @@ impl IoUringLoop {
                 // SAFETY: we ensure the buffer ring lives as long as the io ring itself
                 unsafe {
                     submitter.register_buf_ring_with_flags(
-                        loop_ctx.recv_ring.mmap.buf as u64,
-                        loop_ctx.recv_ring.count,
+                        rb.mmap.buf as u64,
+                        rb.count,
                         BUFFER_RING,
                         0 /* https://man.archlinux.org/man/extra/liburing/io_uring_register_buf_ring.3.en#IOU_PBUF_RING_INC is the only suppported flag */,
-                    )
+                    ).expect("failed to register buffer ring")
                 };
 
                 loop_ctx.enqueue_recvmsg();
-                loop_ctx.push_with_token(pending_sends_event.io_uring_entry(), Token::PendingSends);
+                loop_ctx.push(pending_sends_event.io_uring_entry().user_data((IORING_OP_READ as u64) << 56));
 
                 // Sync always needs to be called when entries have been pushed
                 // onto the submission queue for the loop to actually function (ie, similar to await on futures)
@@ -578,55 +545,80 @@ impl IoUringLoop {
                         break 'io;
                     }
 
-                    let filters = filter_chain.load();
+                    {
+                        let filters = filter_chain.load();
+                        let mut re = rb.enqueue();
 
-                    // Now actually process all of the completed io requests
-                    for cqe in &mut cq {
-                        let ud = cqe.user_data();
+                        // Now actually process all of the completed io requests
+                        for cqe in &mut cq {
+                            let ud = cqe.user_data();
 
-                        let op = (ud >> 56) as u8;
-                        match token {
-                            IORING_OP_RECVMSG => {
-                                if let Some(packet) = loop_ctx.pop_recv(cqe) {
+                            let op = (ud >> 56) as u8;
+                            match op {
+                                IORING_OP_RECVMSG => {
+                                    let Some(packet) = loop_ctx.pop_recv(cqe, &rb) else { continue; };
+
+                                    let id = packet.buffer.id();
+                                    
                                     process_packet(&mut ctx, filters, packet, &mut last_received_at);
-                                    loop_ctx.enqueue_recv(buffer_pool.clone().alloc());
+                                    
+                                    // The process will copy the packet data into a separate buffer if it is being forwarded
+                                    // to another destination, so we can return the buffer back to the ring at this point
+                                    // to be available for receiving new packets
+                                    re.enqueue_by_id(id);
                                 }
-                            }
-                            Token::PendingSends => {
-                                double_pending_sends = pending_sends.swap(double_pending_sends);
-                                loop_ctx.push_with_token(
-                                    pending_sends_event.io_uring_entry(),
-                                    Token::PendingSends,
-                                );
+                                IORING_OP_READ => {
+                                    double_pending_sends = pending_sends.swap(double_pending_sends);
+                                    loop_ctx.push(
+                                        pending_sends_event.io_uring_entry().user_data((IORING_OP_READ as u64) << 56)
+                                    );
 
-                                for pending in
-                                    double_pending_sends.drain(0..double_pending_sends.len())
-                                {
-                                    loop_ctx.enqueue_send(pending);
+                                    for pending in
+                                        double_pending_sends.drain(0..double_pending_sends.len())
+                                    {
+                                        loop_ctx.enqueue_send(pending);
+                                    }
                                 }
-                            }
-                            Token::Send { key } => {
-                                let packet = loop_ctx.pop_packet(key).finalize_send();
-                                let asn_info = packet.asn_info.as_ref().into();
+                                IORING_OP_SEND_ZC => {
+                                    let flags = cqe.flags();
 
-                                if ret < 0 {
-                                    let source =
-                                        std::io::Error::from_raw_os_error(-ret).to_string();
-                                    metrics::errors_total(send_dir, &source, &asn_info).inc();
-                                    metrics::packets_dropped_total(send_dir, &source, &asn_info)
-                                        .inc();
-                                } else if ret as usize != packet.data.len() {
-                                    metrics::packets_total(send_dir, &asn_info).inc();
-                                    metrics::errors_total(
-                                        send_dir,
-                                        "sent bytes != packet length",
-                                        &asn_info,
-                                    )
-                                    .inc();
-                                } else {
-                                    metrics::packets_total(send_dir, &asn_info).inc();
-                                    metrics::bytes_total(send_dir, &asn_info).inc_by(ret as u64);
+                                    if flags & flags::IORING_CQE_F_NOTIF == 0 {
+                                        let ret = cqe.result();
+
+                                        let Some(zs) = loop_ctx.get_send((ud & 0x00ffffffffffffff) as usize) else {
+                                            tracing::error!("could not find associated metrics data for send completion");
+                                            continue;
+                                        };
+
+                                        let asn_info = zs.asn_info.as_ref().into();
+
+                                        if ret < 0 {
+                                            let source =
+                                                std::io::Error::from_raw_os_error(-ret).to_string();
+                                            metrics::errors_total(send_dir, &source, &asn_info).inc();
+                                            metrics::packets_dropped_total(send_dir, &source, &asn_info)
+                                                .inc();
+                                        } else if ret as usize != zs.data.len() {
+                                            metrics::packets_total(send_dir, &asn_info).inc();
+                                            metrics::errors_total(
+                                                send_dir,
+                                                "sent bytes != packet length",
+                                                &asn_info,
+                                            )
+                                            .inc();
+                                        } else {
+                                            metrics::packets_total(send_dir, &asn_info).inc();
+                                            metrics::bytes_total(send_dir, &asn_info).inc_by(ret as u64);
+                                        }
+                                    }
+
+                                    if flags & flags::IORING_CQE_F_MORE == 0 {
+                                        if loop_ctx.pop_send((ud & 0x00ffffffffffffff) as usize).is_none() {
+                                            tracing::error!("could not find associated data for send completion notification");
+                                        }
+                                    }
                                 }
+                                _ => unreachable!(),
                             }
                         }
                     }
@@ -654,14 +646,12 @@ impl SessionPool {
         let _thread_span = uring_span!(tracing::debug_span!("session", id).or_current());
 
         let io_loop =
-            IoUringLoop::new(2048, crate::net::DualStackLocalSocket::from_raw(raw_socket))?;
-        let buffer_pool = pool.buffer_pool.clone();
+            IoUringLoop::new(64, crate::net::DualStackLocalSocket::from_raw(raw_socket))?;
 
         io_loop.spawn_io_loop(
             format!("session-{id}"),
             PacketProcessorCtx::SessionPool { pool, port },
             pending_sends,
-            buffer_pool,
             filter_chain,
         )
     }

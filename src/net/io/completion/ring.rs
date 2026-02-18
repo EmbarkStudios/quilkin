@@ -1,9 +1,9 @@
 use std::{
-    io, mem, net, ptr,
+    mem, net,
     sync::atomic::{AtomicU16, Ordering},
 };
 
-struct Mmap {
+pub(super) struct Mmap {
     pub(super) buf: *mut u8,
     len: usize,
 }
@@ -52,11 +52,11 @@ pub struct BufferRing {
     pub(super) count: u16,
     /// The mask to determine the offset within the ring regardless of the index
     mask: u16,
-    /// The group id of this ring buffer used to distinguish it from other buffer groups
-    pub group_id: u16,
     /// The backing mmap
     pub(super) mmap: Mmap,
 }
+
+unsafe impl Send for BufferRing {}
 
 #[inline]
 const fn ring_size(count: u16, length: usize) -> usize {
@@ -64,7 +64,7 @@ const fn ring_size(count: u16, length: usize) -> usize {
 }
 
 impl BufferRing {
-    pub fn new(count: u16, length: u16, group_id: u16) -> eyre::Result<Self> {
+    pub fn new(count: u16, length: u16) -> eyre::Result<Self> {
         eyre::ensure!(
             count.is_power_of_two() && length.is_power_of_two(),
             "count and length must be powers of 2"
@@ -94,7 +94,6 @@ impl BufferRing {
                 mask: count - 1,
                 length,
                 count,
-                group_id,
             };
 
             // Mark all buffers in the ring as available for I/O
@@ -118,31 +117,6 @@ impl BufferRing {
         }
     }
 
-    // /// Register this ring buffer with the io_uring context
-    // #[inline]
-    // pub fn register(&self, fd: std::os::fd::RawFd) -> Result<(), skur_libc::error::Error> {
-    //     let reg = crate::kernel::io_uring_buf_reg {
-    //         ring_addr: self.buffers as u64,
-    //         ring_entries: self.count as _,
-    //         bgid: self.group_id,
-    //         ..Default::default()
-    //     };
-
-    //     crate::kernel::io_uring_register(fd, crate::kernel::RegisterOp::RegisterRing(&reg))
-    //         .map(|_| ())
-    // }
-
-    // #[inline]
-    // pub fn unregister(&self, fd: std::os::fd::RawFd) -> Result<(), skur_libc::error::Error> {
-    //     let reg = crate::kernel::io_uring_buf_reg {
-    //         bgid: self.group_id,
-    //         ..Default::default()
-    //     };
-
-    //     crate::kernel::io_uring_register(fd, crate::kernel::RegisterOp::UnregisterRing(&reg))
-    //         .map(|_| ())
-    // }
-
     /// Gets a buffer from the ring
     #[inline]
     pub fn dequeue(&self, id: u16) -> RingBuffer<'_> {
@@ -154,7 +128,6 @@ impl BufferRing {
                 ),
                 head: 0,
                 tail: 0,
-                group_id: self.group_id,
                 buf_id: id,
             }
         }
@@ -175,25 +148,13 @@ pub struct BufferRingEnqueuer<'br> {
 }
 
 impl<'br> BufferRingEnqueuer<'br> {
-    /// Returns the buffer to the ring, allowing it to be used for I/O
+    /// Returns the specified buffer id to the ring
     #[inline]
-    pub fn enqueue(&mut self, buf: RingBuffer<'br>) {
-        debug_assert_eq!(buf.group_id, self.inner.group_id);
-
+    pub fn enqueue_by_id(&mut self, id: u16) {
         unsafe {
             let next = &mut *self.inner.ring.add((self.tail & self.inner.mask) as usize);
-            next.addr = buf.buf.as_ptr() as u64;
-
-            #[cfg(debug_assertions)]
-            {
-                assert_eq!(
-                    buf.buf_id,
-                    (buf.buf.as_ptr().offset_from_unsigned(self.inner.buffers) / self.inner.length)
-                        as u16
-                );
-            }
-
-            next.bid = buf.buf_id;
+            next.addr = self.inner.buffers.byte_add(id as usize * self.inner.length) as u64;
+            next.bid = id;
         }
 
         self.tail = self.tail.wrapping_add(1);
@@ -210,7 +171,6 @@ pub struct RingBuffer<'ring> {
     buf: &'ring mut [u8],
     head: usize,
     tail: usize,
-    group_id: u16,
     buf_id: u16,
 }
 
@@ -236,7 +196,7 @@ impl RingBuffer<'_> {
             );
 
             // First 2 bytes are the address family
-            let family = self.buf[0] as u16 | (self.buf[1] as u16) << 8;
+            let family = self.buf[RECV_OUT] as u16 | (self.buf[RECV_OUT + 1] as u16) << 8;
 
             let addr = match family {
                 2 /*libc::AF_INET*/ => {
@@ -263,18 +223,11 @@ impl RingBuffer<'_> {
         }
     }
 
-    // #[inline]
-    // pub fn read<T: plain::Plain>(&self, offset: usize) -> Option<T> {
-    //     if offset + std::mem::size_of::<T>() <= self.buf.len() {
-    //         unsafe {
-    //             Some(std::ptr::read_unaligned(
-    //                 self.buf.as_ptr().byte_add(offset).cast(),
-    //             ))
-    //         }
-    //     } else {
-    //         None
-    //     }
-    // }
+    /// The identifier for this buffer within its owning ring
+    #[inline]
+    pub fn id(&self) -> u16 {
+        self.buf_id
+    }
 }
 
 impl crate::net::PacketMut for RingBuffer<'_> {
@@ -325,6 +278,7 @@ impl crate::net::PacketMut for RingBuffer<'_> {
         }
     }
 
+    #[inline]
     fn extend_tail(&mut self, bytes: &[u8]) {
         unsafe {
             let max = (self.buf.len() - self.tail).min(bytes.len());
@@ -337,32 +291,36 @@ impl crate::net::PacketMut for RingBuffer<'_> {
         }
     }
 
+    #[inline]
     fn remove_head(&mut self, length: usize) {
         self.head = (self.head + length).min(self.buf.len());
         self.tail = self.tail.max(self.head);
     }
 
+    #[inline]
     fn remove_tail(&mut self, length: usize) {
         self.tail = self.tail.saturating_sub(length);
         self.head = self.head.min(self.tail);
     }
 
-    type FrozenPacket = Self;
-
-    fn freeze(self) -> Self::FrozenPacket {
-        self
+    #[inline]
+    fn freeze(self) -> bytes::Bytes {
+        bytes::Bytes::copy_from_slice(&self.buf[self.head..self.tail])
     }
 }
 
 impl crate::net::Packet for RingBuffer<'_> {
+    #[inline]
     fn as_slice(&self) -> &[u8] {
         &self.buf[self.head..self.tail]
     }
 
+    #[inline]
     fn is_empty(&self) -> bool {
-        self.head == self.tail
+        self.tail - self.head == 0
     }
 
+    #[inline]
     fn len(&self) -> usize {
         self.tail - self.head
     }

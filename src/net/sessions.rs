@@ -26,12 +26,11 @@ use tokio::time::Instant;
 
 use crate::{
     Loggable,
-    collections::{BufferPool, FrozenPoolBuffer, PoolBuffer},
     config::filter::CachedFilterChain,
     filters::Filter,
     metrics,
     net::{
-        PacketQueueSender,
+        PacketMut, PacketQueueSender,
         maxmind_db::{IpNetEntry, MetricsIpNetEntry},
         queue::SendPacket,
     },
@@ -47,8 +46,7 @@ pub type SessionMap = crate::collections::ttl::TtlMap<SessionKey, Session>;
 /// Responsible for managing sending processed traffic to its destination and
 /// tracking metrics and other information about the session.
 pub trait SessionManager {
-    type Packet: crate::filters::Packet;
-    fn send(&self, key: SessionKey, contents: &Self::Packet) -> Result<(), super::PipelineError>;
+    fn send(&self, key: SessionKey, contents: bytes::Bytes) -> Result<(), super::PipelineError>;
 }
 
 #[derive(PartialEq, Eq, Hash)]
@@ -93,7 +91,6 @@ pub struct SessionPool {
     ports_to_sockets: RwLock<HashMap<u16, PacketQueueSender>>,
     storage: Arc<RwLock<SocketStorage>>,
     session_map: SessionMap,
-    pub(super) buffer_pool: Arc<BufferPool>,
     downstream_sends: Vec<PacketQueueSender>,
     downstream_index: atomic::AtomicUsize,
     cached_filter_chain: CachedFilterChain,
@@ -114,7 +111,6 @@ impl SessionPool {
     /// to release their sockets back to the parent.
     pub fn new(
         downstream_sends: Vec<PacketQueueSender>,
-        buffer_pool: Arc<BufferPool>,
         cached_filter_chain: CachedFilterChain,
     ) -> Arc<Self> {
         const SESSION_TIMEOUT_SECONDS: Duration = Duration::from_secs(60);
@@ -124,7 +120,6 @@ impl SessionPool {
             ports_to_sockets: <_>::default(),
             storage: <_>::default(),
             session_map: SessionMap::new(SESSION_TIMEOUT_SECONDS, SESSION_EXPIRY_POLL_INTERVAL),
-            buffer_pool,
             downstream_sends,
             downstream_index: atomic::AtomicUsize::new(0),
             cached_filter_chain,
@@ -160,7 +155,7 @@ impl SessionPool {
 
     pub(crate) fn process_received_upstream_packet(
         self: &Arc<Self>,
-        packet: PoolBuffer,
+        packet: impl PacketMut,
         mut recv_addr: SocketAddr,
         port: u16,
         last_received_at: &mut Option<UtcTimestamp>,
@@ -330,11 +325,11 @@ impl SessionPool {
     }
 
     /// Processes a packet that is received by this session.
-    fn process_recv_packet(
+    fn process_recv_packet<P: PacketMut>(
         source: SocketAddr,
         dest: SocketAddr,
         asn_info: Option<MetricsIpNetEntry>,
-        packet: PoolBuffer,
+        packet: P,
         filters: &crate::filters::FilterChain,
     ) -> Result<SendPacket, (Option<MetricsIpNetEntry>, Error)> {
         tracing::trace!(%source, %dest, length = packet.len(), "received packet from upstream");
@@ -362,17 +357,18 @@ impl SessionPool {
     pub fn send(
         self: &Arc<Self>,
         key: SessionKey,
-        packet: FrozenPoolBuffer,
+        packet: bytes::Bytes,
     ) -> Result<(), super::PipelineError> {
         self.send_inner(key, packet)?;
         Ok(())
     }
 
+    /// A separate function for a unit test below
     #[inline]
     fn send_inner(
         self: &Arc<Self>,
         key: SessionKey,
-        packet: FrozenPoolBuffer,
+        packet: bytes::Bytes,
     ) -> Result<PacketQueueSender, super::PipelineError> {
         let (asn_info, sender) = self.get(key)?;
 
@@ -442,10 +438,8 @@ impl SessionPool {
 }
 
 impl SessionManager for Arc<SessionPool> {
-    type Packet = FrozenPoolBuffer;
-
-    fn send(&self, key: SessionKey, contents: &Self::Packet) -> Result<(), super::PipelineError> {
-        SessionPool::send(self, key, contents.clone())
+    fn send(&self, key: SessionKey, contents: bytes::Bytes) -> Result<(), super::PipelineError> {
+        SessionPool::send(self, key, contents)
     }
 }
 
@@ -556,18 +550,14 @@ impl Loggable for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test::{AddressType, TestHelper, alloc_buffer, available_addr};
+    use crate::test::{AddressType, TestHelper, available_addr};
     use std::sync::Arc;
 
     async fn new_pool() -> (Arc<SessionPool>, PacketQueueSender) {
         let (pending_sends, _srecv) = crate::net::queue(1).unwrap();
         let fake = crate::config::filter::FilterChainConfig::default();
         (
-            SessionPool::new(
-                vec![pending_sends.clone()],
-                Arc::new(BufferPool::default()),
-                fake.cached(),
-            ),
+            SessionPool::new(vec![pending_sends.clone()], fake.cached()),
             pending_sends,
         )
     }
@@ -727,7 +717,9 @@ mod tests {
         let key: SessionKey = (source, dest).into();
         let msg = b"helloworld";
 
-        let pending = pool.send_inner(key, alloc_buffer(msg).freeze()).unwrap();
+        let pending = pool
+            .send_inner(key, bytes::Bytes::from_static(msg))
+            .unwrap();
         let pending = pending.swap(Vec::new());
 
         assert_eq!(msg, &*pending[0].data);
