@@ -39,8 +39,6 @@ trace_test!(server, {
             .0
             .expect("should get a packet")
     );
-
-    panic!("oh no");
 });
 
 trace_test!(client, {
