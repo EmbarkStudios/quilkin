@@ -342,7 +342,7 @@ impl SessionPool {
 
         Ok(SendPacket {
             data: context.contents.freeze(),
-            destination: dest.into(),
+            destination: dest,
             asn_info,
         })
     }
@@ -373,7 +373,7 @@ impl SessionPool {
         let (asn_info, sender) = self.get(key)?;
 
         sender.push(SendPacket {
-            destination: key.dest.into(),
+            destination: key.dest,
             data: packet,
             asn_info,
         });

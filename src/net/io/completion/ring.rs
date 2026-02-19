@@ -10,6 +10,7 @@ pub(super) struct Mmap {
 
 impl Mmap {
     fn anonymous(len: usize) -> eyre::Result<Self> {
+        // SAFETY: syscall, we check errors
         unsafe {
             let mmap = libc::mmap(
                 std::ptr::null_mut(),
@@ -33,6 +34,7 @@ impl Mmap {
 
 impl Drop for Mmap {
     fn drop(&mut self) {
+        // SAFETY: syscall, the inputs are valid
         unsafe {
             libc::munmap(self.buf.cast(), self.len);
         }
@@ -56,6 +58,7 @@ pub struct BufferRing {
     pub(super) mmap: Mmap,
 }
 
+// SAFETY: the pointers live as long as the owned mmap
 unsafe impl Send for BufferRing {}
 
 #[inline]
@@ -75,6 +78,7 @@ impl BufferRing {
         let size = ring_size(count, length);
         let mmap = Mmap::anonymous(size)?;
 
+        // SAFETY: we've sized the mmap appopriately
         unsafe {
             let ring = mmap.buf.cast();
             let buffers = mmap
@@ -120,6 +124,7 @@ impl BufferRing {
     /// Gets a buffer from the ring
     #[inline]
     pub fn dequeue(&self, id: u16) -> RingBuffer<'_> {
+        // SAFETY: the backing mmap lives as long as Self
         unsafe {
             RingBuffer {
                 buf: std::slice::from_raw_parts_mut(
@@ -151,6 +156,7 @@ impl<'br> BufferRingEnqueuer<'br> {
     /// Returns the specified buffer id to the ring
     #[inline]
     pub fn enqueue_by_id(&mut self, id: u16) {
+        // SAFETY: the backing mmap lives as long as the BufferRing itself
         unsafe {
             let next = &mut *self.inner.ring.add((self.tail & self.inner.mask) as usize);
             next.addr = self.inner.buffers.byte_add(id as usize * self.inner.length) as u64;
@@ -184,6 +190,7 @@ impl RingBuffer<'_> {
             "not enough space for io_uring_recvmsg_out"
         );
 
+        // SAFETY: we ensure we don't read outside of the bounds
         unsafe {
             let out = self
                 .buf
@@ -236,6 +243,7 @@ impl crate::net::PacketMut for RingBuffer<'_> {
         // If the head is already above the base and has enough space we can
         // just shift it down and copy over the bytes
         if self.head >= bytes.len() {
+            // SAFETY: we ensure the copy stays within bounds
             unsafe {
                 self.head -= bytes.len();
 
@@ -246,7 +254,7 @@ impl crate::net::PacketMut for RingBuffer<'_> {
                 );
             }
         } else {
-            // Otherwise we need to shift up the current bytes before prepending
+            // SAFETY: we ensure the copy stays within bounds
             unsafe {
                 let start = if self.head > 0 {
                     let start = self.head;
@@ -284,6 +292,7 @@ impl crate::net::PacketMut for RingBuffer<'_> {
 
     #[inline]
     fn extend_tail(&mut self, bytes: &[u8]) {
+        // SAFETY: we ensure the copy stays within bounds
         unsafe {
             let max = (self.buf.len() - self.tail).min(bytes.len());
             std::ptr::copy_nonoverlapping(
@@ -392,6 +401,7 @@ mod ring_buffer {
 
         let mut cursor = 0;
 
+        // SAFETY: just a test, chill
         unsafe {
             {
                 let out = &mut *storage
@@ -460,6 +470,7 @@ mod ring_buffer {
                 (RECV_OUT + V6 + count) as u32,
                 &libc::msghdr {
                     msg_namelen: V6 as _,
+                    // SAFETY: POD
                     ..unsafe { std::mem::zeroed() }
                 },
             )

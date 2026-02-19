@@ -166,6 +166,7 @@ impl ZcSend {
 
     #[inline]
     fn set_destination(&mut self) -> u32 {
+        // SAFETY: buffer manipulation, the buffer is large enough for an ipv4 or ipv6 address
         unsafe {
             match self.inner.destination {
                 std::net::SocketAddr::V4(v4) => {
@@ -173,6 +174,8 @@ impl ZcSend {
                     addr.sin_family = libc::AF_INET as _;
                     addr.sin_addr.s_addr = v4.ip().to_bits().to_be();
                     addr.sin_port = v4.port().to_be();
+
+                    // We initialized the backing array with 0 so no need to 0-fill
 
                     std::mem::size_of::<libc::sockaddr_in>() as _
                 }
@@ -257,15 +260,15 @@ mod flags {
     /// If set, the upper 16 bits of the flags field carries the buffer ID that was chosen for this request.
     ///
     /// The request must have been issued with `IOSQE_BUFFER_SELECT` set, and used with a request type that supports
-    /// buffer selection. Additionally, buffers must have been provided upfront either via the IORING_OP_PROVIDE_BUFFERS
-    /// or the IORING_REGISTER_PBUF_RING methods.
+    /// buffer selection. Additionally, buffers must have been provided upfront either via the `IORING_OP_PROVIDE_BUFFERS`
+    /// or the `IORING_REGISTER_PBUF_RING` methods.
     pub const IORING_CQE_F_BUFFER: Enum = 1 << 0;
     /// If set, the application should expect more completions from the request.
     ///
     /// This is used for requests that can generate multiple completions, such as multi-shot requests, receive, or accept.
     pub const IORING_CQE_F_MORE: Enum = 1 << 1;
     /// Set for notification CQEs.
-    /// 
+    ///
     /// Can be used to distinct them from sends.
     pub const IORING_CQE_F_NOTIF: Enum = 1 << 3;
 }
@@ -301,7 +304,11 @@ impl<'uring> LoopCtx<'uring> {
     }
 
     #[inline]
-    fn pop_recv<'rb>(&mut self, cqe: io_uring::cqueue::Entry, br: &'rb super::ring::BufferRing) -> Option<RecvPacket<'rb>> {
+    fn pop_recv<'rb>(
+        &mut self,
+        cqe: io_uring::cqueue::Entry,
+        br: &'rb super::ring::BufferRing,
+    ) -> Option<RecvPacket<'rb>> {
         let ret = cqe.result();
 
         if ret < 0 {
@@ -364,16 +371,18 @@ impl<'uring> LoopCtx<'uring> {
 
             let token = (IORING_OP_SEND_ZC as u64) << 56 | key as u64;
 
-            io_uring::opcode::SendZc::new(self.socket_fd, zs.inner.data.as_ptr(), zs.inner.data.len() as _)
-                .dest_addr(zs.addr.as_ptr().cast())
-                .dest_addr_len(addr_len)
-                .build()
-                .user_data(token)
+            io_uring::opcode::SendZc::new(
+                self.socket_fd,
+                zs.inner.data.as_ptr(),
+                zs.inner.data.len() as _,
+            )
+            .dest_addr(zs.addr.as_ptr().cast())
+            .dest_addr_len(addr_len)
+            .build()
+            .user_data(token)
         };
 
-        self.push(
-            entry
-        );
+        self.push(entry);
     }
 
     #[inline]
@@ -455,9 +464,10 @@ impl IoUringLoop {
         let socket = self.socket;
         let concurrent_sends = self.concurrent_sends;
 
-        let mut ring = io_uring::IoUring::<io_uring::squeue::Entry, io_uring::cqueue::Entry>::builder()
-            .setup_cqsize(self.concurrent_sends)
-            .build(self.concurrent_sends >> 1)?;
+        let mut ring =
+            io_uring::IoUring::<io_uring::squeue::Entry, io_uring::cqueue::Entry>::builder()
+                .setup_cqsize(self.concurrent_sends)
+                .build(self.concurrent_sends >> 1)?;
 
         let mut pending_sends_event = pending_sends.1;
         let pending_sends = pending_sends.0;
@@ -467,7 +477,7 @@ impl IoUringLoop {
             // we only deal with non-fragmented UDP with a presumed MTU of 1500, though we also need to account for the extra metadata for multishot recvmsg, so just round up to the next power of 2
             2048,
         )
-        .map_err(|err| std::io::Error::other(err))?;
+        .map_err(std::io::Error::other)?;
 
         std::thread::Builder::new()
             .name(thread_name)
@@ -502,6 +512,7 @@ impl IoUringLoop {
                         // explicit here for clarity as it is the only other relevant field
                         // for multishot recvmsg
                         msg_controllen: 0,
+                        // SAFETY: POD
                         ..unsafe { std::mem::zeroed() }
                     },
                 };
@@ -513,7 +524,7 @@ impl IoUringLoop {
                         rb.count,
                         BUFFER_RING,
                         0 /* https://man.archlinux.org/man/extra/liburing/io_uring_register_buf_ring.3.en#IOU_PBUF_RING_INC is the only suppported flag */,
-                    ).expect("failed to register buffer ring")
+                    ).expect("failed to register buffer ring");
                 };
 
                 loop_ctx.enqueue_recvmsg();
@@ -559,9 +570,9 @@ impl IoUringLoop {
                                     let Some(packet) = loop_ctx.pop_recv(cqe, &rb) else { continue; };
 
                                     let id = packet.buffer.id();
-                                    
+
                                     process_packet(&mut ctx, filters, packet, &mut last_received_at);
-                                    
+
                                     // The process will copy the packet data into a separate buffer if it is being forwarded
                                     // to another destination, so we can return the buffer back to the ring at this point
                                     // to be available for receiving new packets
@@ -612,10 +623,8 @@ impl IoUringLoop {
                                         }
                                     }
 
-                                    if flags & flags::IORING_CQE_F_MORE == 0 {
-                                        if loop_ctx.pop_send((ud & 0x00ffffffffffffff) as usize).is_none() {
-                                            tracing::error!("could not find associated data for send completion notification");
-                                        }
+                                    if flags & flags::IORING_CQE_F_MORE == 0 && loop_ctx.pop_send((ud & 0x00ffffffffffffff) as usize).is_none() {
+                                        tracing::error!("could not find associated data for send completion notification");
                                     }
                                 }
                                 _ => unreachable!(),
@@ -645,8 +654,7 @@ impl SessionPool {
         let id = SESSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let _thread_span = uring_span!(tracing::debug_span!("session", id).or_current());
 
-        let io_loop =
-            IoUringLoop::new(64, crate::net::DualStackLocalSocket::from_raw(raw_socket))?;
+        let io_loop = IoUringLoop::new(64, crate::net::DualStackLocalSocket::from_raw(raw_socket))?;
 
         io_loop.spawn_io_loop(
             format!("session-{id}"),
