@@ -41,7 +41,7 @@ spec:
             - name: xonotic
               image: us-docker.pkg.dev/agones-images/examples/xonotic-example:1.2
             - name: quilkin
-              image: us-docker.pkg.dev/quilkin/release/quilkin:0.9.0
+              image: ghcr.io/embarkstudios/quilkin:0.10.0-3d8eaef
               args:
                 - --service.udp
                 - --service.udp.port=26001
