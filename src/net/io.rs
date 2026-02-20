@@ -47,5 +47,4 @@ pub struct Listener {
     pub port: u16,
     pub config: Arc<Config>,
     pub sessions: Arc<crate::net::sessions::SessionPool>,
-    pub buffer_pool: Arc<crate::collections::BufferPool>,
 }

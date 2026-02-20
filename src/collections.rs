@@ -16,10 +16,6 @@
 
 //! Collection types designed for use with Quilkin.
 
-pub mod pool;
 pub mod ttl;
 
-pub use self::{
-    pool::{BufferPool, FrozenPoolBuffer, PoolBuffer},
-    ttl::TtlMap,
-};
+pub use self::ttl::TtlMap;

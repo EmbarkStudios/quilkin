@@ -4000,6 +4000,7 @@ dependencies = [
 name = "qt"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "etherparse",
  "insta",
  "once_cell",

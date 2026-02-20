@@ -49,14 +49,55 @@ pub trait Packet: Sized {
 /// Representation of an mutable set of bytes pulled from the network, this trait
 /// provides an abstraction over however the packet was received (epoll, io-uring, xdp)
 pub trait PacketMut: Sized + Packet {
-    type FrozenPacket: Packet;
+    /// Truncates the head by the specified number of bytes
     fn remove_head(&mut self, length: usize);
+    /// Truncates the tail by the specified number of bytes
     fn remove_tail(&mut self, length: usize);
+    /// Prepend the specified bytes
     fn extend_head(&mut self, bytes: &[u8]);
+    /// Append the specified bytes
     fn extend_tail(&mut self, bytes: &[u8]);
     /// Returns an immutable version of the packet, this allows certain types
     /// return a type that can be more cheaply cloned and shared.
-    fn freeze(self) -> Self::FrozenPacket;
+    fn freeze(self) -> bytes::Bytes;
+}
+
+impl PacketMut for bytes::BytesMut {
+    fn remove_head(&mut self, length: usize) {
+        drop(self.split_to(length));
+    }
+
+    fn extend_head(&mut self, bytes: &[u8]) {
+        let rest = self.split();
+        self.extend_from_slice(bytes);
+        self.unsplit(rest);
+    }
+
+    fn extend_tail(&mut self, bytes: &[u8]) {
+        self.extend_from_slice(bytes);
+    }
+
+    fn remove_tail(&mut self, length: usize) {
+        self.truncate(self.len().saturating_sub(length));
+    }
+
+    fn freeze(self) -> bytes::Bytes {
+        self.freeze()
+    }
+}
+
+impl Packet for bytes::BytesMut {
+    fn as_slice(&self) -> &[u8] {
+        self.as_ref()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
 }
 
 /// Packet received from local port
@@ -68,7 +109,7 @@ pub(crate) struct DownstreamPacket<'stack, P> {
 
 impl<P: PacketMut> DownstreamPacket<'_, P> {
     #[inline]
-    pub(crate) fn process<S: SessionManager<Packet = P::FrozenPacket>>(
+    pub(crate) fn process<S: SessionManager>(
         self,
         worker_id: usize,
         config: &Arc<Config>,
@@ -95,7 +136,7 @@ impl<P: PacketMut> DownstreamPacket<'_, P> {
 
     /// Processes a packet by running it through the filter chain.
     #[inline]
-    fn process_inner<S: SessionManager<Packet = P::FrozenPacket>>(
+    fn process_inner<S: SessionManager>(
         self,
         config: &Arc<Config>,
         sessions: &S,
@@ -134,18 +175,35 @@ impl<P: PacketMut> DownstreamPacket<'_, P> {
 
         let ReadContext { contents, .. } = context;
 
+        if destinations.is_empty() {
+            return Ok(());
+        }
+
         // Similar to bytes::BytesMut::freeze, we turn the mutable pool buffer
         // into an immutable one with its own internal arc so it can be cloned
         // cheaply and returned to the pool once all references are dropped
         let contents = contents.freeze();
 
-        for epa in destinations.drain(0..) {
+        // A single destination is the most likely outcome for a typical workload
+        // so we can avoid an unnecessary buffer clone
+        if destinations.len() == 1
+            && let Some(dest) = destinations.pop()
+        {
             let session_key = SessionKey {
                 source: self.source,
-                dest: epa.to_socket_addr()?,
+                dest: dest.to_socket_addr()?,
             };
 
-            sessions.send(session_key, &contents)?;
+            sessions.send(session_key, contents)?;
+        } else {
+            for epa in destinations.drain(0..) {
+                let session_key = SessionKey {
+                    source: self.source,
+                    dest: epa.to_socket_addr()?,
+                };
+
+                sessions.send(session_key, contents.clone())?;
+            }
         }
 
         Ok(())
@@ -162,7 +220,6 @@ pub fn spawn_receivers(
     socket: socket2::Socket,
     worker_sends: Vec<crate::net::PacketQueue>,
     sessions: &Arc<SessionPool>,
-    buffer_pool: Arc<crate::collections::BufferPool>,
 ) -> crate::Result<()> {
     let port = crate::net::socket_port(&socket);
 
@@ -176,7 +233,6 @@ pub fn spawn_receivers(
             port,
             config: config.clone(),
             sessions: sessions.clone(),
-            buffer_pool: buffer_pool.clone(),
         };
 
         worker.spawn_io_loop(ws, pfc.clone())?;

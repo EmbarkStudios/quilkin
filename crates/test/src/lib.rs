@@ -1,12 +1,6 @@
 #![allow(clippy::unimplemented)]
 
-use quilkin::{
-    Config,
-    collections::{BufferPool, PoolBuffer},
-    net::TcpListener,
-    signal::ShutdownTx,
-    test::TestConfig,
-};
+use quilkin::{Config, net::TcpListener, signal::ShutdownTx, test::TestConfig};
 pub use serde_json::json;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
@@ -15,12 +9,10 @@ use tokio::sync::mpsc;
 pub mod xdp_util;
 
 pub const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
-pub static BUFFER_POOL: once_cell::sync::Lazy<Arc<BufferPool>> =
-    once_cell::sync::Lazy::new(|| Arc::new(BufferPool::default()));
 
 #[inline]
-pub fn alloc_buffer(data: impl AsRef<[u8]>) -> PoolBuffer {
-    BUFFER_POOL.clone().alloc_slice(data.as_ref())
+pub fn alloc_buffer(data: impl AsRef<[u8]>) -> bytes::BytesMut {
+    bytes::BytesMut::from(data.as_ref())
 }
 
 /// Macro that can get the function name of the function the macro is invoked
@@ -88,6 +80,7 @@ macro_rules! trace_test {
 pub struct ServerPailConfig {
     pub packet_size: u16,
     pub num_packets: Option<usize>,
+    pub echo: bool,
 }
 
 impl Default for ServerPailConfig {
@@ -95,6 +88,7 @@ impl Default for ServerPailConfig {
         Self {
             packet_size: 1024,
             num_packets: None,
+            echo: false,
         }
     }
 }
@@ -333,16 +327,24 @@ impl Pail {
                     let mut received = 0;
 
                     while num_packets > 0 {
-                        let (size, _) = socket
+                        let (size, addr) = socket
                             .recv_from(&mut buf)
                             .await
                             .expect("failed to receive packet");
                         received += size;
-                        let pstr = std::str::from_utf8(&buf[..size])
-                            .expect("received non-utf8 string in packet")
-                            .to_owned();
 
-                        packet_tx.send(pstr).await.expect("packet receiver dropped");
+                        if sspc.echo {
+                            socket
+                                .send_to(&buf[..size], addr)
+                                .await
+                                .expect("failed to send packet");
+                        } else {
+                            let pstr = std::str::from_utf8(&buf[..size])
+                                .expect("received non-utf8 string in packet")
+                                .to_owned();
+
+                            packet_tx.send(pstr).await.expect("packet receiver dropped");
+                        }
 
                         num_packets -= 1;
                     }

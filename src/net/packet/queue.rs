@@ -48,9 +48,9 @@ impl PacketQueueSender {
 
 pub struct SendPacket {
     /// The destination address of the packet
-    pub destination: socket2::SockAddr,
+    pub destination: std::net::SocketAddr,
     /// The packet data being sent
-    pub data: crate::collections::FrozenPoolBuffer,
+    pub data: bytes::Bytes,
     /// The asn info for the sender, used for metrics
     pub asn_info: Option<crate::net::maxmind_db::MetricsIpNetEntry>,
 }
