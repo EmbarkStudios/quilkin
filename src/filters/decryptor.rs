@@ -103,7 +103,7 @@ impl Filter for Decryptor {
                             }
                             _ => {
                                 return Err(FilterError::Custom(
-                                    "Invalid decoded data length, must be `6` or `8` bytes.",
+                                    "Invalid decoded data length, must be `6` or `18` bytes.",
                                 ));
                             }
                         };
