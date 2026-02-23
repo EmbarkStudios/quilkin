@@ -27,200 +27,203 @@
 <a href=#27 id=27 data-nosnippet>27</a><span class="kw">pub mod </span>capture;
 <a href=#28 id=28 data-nosnippet>28</a><span class="kw">pub mod </span>concatenate;
 <a href=#29 id=29 data-nosnippet>29</a><span class="kw">pub mod </span>debug;
-<a href=#30 id=30 data-nosnippet>30</a><span class="kw">pub mod </span>drop;
-<a href=#31 id=31 data-nosnippet>31</a><span class="kw">pub mod </span>firewall;
-<a href=#32 id=32 data-nosnippet>32</a><span class="kw">pub mod </span>load_balancer;
-<a href=#33 id=33 data-nosnippet>33</a><span class="kw">pub mod </span>local_rate_limit;
-<a href=#34 id=34 data-nosnippet>34</a><span class="kw">pub mod </span>r#match;
-<a href=#35 id=35 data-nosnippet>35</a><span class="kw">pub mod </span>metrics;
-<a href=#36 id=36 data-nosnippet>36</a><span class="kw">pub mod </span>pass;
-<a href=#37 id=37 data-nosnippet>37</a><span class="kw">pub mod </span>timestamp;
-<a href=#38 id=38 data-nosnippet>38</a><span class="kw">pub mod </span>token_router;
-<a href=#39 id=39 data-nosnippet>39</a>
-<a href=#40 id=40 data-nosnippet>40</a><span class="doccomment">/// Prelude containing all types and traits required to implement [`Filter`] and
-<a href=#41 id=41 data-nosnippet>41</a>/// [`FilterFactory`].
-<a href=#42 id=42 data-nosnippet>42</a></span><span class="kw">pub mod </span>prelude {
-<a href=#43 id=43 data-nosnippet>43</a>    <span class="kw">pub use super</span>::{
-<a href=#44 id=44 data-nosnippet>44</a>        ConvertProtoConfigError, CreateFilterArgs, CreationError, Filter, FilterError,
-<a href=#45 id=45 data-nosnippet>45</a>        FilterInstance, Packet, PacketMut, ReadContext, StaticFilter, WriteContext,
-<a href=#46 id=46 data-nosnippet>46</a>    };
-<a href=#47 id=47 data-nosnippet>47</a>}
-<a href=#48 id=48 data-nosnippet>48</a>
-<a href=#49 id=49 data-nosnippet>49</a><span class="comment">// Core Filter types
-<a href=#50 id=50 data-nosnippet>50</a></span><span class="attr">#[doc(inline)]
-<a href=#51 id=51 data-nosnippet>51</a></span><span class="kw">pub use </span><span class="self">self</span>::{
-<a href=#52 id=52 data-nosnippet>52</a>    capture::Capture,
-<a href=#53 id=53 data-nosnippet>53</a>    chain::FilterChain,
-<a href=#54 id=54 data-nosnippet>54</a>    concatenate::Concatenate,
-<a href=#55 id=55 data-nosnippet>55</a>    debug::Debug,
-<a href=#56 id=56 data-nosnippet>56</a>    drop::Drop,
-<a href=#57 id=57 data-nosnippet>57</a>    error::{ConvertProtoConfigError, CreationError, FilterError},
-<a href=#58 id=58 data-nosnippet>58</a>    factory::{CreateFilterArgs, DynFilterFactory, FilterFactory, FilterInstance},
-<a href=#59 id=59 data-nosnippet>59</a>    firewall::Firewall,
-<a href=#60 id=60 data-nosnippet>60</a>    load_balancer::LoadBalancer,
-<a href=#61 id=61 data-nosnippet>61</a>    local_rate_limit::LocalRateLimit,
-<a href=#62 id=62 data-nosnippet>62</a>    r#match::Match,
-<a href=#63 id=63 data-nosnippet>63</a>    pass::Pass,
-<a href=#64 id=64 data-nosnippet>64</a>    read::ReadContext,
-<a href=#65 id=65 data-nosnippet>65</a>    registry::FilterRegistry,
-<a href=#66 id=66 data-nosnippet>66</a>    set::{FilterMap, FilterSet},
-<a href=#67 id=67 data-nosnippet>67</a>    timestamp::Timestamp,
-<a href=#68 id=68 data-nosnippet>68</a>    token_router::{HashedTokenRouter, TokenRouter},
-<a href=#69 id=69 data-nosnippet>69</a>    write::WriteContext,
-<a href=#70 id=70 data-nosnippet>70</a>};
-<a href=#71 id=71 data-nosnippet>71</a>
-<a href=#72 id=72 data-nosnippet>72</a><span class="kw">pub use crate</span>::{
-<a href=#73 id=73 data-nosnippet>73</a>    net::{Packet, PacketMut},
-<a href=#74 id=74 data-nosnippet>74</a>    test::TestFilter,
-<a href=#75 id=75 data-nosnippet>75</a>};
-<a href=#76 id=76 data-nosnippet>76</a>
-<a href=#77 id=77 data-nosnippet>77</a><span class="kw">use </span><span class="kw">crate</span>::config::filter::Filter <span class="kw">as </span>FilterConfig;
+<a href=#30 id=30 data-nosnippet>30</a><span class="kw">pub mod </span>decryptor;
+<a href=#31 id=31 data-nosnippet>31</a><span class="kw">pub mod </span>drop;
+<a href=#32 id=32 data-nosnippet>32</a><span class="kw">pub mod </span>firewall;
+<a href=#33 id=33 data-nosnippet>33</a><span class="kw">pub mod </span>load_balancer;
+<a href=#34 id=34 data-nosnippet>34</a><span class="kw">pub mod </span>local_rate_limit;
+<a href=#35 id=35 data-nosnippet>35</a><span class="kw">pub mod </span>r#match;
+<a href=#36 id=36 data-nosnippet>36</a><span class="kw">pub mod </span>metrics;
+<a href=#37 id=37 data-nosnippet>37</a><span class="kw">pub mod </span>pass;
+<a href=#38 id=38 data-nosnippet>38</a><span class="kw">pub mod </span>timestamp;
+<a href=#39 id=39 data-nosnippet>39</a><span class="kw">pub mod </span>token_router;
+<a href=#40 id=40 data-nosnippet>40</a>
+<a href=#41 id=41 data-nosnippet>41</a><span class="doccomment">/// Prelude containing all types and traits required to implement [`Filter`] and
+<a href=#42 id=42 data-nosnippet>42</a>/// [`FilterFactory`].
+<a href=#43 id=43 data-nosnippet>43</a></span><span class="kw">pub mod </span>prelude {
+<a href=#44 id=44 data-nosnippet>44</a>    <span class="kw">pub use super</span>::{
+<a href=#45 id=45 data-nosnippet>45</a>        ConvertProtoConfigError, CreateFilterArgs, CreationError, Filter, FilterError,
+<a href=#46 id=46 data-nosnippet>46</a>        FilterInstance, Packet, PacketMut, ReadContext, StaticFilter, WriteContext,
+<a href=#47 id=47 data-nosnippet>47</a>    };
+<a href=#48 id=48 data-nosnippet>48</a>}
+<a href=#49 id=49 data-nosnippet>49</a>
+<a href=#50 id=50 data-nosnippet>50</a><span class="comment">// Core Filter types
+<a href=#51 id=51 data-nosnippet>51</a></span><span class="attr">#[doc(inline)]
+<a href=#52 id=52 data-nosnippet>52</a></span><span class="kw">pub use </span><span class="self">self</span>::{
+<a href=#53 id=53 data-nosnippet>53</a>    capture::Capture,
+<a href=#54 id=54 data-nosnippet>54</a>    chain::FilterChain,
+<a href=#55 id=55 data-nosnippet>55</a>    concatenate::Concatenate,
+<a href=#56 id=56 data-nosnippet>56</a>    debug::Debug,
+<a href=#57 id=57 data-nosnippet>57</a>    decryptor::Decryptor,
+<a href=#58 id=58 data-nosnippet>58</a>    drop::Drop,
+<a href=#59 id=59 data-nosnippet>59</a>    error::{ConvertProtoConfigError, CreationError, FilterError},
+<a href=#60 id=60 data-nosnippet>60</a>    factory::{CreateFilterArgs, DynFilterFactory, FilterFactory, FilterInstance},
+<a href=#61 id=61 data-nosnippet>61</a>    firewall::Firewall,
+<a href=#62 id=62 data-nosnippet>62</a>    load_balancer::LoadBalancer,
+<a href=#63 id=63 data-nosnippet>63</a>    local_rate_limit::LocalRateLimit,
+<a href=#64 id=64 data-nosnippet>64</a>    r#match::Match,
+<a href=#65 id=65 data-nosnippet>65</a>    pass::Pass,
+<a href=#66 id=66 data-nosnippet>66</a>    read::ReadContext,
+<a href=#67 id=67 data-nosnippet>67</a>    registry::FilterRegistry,
+<a href=#68 id=68 data-nosnippet>68</a>    set::{FilterMap, FilterSet},
+<a href=#69 id=69 data-nosnippet>69</a>    timestamp::Timestamp,
+<a href=#70 id=70 data-nosnippet>70</a>    token_router::{HashedTokenRouter, TokenRouter},
+<a href=#71 id=71 data-nosnippet>71</a>    write::WriteContext,
+<a href=#72 id=72 data-nosnippet>72</a>};
+<a href=#73 id=73 data-nosnippet>73</a>
+<a href=#74 id=74 data-nosnippet>74</a><span class="kw">pub use crate</span>::{
+<a href=#75 id=75 data-nosnippet>75</a>    net::{Packet, PacketMut},
+<a href=#76 id=76 data-nosnippet>76</a>    test::TestFilter,
+<a href=#77 id=77 data-nosnippet>77</a>};
 <a href=#78 id=78 data-nosnippet>78</a>
-<a href=#79 id=79 data-nosnippet>79</a><span class="attr">#[enum_dispatch::enum_dispatch(Filter)]
-<a href=#80 id=80 data-nosnippet>80</a></span><span class="kw">pub enum </span>FilterKind {
-<a href=#81 id=81 data-nosnippet>81</a>    Capture,
-<a href=#82 id=82 data-nosnippet>82</a>    Concatenate,
-<a href=#83 id=83 data-nosnippet>83</a>    Debug,
-<a href=#84 id=84 data-nosnippet>84</a>    Drop,
-<a href=#85 id=85 data-nosnippet>85</a>    Firewall,
-<a href=#86 id=86 data-nosnippet>86</a>    LoadBalancer,
-<a href=#87 id=87 data-nosnippet>87</a>    LocalRateLimit,
-<a href=#88 id=88 data-nosnippet>88</a>    Pass,
-<a href=#89 id=89 data-nosnippet>89</a>    Match,
-<a href=#90 id=90 data-nosnippet>90</a>    Timestamp,
-<a href=#91 id=91 data-nosnippet>91</a>    TokenRouter,
-<a href=#92 id=92 data-nosnippet>92</a>    HashedTokenRouter,
-<a href=#93 id=93 data-nosnippet>93</a>    TestFilter,
-<a href=#94 id=94 data-nosnippet>94</a>}
-<a href=#95 id=95 data-nosnippet>95</a>
-<a href=#96 id=96 data-nosnippet>96</a><span class="doccomment">/// Statically safe version of [`Filter`], if you're writing a Rust filter, you
-<a href=#97 id=97 data-nosnippet>97</a>/// should implement [`StaticFilter`] in addition to [`Filter`], as
-<a href=#98 id=98 data-nosnippet>98</a>/// [`StaticFilter`] guarantees all of the required properties through the type
-<a href=#99 id=99 data-nosnippet>99</a>/// system, allowing Quilkin take care of the virtual table boilerplate
-<a href=#100 id=100 data-nosnippet>100</a>/// automatically at compile-time.
-<a href=#101 id=101 data-nosnippet>101</a></span><span class="kw">pub trait </span>StaticFilter: Filter + Sized + Into&lt;FilterKind&gt;
-<a href=#102 id=102 data-nosnippet>102</a><span class="comment">// This where clause simply states that `Configuration`'s and
-<a href=#103 id=103 data-nosnippet>103</a>// `BinaryConfiguration`'s `Error` types are compatible with `filters::Error`.
-<a href=#104 id=104 data-nosnippet>104</a></span><span class="kw">where
-<a href=#105 id=105 data-nosnippet>105</a>    </span>CreationError: From&lt;&lt;<span class="self">Self</span>::Configuration <span class="kw">as </span>TryFrom&lt;<span class="self">Self</span>::BinaryConfiguration&gt;&gt;::Error&gt;
-<a href=#106 id=106 data-nosnippet>106</a>        + From&lt;&lt;<span class="self">Self</span>::BinaryConfiguration <span class="kw">as </span>TryFrom&lt;<span class="self">Self</span>::Configuration&gt;&gt;::Error&gt;,
-<a href=#107 id=107 data-nosnippet>107</a>{
-<a href=#108 id=108 data-nosnippet>108</a>    <span class="doccomment">/// The globally unique name of the filter.
-<a href=#109 id=109 data-nosnippet>109</a>    </span><span class="kw">const </span>NAME: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str;
-<a href=#110 id=110 data-nosnippet>110</a>    <span class="doccomment">/// The human-readable configuration of the filter. **Must** be [`serde`]
-<a href=#111 id=111 data-nosnippet>111</a>    /// compatible, have a JSON schema, and be convertible to and
-<a href=#112 id=112 data-nosnippet>112</a>    /// from [`Self::BinaryConfiguration`].
-<a href=#113 id=113 data-nosnippet>113</a>    </span><span class="kw">type </span>Configuration: schemars::JsonSchema
-<a href=#114 id=114 data-nosnippet>114</a>        + serde::Serialize
-<a href=#115 id=115 data-nosnippet>115</a>        + <span class="kw">for</span>&lt;<span class="lifetime">'de</span>&gt; serde::Deserialize&lt;<span class="lifetime">'de</span>&gt;
-<a href=#116 id=116 data-nosnippet>116</a>        + TryFrom&lt;<span class="self">Self</span>::BinaryConfiguration&gt;;
-<a href=#117 id=117 data-nosnippet>117</a>    <span class="doccomment">/// The binary configuration of the filter. **Must** be [`prost`] compatible,
-<a href=#118 id=118 data-nosnippet>118</a>    /// and be convertible to and from [`Self::Configuration`].
-<a href=#119 id=119 data-nosnippet>119</a>    </span><span class="kw">type </span>BinaryConfiguration: prost::Message
-<a href=#120 id=120 data-nosnippet>120</a>        + Default
-<a href=#121 id=121 data-nosnippet>121</a>        + TryFrom&lt;<span class="self">Self</span>::Configuration&gt;
-<a href=#122 id=122 data-nosnippet>122</a>        + Send
-<a href=#123 id=123 data-nosnippet>123</a>        + Sync
-<a href=#124 id=124 data-nosnippet>124</a>        + Sized;
-<a href=#125 id=125 data-nosnippet>125</a>
-<a href=#126 id=126 data-nosnippet>126</a>    <span class="doccomment">/// Instantiates a new [`StaticFilter`] from the given configuration, if any.
-<a href=#127 id=127 data-nosnippet>127</a>    /// # Errors
-<a href=#128 id=128 data-nosnippet>128</a>    /// If the provided configuration is invalid.
-<a href=#129 id=129 data-nosnippet>129</a>    </span><span class="kw">fn </span>try_from_config(config: <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, CreationError&gt;;
-<a href=#130 id=130 data-nosnippet>130</a>
-<a href=#131 id=131 data-nosnippet>131</a>    <span class="doccomment">/// Instantiates a new [`StaticFilter`] from the given configuration, if any.
-<a href=#132 id=132 data-nosnippet>132</a>    /// # Panics
-<a href=#133 id=133 data-nosnippet>133</a>    /// If the provided configuration is invalid.
-<a href=#134 id=134 data-nosnippet>134</a>    </span><span class="kw">fn </span>from_config(config: <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;) -&gt; <span class="self">Self </span>{
-<a href=#135 id=135 data-nosnippet>135</a>        <span class="self">Self</span>::try_from_config(config).unwrap()
-<a href=#136 id=136 data-nosnippet>136</a>    }
-<a href=#137 id=137 data-nosnippet>137</a>
-<a href=#138 id=138 data-nosnippet>138</a>    <span class="doccomment">/// Creates a new dynamic [`FilterFactory`] virtual table.
-<a href=#139 id=139 data-nosnippet>139</a>    </span><span class="kw">fn </span>factory() -&gt; DynFilterFactory
-<a href=#140 id=140 data-nosnippet>140</a>    <span class="kw">where
-<a href=#141 id=141 data-nosnippet>141</a>        </span><span class="self">Self</span>: <span class="lifetime">'static</span>,
-<a href=#142 id=142 data-nosnippet>142</a>    {
-<a href=#143 id=143 data-nosnippet>143</a>        Box::from(std::marker::PhantomData::&lt;<span class="kw">fn</span>() -&gt; <span class="self">Self</span>&gt;)
-<a href=#144 id=144 data-nosnippet>144</a>    }
-<a href=#145 id=145 data-nosnippet>145</a>
-<a href=#146 id=146 data-nosnippet>146</a>    <span class="doccomment">/// Convenience method for providing a consistent error message for filters
-<a href=#147 id=147 data-nosnippet>147</a>    /// which require a fully initialized [`Self::Configuration`].
-<a href=#148 id=148 data-nosnippet>148</a>    </span><span class="kw">fn </span>ensure_config_exists(
-<a href=#149 id=149 data-nosnippet>149</a>        config: <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;,
-<a href=#150 id=150 data-nosnippet>150</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Configuration, CreationError&gt; {
-<a href=#151 id=151 data-nosnippet>151</a>        config.ok_or(CreationError::MissingConfig(<span class="self">Self</span>::NAME))
-<a href=#152 id=152 data-nosnippet>152</a>    }
-<a href=#153 id=153 data-nosnippet>153</a>
-<a href=#154 id=154 data-nosnippet>154</a>    <span class="kw">fn </span>as_filter_config(
-<a href=#155 id=155 data-nosnippet>155</a>        config: <span class="kw">impl </span>Into&lt;<span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;&gt;,
-<a href=#156 id=156 data-nosnippet>156</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;FilterConfig, CreationError&gt; {
-<a href=#157 id=157 data-nosnippet>157</a>        <span class="prelude-val">Ok</span>(FilterConfig {
-<a href=#158 id=158 data-nosnippet>158</a>            name: <span class="self">Self</span>::NAME.into(),
-<a href=#159 id=159 data-nosnippet>159</a>            label: <span class="prelude-val">None</span>,
-<a href=#160 id=160 data-nosnippet>160</a>            config: config
-<a href=#161 id=161 data-nosnippet>161</a>                .into()
-<a href=#162 id=162 data-nosnippet>162</a>                .map(|config| serde_json::to_value(<span class="kw-2">&amp;</span>config))
-<a href=#163 id=163 data-nosnippet>163</a>                .transpose()<span class="question-mark">?</span>,
-<a href=#164 id=164 data-nosnippet>164</a>        })
-<a href=#165 id=165 data-nosnippet>165</a>    }
-<a href=#166 id=166 data-nosnippet>166</a>
-<a href=#167 id=167 data-nosnippet>167</a>    <span class="attr">#[inline]
-<a href=#168 id=168 data-nosnippet>168</a>    </span><span class="kw">fn </span>as_labeled_filter_config(
-<a href=#169 id=169 data-nosnippet>169</a>        config: <span class="kw">impl </span>Into&lt;<span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;&gt;,
-<a href=#170 id=170 data-nosnippet>170</a>        label: String,
-<a href=#171 id=171 data-nosnippet>171</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;FilterConfig, CreationError&gt; {
-<a href=#172 id=172 data-nosnippet>172</a>        <span class="prelude-val">Ok</span>(FilterConfig {
-<a href=#173 id=173 data-nosnippet>173</a>            name: <span class="self">Self</span>::NAME.into(),
-<a href=#174 id=174 data-nosnippet>174</a>            label: <span class="prelude-val">Some</span>(label),
-<a href=#175 id=175 data-nosnippet>175</a>            config: config
-<a href=#176 id=176 data-nosnippet>176</a>                .into()
-<a href=#177 id=177 data-nosnippet>177</a>                .map(|config| serde_json::to_value(<span class="kw-2">&amp;</span>config))
-<a href=#178 id=178 data-nosnippet>178</a>                .transpose()<span class="question-mark">?</span>,
-<a href=#179 id=179 data-nosnippet>179</a>        })
-<a href=#180 id=180 data-nosnippet>180</a>    }
-<a href=#181 id=181 data-nosnippet>181</a>}
-<a href=#182 id=182 data-nosnippet>182</a>
-<a href=#183 id=183 data-nosnippet>183</a><span class="doccomment">/// Trait for routing and manipulating packets.
-<a href=#184 id=184 data-nosnippet>184</a>///
-<a href=#185 id=185 data-nosnippet>185</a>/// An implementation of [`Filter`] provides a `read` and a `write` method. Both
-<a href=#186 id=186 data-nosnippet>186</a>/// methods are invoked by the proxy when it consults the filter chain - their
-<a href=#187 id=187 data-nosnippet>187</a>/// arguments contain information about the packet being processed.
-<a href=#188 id=188 data-nosnippet>188</a>/// - `read` is invoked when a packet is received on the local downstream port
-<a href=#189 id=189 data-nosnippet>189</a>///   and is to be sent to an upstream endpoint.
-<a href=#190 id=190 data-nosnippet>190</a>/// - `write` is invoked in the opposite direction when a packet is received
-<a href=#191 id=191 data-nosnippet>191</a>///   from an upstream endpoint and is to be sent to a downstream client.
-<a href=#192 id=192 data-nosnippet>192</a>///
-<a href=#193 id=193 data-nosnippet>193</a>/// **Metrics**
-<a href=#194 id=194 data-nosnippet>194</a>///
-<a href=#195 id=195 data-nosnippet>195</a>/// * `filter_read_duration_seconds` The duration it took for a `filter`'s
-<a href=#196 id=196 data-nosnippet>196</a>///   `read` implementation to execute.
-<a href=#197 id=197 data-nosnippet>197</a>///   * Labels
-<a href=#198 id=198 data-nosnippet>198</a>///     * `filter` The name of the filter being executed.
-<a href=#199 id=199 data-nosnippet>199</a>///
-<a href=#200 id=200 data-nosnippet>200</a>/// * `filter_write_duration_seconds` The duration it took for a `filter`'s
-<a href=#201 id=201 data-nosnippet>201</a>///   `write` implementation to execute.
-<a href=#202 id=202 data-nosnippet>202</a>///   * Labels
-<a href=#203 id=203 data-nosnippet>203</a>///     * `filter` The name of the filter being executed.
-<a href=#204 id=204 data-nosnippet>204</a></span><span class="attr">#[enum_dispatch::enum_dispatch]
-<a href=#205 id=205 data-nosnippet>205</a></span><span class="kw">pub trait </span>Filter: Send + Sync {
-<a href=#206 id=206 data-nosnippet>206</a>    <span class="doccomment">/// [`Filter::read`] is invoked when the proxy receives data from a
-<a href=#207 id=207 data-nosnippet>207</a>    /// downstream connection on the listening port.
-<a href=#208 id=208 data-nosnippet>208</a>    ///
-<a href=#209 id=209 data-nosnippet>209</a>    /// This function should return an `Some` if the packet processing should
-<a href=#210 id=210 data-nosnippet>210</a>    /// proceed. If the packet should be rejected, it will return [`None`]
-<a href=#211 id=211 data-nosnippet>211</a>    /// instead. By default, the context passes through unchanged.
-<a href=#212 id=212 data-nosnippet>212</a>    </span><span class="kw">fn </span>read&lt;P: PacketMut&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;mut </span>ReadContext&lt;<span class="lifetime">'_</span>, P&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), FilterError&gt; {
-<a href=#213 id=213 data-nosnippet>213</a>        <span class="prelude-val">Ok</span>(())
-<a href=#214 id=214 data-nosnippet>214</a>    }
-<a href=#215 id=215 data-nosnippet>215</a>
-<a href=#216 id=216 data-nosnippet>216</a>    <span class="doccomment">/// [`Filter::write`] is invoked when the proxy is about to send data to a
-<a href=#217 id=217 data-nosnippet>217</a>    /// downstream connection via the listening port after receiving it via one
-<a href=#218 id=218 data-nosnippet>218</a>    /// of the upstream Endpoints.
-<a href=#219 id=219 data-nosnippet>219</a>    ///
-<a href=#220 id=220 data-nosnippet>220</a>    /// This function should return an `Some` if the packet processing should
-<a href=#221 id=221 data-nosnippet>221</a>    /// proceed. If the packet should be rejected, it will return [`None`]
-<a href=#222 id=222 data-nosnippet>222</a>    </span><span class="kw">fn </span>write&lt;P: PacketMut&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;mut </span>WriteContext&lt;P&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), FilterError&gt; {
-<a href=#223 id=223 data-nosnippet>223</a>        <span class="prelude-val">Ok</span>(())
-<a href=#224 id=224 data-nosnippet>224</a>    }
-<a href=#225 id=225 data-nosnippet>225</a>}
+<a href=#79 id=79 data-nosnippet>79</a><span class="kw">use </span><span class="kw">crate</span>::config::filter::Filter <span class="kw">as </span>FilterConfig;
+<a href=#80 id=80 data-nosnippet>80</a>
+<a href=#81 id=81 data-nosnippet>81</a><span class="attr">#[enum_dispatch::enum_dispatch(Filter)]
+<a href=#82 id=82 data-nosnippet>82</a></span><span class="kw">pub enum </span>FilterKind {
+<a href=#83 id=83 data-nosnippet>83</a>    Capture,
+<a href=#84 id=84 data-nosnippet>84</a>    Concatenate,
+<a href=#85 id=85 data-nosnippet>85</a>    Debug,
+<a href=#86 id=86 data-nosnippet>86</a>    Decryptor,
+<a href=#87 id=87 data-nosnippet>87</a>    Drop,
+<a href=#88 id=88 data-nosnippet>88</a>    Firewall,
+<a href=#89 id=89 data-nosnippet>89</a>    LoadBalancer,
+<a href=#90 id=90 data-nosnippet>90</a>    LocalRateLimit,
+<a href=#91 id=91 data-nosnippet>91</a>    Pass,
+<a href=#92 id=92 data-nosnippet>92</a>    Match,
+<a href=#93 id=93 data-nosnippet>93</a>    Timestamp,
+<a href=#94 id=94 data-nosnippet>94</a>    TokenRouter,
+<a href=#95 id=95 data-nosnippet>95</a>    HashedTokenRouter,
+<a href=#96 id=96 data-nosnippet>96</a>    TestFilter,
+<a href=#97 id=97 data-nosnippet>97</a>}
+<a href=#98 id=98 data-nosnippet>98</a>
+<a href=#99 id=99 data-nosnippet>99</a><span class="doccomment">/// Statically safe version of [`Filter`], if you're writing a Rust filter, you
+<a href=#100 id=100 data-nosnippet>100</a>/// should implement [`StaticFilter`] in addition to [`Filter`], as
+<a href=#101 id=101 data-nosnippet>101</a>/// [`StaticFilter`] guarantees all of the required properties through the type
+<a href=#102 id=102 data-nosnippet>102</a>/// system, allowing Quilkin take care of the virtual table boilerplate
+<a href=#103 id=103 data-nosnippet>103</a>/// automatically at compile-time.
+<a href=#104 id=104 data-nosnippet>104</a></span><span class="kw">pub trait </span>StaticFilter: Filter + Sized + Into&lt;FilterKind&gt;
+<a href=#105 id=105 data-nosnippet>105</a><span class="comment">// This where clause simply states that `Configuration`'s and
+<a href=#106 id=106 data-nosnippet>106</a>// `BinaryConfiguration`'s `Error` types are compatible with `filters::Error`.
+<a href=#107 id=107 data-nosnippet>107</a></span><span class="kw">where
+<a href=#108 id=108 data-nosnippet>108</a>    </span>CreationError: From&lt;&lt;<span class="self">Self</span>::Configuration <span class="kw">as </span>TryFrom&lt;<span class="self">Self</span>::BinaryConfiguration&gt;&gt;::Error&gt;
+<a href=#109 id=109 data-nosnippet>109</a>        + From&lt;&lt;<span class="self">Self</span>::BinaryConfiguration <span class="kw">as </span>TryFrom&lt;<span class="self">Self</span>::Configuration&gt;&gt;::Error&gt;,
+<a href=#110 id=110 data-nosnippet>110</a>{
+<a href=#111 id=111 data-nosnippet>111</a>    <span class="doccomment">/// The globally unique name of the filter.
+<a href=#112 id=112 data-nosnippet>112</a>    </span><span class="kw">const </span>NAME: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str;
+<a href=#113 id=113 data-nosnippet>113</a>    <span class="doccomment">/// The human-readable configuration of the filter. **Must** be [`serde`]
+<a href=#114 id=114 data-nosnippet>114</a>    /// compatible, have a JSON schema, and be convertible to and
+<a href=#115 id=115 data-nosnippet>115</a>    /// from [`Self::BinaryConfiguration`].
+<a href=#116 id=116 data-nosnippet>116</a>    </span><span class="kw">type </span>Configuration: schemars::JsonSchema
+<a href=#117 id=117 data-nosnippet>117</a>        + serde::Serialize
+<a href=#118 id=118 data-nosnippet>118</a>        + <span class="kw">for</span>&lt;<span class="lifetime">'de</span>&gt; serde::Deserialize&lt;<span class="lifetime">'de</span>&gt;
+<a href=#119 id=119 data-nosnippet>119</a>        + TryFrom&lt;<span class="self">Self</span>::BinaryConfiguration&gt;;
+<a href=#120 id=120 data-nosnippet>120</a>    <span class="doccomment">/// The binary configuration of the filter. **Must** be [`prost`] compatible,
+<a href=#121 id=121 data-nosnippet>121</a>    /// and be convertible to and from [`Self::Configuration`].
+<a href=#122 id=122 data-nosnippet>122</a>    </span><span class="kw">type </span>BinaryConfiguration: prost::Message
+<a href=#123 id=123 data-nosnippet>123</a>        + Default
+<a href=#124 id=124 data-nosnippet>124</a>        + TryFrom&lt;<span class="self">Self</span>::Configuration&gt;
+<a href=#125 id=125 data-nosnippet>125</a>        + Send
+<a href=#126 id=126 data-nosnippet>126</a>        + Sync
+<a href=#127 id=127 data-nosnippet>127</a>        + Sized;
+<a href=#128 id=128 data-nosnippet>128</a>
+<a href=#129 id=129 data-nosnippet>129</a>    <span class="doccomment">/// Instantiates a new [`StaticFilter`] from the given configuration, if any.
+<a href=#130 id=130 data-nosnippet>130</a>    /// # Errors
+<a href=#131 id=131 data-nosnippet>131</a>    /// If the provided configuration is invalid.
+<a href=#132 id=132 data-nosnippet>132</a>    </span><span class="kw">fn </span>try_from_config(config: <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, CreationError&gt;;
+<a href=#133 id=133 data-nosnippet>133</a>
+<a href=#134 id=134 data-nosnippet>134</a>    <span class="doccomment">/// Instantiates a new [`StaticFilter`] from the given configuration, if any.
+<a href=#135 id=135 data-nosnippet>135</a>    /// # Panics
+<a href=#136 id=136 data-nosnippet>136</a>    /// If the provided configuration is invalid.
+<a href=#137 id=137 data-nosnippet>137</a>    </span><span class="kw">fn </span>from_config(config: <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;) -&gt; <span class="self">Self </span>{
+<a href=#138 id=138 data-nosnippet>138</a>        <span class="self">Self</span>::try_from_config(config).unwrap()
+<a href=#139 id=139 data-nosnippet>139</a>    }
+<a href=#140 id=140 data-nosnippet>140</a>
+<a href=#141 id=141 data-nosnippet>141</a>    <span class="doccomment">/// Creates a new dynamic [`FilterFactory`] virtual table.
+<a href=#142 id=142 data-nosnippet>142</a>    </span><span class="kw">fn </span>factory() -&gt; DynFilterFactory
+<a href=#143 id=143 data-nosnippet>143</a>    <span class="kw">where
+<a href=#144 id=144 data-nosnippet>144</a>        </span><span class="self">Self</span>: <span class="lifetime">'static</span>,
+<a href=#145 id=145 data-nosnippet>145</a>    {
+<a href=#146 id=146 data-nosnippet>146</a>        Box::from(std::marker::PhantomData::&lt;<span class="kw">fn</span>() -&gt; <span class="self">Self</span>&gt;)
+<a href=#147 id=147 data-nosnippet>147</a>    }
+<a href=#148 id=148 data-nosnippet>148</a>
+<a href=#149 id=149 data-nosnippet>149</a>    <span class="doccomment">/// Convenience method for providing a consistent error message for filters
+<a href=#150 id=150 data-nosnippet>150</a>    /// which require a fully initialized [`Self::Configuration`].
+<a href=#151 id=151 data-nosnippet>151</a>    </span><span class="kw">fn </span>ensure_config_exists(
+<a href=#152 id=152 data-nosnippet>152</a>        config: <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;,
+<a href=#153 id=153 data-nosnippet>153</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Configuration, CreationError&gt; {
+<a href=#154 id=154 data-nosnippet>154</a>        config.ok_or(CreationError::MissingConfig(<span class="self">Self</span>::NAME))
+<a href=#155 id=155 data-nosnippet>155</a>    }
+<a href=#156 id=156 data-nosnippet>156</a>
+<a href=#157 id=157 data-nosnippet>157</a>    <span class="kw">fn </span>as_filter_config(
+<a href=#158 id=158 data-nosnippet>158</a>        config: <span class="kw">impl </span>Into&lt;<span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;&gt;,
+<a href=#159 id=159 data-nosnippet>159</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;FilterConfig, CreationError&gt; {
+<a href=#160 id=160 data-nosnippet>160</a>        <span class="prelude-val">Ok</span>(FilterConfig {
+<a href=#161 id=161 data-nosnippet>161</a>            name: <span class="self">Self</span>::NAME.into(),
+<a href=#162 id=162 data-nosnippet>162</a>            label: <span class="prelude-val">None</span>,
+<a href=#163 id=163 data-nosnippet>163</a>            config: config
+<a href=#164 id=164 data-nosnippet>164</a>                .into()
+<a href=#165 id=165 data-nosnippet>165</a>                .map(|config| serde_json::to_value(<span class="kw-2">&amp;</span>config))
+<a href=#166 id=166 data-nosnippet>166</a>                .transpose()<span class="question-mark">?</span>,
+<a href=#167 id=167 data-nosnippet>167</a>        })
+<a href=#168 id=168 data-nosnippet>168</a>    }
+<a href=#169 id=169 data-nosnippet>169</a>
+<a href=#170 id=170 data-nosnippet>170</a>    <span class="attr">#[inline]
+<a href=#171 id=171 data-nosnippet>171</a>    </span><span class="kw">fn </span>as_labeled_filter_config(
+<a href=#172 id=172 data-nosnippet>172</a>        config: <span class="kw">impl </span>Into&lt;<span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Configuration&gt;&gt;,
+<a href=#173 id=173 data-nosnippet>173</a>        label: String,
+<a href=#174 id=174 data-nosnippet>174</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;FilterConfig, CreationError&gt; {
+<a href=#175 id=175 data-nosnippet>175</a>        <span class="prelude-val">Ok</span>(FilterConfig {
+<a href=#176 id=176 data-nosnippet>176</a>            name: <span class="self">Self</span>::NAME.into(),
+<a href=#177 id=177 data-nosnippet>177</a>            label: <span class="prelude-val">Some</span>(label),
+<a href=#178 id=178 data-nosnippet>178</a>            config: config
+<a href=#179 id=179 data-nosnippet>179</a>                .into()
+<a href=#180 id=180 data-nosnippet>180</a>                .map(|config| serde_json::to_value(<span class="kw-2">&amp;</span>config))
+<a href=#181 id=181 data-nosnippet>181</a>                .transpose()<span class="question-mark">?</span>,
+<a href=#182 id=182 data-nosnippet>182</a>        })
+<a href=#183 id=183 data-nosnippet>183</a>    }
+<a href=#184 id=184 data-nosnippet>184</a>}
+<a href=#185 id=185 data-nosnippet>185</a>
+<a href=#186 id=186 data-nosnippet>186</a><span class="doccomment">/// Trait for routing and manipulating packets.
+<a href=#187 id=187 data-nosnippet>187</a>///
+<a href=#188 id=188 data-nosnippet>188</a>/// An implementation of [`Filter`] provides a `read` and a `write` method. Both
+<a href=#189 id=189 data-nosnippet>189</a>/// methods are invoked by the proxy when it consults the filter chain - their
+<a href=#190 id=190 data-nosnippet>190</a>/// arguments contain information about the packet being processed.
+<a href=#191 id=191 data-nosnippet>191</a>/// - `read` is invoked when a packet is received on the local downstream port
+<a href=#192 id=192 data-nosnippet>192</a>///   and is to be sent to an upstream endpoint.
+<a href=#193 id=193 data-nosnippet>193</a>/// - `write` is invoked in the opposite direction when a packet is received
+<a href=#194 id=194 data-nosnippet>194</a>///   from an upstream endpoint and is to be sent to a downstream client.
+<a href=#195 id=195 data-nosnippet>195</a>///
+<a href=#196 id=196 data-nosnippet>196</a>/// **Metrics**
+<a href=#197 id=197 data-nosnippet>197</a>///
+<a href=#198 id=198 data-nosnippet>198</a>/// * `filter_read_duration_seconds` The duration it took for a `filter`'s
+<a href=#199 id=199 data-nosnippet>199</a>///   `read` implementation to execute.
+<a href=#200 id=200 data-nosnippet>200</a>///   * Labels
+<a href=#201 id=201 data-nosnippet>201</a>///     * `filter` The name of the filter being executed.
+<a href=#202 id=202 data-nosnippet>202</a>///
+<a href=#203 id=203 data-nosnippet>203</a>/// * `filter_write_duration_seconds` The duration it took for a `filter`'s
+<a href=#204 id=204 data-nosnippet>204</a>///   `write` implementation to execute.
+<a href=#205 id=205 data-nosnippet>205</a>///   * Labels
+<a href=#206 id=206 data-nosnippet>206</a>///     * `filter` The name of the filter being executed.
+<a href=#207 id=207 data-nosnippet>207</a></span><span class="attr">#[enum_dispatch::enum_dispatch]
+<a href=#208 id=208 data-nosnippet>208</a></span><span class="kw">pub trait </span>Filter: Send + Sync {
+<a href=#209 id=209 data-nosnippet>209</a>    <span class="doccomment">/// [`Filter::read`] is invoked when the proxy receives data from a
+<a href=#210 id=210 data-nosnippet>210</a>    /// downstream connection on the listening port.
+<a href=#211 id=211 data-nosnippet>211</a>    ///
+<a href=#212 id=212 data-nosnippet>212</a>    /// This function should return an `Some` if the packet processing should
+<a href=#213 id=213 data-nosnippet>213</a>    /// proceed. If the packet should be rejected, it will return [`None`]
+<a href=#214 id=214 data-nosnippet>214</a>    /// instead. By default, the context passes through unchanged.
+<a href=#215 id=215 data-nosnippet>215</a>    </span><span class="kw">fn </span>read&lt;P: PacketMut&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;mut </span>ReadContext&lt;<span class="lifetime">'_</span>, P&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), FilterError&gt; {
+<a href=#216 id=216 data-nosnippet>216</a>        <span class="prelude-val">Ok</span>(())
+<a href=#217 id=217 data-nosnippet>217</a>    }
+<a href=#218 id=218 data-nosnippet>218</a>
+<a href=#219 id=219 data-nosnippet>219</a>    <span class="doccomment">/// [`Filter::write`] is invoked when the proxy is about to send data to a
+<a href=#220 id=220 data-nosnippet>220</a>    /// downstream connection via the listening port after receiving it via one
+<a href=#221 id=221 data-nosnippet>221</a>    /// of the upstream Endpoints.
+<a href=#222 id=222 data-nosnippet>222</a>    ///
+<a href=#223 id=223 data-nosnippet>223</a>    /// This function should return an `Some` if the packet processing should
+<a href=#224 id=224 data-nosnippet>224</a>    /// proceed. If the packet should be rejected, it will return [`None`]
+<a href=#225 id=225 data-nosnippet>225</a>    </span><span class="kw">fn </span>write&lt;P: PacketMut&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;mut </span>WriteContext&lt;P&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), FilterError&gt; {
+<a href=#226 id=226 data-nosnippet>226</a>        <span class="prelude-val">Ok</span>(())
+<a href=#227 id=227 data-nosnippet>227</a>    }
+<a href=#228 id=228 data-nosnippet>228</a>}
 </code></pre></div></section></main></body></html>
