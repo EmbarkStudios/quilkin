@@ -54,6 +54,7 @@ skip = [
 skip-tree = [
     { crate = "thiserror@1.0.69", reason = "many crates use this old version" },
     { crate = "hashbrown@0.15.5", reason = "many crates this old version" },
+    { crate = "sha2@0.10.9", reason = "old version that uses multiple other old crates" },
 ]
 
 [[bans.features]]
@@ -82,5 +83,4 @@ exceptions = [
     # This license should not really be used for code, but here we are
     { crate = "notify", allow = ["CC0-1.0"] },
     { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
-    { crate = "ar_archive_writer", allow = ["Apache-2.0 WITH LLVM-exception"] }
 ]
