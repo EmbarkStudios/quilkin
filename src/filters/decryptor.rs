@@ -85,7 +85,7 @@ impl Filter for Decryptor {
         ) {
             (Some(metadata::Value::Bytes(data)), Some(metadata::Value::Bytes(nonce))) => {
                 let nonce = <[u8; 12]>::try_from(&**nonce)
-                    .map_err(|_| FilterError::Custom("Expected 12 byte nonce"))?;
+                    .map_err(|_e| FilterError::Custom("Expected 12 byte nonce"))?;
 
                 match self.config.mode {
                     Mode::Destination => {
@@ -94,11 +94,11 @@ impl Filter for Decryptor {
 
                         let edata = match data.len() {
                             DESTINATION_MIN => {
-                                edata[..DESTINATION_MIN].copy_from_slice(&data);
+                                edata[..DESTINATION_MIN].copy_from_slice(data);
                                 &mut edata[..DESTINATION_MIN]
                             }
                             DESTINATION_MAX => {
-                                edata[..DESTINATION_MAX].copy_from_slice(&data);
+                                edata[..DESTINATION_MAX].copy_from_slice(data);
                                 &mut edata[..DESTINATION_MAX]
                             }
                             _ => {
@@ -195,7 +195,7 @@ where
     crate::codec::base64::decode(string)
         .map_err(serde::de::Error::custom)?
         .try_into()
-        .map_err(|_| serde::de::Error::custom("invalid key, expected 32 bytes"))
+        .map_err(|_e| serde::de::Error::custom("invalid key, expected 32 bytes"))
 }
 
 fn serialize<S>(value: &[u8; 32], ser: S) -> Result<S::Ok, S::Error>
@@ -221,21 +221,17 @@ impl TryFrom<proto::Decryptor> for Config {
 
     fn try_from(p: proto::Decryptor) -> Result<Self, Self::Error> {
         Ok(Self {
-            key: p.key.try_into().map_err(|_| {
+            key: p.key.try_into().map_err(|_e| {
                 ConvertProtoConfigError::new(
                     "invalid key, expected 32 bytes",
                     Some("private_key".into()),
                 )
             })?,
             mode: p.mode.try_into()?,
-            data_key: p
-                .data_key
-                .map(metadata::Key::new)
-                .unwrap_or_else(default_data_key),
+            data_key: p.data_key.map_or_else(default_data_key, metadata::Key::new),
             nonce_key: p
                 .nonce_key
-                .map(metadata::Key::new)
-                .unwrap_or_else(default_nonce_key),
+                .map_or_else(default_nonce_key, metadata::Key::new),
         })
     }
 }
