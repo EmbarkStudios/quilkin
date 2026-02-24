@@ -268,7 +268,7 @@ corro-agent = { git = "https://github.com/EmbarkStudios/corrosion", branch = "mi
 corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 corro-client = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 corro-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-rusqlite = "=0.33"
+rusqlite = "=0.38"
 spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 sqlite-pool = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
