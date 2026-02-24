@@ -307,7 +307,6 @@ impl TestHelper {
     pub async fn run_server(
         &mut self,
         config: Arc<Config>,
-        server: Option<crate::components::proxy::Proxy>,
         with_admin: Option<Option<SocketAddr>>,
     ) -> u16 {
         let (shutdown_tx, shutdown_rx) = crate::signal::channel();
@@ -318,39 +317,22 @@ impl TestHelper {
             crate::components::admin::serve(config.clone(), ready, shutdown_tx.clone(), address);
         }
 
-        let server = server.unwrap_or_else(|| {
-            let qcmp = crate::net::raw_socket_with_reuse(0).unwrap();
-            let phoenix = crate::net::TcpListener::bind(None).unwrap();
-
-            crate::components::proxy::Proxy {
-                num_workers: std::num::NonZeroUsize::new(1).unwrap(),
-                socket: Some(crate::net::raw_socket_with_reuse(0).unwrap()),
-                qcmp,
-                phoenix,
-                ..Default::default()
-            }
-        });
-
-        let (prox_tx, prox_rx) = tokio::sync::oneshot::channel();
         let shutdown = crate::signal::ShutdownHandler::new(shutdown_tx, shutdown_rx);
 
-        let port = crate::net::socket_port(server.socket.as_ref().unwrap());
+        let (task, ports) = crate::Service::default()
+            .udp()
+            .udp_port(0)
+            .qcmp()
+            .qcmp_port(0)
+            .phoenix()
+            .phoenix_port(0)
+            .spawn_services(&config, shutdown)
+            .await
+            .expect("failed to spawn services");
 
-        tokio::spawn(async move {
-            server
-                .run(
-                    crate::components::RunArgs {
-                        config,
-                        ready: Default::default(),
-                        shutdown,
-                    },
-                    Some(prox_tx),
-                )
-                .unwrap();
-        });
+        tokio::spawn(async move { task.await.unwrap() });
 
-        prox_rx.await.unwrap();
-        port
+        ports.udp.expect("should have spawned UDP")
     }
 
     /// Returns a receiver subscribed to the helper's shutdown event.

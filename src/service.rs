@@ -3,8 +3,8 @@ use eyre::ContextCompat;
 use std::sync::Arc;
 
 use crate::{
-    components::proxy::SessionPool,
     config::{Config, filter::CachedFilterChain},
+    net::SessionPool,
     signal::ShutdownHandler,
 };
 
@@ -163,6 +163,15 @@ pub struct Service {
 
 pub type Finalizer = Box<dyn FnOnce() + Send>;
 
+pub struct ServicePorts {
+    pub mds: Option<u16>,
+    pub phoenix: Option<u16>,
+    pub qcmp: Option<u16>,
+    pub udp: Option<u16>,
+    pub xds: Option<u16>,
+    pub corrosion: Option<u16>,
+}
+
 impl Default for Service {
     fn default() -> Self {
         Self {
@@ -207,6 +216,12 @@ impl Service {
     pub fn udp_port(mut self, port: u16) -> Self {
         self.udp_port = port;
         self
+    }
+
+    /// Gets the UDP port for the UDP service if it is enabled
+    #[inline]
+    pub fn get_udp_port(&self) -> Option<u16> {
+        self.udp_enabled.then_some(self.udp_port)
     }
 
     /// Enables the QCMP service.
@@ -326,53 +341,68 @@ impl Service {
     ///
     /// When called will spawn any and all enabled services, if successful
     /// returning a future that can be await to wait on services to be cancelled.
-    pub fn spawn_services(
+    pub async fn spawn_services(
         mut self,
         config: &Arc<Config>,
         mut shutdown: ShutdownHandler,
-    ) -> crate::Result<tokio::task::JoinHandle<(ShutdownHandler, crate::Result<()>)>> {
+    ) -> crate::Result<(
+        tokio::task::JoinHandle<(ShutdownHandler, crate::Result<()>)>,
+        ServicePorts,
+    )> {
+        let mut ports = ServicePorts {
+            mds: None,
+            phoenix: None,
+            qcmp: None,
+            udp: None,
+            xds: None,
+            corrosion: None,
+        };
+
         {
             let shutdown = &mut shutdown;
-            self.publish_mds(config, shutdown)?;
-            self.publish_phoenix(config, shutdown)?;
+            self.publish_mds(config, shutdown, &mut ports).await?;
+            self.publish_phoenix(config, shutdown, &mut ports)?;
             // We need to call this before qcmp since if we use XDP we handle QCMP
             // internally without a separate task
-            self.publish_udp(config, shutdown)?;
-            self.publish_qcmp(config, shutdown)?;
-            self.publish_xds(config, shutdown)?;
+            self.publish_udp(config, shutdown, &mut ports)?;
+            self.publish_qcmp(config, shutdown, &mut ports)?;
+            self.publish_xds(config, shutdown, &mut ports)?;
         }
 
-        Ok(tokio::spawn(async move {
-            let (tx, rx, results) = shutdown.await_any_then_shutdown().await;
+        Ok((
+            tokio::spawn(async move {
+                let (tx, rx, results) = shutdown.await_any_then_shutdown().await;
 
-            let mut errors = 0;
-            for (task, res) in &results {
-                if let Err(error) = res {
-                    tracing::error!(task, %error, "service task failed");
-                    errors += 1;
-                }
-            }
-
-            let res = match errors {
-                0 => Ok(()),
-                1 => Err(results.into_iter().find_map(|(_, res)| res.err()).unwrap()),
-                _ => {
-                    use std::fmt::Write as _;
-                    let mut err_str = String::new();
-                    writeln!(&mut err_str, "encountered {errors} errors:").unwrap();
-
-                    for (which, res) in results {
-                        if let Err(error) = res {
-                            writeln!(&mut err_str, "  {which}: {error:#}").unwrap();
-                        }
+                let mut errors = 0;
+                for (task, res) in &results {
+                    if let Err(error) = res {
+                        tracing::error!(task, %error, "service task failed");
+                        errors += 1;
                     }
-
-                    Err(eyre::Report::msg(err_str))
                 }
-            };
 
-            (ShutdownHandler::new(tx, rx), res)
-        }))
+                let res = match errors {
+                    0 => Ok(()),
+                    1 => Err(results.into_iter().find_map(|(_, res)| res.err()).unwrap()),
+                    _ => {
+                        use std::fmt::Write as _;
+                        let mut err_str = String::new();
+                        writeln!(&mut err_str, "encountered {errors} errors:").unwrap();
+
+                        for (which, res) in results {
+                            if let Err(error) = res {
+                                writeln!(&mut err_str, "  {which}: {error:#}").unwrap();
+                            }
+                        }
+
+                        Err(eyre::Report::msg(err_str))
+                    }
+                };
+
+                (ShutdownHandler::new(tx, rx), res)
+            }),
+            ports,
+        ))
     }
 
     /// Spawns an QCMP server if enabled, otherwise returns a future which never completes.
@@ -380,6 +410,7 @@ impl Service {
         &self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.phoenix_enabled {
             return Ok(());
@@ -402,12 +433,20 @@ impl Service {
             builder.build()
         };
 
+        let listener = quilkin_system::net::tcp::default_nonblocking_listener((
+            std::net::Ipv6Addr::UNSPECIFIED,
+            self.phoenix_port,
+        ))?;
+        let port = listener.local_addr()?.port();
+
         let finalizer = crate::net::phoenix::spawn(
-            (std::net::Ipv6Addr::UNSPECIFIED, self.phoenix_port),
+            listener,
             datacenters.clone(),
             phoenix,
             shutdown.shutdown_rx(),
         )?;
+
+        ports.phoenix = Some(port);
 
         let finished = shutdown.push("phoenix");
         let mut srx = shutdown.shutdown_rx();
@@ -423,20 +462,28 @@ impl Service {
     }
 
     /// Spawns an QCMP server if enabled, otherwise returns a future which never completes.
-    fn publish_qcmp(&self, config: &Config, shutdown: &mut ShutdownHandler) -> crate::Result<()> {
+    fn publish_qcmp(
+        &self,
+        config: &Config,
+        shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
+    ) -> crate::Result<()> {
         if !self.qcmp_enabled {
             return Ok(());
         }
+
+        let qcmp = crate::net::raw_socket_with_reuse(self.qcmp_port)?;
+        let port = crate::net::socket_port(&qcmp);
+        ports.qcmp = Some(port);
 
         let qcmp_port = config
             .dyn_cfg
             .qcmp_port()
             .context("QCMP was enabled, but QCMP port was not inserted into typemap")?;
 
-        qcmp_port.store(self.qcmp_port);
+        qcmp_port.store(port);
 
-        tracing::info!(port=%self.qcmp_port, "starting qcmp service");
-        let qcmp = crate::net::raw_socket_with_reuse(self.qcmp_port)?;
+        tracing::info!(port, "starting qcmp service");
 
         crate::codec::qcmp::spawn(qcmp, qcmp_port.subscribe(), shutdown)?;
 
@@ -448,12 +495,14 @@ impl Service {
         &self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.xds_enabled && !self.grpc_enabled {
             return Ok(());
         }
 
         let listener = crate::net::TcpListener::bind(Some(self.xds_port))?;
+        ports.xds = Some(listener.local_addr().port());
 
         let finished = shutdown.push("xds");
         let srx = shutdown.shutdown_rx();
@@ -474,17 +523,18 @@ impl Service {
     }
 
     /// Spawns an xDS server and/or corrosion server if enabled
-    fn publish_mds(
+    async fn publish_mds(
         &self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.mds_enabled {
             return Ok(());
         }
 
-        tokio::runtime::Handle::current()
-            .block_on(async { self.spawn_corrosion_server(config.clone(), shutdown).await })?;
+        self.spawn_corrosion_server(config.clone(), shutdown, ports)
+            .await?;
 
         if !self.grpc_enabled {
             return Ok(());
@@ -515,6 +565,7 @@ impl Service {
         &mut self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.udp_enabled && !self.qcmp_enabled {
             return Ok(());
@@ -530,6 +581,12 @@ impl Service {
                         // Disable this so that we don't create a separate user-space
                         // QCMP service since we are handling QCMP messsages in XDP
                         self.qcmp_enabled = false;
+
+                        assert!(self.qcmp_port != 0, "don't use ephemeral ports with XDP");
+                        assert!(self.udp_port != 0, "don't use ephemeral ports with XDP");
+
+                        ports.qcmp = Some(self.qcmp_port);
+                        ports.udp = Some(self.udp_port);
 
                         let finished = shutdown.push("xdp");
                         let mut srx = shutdown.shutdown_rx();
@@ -565,7 +622,7 @@ impl Service {
             return Ok(());
         }
 
-        self.spawn_user_space_router(config.clone(), shutdown)
+        self.spawn_user_space_router(config.clone(), shutdown, ports)
     }
 
     /// Launches the user space implementation of the packet router using
@@ -579,6 +636,7 @@ impl Service {
         &self,
         config: Arc<Config>,
         shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         // If we're on linux, we're using io-uring, but we're probably running in a container
         // and may not be allowed to call io-uring related syscalls due to seccomp
@@ -620,6 +678,7 @@ impl Service {
         }
 
         let socket = crate::net::raw_socket_with_reuse(self.udp_port)?;
+        ports.udp = Some(crate::net::socket_port(&socket));
         let workers = self.udp_workers.get();
         let buffer_pool = Arc::new(crate::collections::BufferPool::new(workers, 2 * 1024));
 
@@ -737,6 +796,7 @@ impl Service {
         &self,
         config: Arc<Config>,
         shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
     ) -> eyre::Result<()> {
         use corrosion::types;
 
@@ -853,6 +913,8 @@ impl Service {
             ps_ctx,
             corrosion::persistent::Metrics::new(crate::metrics::registry()),
         )?;
+
+        ports.corrosion = Some(udp_server.local_addr().port());
 
         let finished = shutdown.push("corrosion_server");
         let mut srx = shutdown.shutdown_rx();

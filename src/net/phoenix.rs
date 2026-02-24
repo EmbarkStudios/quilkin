@@ -48,7 +48,7 @@ use crate::{
 const BAD_NODE_THRESHOLD: u64 = 10;
 
 pub fn spawn(
-    address: impl Into<SocketAddr>,
+    listener: std::net::TcpListener,
     datacenters: config::Watch<config::DatacenterMap>,
     phoenix: Phoenix<crate::codec::qcmp::QcmpTransceiver>,
     mut shutdown_rx: crate::signal::ShutdownRx,
@@ -59,7 +59,6 @@ pub fn spawn(
 
     let mut dc_watcher = datacenters.watch();
 
-    let listener = quilkin_system::net::tcp::default_nonblocking_listener(address)?;
     let tokio_listener = tokio::net::TcpListener::from_std(listener)?;
 
     let ph_thread = std::thread::Builder::new()
@@ -1051,13 +1050,13 @@ mod tests {
             .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
             .build();
 
-        let end = super::spawn(
-            (std::net::Ipv6Addr::UNSPECIFIED, qcmp_port),
-            datacenters,
-            phoenix,
-            rx,
-        )
-        .unwrap();
+        let listener = quilkin_system::net::tcp::default_nonblocking_listener((
+            std::net::Ipv6Addr::UNSPECIFIED,
+            qcmp_port,
+        ))
+        .expect("failed to build listener");
+
+        let end = super::spawn(listener, datacenters, phoenix, rx).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let client =
@@ -1131,13 +1130,13 @@ mod tests {
             .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
             .build();
 
-        let end = super::spawn(
-            (std::net::Ipv6Addr::UNSPECIFIED, qcmp_port),
-            datacenters,
-            phoenix,
-            rx,
-        )
-        .unwrap();
+        let listener = quilkin_system::net::tcp::default_nonblocking_listener((
+            std::net::Ipv6Addr::UNSPECIFIED,
+            qcmp_port,
+        ))
+        .expect("failed to build listener");
+
+        let end = super::spawn(listener, datacenters, phoenix, rx).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let client =
