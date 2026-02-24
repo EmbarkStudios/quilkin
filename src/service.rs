@@ -248,6 +248,12 @@ impl Service {
         self
     }
 
+    /// Set the port used for the corrosion service
+    pub fn corrosion_port(mut self, port: u16) -> Self {
+        self.corrosion_port = port;
+        self
+    }
+
     /// Enables the Phoenix service.
     pub fn phoenix(mut self) -> Self {
         self.phoenix_enabled = true;
@@ -803,13 +809,23 @@ impl Service {
         let db_root = if let Some(cdb) = self.corrosion_db_path.clone() {
             cdb
         } else {
-            let mut dr = match camino::Utf8PathBuf::from_path_buf(std::env::temp_dir()) {
-                Ok(dr) => dr,
-                Err(td) => {
-                    eyre::bail!("$TEMP_DIR {td:?} was not utf-8")
+            let mut dr = if self.testing {
+                let mut dr = camino::Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap();
+                dr.push(format!("quilkin_{}", rand::random::<u32>()));
+                dr
+            } else {
+                match camino::Utf8PathBuf::from_path_buf(std::env::temp_dir()) {
+                    Ok(dr) => dr,
+                    Err(td) => {
+                        eyre::bail!("$TEMP_DIR {td:?} was not utf-8")
+                    }
                 }
             };
+
             dr.push("quilkin_db");
+
+            std::fs::create_dir_all(&dr)?;
+
             dr
         };
 

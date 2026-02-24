@@ -72,7 +72,7 @@ pub fn init_logging(level: Level, test_pkg: &'static str) {
 macro_rules! trace_test {
     ($(#[$attr:meta])* $name:ident, $body:block) => {
         $(#[$attr])*
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn $name() {
             // Get the module name
             let fname = $crate::func_name!();
@@ -297,7 +297,9 @@ impl Pail {
                 .xds()
                 .xds_port(rp.xds_port)
                 .mds()
-                .mds_port(rp.mds_port);
+                .mds_port(rp.mds_port)
+                .corrosion_port(0)
+                .testing();
             let (tx, rx) = quilkin::signal::channel();
             let sh = quilkin::signal::ShutdownHandler::new(tx.clone(), rx);
             let (task, _ports) = svc.spawn_services(&rp.config, sh).await.unwrap();
@@ -375,7 +377,9 @@ impl Pail {
                     .xds()
                     .xds_port(xds_port)
                     .mds()
-                    .mds_port(mds_port);
+                    .mds_port(mds_port)
+                    .corrosion_port(0)
+                    .testing();
 
                 let config = crate::Config::new_rc(
                     Some("test-relay".into()),
