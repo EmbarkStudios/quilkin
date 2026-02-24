@@ -61,8 +61,8 @@ skip = [
 skip-tree = [
     { crate = "thiserror@1.0.69", reason = "many crates use this old version" },
     { crate = "hashbrown@0.15.5", reason = "many crates this old version" },
-    { crate = "hashbrown@0.12.3", reason = "many crates this old version" },
     { crate = "rand@0.8.5", reason = "several users of old version in corrosion crates" },
+    { crate = "sha2@0.10.9", reason = "old version that uses multiple other old crates" },
 ]
 
 [[bans.features]]

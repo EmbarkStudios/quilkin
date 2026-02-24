@@ -42,7 +42,7 @@ spec:
     spec:
       containers:
         - name: quilkin
-          image: us-docker.pkg.dev/quilkin/release/quilkin:0.9.0
+          image: ghcr.io/embarkstudios/quilkin:0.10.0-3d8eaef
           args:
             - --service.udp
             - --provider.xds.endpoints=http://quilkin-relay-agones:7800

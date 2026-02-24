@@ -113,7 +113,7 @@ spec:
           env:
             - name: RUST_LOG
               value: info
-          image: us-docker.pkg.dev/quilkin/release/quilkin:0.9.0
+          image: ghcr.io/embarkstudios/quilkin:0.10.0-3d8eaef
           livenessProbe:
             periodSeconds: 5
             failureThreshold: 3

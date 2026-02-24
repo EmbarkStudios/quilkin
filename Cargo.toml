@@ -72,6 +72,7 @@ base64-serde = "0.8.0"
 bytes.workspace = true
 camino.workspace = true
 cfg-if = "1.0"
+chacha20 = { version = "0.10", default-features = false, features = ["cipher"] }
 crossbeam-utils = { version = "0.8", optional = true }
 clap = { version = "4.5.54", features = ["cargo", "derive", "env"] }
 dashmap = { version = "6.1", features = ["serde"] }
@@ -169,13 +170,13 @@ axum-test = "18.6.0"
 debug = true
 
 [workspace]
+#"crates/nmap-service-probes",
 members = [
     ".",
     "crates/agones",
     "crates/corrosion",
     "crates/corrosion-tests",
     "crates/macros",
-    #"crates/nmap-service-probes",
     "crates/proto-gen",
     "crates/quilkin-proto",
     "crates/system",
