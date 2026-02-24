@@ -1,0 +1,15 @@
+
+
+[env]
+GITHUB_REF_NAME='main'
+QUILKIN_VERSION='latest'
+
+[tasks.serve]
+run = '''
+cargo run -q --manifest-path ../Cargo.toml -- -q generate-config-schema -o ../target
+
+# Output all the command line help
+cargo run -q --manifest-path ../Cargo.toml -- -h > ../target/quilkin.commands
+
+mdbook serve
+'''

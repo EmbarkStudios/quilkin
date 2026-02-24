@@ -28,7 +28,7 @@ pub(crate) fn counter(
     static COUNTERS: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
-                "filter_int_counter",
+                "quilkin_filter_int_counter",
                 "generic filter counter, see help label for more specific info",
             },
             &["id", "label", "help", Direction::LABEL],

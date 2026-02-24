@@ -15,8 +15,8 @@ jobs:
             submodules: true
       - run: echo docs_dir=docs-build/${{ github.ref_name }} >> $GITHUB_ENV
       - run: echo documentation directory=${{ env.docs_dir }}
-      - run: cargo install mdbook
-      - run: cargo install mdbook-variables --locked
+      - uses: jdx/mise-action@v3
+      - run: mise install rust mdbook cargo:mdbook-variables github:badboy/mdbook-mermaid
       - run: mkdir -p ${{ env.docs_dir }}
       - run: |
           export GITHUB_REF_NAME=${{ github.ref_name }}
@@ -25,8 +25,8 @@ jobs:
           echo GITHUB_REF_NAME=${GITHUB_REF_NAME}
           echo QUILKIN_VERSION=${QUILKIN_VERSION}
           cd docs
-          mdbook build -d ../${{ env.docs_dir }}/book
-      - run: cargo doc --workspace --no-deps
+          mise x -- mdbook build -d ../${{ env.docs_dir }}/book
+      - run: mise x -- cargo doc --workspace --no-deps
       - run: mv target/doc ${{ env.docs_dir }}/api
       - uses: JamesIves/github-pages-deploy-action@4.1.4
         with:

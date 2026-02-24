@@ -12,11 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM gcr.io/distroless/cc-debian12:nonroot as base
+FROM debian:bookworm-slim AS base
 WORKDIR /
+RUN groupadd --gid 65532 nonroot
+RUN useradd --create-home --uid 65532 --gid 65532 --shell /bin/bash nonroot
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y ca-certificates
 COPY ./license.html .
 COPY ./dependencies-src.zip .
 COPY --chown=nonroot:nonroot ./target/image/quilkin .
 
-USER nonroot:nonroot
+USER nonroot
 ENTRYPOINT ["/quilkin"]

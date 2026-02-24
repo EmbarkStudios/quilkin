@@ -26,7 +26,7 @@ PacketHeaders {
             },
         ),
     ),
-    vlan: None,
+    link_exts: [],
     net: Some(
         Ipv6(
             Ipv6Header {

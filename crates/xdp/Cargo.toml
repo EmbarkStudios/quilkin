@@ -1,12 +1,12 @@
 [package]
 name = "quilkin-xdp"
 version = "0.1.0"
+description = "quilkin's XDP library"
 license.workspace = true
 edition.workspace = true
 
 [dependencies]
 thiserror.workspace = true
-tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 xdp.workspace = true

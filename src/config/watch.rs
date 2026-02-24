@@ -115,15 +115,11 @@ impl<'de, T: serde::Deserialize<'de> + Clone> serde::Deserialize<'de> for Watch<
 }
 
 impl<T: schemars::JsonSchema> schemars::JsonSchema for Watch<T> {
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         <T>::schema_name()
     }
-    fn json_schema(r#gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        <T>::json_schema(r#gen)
-    }
-
-    fn is_referenceable() -> bool {
-        <T>::is_referenceable()
+    fn json_schema(sg: &mut schemars::generate::SchemaGenerator) -> schemars::Schema {
+        <T>::json_schema(sg)
     }
 }
 

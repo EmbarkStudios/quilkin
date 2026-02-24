@@ -3,6 +3,9 @@ set -e
 
 source="${BASH_SOURCE[0]}"
 
+# Print kernel version just for confirmation in CI
+echo "$(uname -r)"
+
 cleanup() {
     echo "Cleaning up"
     ip netns del cs || true

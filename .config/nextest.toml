@@ -1,0 +1,3 @@
+[[profile.ci.overrides]]
+filter = 'test(multiple_subs)'
+retries = 2

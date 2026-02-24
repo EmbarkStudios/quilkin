@@ -39,6 +39,12 @@ pub fn channel() -> (ShutdownTx, ShutdownRx) {
     tokio::sync::watch::channel(())
 }
 
+pub async fn await_shutdown(mut shutdown_rx: ShutdownRx) {
+    if let Err(error) = shutdown_rx.changed().await {
+        tracing::error!(%error, "shutdown signal error");
+    }
+}
+
 /// Adapter method to create a `CancellationToken` that will be cancelled when the `ShutdownRx`
 /// watch channel is changed.
 ///

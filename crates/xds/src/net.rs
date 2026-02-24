@@ -41,11 +41,23 @@ impl TcpListener {
         self.inner.local_addr().expect("failed to bind")
     }
 
+    /// Returns the underlying std library TCP listener.
+    #[inline]
+    pub fn into_std(self) -> std::net::TcpListener {
+        self.inner
+    }
+
+    /// Returns the listener as a tokio listener.
+    #[inline]
+    pub fn into_tokio(self) -> io::Result<tokio::net::TcpListener> {
+        self.inner.set_nonblocking(true)?;
+        tokio::net::TcpListener::from_std(self.inner)
+    }
+
     #[inline]
     pub fn into_stream(self) -> io::Result<tokio_stream::wrappers::TcpListenerStream> {
-        self.inner.set_nonblocking(true)?;
-        let tl = tokio::net::TcpListener::from_std(self.inner)?;
-        Ok(tokio_stream::wrappers::TcpListenerStream::new(tl))
+        self.into_tokio()
+            .map(tokio_stream::wrappers::TcpListenerStream::new)
     }
 }
 

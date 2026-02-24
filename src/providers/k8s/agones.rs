@@ -275,12 +275,12 @@ impl Resource for GameServer {
 impl kube::core::crd::v1::CustomResourceExt for GameServer {
     fn crd() -> CustomResourceDefinition {
         let open_api_v3_schema = Some(
-            schemars::r#gen::SchemaSettings::openapi3()
+            schemars::generate::SchemaSettings::openapi3()
                 .with(|s| {
                     s.inline_subschemas = true;
                     s.meta_schema = None;
                 })
-                .with_visitor(kube_core::schema::StructuralSchemaRewriter)
+                .with_transform(kube_core::schema::StructuralSchemaRewriter)
                 .into_generator()
                 .into_root_schema_for::<Self>(),
         );
@@ -535,9 +535,10 @@ impl Default for SdkServer {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
 pub enum SdkServerLogLevel {
     /// Output all messages except for debug messages.
+    #[default]
     Info,
     /// Output all messages including debug messages.
     Debug,
@@ -545,29 +546,18 @@ pub enum SdkServerLogLevel {
     Error,
 }
 
-impl Default for SdkServerLogLevel {
-    fn default() -> Self {
-        Self::Info
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
 pub enum PortPolicy {
     /// The user defines the host port to be used in the configuration.
     Static,
     /// The system will choose an open port for the [`GameServer`] in question.
+    #[default]
     Dynamic,
     /// Dynamically sets the container port to the same value as the dynamically
     /// selected host port. This will mean that users will need to lookup what
     /// port has been opened through the server side SDK.
     Passthrough,
     None,
-}
-
-impl Default for PortPolicy {
-    fn default() -> Self {
-        Self::Dynamic
-    }
 }
 
 /// The strategy that a [`Fleet`] & [`GameServer`]s will use when scheduling
@@ -587,20 +577,15 @@ pub enum SchedulingStrategy {
     Distributed,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
 pub enum Protocol {
     #[serde(rename = "UDP")]
+    #[default]
     Udp,
     #[serde(rename = "TCP")]
     Tcp,
     #[serde(rename = "TCPUDP")]
     UdpTcp,
-}
-
-impl Default for Protocol {
-    fn default() -> Self {
-        Self::Udp
-    }
 }
 
 #[derive(Clone, Debug, JsonSchema)]
@@ -731,12 +716,12 @@ impl ::kube::core::crd::v1::CustomResourceExt for Fleet {
         } else {
             ::serde_json::Value::Object(::serde_json::Map::new())
         };
-        let r#gen = ::schemars::r#gen::SchemaSettings::openapi3()
+        let r#gen = schemars::generate::SchemaSettings::openapi3()
             .with(|s| {
                 s.inline_subschemas = true;
                 s.meta_schema = None;
             })
-            .with_visitor(kube_core::schema::StructuralSchemaRewriter)
+            .with_transform(kube_core::schema::StructuralSchemaRewriter)
             .into_generator();
         let schema = r#gen.into_root_schema_for::<Self>();
         let jsondata = ::serde_json::Value::Object({

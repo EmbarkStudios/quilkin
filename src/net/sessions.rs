@@ -132,8 +132,8 @@ impl SessionPool {
     }
 
     /// Allocates a new upstream socket from a new socket from the system.
-    fn create_new_session_from_new_socket<'pool>(
-        self: &'pool Arc<Self>,
+    fn create_new_session_from_new_socket(
+        self: &Arc<Self>,
         key: SessionKey,
     ) -> Result<(Option<MetricsIpNetEntry>, PacketQueueSender), super::PipelineError> {
         tracing::trace!(source=%key.source, dest=%key.dest, "creating new socket for session");
@@ -219,8 +219,8 @@ impl SessionPool {
     /// creates a new session either from a fresh socket, or if there are sockets
     /// allocated that are not reserved by an existing destination, using the
     /// existing socket.
-    pub(crate) fn get<'pool>(
-        self: &'pool Arc<Self>,
+    pub(crate) fn get(
+        self: &Arc<Self>,
         key @ SessionKey { dest, .. }: SessionKey,
     ) -> Result<(Option<MetricsIpNetEntry>, PacketQueueSender), super::PipelineError> {
         tracing::trace!(source=%key.source, dest=%key.dest, "SessionPool::get");
@@ -280,8 +280,8 @@ impl SessionPool {
     }
 
     /// Using an existing socket, reserves the socket for a new session.
-    fn create_session_from_existing_socket<'session>(
-        self: &'session Arc<Self>,
+    fn create_session_from_existing_socket(
+        self: &Arc<Self>,
         key: SessionKey,
         pending_sends: PacketQueueSender,
         socket_port: u16,

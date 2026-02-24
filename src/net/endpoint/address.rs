@@ -86,9 +86,7 @@ impl EndpointAddress {
                         .find(|item| matches!(item, IpAddr::V6(_)))
                         .or_else(|| set.iter().find(|item| matches!(item, IpAddr::V4(_))))
                         .copied()
-                        .ok_or_else(|| {
-                            std::io::Error::new(std::io::ErrorKind::Other, "no ip address found")
-                        })?;
+                        .ok_or_else(|| std::io::Error::other("no ip address found"))?;
 
                     CACHE.insert(name.clone(), ip);
                     ip

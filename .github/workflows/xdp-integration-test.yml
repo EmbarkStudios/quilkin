@@ -33,14 +33,18 @@ jobs:
       #     registry: true
       #     registry_name: ${{ env.REGISTRY_NAME }}
       #     registry_port: ${{ env.REGISTRY_PORT }}
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Fetch quilkin
-        run: cargo fetch --target x86_64-unknown-linux-gnu
-      - name: Build quilkin
-        run: cargo build -p quilkin --bin quilkin
+      - uses: dtolnay/rust-toolchain@1.91.1
+      - name: Install virtme-ng
+        env:
+          VIRTME_VERSION: "v1.38"
+        run: .ci/install-virtme-ng.sh
       - name: Install fortio
         run: |
           curl -L -o fortio.deb https://github.com/fortio/fortio/releases/download/v1.68.0/fortio_1.68.0_amd64.deb
           sudo dpkg -i fortio.deb
+      - name: Fetch quilkin
+        run: cargo fetch --target x86_64-unknown-linux-gnu
+      - name: Build quilkin
+        run: cargo build -p quilkin --bin quilkin
       - name: Run XDP integration test
-        run: sudo .ci/xdp/veth-integ-test.sh
+        run: .ci/xdp/integ-test-multi-kernel.sh

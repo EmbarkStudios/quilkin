@@ -1,0 +1,24 @@
+[package]
+name = "quilkin-system"
+version.workspace = true
+description = "Quilkin is a non-transparent UDP proxy specifically designed for use with large scale multiplayer dedicated game server deployments, to ensure security, access control, telemetry data, metrics and more."
+homepage = "https://github.com/EmbarkStudios/quilkin"
+repository = "https://github.com/EmbarkStudios/quilkin"
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["http", "sockets"]
+http = ["dep:axum", "dep:futures", "dep:hyper-util", "dep:tokio", "dep:tower"]
+sockets = ["dep:socket2"]
+
+[dependencies]
+axum = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true, features = ["http1", "http2"] }
+once_cell.workspace = true
+prometheus-client.workspace = true
+socket2 = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+tracing.workspace = true

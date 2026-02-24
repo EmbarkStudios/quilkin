@@ -63,7 +63,7 @@ pub struct LocalityCli {
     /// The `sub_zone` in the `zone` in the `region` to set in the cluster map
     /// for any provider endpoints discovered.
     #[clap(
-        long = "locality.region.sub_zone",
+        long = "locality.region.sub-zone",
         requires("zone"),
         env = "QUILKIN_LOCALITY_SUB_ZONE"
     )]
@@ -269,9 +269,13 @@ impl Cli {
         );
         config.read_config(&self.config, locality.clone())?;
 
+        crate::metrics::with_mut_registry(|mut registry| {
+            crate::metrics::register_metrics(&mut registry, config.id());
+        });
+
         let ready = Arc::<std::sync::atomic::AtomicBool>::default();
         if self.admin.enabled {
-            crate::components::admin::server(
+            crate::components::admin::serve(
                 config.clone(),
                 ready.clone(),
                 shutdown_handler.shutdown_tx(),

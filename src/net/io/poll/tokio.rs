@@ -264,7 +264,7 @@ impl crate::net::sessions::SessionPool {
                                 },
                                 Ok((_size, recv_addr)) => {
                                     let filters = filters.load();
-                                    pool.process_received_upstream_packet(buf, recv_addr, port, &mut last_received_at, filters)
+                                    pool.process_received_upstream_packet(buf, recv_addr, port, &mut last_received_at, filters);
                                 },
                             }
                         }

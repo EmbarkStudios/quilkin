@@ -22,6 +22,7 @@ edition.workspace = true
 license.workspace = true
 description = "End to end integration tests to be run against a Kubernetes cluster with Agones installed"
 readme = "README.md"
+publish = false
 
 [lints]
 workspace = true
@@ -33,7 +34,9 @@ futures.workspace = true
 k8s-openapi.workspace = true
 kube = { workspace = true, features = ["openssl-tls", "client", "derive", "runtime"] }
 quilkin = { path = "../../" }
-rustls = "0.23.27"
-serial_test = "3.2.0"
+rustls = "0.23.36"
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+serial_test = "3.3.1"

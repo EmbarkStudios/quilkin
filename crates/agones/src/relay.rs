@@ -55,7 +55,7 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    /// Test for Agones Provider integration. Since this will look at all GameServers in the namespace
+    /// Test for Agones Provider integration. Since this will look at all `GameServers` in the namespace
     /// for this test, we should only run Agones integration test in a serial manner, since they
     /// could easily collide with each other.
     async fn agones_token_router() {

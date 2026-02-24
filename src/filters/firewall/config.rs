@@ -16,7 +16,7 @@
 
 use std::net::IpAddr;
 use std::str::FromStr;
-use std::{convert::TryFrom, fmt, fmt::Formatter, net::SocketAddr, ops::Range, vec};
+use std::{convert::TryFrom, fmt, fmt::Formatter, net::SocketAddr, ops::Range};
 
 use ipnetwork::{IpNetwork, IpNetworkError};
 use schemars::JsonSchema;
@@ -90,12 +90,11 @@ impl Cidr {
     pub fn contains(&self, ip: IpAddr) -> bool {
         // if we have a v4 mask, but a v6 address, let's see if it's a compatible or mapped
         // ipv4->ipv6 address
-        if let IpNetwork::V4(v4network) = self.0 {
-            if let IpAddr::V6(v6) = ip {
-                if let Some(ipv4) = v6.to_ipv4() {
-                    return v4network.contains(ipv4);
-                }
-            }
+        if let IpNetwork::V4(v4network) = self.0
+            && let IpAddr::V6(v6) = ip
+            && let Some(ipv4) = v6.to_ipv4()
+        {
+            return v4network.contains(ipv4);
         }
 
         self.0.contains(ip)

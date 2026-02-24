@@ -222,6 +222,7 @@ fn execute(which: &str) {
                 "config/v1alpha1/config",
                 "filters/capture/v1alpha1/capture",
                 "filters/concatenate/v1alpha1/concatenate",
+                "filters/decryptor/v1alpha1/decryptor",
                 "filters/debug/v1alpha1/debug",
                 "filters/drop/v1alpha1/drop",
                 "filters/firewall/v1alpha1/firewall",
@@ -261,50 +262,6 @@ fn execute(which: &str) {
 
     if !cmd.status().expect("proto-gen was not installed").success() {
         panic!("proto-gen {which} failed");
-    }
-
-    if which == "generate" {
-        docs(files);
-    }
-}
-
-fn docs(files: &[(&str, &[&str])]) {
-    let mut cmd = Command::new("protoc");
-
-    let quilkin_protos: Vec<&(&str, &[&str])> = files
-        .iter()
-        .filter(|item| item.0 == "proto/quilkin")
-        .collect();
-    let includes: Vec<&(&str, &[&str])> = files
-        .iter()
-        .filter(|item| item.0 != "proto/quilkin")
-        .collect();
-
-    for (dir, files) in includes {
-        if files.is_empty() {
-            cmd.args(["-I", dir]);
-        } else {
-            for file in *files {
-                cmd.args(["-I".into(), format!("{dir}/{file}.proto")]);
-            }
-        }
-    }
-
-    cmd.args(["--doc_out", "./docs/src/services/xds/proto"]);
-    cmd.args(["--doc_opt", "markdown,index.md"]);
-
-    for (dir, files) in quilkin_protos {
-        for file in *files {
-            cmd.arg(format!("{dir}/{file}.proto"));
-        }
-    }
-
-    if !cmd
-        .status()
-        .expect("protoc-gen-doc was not installed")
-        .success()
-    {
-        panic!("protoc-gen-doc failed");
     }
 }
 
@@ -398,10 +355,10 @@ fn copy() {
 
     {
         let parent = tbp.parent().unwrap();
-        if !parent.exists() {
-            if let Err(err) = std::fs::create_dir_all(parent) {
-                panic!("failed to create directory {parent:?}: {err}");
-            }
+        if !parent.exists()
+            && let Err(err) = std::fs::create_dir_all(parent)
+        {
+            panic!("failed to create directory {parent:?}: {err}");
         }
     }
 

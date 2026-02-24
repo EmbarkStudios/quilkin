@@ -95,15 +95,11 @@ impl crate::config::watch::Watchable for DatacenterMap {
 }
 
 impl schemars::JsonSchema for DatacenterMap {
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         <std::collections::HashMap<IpAddr, Datacenter>>::schema_name()
     }
-    fn json_schema(r#gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        <std::collections::HashMap<IpAddr, Datacenter>>::json_schema(r#gen)
-    }
-
-    fn is_referenceable() -> bool {
-        <std::collections::HashMap<IpAddr, Datacenter>>::is_referenceable()
+    fn json_schema(sg: &mut schemars::generate::SchemaGenerator) -> schemars::Schema {
+        <std::collections::HashMap<IpAddr, Datacenter>>::json_schema(sg)
     }
 }
 

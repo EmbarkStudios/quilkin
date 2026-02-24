@@ -7,9 +7,9 @@ If you have a feature you'd like to request that doesn't have an existing issue,
 
 Participation in this project comes under the [Contributor Covenant Code of Conduct](code-of-conduct.md)
 
-[unassigned "help wanted" issues.]: https://github.com/googleforgames/quilkin/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22help%20wanted%22%20no%3Aassignee
-[github discussions]: https://github.com/googleforgames/quilkin/discussions
-["Feature Request"]: https://github.com/googleforgames/quilkin/issues/new?template=feature_request.md
+[unassigned "help wanted" issues.]: https://github.com/EmbarkStudios/quilkin/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22help%20wanted%22%20no%3Aassignee
+[github discussions]: https://github.com/EmbarkStudios/quilkin/discussions
+["Feature Request"]: https://github.com/EmbarkStudios/quilkin/issues/new?template=feature_request.md
 
 ## Repository Layout
 
@@ -45,7 +45,7 @@ See our [Quilkin Development and Building Guide](./build/README.md) for developi
 - We follow the [GitHub Pull Request Model](https://help.github.com/articles/about-pull-requests/) for
   all contributions.
 - For large bodies of work, we recommend creating an issue and labelling it
-  "[kind/design](https://github.com/googleforgames/quilkin/issues?q=is%3Aissue+is%3Aopen+label%3Akind%2Fdesign)"
+  "[kind/design](https://github.com/EmbarkStudios/quilkin/issues?q=is%3Aissue+is%3Aopen+label%3Akind%2Fdesign)"
   outlining the feature that you wish to build, and describing how it will be implemented. This gives a chance
   for review to happen early, and ensures no wasted effort occurs.
 - For new features, documentation *must* be included. Documentation can currently be found under 

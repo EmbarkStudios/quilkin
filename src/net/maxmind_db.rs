@@ -83,8 +83,14 @@ impl MaxmindDb {
             return None;
         };
 
-        match mmdb.lookup::<IpNetEntry>(ip) {
-            Ok(asn) => Some(asn),
+        match mmdb.lookup(ip) {
+            Ok(lookup_result) => match lookup_result.decode::<IpNetEntry>() {
+                Ok(asn) => asn,
+                Err(error) => {
+                    tracing::warn!(%ip, %error, "failed to decode ip");
+                    None
+                }
+            },
             Err(error) => {
                 tracing::warn!(%ip, %error, "ip not found in maxmind database");
                 None
@@ -240,7 +246,7 @@ pub(crate) fn itoa(mut num: u64, asn: &mut [u8]) -> u8 {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    MaxmindDb(#[from] maxminddb::MaxMindDBError),
+    MaxmindDb(#[from] maxminddb::MaxMindDbError),
     #[error(transparent)]
     Http(#[from] hyper::Error),
     #[error(transparent)]

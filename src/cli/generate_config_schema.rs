@@ -29,17 +29,17 @@ pub struct GenerateConfigSchema {
 impl GenerateConfigSchema {
     pub fn generate_config_schema(&self) -> crate::Result<()> {
         let set = crate::filters::FilterSet::default();
-        type SchemaIterator<'r> =
-            Box<dyn Iterator<Item = (&'static str, schemars::schema::RootSchema)> + 'r>;
+        type SchemaIterator<'r> = Box<dyn Iterator<Item = (&'static str, schemars::Schema)> + 'r>;
 
-        let schemas = (self.filter_ids.len() == 1 && self.filter_ids[0].to_lowercase() == "all")
-            .then(|| {
+        let schemas = if self.filter_ids.len() == 1 && self.filter_ids[0].to_lowercase() == "all" {
+            {
                 Box::new(
                     set.iter()
                         .map(|factory| (factory.name(), factory.config_schema())),
                 ) as SchemaIterator<'_>
-            })
-            .unwrap_or_else(|| {
+            }
+        } else {
+            {
                 Box::new(self.filter_ids.iter().filter_map(|id| {
                     let item = set.get(id);
 
@@ -49,7 +49,8 @@ impl GenerateConfigSchema {
 
                     item.map(|item| (item.name(), item.config_schema()))
                 })) as SchemaIterator<'_>
-            });
+            }
+        };
 
         for (id, schema) in schemas {
             let mut path = self.output_directory.join(id);

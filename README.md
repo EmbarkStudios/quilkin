@@ -7,7 +7,6 @@
 [![Docs.rs](https://docs.rs/quilkin/badge.svg)](https://docs.rs/quilkin)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/EmbarkStudios/quilkin)](https://github.com/EmbarkStudios/quilkin/releases)
 [![Discord](https://img.shields.io/discord/773975408265134100)](https://discord.gg/mfBNZjBDnc)
-[![Twitter Follow](https://img.shields.io/twitter/follow/quilkindev?style=social)](https://twitter.com/quilkindev)
 
 Quilkin is a non-transparent UDP proxy specifically designed for use with large scale multiplayer dedicated game
 servers deployments that ensures security, access control, telemetry data, metrics and more without the end user
@@ -80,13 +79,7 @@ There are lots of ways to engage with the Quilkin community:
 * Here on [Github](https://github.com/EmbarkStudios/quilkin) via
   [issues](https://github.com/EmbarkStudios/quilkin/issues) and
   [pull requests](https://github.com/EmbarkStudios/quilkin/pulls).
-* Join our [mailing list](https://groups.google.com/forum/#!forum/quilkin-discuss), which also gives you access to
-  our continuous integration builds.
 * Join our [Discord chat server](https://discord.gg/mfBNZjBDnc).
-* Follow up on [Twitter](https://twitter.com/quilkindev).
-* Join our monthly community meetings ([webcal](https://calendar.google.com/calendar/embed?src=c_9mgnkieltlphoijg5uio0g6a14%40group.calendar.google.com&ctz=America%2FLos_Angeles),
-  [ical](https://calendar.google.com/calendar/ical/c_9mgnkieltlphoijg5uio0g6a14%40group.calendar.google.com/public/basic.ics),
-  [recordings](https://www.youtube.com/playlist?list=PLhkWKwFGACw1oG-qbKQZBlAKAfuG_XpTd)).
 
 ## Credits
 
