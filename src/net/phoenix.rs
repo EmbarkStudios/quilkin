@@ -339,24 +339,23 @@ impl<M> Phoenix<M> {
     pub fn ordered_nodes_by_latency(&self) -> Vec<(IcaoCode, f64)> {
         use std::collections::hash_map::Entry;
 
-        let origin = Coordinates::ORIGIN;
         let mut icao_map = HashMap::new();
 
         for entry in self.nodes.iter() {
             let Some(coordinates) = entry.value().coordinates else {
                 continue;
             };
-            let distance = origin.distance_to(&coordinates);
+            let rtt: f64 = coordinates.incoming + coordinates.outgoing;
             let icao = entry.value().icao_code;
 
             match icao_map.entry(icao) {
                 Entry::Vacant(entry) => {
-                    entry.insert(distance);
+                    entry.insert(rtt);
                 }
                 Entry::Occupied(entry) => {
                     let old_distance = entry.into_mut();
-                    if *old_distance > distance {
-                        *old_distance = distance;
+                    if *old_distance > rtt {
+                        *old_distance = rtt;
                     }
                 }
             }
