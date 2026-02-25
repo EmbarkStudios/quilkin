@@ -136,7 +136,7 @@ pub struct ReadGuard<'inner, T: Watchable + std::fmt::Debug> {
 
 impl<T: Watchable + std::fmt::Debug> Drop for ReadGuard<'_, T> {
     fn drop(&mut self) {
-        //debug_assert!(!self.inner.has_changed(self.marker));
+        debug_assert!(!self.inner.has_changed(self.marker));
     }
 }
 
