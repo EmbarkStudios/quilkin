@@ -19,6 +19,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Gather information
         id: info
@@ -65,3 +67,4 @@ jobs:
           # hopefully get reproducible builds when built from the same commit
           # https://github.com/moby/buildkit/blob/master/docs/build-repro.md#source_date_epoch
           SOURCE_DATE_EPOCH: ${{ steps.info.outputs.git_timestamp }}
+
