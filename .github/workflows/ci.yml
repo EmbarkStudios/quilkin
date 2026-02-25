@@ -106,8 +106,9 @@ jobs:
           cargo install --git https://github.com/cross-rs/cross --rev 19bc73f cross
       - name: Build
         run: cross build --target ${{ matrix.target }} -p qt -p quilkin -p quilkin-xds --tests
-      - name: Build
-        run: cross test --target ${{ matrix.target }} -p qt -p quilkin -p quilkin-xds
+      # We can't test, io_uring_setup is not implemented in qemu as of now
+      # - name: Build
+      #   run: cross test --target ${{ matrix.target }} -p qt -p quilkin -p quilkin-xds
 
   build:
     name: Build
