@@ -508,7 +508,7 @@ impl Service {
         }
 
         let listener = crate::net::TcpListener::bind(Some(self.xds_port))?;
-        ports.xds = Some(listener.local_addr().port());
+        ports.xds = Some(listener.port());
 
         let finished = shutdown.push("xds");
         let srx = shutdown.shutdown_rx();
@@ -548,6 +548,7 @@ impl Service {
 
         tracing::info!(port=%self.mds_port, "starting mds service");
         let listener = crate::net::TcpListener::bind(Some(self.mds_port))?;
+        ports.mds = Some(listener.port());
 
         let finished = shutdown.push("mds");
         let srx = shutdown.shutdown_rx();

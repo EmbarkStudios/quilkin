@@ -3,7 +3,6 @@
 use quilkin::{
     Config,
     collections::{BufferPool, PoolBuffer},
-    net::TcpListener,
     signal::ShutdownTx,
     test::TestConfig,
 };
@@ -298,6 +297,7 @@ impl Pail {
                 .xds_port(rp.xds_port)
                 .mds()
                 .mds_port(rp.mds_port)
+                .grpc()
                 .corrosion_port(0)
                 .testing();
             let (tx, rx) = quilkin::signal::channel();
@@ -359,9 +359,6 @@ impl Pail {
                 })
             }
             PailConfig::Relay(rpc) => {
-                let xds_port = TcpListener::bind(None).unwrap().port();
-                let mds_port = TcpListener::bind(None).unwrap().port();
-
                 let path = td.join(spc.name);
                 let mut tc = rpc.config.unwrap_or_default();
                 tc.id = spc.name.into();
@@ -375,9 +372,10 @@ impl Pail {
                 let providers = quilkin::Providers::default().fs().fs_path(path);
                 let svc = quilkin::Service::default()
                     .xds()
-                    .xds_port(xds_port)
+                    .xds_port(0)
                     .mds()
-                    .mds_port(mds_port)
+                    .mds_port(0)
+                    .grpc()
                     .corrosion_port(0)
                     .testing();
 
@@ -398,7 +396,7 @@ impl Pail {
                     None,
                     shutdown_rx.clone(),
                 );
-                let (task, _ports) = svc
+                let (task, ports) = svc
                     .spawn_services(
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
@@ -407,8 +405,8 @@ impl Pail {
                     .unwrap();
 
                 Self::Relay(RelayPail {
-                    xds_port,
-                    mds_port,
+                    xds_port: ports.xds.expect("xds not spawned"),
+                    mds_port: ports.mds.expect("mds not spawned"),
                     task: Some(task),
                     provider_task,
                     healthy,
@@ -461,12 +459,8 @@ impl Pail {
                 let (shutdown, shutdown_rx) = quilkin::signal::channel();
                 let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
 
-                let port = quilkin::net::socket_port(
-                    &quilkin::net::raw_socket_with_reuse(0).expect("failed to bind qcmp socket"),
-                );
-
                 let config_path = path.clone();
-                let svc = quilkin::Service::default().qcmp().qcmp_port(port);
+                let svc = quilkin::Service::default().qcmp().qcmp_port(0);
                 let providers = quilkin::Providers::default()
                     .fs()
                     .fs_path(path)
@@ -490,7 +484,7 @@ impl Pail {
                     None,
                     shutdown_rx.clone(),
                 );
-                let (task, _ports) = svc
+                let (task, ports) = svc
                     .spawn_services(
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
@@ -499,7 +493,7 @@ impl Pail {
                     .unwrap();
 
                 Self::Agent(AgentPail {
-                    qcmp_port: port,
+                    qcmp_port: ports.qcmp.expect("failed to spawn QCMP"),
                     task: Some(task),
                     provider_task,
                     healthy,
@@ -512,16 +506,6 @@ impl Pail {
                 })
             }
             PailConfig::Proxy(ppc) => {
-                let socket = quilkin::net::raw_socket_with_reuse(0).expect("failed to bind socket");
-                let qcmp =
-                    quilkin::net::raw_socket_with_reuse(0).expect("failed to bind qcmp socket");
-                let qcmp_port = quilkin::net::socket_port(&qcmp);
-                let phoenix_port = TcpListener::bind(None)
-                    .expect("failed to bind phoenix socket")
-                    .port();
-
-                let port = quilkin::net::socket_port(&socket);
-
                 let management_servers: Vec<_> = spc
                     .dependencies
                     .iter()
@@ -542,11 +526,11 @@ impl Pail {
 
                 let svc = quilkin::Service::default()
                     .udp()
-                    .udp_port(port)
+                    .udp_port(0)
                     .qcmp()
-                    .qcmp_port(qcmp_port)
+                    .qcmp_port(0)
                     .phoenix()
-                    .phoenix_port(phoenix_port)
+                    .phoenix_port(0)
                     .termination_timeout(None);
 
                 let (shutdown, shutdown_rx) = quilkin::signal::channel();
@@ -604,7 +588,7 @@ impl Pail {
                     Some(rttx),
                     shutdown_rx.clone(),
                 );
-                let (task, _ports) = svc
+                let (task, ports) = svc
                     .spawn_services(
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
@@ -613,9 +597,9 @@ impl Pail {
                     .unwrap();
 
                 Self::Proxy(ProxyPail {
-                    port,
-                    qcmp_port,
-                    phoenix_port,
+                    port: ports.udp.expect("failed to spawn proxy"),
+                    qcmp_port: ports.qcmp.expect("failed to spawn qcmp"),
+                    phoenix_port: ports.phoenix.expect("failed to spawn phoenix"),
                     shutdown,
                     task: Some(task),
                     provider_task,
