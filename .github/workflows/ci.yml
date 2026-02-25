@@ -87,7 +87,7 @@ jobs:
           fi
           exit 0
 
-  test-aarch64:
+  build-non-x86:
     name: Test non-x86
     strategy:
       matrix:
@@ -135,6 +135,6 @@ jobs:
 
   test_success:
     runs-on: ubuntu-24.04
-    needs: [lint, test, build, deny-check, validate-proto-bufs]
+    needs: [lint, test, build, build-non-x86, deny-check, validate-proto-bufs]
     steps:
       - run: echo "All test jobs passed"
