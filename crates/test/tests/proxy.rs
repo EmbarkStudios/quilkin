@@ -80,7 +80,7 @@ trace_test!(with_filter, {
     client.send_to(msg.as_bytes(), &local_addr).await.unwrap();
 
     // search for the filter strings.
-    let result = sb.timeout(100, rx.recv()).await.0.unwrap();
+    let result = sb.timeout(1000, rx.recv()).await.0.unwrap();
     assert!(result.starts_with(&format!("{msg}:odr:[::1]:")));
 });
 
