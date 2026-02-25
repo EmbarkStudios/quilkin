@@ -23,15 +23,12 @@ use quilkin::codec::qcmp::Protocol;
 #[tokio::test]
 #[cfg_attr(target_os = "macos", ignore)]
 async fn proxy_ping() {
-    let qcmp = quilkin::net::raw_socket_with_reuse(0).unwrap();
-    let qcmp_port = quilkin::net::socket_port(&qcmp);
-
     let shutdown_handler = quilkin::signal::spawn_handler();
     let stx = shutdown_handler.shutdown_tx();
 
     let providers = quilkin::Providers::default();
 
-    let svc = quilkin::Service::builder().qcmp().qcmp_port(qcmp_port);
+    let svc = quilkin::Service::builder().qcmp().qcmp_port(0);
 
     let config = quilkin::Config::new_rc(
         None,
