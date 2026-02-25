@@ -542,9 +542,11 @@ impl Service {
         self.spawn_corrosion_server(config.clone(), shutdown, ports)
             .await?;
 
-        if !self.grpc_enabled {
-            return Ok(());
-        }
+        // Transition compatibility, previously mds would be enable if _either_ mds_enabled or grpc_enabled
+        // were true
+        // if !self.grpc_enabled {
+        //     return Ok(());
+        // }
 
         tracing::info!(port=%self.mds_port, "starting mds service");
         let listener = crate::net::TcpListener::bind(Some(self.mds_port))?;
