@@ -104,11 +104,11 @@ jobs:
         run: |
           # Cross has not released a binary in over 2 years, so...we install from git, which is bad, but at least
           # we pin it to a specific revision to avoid random breakage
-          cargo install --git https://github.com/cross-rs/cross --rev 19bc73f
+          cargo install --git https://github.com/cross-rs/cross --rev 19bc73f cross
       - name: Build
-        run: cargo cross build --target ${{ matrix.target }} -p qt -p quilkin -p quilkin-xds --tests
+        run: cross build --target ${{ matrix.target }} -p qt -p quilkin -p quilkin-xds --tests
       - name: Build
-        run: cargo cross test --target ${{ matrix.target }} -p qt -p quilkin -p quilkin-xds
+        run: cross test --target ${{ matrix.target }} -p qt -p quilkin -p quilkin-xds
 
   build:
     name: Build
