@@ -3,6 +3,11 @@ rustflags = [
     "-Ctarget-feature=+aes,+avx2",
 ]
 
+[target.'cfg(target_arch = "aarch64")']
+rustflags = [
+    "-Ctarget-feature=+aes,+neon",
+]
+
 [target.'cfg(all())']
 rustflags = [
     "-Wunexpected_cfgs",

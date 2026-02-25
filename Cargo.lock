@@ -6837,9 +6837,9 @@ dependencies = [
 
 [[package]]
 name = "xdp"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20a4c3268639acafa7d26127e7e3adf88d20181f420f2942b376671e5f1568a0"
+checksum = "21a573b5aa423fecf27e2dc9c4009db67cd2f35718c2a859d7352ee3fe0d1780"
 
 [[package]]
 name = "yansi"
