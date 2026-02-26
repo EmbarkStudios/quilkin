@@ -491,20 +491,43 @@ pub(crate) fn phoenix_coordinates(icao: crate::config::IcaoCode, axis: &str) -> 
     PHOENIX_COORDINATES.with_label_values(&[icao.as_ref(), axis])
 }
 
-pub(crate) fn phoenix_coordinates_alpha(icao: crate::config::IcaoCode) -> Gauge {
-    static PHOENIX_COORDINATES_ALPHA: Lazy<GaugeVec> = Lazy::new(|| {
+#[derive(Clone, Copy, Debug)]
+enum CoordinateDirection {
+    Incoming,
+    Outgoing,
+}
+
+impl CoordinateDirection {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Incoming => "incoming",
+            Self::Outgoing => "outgoing",
+        }
+    }
+}
+
+pub(crate) fn phoenix_nnls_outgoing_residual() -> Gauge {
+    phoenix_nnls_residual(CoordinateDirection::Outgoing)
+}
+
+pub(crate) fn phoenix_nnls_incoming_residual() -> Gauge {
+    phoenix_nnls_residual(CoordinateDirection::Incoming)
+}
+
+fn phoenix_nnls_residual(direction: CoordinateDirection) -> Gauge {
+    static PHOENIX_NNLS_RESIDUAL: Lazy<GaugeVec> = Lazy::new(|| {
         prometheus::register_gauge_vec_with_registry! {
             prometheus::opts! {
-                "quilkin_phoenix_coordinates_alpha",
-                "The alpha used when adjusting coordinates",
+                "quilkin_phoenix_nnls_residual",
+                "The NNLS residual norm from the most recent coordinate computation",
             },
-            &["icao"],
+            &["direction"],
             registry(),
         }
         .unwrap()
     });
 
-    PHOENIX_COORDINATES_ALPHA.with_label_values(&[icao.as_ref()])
+    PHOENIX_NNLS_RESIDUAL.with_label_values(&[direction.label()])
 }
 
 pub(crate) fn phoenix_distance_error_estimate(icao: crate::config::IcaoCode) -> Gauge {

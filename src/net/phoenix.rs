@@ -34,6 +34,8 @@
 //! Phoenix periodically updates the coordinates of each node based on a subset
 //! of latency measurements to reflect the current state of the network.
 
+mod nnls;
+
 use std::{collections::HashMap, net::SocketAddr, ops::Range, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
@@ -43,6 +45,13 @@ use crate::{
     config::{self, IcaoCode},
     time::DurationNanos,
 };
+
+/// The dimensionality of the coordinate vectors in the matrix factorization model.
+///
+/// In the Phoenix paper (Section IV-A), d=8 is used with m=32 reference hosts.
+/// We start at 1 to maintain compatibility for now and will increase to 8 once
+/// once corrosion is deployed and we can share measurements across nodes.
+const DIMENSION: usize = 1;
 
 /// The number of consecutive ping failures after which we will inform that this is a bad node
 const BAD_NODE_THRESHOLD: u64 = 10;
@@ -289,6 +298,10 @@ pub struct Inner<M> {
         tokio::sync::watch::Receiver<()>,
     ),
     bad_node_informer: Option<crate::config::BadNodeInformer>,
+    /// This node's outgoing coordinate vector, computed by NNLS each round.
+    self_outgoing: parking_lot::RwLock<f64>,
+    /// This node's incoming coordinate vector, computed by NNLS each round.
+    self_incoming: parking_lot::RwLock<f64>,
 }
 
 impl<M> Phoenix<M> {
@@ -345,7 +358,7 @@ impl<M> Phoenix<M> {
             let Some(coordinates) = entry.value().coordinates else {
                 continue;
             };
-            let rtt: f64 = coordinates.incoming + coordinates.outgoing;
+            let rtt: f64 = coordinates.rtt_estimate();
             let icao = entry.value().icao_code;
 
             match icao_map.entry(icao) {
@@ -451,19 +464,26 @@ impl<M: Measurement + 'static> Phoenix<M> {
     }
 
     async fn measure_nodes(&self, nodes: Vec<SocketAddr>) -> (i64, i64) {
-        let mut total_difference = 0;
-        let mut count = 0;
+        let mut measurements: Vec<(SocketAddr, DistanceMeasure)> = Vec::with_capacity(nodes.len());
+        let mut total_difference: i64 = 0;
+        let mut count: i64 = 0;
+
         for address in nodes {
-            let measurement = self.measurement.measure_distance(address).await;
+            let result = self.measurement.measure_distance(address).await;
 
             let Some(mut node) = self.nodes.get_mut(&address) else {
                 tracing::debug!(%address, "node removed between selection and measurement");
                 continue;
             };
 
-            match measurement {
+            match result {
                 Ok(distance) => {
-                    node.adjust_coordinates(distance);
+                    crate::metrics::phoenix_measurement_seconds(node.icao_code, "incoming")
+                        .observe(distance.incoming.duration().as_secs_f64());
+                    crate::metrics::phoenix_measurement_seconds(node.icao_code, "outgoing")
+                        .observe(distance.outgoing.duration().as_secs_f64());
+
+                    measurements.push((address, distance));
                     total_difference += distance.total_nanos();
                     count += 1;
                 }
@@ -484,7 +504,70 @@ impl<M: Measurement + 'static> Phoenix<M> {
                 }
             }
         }
+
+        if !measurements.is_empty() {
+            self.compute_coordinates(&measurements);
+        }
+
         (count, total_difference)
+    }
+
+    /// Compute and update coordinates using NNLS after a measurement round.
+    ///
+    /// Sets each node's coordinates from the measured latencies, then solves
+    /// for the proxy's own coordinate vectors via regularized NNLS.
+    fn compute_coordinates(&self, measurements: &[(SocketAddr, DistanceMeasure)]) {
+        let num_measurements = measurements.len();
+
+        // Set each node's coordinates from raw measurements.
+        for &(address, distance) in measurements {
+            let incoming = distance.incoming.nanos() as f64;
+            let outgoing = distance.outgoing.nanos() as f64;
+
+            if let Some(mut node) = self.nodes.get_mut(&address) {
+                node.set_coordinates(Coordinates { incoming, outgoing });
+            }
+        }
+
+        // Solve for the proxy's outgoing vector via NNLS.
+        //
+        // coefficients (N×1): each row is a node's incoming coordinate
+        // targets (N): measured total RTT to each node
+        //
+        // Finds self_outgoing such that self_outgoing * node.incoming ≈ RTT.
+        let mut coefficients = ndarray::Array2::<f64>::zeros((num_measurements, DIMENSION));
+        let mut targets = ndarray::Array1::<f64>::zeros(num_measurements);
+
+        *self.self_outgoing.write() = {
+            for (i, &(_, distance)) in measurements.iter().enumerate() {
+                coefficients[[i, 0]] = distance.incoming.nanos() as f64;
+                targets[i] = distance.total_nanos() as f64;
+            }
+
+            let (self_outgoing, residual) = nnls::solve_regularized(&coefficients, &targets, 2.0);
+
+            crate::metrics::phoenix_nnls_outgoing_residual().set(residual);
+
+            self_outgoing[0]
+        };
+
+        *self.self_incoming.write() = {
+            for (i, &(_, distance)) in measurements.iter().enumerate() {
+                coefficients[[i, 0]] = distance.outgoing.nanos() as f64;
+            }
+
+            let (self_incoming, residual) = nnls::solve_regularized(&coefficients, &targets, 2.0);
+            crate::metrics::phoenix_nnls_incoming_residual().set(residual);
+
+            self_incoming[0]
+        };
+
+        tracing::debug!(
+            self_outgoing = *self.self_outgoing.read(),
+            self_incoming = *self.self_incoming.read(),
+            nodes = num_measurements,
+            "computed NNLS coordinates"
+        );
     }
 
     #[cfg(test)]
@@ -589,12 +672,18 @@ impl<M: Measurement> Builder<M> {
                 subset_percentage: self.subset_percentage.unwrap_or(Self::DEFAULT_SUBSET),
                 update_watcher: tokio::sync::watch::channel(()),
                 bad_node_informer: self.bad_node_informer,
+                self_outgoing: <_>::default(),
+                self_incoming: <_>::default(),
             }),
         }
     }
 }
 
 /// The network coordinates of a node in the phoenix system.
+///
+/// Each field represents one element of the d-dimensional coordinate vector
+/// (currently d=1, see [`DIMENSION`]). Predicted one-way latency from node A
+/// to node B is the dot product `A.outgoing · B.incoming`.
 #[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct Coordinates {
     incoming: f64,
@@ -602,16 +691,15 @@ pub struct Coordinates {
 }
 
 impl Coordinates {
-    const ORIGIN: Self = Self {
-        incoming: 0.0,
-        outgoing: 0.0,
-    };
+    /// Sum of coordinate components — used as RTT estimate for ordering.
+    fn rtt_estimate(&self) -> f64 {
+        self.incoming + self.outgoing
+    }
 
-    fn distance_to(&self, other: &Coordinates) -> f64 {
-        let x_diff = self.incoming - other.incoming;
-        let y_diff = self.outgoing - other.outgoing;
+    /// Euclidean magnitude of the coordinate vector (for metrics).
+    fn distance_from_origin(&self) -> f64 {
         #[allow(clippy::imprecise_flops)]
-        (x_diff.powi(2) + y_diff.powi(2)).sqrt()
+        (self.incoming.powi(2) + self.outgoing.powi(2)).sqrt()
     }
 }
 
@@ -623,19 +711,16 @@ struct Node {
     icao_code: IcaoCode,
     error_estimate: f64,
     consecutive_errors: u64,
-    alpha: f64,
 }
 
 impl Node {
     fn new(icao_code: IcaoCode) -> Self {
         crate::metrics::phoenix_distance_error_estimate(icao_code).set(1.0);
-        crate::metrics::phoenix_coordinates_alpha(icao_code).set(1.0);
         Node {
             coordinates: None,
             icao_code,
             error_estimate: 1.0,
             consecutive_errors: 0,
-            alpha: 1.0,
         }
     }
 
@@ -648,40 +733,15 @@ impl Node {
         self.consecutive_errors += 1;
         crate::metrics::phoenix_measurement_errors(self.icao_code).inc();
         crate::metrics::phoenix_distance_error_estimate(self.icao_code).set(self.error_estimate);
-        self.alpha = (self.alpha - 0.1).clamp(0.2, 1.0);
-        crate::metrics::phoenix_coordinates_alpha(self.icao_code).set(self.alpha);
     }
 
-    fn adjust_coordinates(&mut self, distance: DistanceMeasure) {
+    /// Set this node's coordinates (computed by NNLS) and update metrics.
+    fn set_coordinates(&mut self, coords: Coordinates) {
+        crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coords.incoming);
+        crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coords.outgoing);
+        crate::metrics::phoenix_distance(self.icao_code).set(coords.distance_from_origin());
+        self.coordinates = Some(coords);
         self.consecutive_errors = 0;
-        let incoming = distance.incoming.nanos() as f64;
-        let outgoing = distance.outgoing.nanos() as f64;
-
-        crate::metrics::phoenix_measurement_seconds(self.icao_code, "incoming")
-            .observe(distance.incoming.duration().as_secs_f64());
-        crate::metrics::phoenix_measurement_seconds(self.icao_code, "outgoing")
-            .observe(distance.outgoing.duration().as_secs_f64());
-
-        let Some(coordinates) = &mut self.coordinates else {
-            let coordinates = Coordinates { incoming, outgoing };
-            crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coordinates.incoming);
-            crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coordinates.outgoing);
-            crate::metrics::phoenix_distance(self.icao_code)
-                .set(Coordinates::ORIGIN.distance_to(&coordinates));
-            self.coordinates = Some(coordinates);
-            return;
-        };
-
-        // Exponentially weighted moving average
-        coordinates.incoming = self.alpha * incoming + (1.0 - self.alpha) * coordinates.incoming;
-        coordinates.outgoing = self.alpha * outgoing + (1.0 - self.alpha) * coordinates.outgoing;
-        self.alpha = (self.alpha + 0.05).clamp(0.2, 1.0);
-        crate::metrics::phoenix_coordinates_alpha(self.icao_code).set(self.alpha);
-
-        crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coordinates.incoming);
-        crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coordinates.outgoing);
-        crate::metrics::phoenix_distance(self.icao_code)
-            .set(Coordinates::ORIGIN.distance_to(coordinates));
     }
 }
 
@@ -1086,7 +1146,7 @@ mod tests {
                 outgoing: std::time::Duration::from_millis(1).as_nanos() as f64 / 2.0,
             };
 
-            let min = Coordinates::ORIGIN.distance_to(&coords);
+            let min = coords.rtt_estimate();
             let max = min * 3.0;
             let distance = map[icao_code.as_ref()].as_f64().unwrap();
 
