@@ -467,7 +467,7 @@ impl Providers {
                             k8s_leader_lease_name,
                             k8s_leader_id,
                             ll,
-                            shutdown,
+                            shutdown.clone(),
                         )))
                     } else {
                         either::Right(std::future::pending())
@@ -476,13 +476,20 @@ impl Providers {
                     let mut gs_streams = tokio::task::JoinSet::new();
                     if let Some(Some(clusters)) = agones_enabled.then(|| config.dyn_cfg.clusters())
                     {
+                        let token = crate::signal::cancellation_token(shutdown.clone());
                         for namespace in agones_namespaces {
+                            let cluster_update_batcher =
+                                crate::net::cluster::ClusterUpdateBatcher::spawn(
+                                    clusters.clone(),
+                                    locality.clone(),
+                                    std::time::Duration::from_millis(500),
+                                    token.child_token(),
+                                );
                             let processor = EventProcessor {
-                                clusters: clusters.clone(),
                                 namespace: namespace.clone(),
                                 mutator: mutator.clone(),
                                 address_selector: selector.clone(),
-                                locality: locality.clone(),
+                                cluster_update_batcher: cluster_update_batcher.clone(),
                                 servers: Default::default(),
                             };
 

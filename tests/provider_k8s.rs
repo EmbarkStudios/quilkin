@@ -136,15 +136,16 @@ fn corrosion_matches_xds() {
     let (mutator, mut rx) = corrosion::ServerMutator::testing(state.clone());
     let namespace = "test".to_string();
 
+    let cluster_update_batcher =
+        crate::net::cluster::ClusterUpdateBatcher::test_batcher(clusters.clone(), None);
     let mut processor = providers::k8s::EventProcessor {
-        clusters: clusters.clone(),
         namespace: namespace.clone(),
+        cluster_update_batcher: cluster_update_batcher.clone(),
         address_selector: Some(config::AddressSelector {
             name: "addr".into(),
             kind: config::AddrKind::Ipv6,
         }),
         mutator: Some(mutator),
-        locality: None,
         servers: Default::default(),
     };
 
@@ -152,8 +153,10 @@ fn corrosion_matches_xds() {
     fn matches(
         rx: &mut tokio::sync::mpsc::UnboundedReceiver<providers::corrosion::push::Mutation>,
         clusters: &config::Watch<net::ClusterMap>,
+        cluster_update_batcher: &crate::net::cluster::ClusterUpdateBatcher,
         state: &providers::corrosion::push::LocalState,
     ) {
+        cluster_update_batcher.flush();
         // Drain the receiver, we don't care about events in this test
         while rx.try_recv().is_ok() {}
 
@@ -174,7 +177,7 @@ fn corrosion_matches_xds() {
     // Add a single server
     {
         processor.process_event(Event::Apply(GameServerBuilder::new(0).guard()));
-        matches(&mut rx, &clusters, &state);
+        matches(&mut rx, &clusters, &cluster_update_batcher, &state);
     }
 
     // Init -> apply many servers
@@ -186,7 +189,7 @@ fn corrosion_matches_xds() {
         }
 
         processor.process_event(Event::InitDone);
-        matches(&mut rx, &clusters, &state);
+        matches(&mut rx, &clusters, &cluster_update_batcher, &state);
     }
 
     // Init -> apply with only updates of existing servers
@@ -198,7 +201,7 @@ fn corrosion_matches_xds() {
         }
 
         processor.process_event(Event::InitDone);
-        matches(&mut rx, &clusters, &state);
+        matches(&mut rx, &clusters, &cluster_update_batcher, &state);
     }
 
     // Remove, update, and add multiple servers
@@ -210,7 +213,7 @@ fn corrosion_matches_xds() {
             processor.process_event(Event::Apply(GameServerBuilder::new(i).guard()));
         }
 
-        matches(&mut rx, &clusters, &state);
+        matches(&mut rx, &clusters, &cluster_update_batcher, &state);
     }
 
     // Same, but in an init block
@@ -225,7 +228,7 @@ fn corrosion_matches_xds() {
 
         processor.process_event(Event::InitDone);
 
-        matches(&mut rx, &clusters, &state);
+        matches(&mut rx, &clusters, &cluster_update_batcher, &state);
     }
 }
 
@@ -239,15 +242,16 @@ fn handles_missing_invalid_uid() {
     let (mutator, mut rx) = corrosion::ServerMutator::testing(state.clone());
     let namespace = "test".to_string();
 
+    let cluster_update_batcher =
+        crate::net::cluster::ClusterUpdateBatcher::test_batcher(clusters.clone(), None);
     let mut processor = providers::k8s::EventProcessor {
-        clusters: clusters.clone(),
         namespace: namespace.clone(),
+        cluster_update_batcher: cluster_update_batcher.clone(),
         address_selector: Some(config::AddressSelector {
             name: "addr".into(),
             kind: config::AddrKind::Ipv6,
         }),
         mutator: Some(mutator),
-        locality: None,
         servers: Default::default(),
     };
 
@@ -313,26 +317,29 @@ fn handles_multiple_namespaces() {
     let locality = None;
     let ns_a = "ns-a".to_string();
     let ns_b = "ns-b".to_string();
+
+    let cluster_update_batcher_a =
+        crate::net::cluster::ClusterUpdateBatcher::test_batcher(clusters.clone(), locality.clone());
     let mut processor_a = providers::k8s::EventProcessor {
-        clusters: clusters.clone(),
+        cluster_update_batcher: cluster_update_batcher_a.clone(),
         namespace: ns_a.clone(),
         address_selector: Some(config::AddressSelector {
             name: "addr".into(),
             kind: config::AddrKind::Ipv6,
         }),
         mutator: Some(mutator.clone()),
-        locality: locality.clone(),
         servers: Default::default(),
     };
+    let cluster_update_batcher_b =
+        crate::net::cluster::ClusterUpdateBatcher::test_batcher(clusters.clone(), locality.clone());
     let mut processor_b = providers::k8s::EventProcessor {
-        clusters: clusters.clone(),
+        cluster_update_batcher: cluster_update_batcher_b.clone(),
         namespace: ns_b.clone(),
         address_selector: Some(config::AddressSelector {
             name: "addr".into(),
             kind: config::AddrKind::Ipv6,
         }),
         mutator: Some(mutator),
-        locality: locality.clone(),
         servers: Default::default(),
     };
 
@@ -374,6 +381,8 @@ fn handles_multiple_namespaces() {
 
     // Initial state check
     {
+        cluster_update_batcher_a.flush();
+        cluster_update_batcher_b.flush();
         let guard = clusters.read();
         let endpoint_set = guard.get(&locality).unwrap();
         assert_eq!(endpoint_set.len(), gameservers.len());
@@ -406,6 +415,8 @@ fn handles_multiple_namespaces() {
 
     // State check
     {
+        cluster_update_batcher_a.flush();
+        cluster_update_batcher_b.flush();
         let guard = clusters.read();
         let endpoint_set = guard.get(&locality).unwrap();
         assert_eq!(endpoint_set.len(), gameservers.len());
@@ -436,6 +447,8 @@ fn handles_multiple_namespaces() {
 
     // State check
     {
+        cluster_update_batcher_a.flush();
+        cluster_update_batcher_b.flush();
         let guard = clusters.read();
         let endpoint_set = guard.get(&locality).unwrap();
         assert_eq!(endpoint_set.len(), gameservers.len());

@@ -107,12 +107,66 @@ impl std::str::FromStr for EndpointSetVersion {
     }
 }
 
+/// Guard that allows performing multiple modifications to an `EndpointSet` and ensuring that the
+/// token map is updated when the guard is dropped.
+pub struct EndpointSetWriteGuard<'a> {
+    endpoint_set: &'a mut EndpointSet,
+    needs_update: bool,
+}
+
+impl<'a> Drop for EndpointSetWriteGuard<'a> {
+    fn drop(&mut self) {
+        if self.needs_update {
+            self.endpoint_set.update();
+        }
+    }
+}
+
+impl EndpointSetWriteGuard<'_> {
+    #[inline]
+    pub fn replace_endpoint(&mut self, endpoint: Endpoint) -> Option<Endpoint> {
+        self.needs_update = true;
+        self.endpoint_set
+            .endpoints
+            .insert(endpoint.address.clone(), endpoint.metadata)
+            .map(|metadata| Endpoint {
+                address: endpoint.address.clone(),
+                metadata,
+            })
+    }
+
+    #[inline]
+    pub fn remove_endpoint(&mut self, endpoint: &Endpoint) -> bool {
+        self.needs_update = true;
+        self.endpoint_set
+            .endpoints
+            .remove(&endpoint.address)
+            .is_some()
+    }
+
+    #[inline]
+    pub fn remove_endpoint_if(&mut self, closure: impl Fn(&EndpointMetadata) -> bool) -> bool {
+        if let Some(address) = self
+            .endpoint_set
+            .endpoints
+            .iter()
+            .find_map(|(addr, md)| (closure)(md).then(|| addr.clone()))
+        {
+            self.needs_update = true;
+            self.endpoint_set.endpoints.remove(&address);
+            true
+        } else {
+            false
+        }
+    }
+}
+
 type InnerMap = BTreeMap<EndpointAddress, EndpointMetadata>;
 
 #[derive(Debug, Clone)]
 pub struct EndpointSet {
-    pub endpoints: InnerMap,
-    pub token_map: TokenAddressMap,
+    endpoints: InnerMap,
+    token_map: TokenAddressMap,
     /// The hash of all of the endpoints in this set
     hash: u64,
     change_id: ChangeId,
@@ -209,11 +263,19 @@ impl EndpointSet {
         self.change_id
     }
 
+    #[inline]
+    pub fn modify(&mut self) -> EndpointSetWriteGuard<'_> {
+        EndpointSetWriteGuard {
+            endpoint_set: self,
+            needs_update: false,
+        }
+    }
+
     /// Bumps the version, calculating a hash for the entire endpoint set
     ///
     /// This is extremely expensive
     #[inline]
-    pub fn update(&mut self) -> TokenAddressMap {
+    fn update(&mut self) -> TokenAddressMap {
         use std::hash::{Hash, Hasher};
         let mut hasher = gxhash::GxHasher::with_seed(HASH_SEED);
         let mut token_map = TokenAddressMap::default();
@@ -234,7 +296,7 @@ impl EndpointSet {
 
     /// Creates a map of tokens -> address for the current set
     #[inline]
-    pub fn build_token_map(&mut self) -> TokenAddressMap {
+    fn build_token_map(&mut self) -> TokenAddressMap {
         let mut token_map = TokenAddressMap::default();
 
         // This is only called on proxies, so calculate a token map
@@ -249,7 +311,7 @@ impl EndpointSet {
     }
 
     #[inline]
-    pub fn replace(
+    fn replace(
         &mut self,
         replacement: Self,
     ) -> (
@@ -272,7 +334,7 @@ impl EndpointSet {
 
     /// Partially replace self with replacement, only replacing endpoints that match the closure
     /// predicate.
-    pub fn partial_replace(
+    fn partial_replace(
         &mut self,
         replacement: Self,
         should_be_replaced: impl Fn(&EndpointMetadata) -> bool,
@@ -643,99 +705,44 @@ where
         self.insert(None, None, endpoints);
     }
 
-    #[inline]
-    pub fn remove_endpoint(&self, needle: &Endpoint) -> bool {
-        let locality = 'l: {
-            for mut entry in self.map.iter_mut() {
-                let set = entry.value_mut();
-
-                if set.endpoints.remove(&needle.address).is_some() {
-                    set.update();
-                    self.num_endpoints.fetch_sub(1, Relaxed);
-                    self.version.fetch_add(1, Relaxed);
-
-                    if set.is_empty() {
-                        break 'l entry.key().clone();
-                    }
-
-                    return true;
-                }
+    /// Applies a batch of updates to the `ClusterMap`
+    ///
+    /// BEWARE: This method does not keep the global `token_map` up to date, as this is part of the
+    /// provider codepath and it is assumed that this instance does not run any proxying.
+    fn batch_modify(&self, locality: &Option<Locality>, batch: Vec<EndpointSetUpdateAction>) {
+        let added_removed: i32;
+        let mut empty_locality = false;
+        {
+            let mut set = self
+                .map
+                .entry(locality.clone())
+                .or_insert_with(|| EndpointSet::new([].into()));
+            {
+                let mut guard = set.modify();
+                added_removed = apply_update_batch_to_guard(&mut guard, batch);
             }
-            return false;
-        };
 
-        self.do_remove_locality(&locality);
-        true
-    }
-
-    #[inline]
-    pub fn remove_endpoint_if(&self, closure: impl Fn(&EndpointMetadata) -> bool) -> bool {
-        let locality = 'l: {
-            for mut entry in self.map.iter_mut() {
-                let set = entry.value_mut();
-                if let Some(address) = set
-                    .endpoints
-                    .iter()
-                    .find_map(|(addr, md)| (closure)(md).then(|| addr.clone()))
-                {
-                    set.endpoints.remove(&address);
-                    set.update();
-                    self.num_endpoints.fetch_sub(1, Relaxed);
-                    self.version.fetch_add(1, Relaxed);
-
-                    if set.is_empty() {
-                        break 'l entry.key().clone();
-                    }
-                    return true;
-                }
+            if set.is_empty() {
+                empty_locality = true;
             }
-            return false;
-        };
+        }
 
-        self.do_remove_locality(&locality);
-        true
+        if added_removed.is_positive() {
+            self.num_endpoints
+                .fetch_add(added_removed.unsigned_abs() as usize, Relaxed);
+        } else {
+            self.num_endpoints
+                .fetch_sub(added_removed.unsigned_abs() as usize, Relaxed);
+        }
+        if empty_locality {
+            self.do_remove_locality(locality);
+        }
+        self.version.fetch_add(1, Relaxed);
     }
 
     #[inline]
     pub fn iter(&self) -> dashmap::iter::Iter<'_, Option<Locality>, EndpointSet, S> {
         self.map.iter()
-    }
-
-    #[inline]
-    pub fn replace(
-        &self,
-        remote_addr: Option<std::net::IpAddr>,
-        locality: Option<Locality>,
-        endpoint: Endpoint,
-    ) -> Option<Endpoint> {
-        if let Some(raddr) = self.localities.get(&locality)
-            && *raddr != remote_addr
-        {
-            tracing::trace!("not replacing locality endpoints");
-            return None;
-        }
-
-        if let Some(mut set) = self.map.get_mut(&locality) {
-            let replaced = set
-                .endpoints
-                .remove(&endpoint.address)
-                .map(|metadata| Endpoint {
-                    address: endpoint.address.clone(),
-                    metadata,
-                });
-            set.endpoints.insert(endpoint.address, endpoint.metadata);
-            set.update();
-            self.version.fetch_add(1, Relaxed);
-
-            if replaced.is_none() {
-                self.num_endpoints.fetch_add(1, Relaxed);
-            }
-
-            replaced
-        } else {
-            self.insert(remote_addr, locality, [endpoint].into());
-            None
-        }
     }
 
     #[inline]
@@ -1078,6 +1085,206 @@ impl From<&'_ Endpoint> for proto::Endpoint {
     }
 }
 
+/// Helper that applies a batch of updates to an `EndpointSetWriteGuard`
+fn apply_update_batch_to_guard(
+    guard: &mut EndpointSetWriteGuard<'_>,
+    batch: Vec<EndpointSetUpdateAction>,
+) -> i32 {
+    let mut added_removed: i32 = 0;
+    for action in batch {
+        match action {
+            EndpointSetUpdateAction::Upsert(endpoint) => {
+                let replaced = guard.replace_endpoint(endpoint);
+                if replaced.is_none() {
+                    added_removed += 1;
+                }
+            }
+            EndpointSetUpdateAction::RemoveByEndpoint(endpoint) => {
+                if guard.remove_endpoint(&endpoint) {
+                    crate::metrics::k8s::gameservers_deletions_total(true);
+                    tracing::debug!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "deleted by endpoint");
+                    added_removed -= 1;
+                } else {
+                    crate::metrics::k8s::gameservers_deletions_total(false);
+                    tracing::debug!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap() ,"received unknown gameserver to delete");
+                }
+            }
+            EndpointSetUpdateAction::RemoveByName(name) => {
+                let server_name: Option<serde_json::Value> = Some(From::from(name.clone()));
+                if guard.remove_endpoint_if(|metadata| {
+                    metadata.unknown.get("name") == server_name.as_ref()
+                }) {
+                    crate::metrics::k8s::gameservers_deletions_total(true);
+                    tracing::debug!(server.metadata.name=%name, "deleted by server name");
+                    added_removed -= 1;
+                } else {
+                    crate::metrics::k8s::gameservers_deletions_total(false);
+                    tracing::debug!(server.metadata.name=%name,"received unknown gameserver to delete");
+                }
+            }
+        }
+    }
+    added_removed
+}
+
+/// Represents an incremental update action to an `EndpointSet` generated by an `Endpoint` provider
+#[derive(Clone, Debug)]
+pub enum EndpointSetUpdateAction {
+    Upsert(crate::net::endpoint::Endpoint),
+    RemoveByEndpoint(crate::net::endpoint::Endpoint),
+    RemoveByName(String),
+}
+
+/// A batcher for `EndpointSet` updates
+///
+/// This helps to keep expensive modifications of the `ClusterMap` at a consistent and bounded rate,
+/// which is necessary for big clusters where there might be many updates per second.
+#[derive(Clone, Debug)]
+pub struct ClusterUpdateBatcher {
+    cluster_map: crate::config::Watch<ClusterMap>,
+    locality: Option<Locality>,
+    updates: std::sync::Arc<std::sync::Mutex<Vec<EndpointSetUpdateAction>>>,
+    interval: std::time::Duration,
+    token: tokio_util::sync::CancellationToken,
+    batcher_mu: std::sync::Arc<std::sync::Mutex<()>>,
+}
+
+impl ClusterUpdateBatcher {
+    /// Start a batcher task and return a `ClusterUpdateBatcher`
+    pub fn spawn(
+        cluster_map: crate::config::Watch<ClusterMap>,
+        locality: Option<Locality>,
+        interval: std::time::Duration,
+        token: tokio_util::sync::CancellationToken,
+    ) -> Self {
+        let cub = Self {
+            cluster_map,
+            locality,
+            updates: <_>::default(),
+            interval,
+            token,
+            batcher_mu: <_>::default(),
+        };
+        let task_cub = cub.clone();
+        tokio::spawn(async move { task_cub.batcher_task().await });
+
+        cub
+    }
+
+    /// Test `ClusterUpdateBatcher` that doesn't require tokio but where you must call `flush()`
+    /// manually
+    pub fn test_batcher(
+        cluster_map: crate::config::Watch<ClusterMap>,
+        locality: Option<Locality>,
+    ) -> Self {
+        Self {
+            cluster_map,
+            locality,
+            updates: <_>::default(),
+            interval: std::time::Duration::from_secs(1),
+            token: tokio_util::sync::CancellationToken::new(),
+            batcher_mu: <_>::default(),
+        }
+    }
+
+    async fn batcher_task(&self) {
+        let mut interval = tokio::time::interval(self.interval);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = self.token.cancelled() => {
+                    break
+                }
+                _ = interval.tick() => {
+                    if let Some(_guard) = match self.batcher_mu.try_lock() {
+                        Ok(guard) => Some(guard),
+                        Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+                            tracing::error!("recovered from poisoned mutex");
+                            Some(poisoned.into_inner())
+                        },
+                        Err(std::sync::TryLockError::WouldBlock) => None,
+                    } {
+                        self.flush();
+                    }
+                }
+            }
+        }
+
+        if let Some(_guard) = match self.batcher_mu.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+                tracing::error!("recovered from poisoned mutex");
+                Some(poisoned.into_inner())
+            }
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        } {
+            self.flush();
+        }
+    }
+
+    #[inline]
+    fn updates_guard(&self) -> std::sync::MutexGuard<'_, Vec<EndpointSetUpdateAction>> {
+        match self.updates.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("recovered from poisoned mutex");
+                poisoned.into_inner()
+            }
+        }
+    }
+
+    pub fn flush(&self) {
+        let updates = {
+            let mut guard = self.updates_guard();
+            std::mem::take(&mut *guard)
+        };
+        if !updates.is_empty() {
+            self.cluster_map
+                .write()
+                .batch_modify(&self.locality, updates);
+        }
+
+        crate::metrics::apply_clusters(&self.cluster_map);
+    }
+
+    pub fn push(&self, update: EndpointSetUpdateAction) {
+        if self.token.is_cancelled() {
+            tracing::warn!(?update, "pushed event while batcher is shutting down");
+        }
+        let mut guard = self.updates_guard();
+        guard.push(update);
+    }
+
+    /// Partially replace an `EndpointSet` with the given closure to determine what Endpoints belong
+    /// to the producer that is resetting state.
+    ///
+    /// This will pause batching and flush any pending updates before applying the partial replace,
+    /// to ensure a consistent state.
+    pub fn partial_replace(
+        &self,
+        endpoint_set: EndpointSet,
+        should_be_replaced: impl Fn(&EndpointMetadata) -> bool,
+    ) {
+        // Lock the batcher mutex to prevent collision with the async batcher_task
+        let _guard = match self.batcher_mu.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("recovered from poisoned mutex");
+                poisoned.into_inner()
+            }
+        };
+        // Flush if we have queued updates. We don't want to risk applying an update that
+        // came in before the Init after we have replaced the state in InitDone.
+        self.flush();
+
+        self.cluster_map.write().partial_replace(
+            self.locality.clone(),
+            endpoint_set,
+            should_be_replaced,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
@@ -1167,34 +1374,5 @@ mod tests {
             cluster.get(&Some(nl1)).unwrap().endpoints,
             set_to_map(not_expected)
         );
-    }
-
-    #[test]
-    fn remove_avoids_deadlocks() {
-        let endpoints: std::collections::BTreeSet<_> = [
-            Endpoint::new((Ipv4Addr::new(1, 2, 3, 4), 1234).into()),
-            Endpoint::new((Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8), 1234).into()),
-            Endpoint::new((Ipv4Addr::new(4, 3, 2, 1), 1234).into()),
-        ]
-        .into();
-
-        let cluster = ClusterMap::new();
-        {
-            cluster.insert(None, None, endpoints.clone());
-            for ep in &endpoints {
-                assert!(cluster.remove_endpoint(ep));
-            }
-
-            assert!(cluster.get(&None).is_none());
-        }
-
-        {
-            cluster.insert(None, None, endpoints.clone());
-            for _ in 0..endpoints.len() {
-                assert!(cluster.remove_endpoint_if(|_ep| true));
-            }
-
-            assert!(cluster.get(&None).is_none());
-        }
     }
 }

@@ -656,17 +656,7 @@ impl Config {
                         let resource = crate::xds::Resource::Cluster(
                             quilkin_xds::generated::quilkin::config::v1alpha1::Cluster {
                                 locality: key.clone().map(|l| l.into()),
-                                endpoints: value
-                                    .endpoints
-                                    .iter()
-                                    .map(|(addr, md)| {
-                                        crate::net::Endpoint {
-                                            address: addr.clone(),
-                                            metadata: md.clone(),
-                                        }
-                                        .into()
-                                    })
-                                    .collect(),
+                                endpoints: value.endpoint_iter().map(|ep| ep.into()).collect(),
                             },
                         );
 

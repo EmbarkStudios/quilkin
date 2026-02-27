@@ -26,10 +26,7 @@ use kube::{
 
 use agones::GameServer;
 
-use crate::{
-    config, metrics,
-    net::{ClusterMap, endpoint::Locality},
-};
+use crate::{config, metrics};
 
 const CONFIGMAP: &str = "v1/ConfigMap";
 const GAMESERVER: &str = "agones.dev/v1/GameServer";
@@ -222,11 +219,10 @@ fn get_simple_endpoint_and_token_set(
 }
 
 pub struct EventProcessor {
-    pub clusters: config::Watch<ClusterMap>,
     pub namespace: String,
     pub address_selector: Option<config::AddressSelector>,
     pub mutator: Option<crate::providers::corrosion::ServerMutator>,
-    pub locality: Option<Locality>,
+    pub cluster_update_batcher: crate::net::cluster::ClusterUpdateBatcher,
     /// Keeps track of servers added during `InitApply`
     pub servers: std::collections::BTreeMap<crate::net::endpoint::Endpoint, Option<uuid::Uuid>>,
 }
@@ -248,6 +244,9 @@ impl EventProcessor {
     /// Processes a kubernetes game server event, applying it to update our
     /// state snapshot
     pub fn process_event(&mut self, event: Event<DeserializeGuard<GameServer>>) {
+        use crate::net::cluster::EndpointSetUpdateAction::{
+            RemoveByEndpoint, RemoveByName, Upsert,
+        };
         match event {
             Event::Apply(result) => {
                 let span = tracing::trace_span!("k8s::gameservers::apply");
@@ -268,9 +267,7 @@ impl EventProcessor {
                     }
                 }
 
-                self.clusters
-                    .write()
-                    .replace(None, self.locality.clone(), endpoint);
+                self.cluster_update_batcher.push(Upsert(endpoint));
             }
             Event::Init => {}
             Event::InitApply(result) => {
@@ -314,8 +311,7 @@ impl EventProcessor {
                 }
 
                 let servers = std::mem::take(&mut self.servers).into_keys().collect();
-                self.clusters.write().partial_replace(
-                    self.locality.clone(),
+                self.cluster_update_batcher.partial_replace(
                     crate::net::cluster::EndpointSet::new(servers),
                     self.metadata_source_filter(),
                 );
@@ -338,31 +334,15 @@ impl EventProcessor {
                 }
 
                 let endpoint = server.endpoint(self.address_selector.as_ref());
-                let found = if let Some(endpoint) = &endpoint {
-                    tracing::debug!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "deleting by endpoint");
-                    self.clusters.write().remove_endpoint(endpoint)
+                if let Some(endpoint) = endpoint {
+                    self.cluster_update_batcher.push(RemoveByEndpoint(endpoint));
+                } else if let Some(name) = server.metadata.name {
+                    self.cluster_update_batcher.push(RemoveByName(name));
                 } else {
-                    let name = server.metadata.name.clone().map(serde_json::Value::from);
-
-                    tracing::debug!(server.metadata.name=?name, "deleting by server name");
-
-                    self.clusters.write().remove_endpoint_if(|metadata| {
-                        metadata.unknown.get("name") == name.as_ref()
-                    })
-                };
-
-                metrics::k8s::gameservers_deletions_total(found);
-                if !found {
-                    tracing::debug!(
-                        endpoint=%serde_json::to_value(&endpoint).unwrap(),
-                        server.metadata.name=%serde_json::to_value(server.metadata.name).unwrap(),
-                        "received unknown gameserver to delete from k8s"
-                    );
-                } else {
-                    tracing::debug!(
-                        endpoint=%serde_json::to_value(&endpoint).unwrap(),
-                        server.metadata.name=%serde_json::to_value(server.metadata.name).unwrap(),
-                        "deleted gameserver"
+                    tracing::warn!(
+                        server.metadata =
+                            serde_json::to_string(&server.metadata).unwrap_or(String::new()),
+                        "couldn't delete gameserver without endpoint or name"
                     );
                 }
             }
@@ -426,7 +406,6 @@ pub fn update_endpoints_from_gameservers(
 
             processor.process_event(track_event(GAMESERVER, event));
 
-            crate::metrics::apply_clusters(&processor.clusters);
             yield Ok(());
         }
 
