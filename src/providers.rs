@@ -389,6 +389,7 @@ impl Providers {
         locality: Option<crate::net::endpoint::Locality>,
         config: &super::Config,
         mutator: Option<crate::providers::corrosion::ServerMutator>,
+        shutdown: tokio::sync::watch::Receiver<()>,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let agones_namespaces = if !self.agones_namespace.is_empty() {
             tracing::warn!(
@@ -422,6 +423,7 @@ impl Providers {
             let locality = locality.clone();
             let health_check = health_check.clone();
             let mutator = mutator.clone();
+            let shutdown = shutdown;
 
             move || {
                 let config = config.clone();
@@ -434,6 +436,7 @@ impl Providers {
                 let locality = locality.clone();
                 let health_check = health_check.clone();
                 let mutator = mutator.clone();
+                let shutdown = shutdown.clone();
 
                 async move {
                     let client = tokio::time::timeout(
@@ -464,6 +467,7 @@ impl Providers {
                             k8s_leader_lease_name,
                             k8s_leader_id,
                             ll,
+                            shutdown,
                         )))
                     } else {
                         either::Right(std::future::pending())
@@ -708,7 +712,7 @@ impl Providers {
                 config.clone(),
                 health_check.clone(),
                 locality.clone(),
-                shutdown,
+                shutdown.clone(),
             ));
         }
 
@@ -718,6 +722,7 @@ impl Providers {
                 locality.clone(),
                 config,
                 mutator,
+                shutdown,
             ));
         }
 
