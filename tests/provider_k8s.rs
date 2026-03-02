@@ -43,9 +43,11 @@ fn corrosion_matches_xds() {
     let clusters = config::Watch::new(net::ClusterMap::new());
     let state = Arc::new(corrosion::push::LocalState::default());
     let (mutator, mut rx) = corrosion::ServerMutator::testing(state.clone());
+    let namespace = "test".to_string();
 
     let mut processor = providers::k8s::EventProcessor {
         clusters: clusters.clone(),
+        namespace: namespace.clone(),
         address_selector: Some(config::AddressSelector {
             name: "addr".into(),
             kind: config::AddrKind::Ipv6,
@@ -88,10 +90,11 @@ fn corrosion_matches_xds() {
     }
 
     macro_rules! game_server {
-        ($id:expr) => {{
+        ($id:expr, $ns:expr) => {{
             let gs = GameServer {
                 metadata: ObjectMeta {
                     name: Some($id.to_string()),
+                    namespace: Some($ns.to_string()),
                     uid: Some(uuid::Uuid::from_u128($id as u128).to_string()),
                     annotations: Some(tokens($id)),
                     ..Default::default()
@@ -126,7 +129,7 @@ fn corrosion_matches_xds() {
 
     // Add a single server
     {
-        processor.process_event(Event::Apply(game_server!(0)));
+        processor.process_event(Event::Apply(game_server!(0, namespace)));
         matches(&mut rx, &clusters, &state);
     }
 
@@ -135,7 +138,7 @@ fn corrosion_matches_xds() {
         processor.process_event(Event::Init);
 
         for i in 0..10 {
-            processor.process_event(Event::InitApply(game_server!(i)));
+            processor.process_event(Event::InitApply(game_server!(i, namespace)));
         }
 
         processor.process_event(Event::InitDone);
@@ -147,7 +150,7 @@ fn corrosion_matches_xds() {
         processor.process_event(Event::Init);
 
         for i in 0..10 {
-            processor.process_event(Event::InitApply(game_server!(i)));
+            processor.process_event(Event::InitApply(game_server!(i, namespace)));
         }
 
         processor.process_event(Event::InitDone);
@@ -158,9 +161,9 @@ fn corrosion_matches_xds() {
     {
         for i in 0..10 {
             if i % 2 == 0 {
-                processor.process_event(Event::Delete(game_server!(i)));
+                processor.process_event(Event::Delete(game_server!(i, namespace)));
             }
-            processor.process_event(Event::Apply(game_server!(i)));
+            processor.process_event(Event::Apply(game_server!(i, namespace)));
         }
 
         matches(&mut rx, &clusters, &state);
@@ -172,7 +175,7 @@ fn corrosion_matches_xds() {
 
         for i in 0..10 {
             if i % 2 == 1 {
-                processor.process_event(Event::InitApply(game_server!(i)));
+                processor.process_event(Event::InitApply(game_server!(i, namespace)));
             }
         }
 
@@ -190,9 +193,11 @@ fn handles_missing_invalid_uid() {
     let clusters = config::Watch::new(net::ClusterMap::new());
     let state = Arc::new(corrosion::push::LocalState::default());
     let (mutator, mut rx) = corrosion::ServerMutator::testing(state.clone());
+    let namespace = "test".to_string();
 
     let mut processor = providers::k8s::EventProcessor {
         clusters: clusters.clone(),
+        namespace: namespace.clone(),
         address_selector: Some(config::AddressSelector {
             name: "addr".into(),
             kind: config::AddrKind::Ipv6,
@@ -202,10 +207,11 @@ fn handles_missing_invalid_uid() {
         servers: Default::default(),
     };
 
-    fn game_server(uid: Option<String>) -> DeserializeGuard<GameServer> {
+    fn game_server(uid: Option<String>, namespace: String) -> DeserializeGuard<GameServer> {
         let gs = GameServer {
             metadata: ObjectMeta {
                 name: Some("name".into()),
+                namespace: Some(namespace),
                 uid,
                 annotations: None,
                 ..Default::default()
@@ -237,7 +243,7 @@ fn handles_missing_invalid_uid() {
         DeserializeGuard(Ok(gs))
     }
 
-    processor.process_event(Event::Apply(game_server(None)));
+    processor.process_event(Event::Apply(game_server(None, namespace.clone())));
     assert!(rx.try_recv().is_err());
 
     processor.process_event(Event::Init);
@@ -246,22 +252,22 @@ fn handles_missing_invalid_uid() {
             None
         } else {
             Some(i.to_string())
-        })));
+        }, namespace.clone())));
     }
     processor.process_event(Event::InitDone);
     assert!(rx.try_recv().is_err());
 
     let valid = uuid::Uuid::from_u128(0xdefaced);
-    processor.process_event(Event::Apply(game_server(Some(valid.to_string()))));
+    processor.process_event(Event::Apply(game_server(Some(valid.to_string()), namespace.clone())));
     assert!(matches!(
         rx.try_recv(),
         Ok(providers::corrosion::push::Mutation::Upsert(_))
     ));
 
-    processor.process_event(Event::Delete(game_server(Some("invalid".into()))));
+    processor.process_event(Event::Delete(game_server(Some("invalid".into()), namespace.clone())));
     assert!(rx.try_recv().is_err());
 
-    processor.process_event(Event::Delete(game_server(Some(valid.to_string()))));
+    processor.process_event(Event::Delete(game_server(Some(valid.to_string()), namespace.clone())));
     assert!(matches!(
         rx.try_recv(),
         Ok(providers::corrosion::push::Mutation::Remove(_))

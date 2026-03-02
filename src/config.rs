@@ -17,7 +17,6 @@
 //! Quilkin configuration.
 
 use std::{
-    collections::BTreeSet,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering::Relaxed},
@@ -889,22 +888,6 @@ impl Config {
         }
 
         Ok(())
-    }
-
-    pub fn cluster(
-        self,
-        remote_addr: Option<std::net::IpAddr>,
-        locality: Option<quilkin_xds::locality::Locality>,
-        cluster: BTreeSet<crate::net::Endpoint>,
-    ) -> Self {
-        let Some(clusters) = self.dyn_cfg.clusters() else {
-            return self;
-        };
-
-        clusters.modify(|clusters| {
-            clusters.insert(remote_addr, locality, cluster);
-        });
-        self
     }
 
     #[inline]

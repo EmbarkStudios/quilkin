@@ -479,6 +479,7 @@ impl Providers {
                         for namespace in agones_namespaces {
                             let processor = EventProcessor {
                                 clusters: clusters.clone(),
+                                namespace: namespace.clone(),
                                 mutator: mutator.clone(),
                                 address_selector: selector.clone(),
                                 locality: locality.clone(),

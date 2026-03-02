@@ -265,10 +265,55 @@ impl EndpointSet {
             self.build_token_map()
         };
 
+        let diff = EndpointSet::token_map_diff(&old_tm, &self.token_map);
+
+        (old_len, diff)
+    }
+
+    /// Partially replace self with replacement, only replacing endpoints that match the closure
+    /// predicate.
+    pub fn partial_replace(
+        &mut self,
+        replacement: Self,
+        should_be_replaced: impl Fn(&EndpointMetadata) -> bool,
+    ) -> (
+        usize,
+        usize,
+        std::collections::HashMap<u64, Option<BTreeSet<EndpointAddress>>>,
+    ) {
+        let old_len = self.endpoints.len();
+        // Drop all entries that match the predicate
+        self.endpoints.retain(|_k, v| !should_be_replaced(v));
+
+        // Add all the endpoints from the replacement EndpointSet
+        for (addr, metadata) in replacement.endpoints {
+            if let Some(metadata) = self.endpoints.insert(addr, metadata) {
+                tracing::warn!(
+                    ?metadata,
+                    "replaced endpoint that should have been removed already, this is a bug"
+                );
+            }
+        }
+
+        let new_len = self.endpoints.len();
+
+        // This should only happen on agents, so always update
+        let old_tm = self.update();
+
+        let diff = EndpointSet::token_map_diff(&old_tm, &self.token_map);
+
+        (new_len, old_len, diff)
+    }
+
+    #[inline]
+    fn token_map_diff(
+        old: &TokenAddressMap,
+        new: &TokenAddressMap,
+    ) -> std::collections::HashMap<u64, Option<BTreeSet<EndpointAddress>>> {
         let mut hm = std::collections::HashMap::new();
 
-        for (token, addrs) in &old_tm {
-            match self.token_map.get(token) {
+        for (token, addrs) in old {
+            match new.get(token) {
                 Some(naddrs) => {
                     if addrs.symmetric_difference(naddrs).count() > 0 {
                         hm.insert(*token, Some(naddrs.iter().cloned().collect()));
@@ -280,13 +325,12 @@ impl EndpointSet {
             }
         }
 
-        for (token, addrs) in &self.token_map {
+        for (token, addrs) in new {
             if !hm.contains_key(token) {
                 hm.insert(*token, Some(addrs.iter().cloned().collect()));
             }
         }
-
-        (old_len, hm)
+        hm
     }
 }
 
@@ -472,6 +516,48 @@ where
         Self {
             map: DashMap::with_capacity_and_hasher(capacity, hasher),
             ..Self::default()
+        }
+    }
+
+    /// Partially replace an `EndpointSet` with the given closure to determine what Endpoints belong
+    /// to the producer that is resetting state.
+    pub fn partial_replace(
+        &self,
+        locality: Option<Locality>,
+        endpoint_set: EndpointSet,
+        should_be_replaced: impl Fn(&EndpointMetadata) -> bool,
+    ) {
+        if let Some(mut current) = self.map.get_mut(&locality) {
+            let current = current.value_mut();
+
+            let (new_len, old_len, token_map_diff) =
+                current.partial_replace(endpoint_set, should_be_replaced);
+
+            if new_len >= old_len {
+                self.num_endpoints.fetch_add(new_len - old_len, Relaxed);
+            } else {
+                self.num_endpoints.fetch_sub(old_len - new_len, Relaxed);
+            }
+
+            self.version.fetch_add(1, Relaxed);
+
+            for (token_hash, addrs) in token_map_diff {
+                if let Some(addrs) = addrs {
+                    self.token_map.insert(token_hash, addrs);
+                } else {
+                    self.token_map.remove(&token_hash);
+                }
+            }
+        } else {
+            for (token_hash, addrs) in &endpoint_set.token_map {
+                self.token_map
+                    .insert(*token_hash, addrs.iter().cloned().collect());
+            }
+
+            let new_len = endpoint_set.len();
+            self.map.insert(locality, endpoint_set);
+            self.num_endpoints.fetch_add(new_len, Relaxed);
+            self.version.fetch_add(1, Relaxed);
         }
     }
 
