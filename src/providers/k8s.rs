@@ -255,7 +255,7 @@ impl EventProcessor {
                 let Some(endpoint) = self.validate_gameserver(result) else {
                     return;
                 };
-                tracing::debug!(endpoint=%serde_json::to_value(&endpoint).unwrap(), "Adding endpoint");
+                tracing::debug!(namespace=%self.namespace, endpoint=%serde_json::to_value(&endpoint).unwrap(), "Adding endpoint");
                 metrics::k8s::gameservers_total_valid();
 
                 if let Some(mutator) = self.mutator.as_ref() {
@@ -263,7 +263,7 @@ impl EventProcessor {
                         let (ep, ts) = get_simple_endpoint_and_token_set(&endpoint);
                         mutator.upsert_server(uid, ep, ts);
                     } else {
-                        tracing::warn!("apply event gameserverspec did not specify a valid UID");
+                        tracing::warn!(namespace=%self.namespace, "apply event gameserverspec did not specify a valid UID");
                     }
                 }
 
@@ -278,16 +278,17 @@ impl EventProcessor {
                     return;
                 };
 
-                tracing::trace!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "applying server");
+                tracing::trace!(namespace=%self.namespace, %endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "applying server");
                 metrics::k8s::gameservers_total_valid();
                 self.servers.insert(endpoint, uid);
             }
             Event::InitDone => {
                 let span = tracing::trace_span!("k8s::gameservers::init_done");
                 let _enter = span.enter();
-                tracing::debug!("received restart event from k8s");
+                tracing::debug!(namespace=%self.namespace, "received restart event from k8s");
 
                 tracing::trace!(
+                    namespace=%self.namespace,
                     num_endpoints = self.servers.len(),
                     "Restarting with endpoints"
                 );
@@ -324,7 +325,7 @@ impl EventProcessor {
                     Ok(server) => server,
                     Err(error) => {
                         metrics::k8s::errors_total(GAMESERVER, "invalid_object").inc();
-                        tracing::debug!(%error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
+                        tracing::debug!(namespace=%self.namespace, %error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
                         return;
                     }
                 };
@@ -340,6 +341,7 @@ impl EventProcessor {
                     self.cluster_update_batcher.push(RemoveByName(name));
                 } else {
                     tracing::warn!(
+                        namespace=%self.namespace,
                         server.metadata =
                             serde_json::to_string(&server.metadata).unwrap_or(String::new()),
                         "couldn't delete gameserver without endpoint or name"
@@ -357,11 +359,12 @@ impl EventProcessor {
             Ok(server) => {
                 if server.is_allocated() {
                     if let Some(ep) = server.endpoint(self.address_selector.as_ref()) {
-                        tracing::trace!(endpoint=%ep.address, metadata=serde_json::to_string(&ep.metadata).unwrap(), "applying server");
+                        tracing::trace!(namespace=%self.namespace, endpoint=%ep.address, metadata=serde_json::to_string(&ep.metadata).unwrap(), "applying server");
                         metrics::k8s::gameservers_total_valid();
                         Some(ep)
                     } else {
                         tracing::warn!(
+                            namespace=%self.namespace,
                             server = serde_json::to_string(&server).unwrap(),
                             "skipping invalid server"
                         );
@@ -370,6 +373,7 @@ impl EventProcessor {
                     }
                 } else {
                     tracing::debug!(
+                        namespace=%self.namespace,
                         server = serde_json::to_string(&server).unwrap(),
                         "skipping unallocated server"
                     );
@@ -378,7 +382,7 @@ impl EventProcessor {
                 }
             }
             Err(error) => {
-                tracing::debug!(error=%error.error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
+                tracing::debug!(namespace=%self.namespace, error=%error.error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
                 metrics::k8s::errors_total(GAMESERVER, "invalid_object").inc();
                 None
             }
@@ -399,7 +403,7 @@ pub fn update_endpoints_from_gameservers(
                 Ok(event) => event,
                 Err(error) => {
                     metrics::k8s::errors_total(GAMESERVER, "watch_error").inc();
-                    tracing::warn!(%error, "gameserver watch error");
+                    tracing::warn!(namespace=%processor.namespace, %error, "gameserver watch error");
                     continue;
                 }
             };
