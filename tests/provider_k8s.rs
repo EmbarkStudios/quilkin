@@ -34,6 +34,76 @@ fn setup_tracing() {
     tracing::dispatcher::set_global_default(disp).unwrap();
 }
 
+struct GS {
+    name: Option<String>,
+    namespace: Option<String>,
+    uid: Option<String>,
+    tokens: Option<quilkin_types::TokenSet>,
+    address: String,
+}
+
+impl GS {
+    fn new(id: u16) -> Self {
+        Self {
+            name: Some(format!("gs-{}", id)),
+            namespace: Some("test".to_string()),
+            uid: Some(uuid::Uuid::from_u128(id as u128).to_string()),
+            tokens: Some((id..id + 5).map(|i| vec![i as u8; i as usize]).collect()),
+            address: std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, id).to_string(),
+        }
+    }
+
+    fn with_uid(mut self, uid: Option<String>) -> Self {
+        self.uid = uid;
+        self
+    }
+
+    fn build(self) -> GameServer {
+        let mut annotations = std::collections::BTreeMap::new();
+        if let Some(tokens) = self.tokens {
+            annotations.insert(
+                agones::QUILKIN_TOKEN_LABEL.to_string(),
+                tokens.serialize_to_string(),
+            );
+        };
+        GameServer {
+            metadata: ObjectMeta {
+                name: self.name,
+                namespace: self.namespace,
+                uid: self.uid,
+                annotations: Some(annotations),
+                ..Default::default()
+            },
+            spec: GameServerSpec {
+                container: None,
+                ports: vec![],
+                health: Default::default(),
+                scheduling: agones::SchedulingStrategy::Packed,
+                sdk_server: Default::default(),
+                template: Default::default(),
+            },
+            status: Some(GameServerStatus {
+                state: GameServerState::Allocated,
+                ports: Some(vec![GameServerStatusPort {
+                    name: "addr".into(),
+                    port: 7777,
+                }]),
+                address: self.address.clone(),
+                addresses: vec![NodeAddress {
+                    type_: "addr".into(),
+                    address: self.address.clone(),
+                }],
+                node_name: "node".into(),
+                reserved_until: None,
+            }),
+        }
+    }
+
+    fn guard(self) -> DeserializeGuard<GameServer> {
+        DeserializeGuard(Ok(self.build()))
+    }
+}
+
 /// Test that ensures the state of the xDs version of a cluster matches valid
 ///
 /// Note this only provides valid events with the valid data, other tests in
@@ -80,56 +150,9 @@ fn corrosion_matches_xds() {
         }
     }
 
-    fn tokens(id: u16) -> std::collections::BTreeMap<String, String> {
-        let mut md = std::collections::BTreeMap::new();
-
-        let ts: quilkin_types::TokenSet = (1..id + 1).map(|i| vec![i as u8; i as usize]).collect();
-        md.insert(agones::QUILKIN_TOKEN_LABEL.into(), ts.serialize_to_string());
-
-        md
-    }
-
-    macro_rules! game_server {
-        ($id:expr, $ns:expr) => {{
-            let gs = GameServer {
-                metadata: ObjectMeta {
-                    name: Some($id.to_string()),
-                    namespace: Some($ns.to_string()),
-                    uid: Some(uuid::Uuid::from_u128($id as u128).to_string()),
-                    annotations: Some(tokens($id)),
-                    ..Default::default()
-                },
-                spec: GameServerSpec {
-                    container: None,
-                    ports: vec![],
-                    health: Default::default(),
-                    scheduling: agones::SchedulingStrategy::Packed,
-                    sdk_server: Default::default(),
-                    template: Default::default(),
-                },
-                status: Some(GameServerStatus {
-                    state: GameServerState::Allocated,
-                    ports: Some(vec![GameServerStatusPort {
-                        name: "addr".into(),
-                        port: $id,
-                    }]),
-                    address: std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, $id).to_string(),
-                    addresses: vec![NodeAddress {
-                        type_: "addr".into(),
-                        address: std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, $id).to_string(),
-                    }],
-                    node_name: $id.to_string(),
-                    reserved_until: None,
-                }),
-            };
-
-            DeserializeGuard(Ok(gs))
-        }};
-    }
-
     // Add a single server
     {
-        processor.process_event(Event::Apply(game_server!(0, namespace)));
+        processor.process_event(Event::Apply(GS::new(0).guard()));
         matches(&mut rx, &clusters, &state);
     }
 
@@ -138,7 +161,7 @@ fn corrosion_matches_xds() {
         processor.process_event(Event::Init);
 
         for i in 0..10 {
-            processor.process_event(Event::InitApply(game_server!(i, namespace)));
+            processor.process_event(Event::InitApply(GS::new(i).guard()));
         }
 
         processor.process_event(Event::InitDone);
@@ -150,7 +173,7 @@ fn corrosion_matches_xds() {
         processor.process_event(Event::Init);
 
         for i in 0..10 {
-            processor.process_event(Event::InitApply(game_server!(i, namespace)));
+            processor.process_event(Event::InitApply(GS::new(i).guard()));
         }
 
         processor.process_event(Event::InitDone);
@@ -161,9 +184,9 @@ fn corrosion_matches_xds() {
     {
         for i in 0..10 {
             if i % 2 == 0 {
-                processor.process_event(Event::Delete(game_server!(i, namespace)));
+                processor.process_event(Event::Delete(GS::new(i).guard()));
             }
-            processor.process_event(Event::Apply(game_server!(i, namespace)));
+            processor.process_event(Event::Apply(GS::new(i).guard()));
         }
 
         matches(&mut rx, &clusters, &state);
@@ -175,7 +198,7 @@ fn corrosion_matches_xds() {
 
         for i in 0..10 {
             if i % 2 == 1 {
-                processor.process_event(Event::InitApply(game_server!(i, namespace)));
+                processor.process_event(Event::InitApply(GS::new(i).guard()));
             }
         }
 
@@ -207,67 +230,41 @@ fn handles_missing_invalid_uid() {
         servers: Default::default(),
     };
 
-    fn game_server(uid: Option<String>, namespace: String) -> DeserializeGuard<GameServer> {
-        let gs = GameServer {
-            metadata: ObjectMeta {
-                name: Some("name".into()),
-                namespace: Some(namespace),
-                uid,
-                annotations: None,
-                ..Default::default()
-            },
-            spec: GameServerSpec {
-                container: None,
-                ports: vec![],
-                health: Default::default(),
-                scheduling: agones::SchedulingStrategy::Packed,
-                sdk_server: Default::default(),
-                template: Default::default(),
-            },
-            status: Some(GameServerStatus {
-                state: GameServerState::Allocated,
-                ports: Some(vec![GameServerStatusPort {
-                    name: "addr".into(),
-                    port: 7777,
-                }]),
-                address: std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1).to_string(),
-                addresses: vec![NodeAddress {
-                    type_: "addr".into(),
-                    address: std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1).to_string(),
-                }],
-                node_name: "name".into(),
-                reserved_until: None,
-            }),
-        };
-
-        DeserializeGuard(Ok(gs))
-    }
-
-    processor.process_event(Event::Apply(game_server(None, namespace.clone())));
+    processor.process_event(Event::Apply(GS::new(0).with_uid(None).guard()));
     assert!(rx.try_recv().is_err());
 
     processor.process_event(Event::Init);
     for i in 0..10 {
-        processor.process_event(Event::InitApply(game_server(if i % 2 == 0 {
-            None
-        } else {
-            Some(i.to_string())
-        }, namespace.clone())));
+        processor.process_event(Event::InitApply(
+            GS::new(i)
+                .with_uid(if i % 2 == 0 {
+                    None
+                } else {
+                    Some(i.to_string())
+                })
+                .guard(),
+        ));
     }
     processor.process_event(Event::InitDone);
     assert!(rx.try_recv().is_err());
 
     let valid = uuid::Uuid::from_u128(0xdefaced);
-    processor.process_event(Event::Apply(game_server(Some(valid.to_string()), namespace.clone())));
+    processor.process_event(Event::Apply(
+        GS::new(0).with_uid(Some(valid.to_string())).guard(),
+    ));
     assert!(matches!(
         rx.try_recv(),
         Ok(providers::corrosion::push::Mutation::Upsert(_))
     ));
 
-    processor.process_event(Event::Delete(game_server(Some("invalid".into()), namespace.clone())));
+    processor.process_event(Event::Delete(
+        GS::new(0).with_uid(Some("invalid".into())).guard(),
+    ));
     assert!(rx.try_recv().is_err());
 
-    processor.process_event(Event::Delete(game_server(Some(valid.to_string()), namespace.clone())));
+    processor.process_event(Event::Delete(
+        GS::new(0).with_uid(Some(valid.to_string())).guard(),
+    ));
     assert!(matches!(
         rx.try_recv(),
         Ok(providers::corrosion::push::Mutation::Remove(_))
