@@ -4,7 +4,7 @@ use ::corrosion::{
 };
 use futures::StreamExt;
 use k8s_openapi::{api::core::v1::NodeAddress, apimachinery::pkg::apis::meta::v1::ObjectMeta};
-use kube::runtime::watcher::Event;
+use kube::{ResourceExt, runtime::watcher::Event};
 use kube_core::DeserializeGuard;
 use quilkin::{
     config, net,
@@ -58,6 +58,11 @@ impl GS {
         self
     }
 
+    fn with_namespace(mut self, namespace: Option<String>) -> Self {
+        self.namespace = namespace;
+        self
+    }
+
     fn build(self) -> GameServer {
         let mut annotations = std::collections::BTreeMap::new();
         if let Some(tokens) = self.tokens {
@@ -102,6 +107,22 @@ impl GS {
     fn guard(self) -> DeserializeGuard<GameServer> {
         DeserializeGuard(Ok(self.build()))
     }
+}
+
+fn get_endpoint(gs: &GameServer) -> quilkin::net::Endpoint {
+    quilkin::net::Endpoint::new(quilkin::net::EndpointAddress {
+        host: quilkin_types::AddressKind::Ip(gs.status.as_ref().unwrap().address.parse().unwrap()),
+        port: gs
+            .status
+            .as_ref()
+            .unwrap()
+            .ports
+            .as_ref()
+            .unwrap()
+            .first()
+            .unwrap()
+            .port,
+    })
 }
 
 /// Test that ensures the state of the xDs version of a cluster matches valid
@@ -269,6 +290,141 @@ fn handles_missing_invalid_uid() {
         rx.try_recv(),
         Ok(providers::corrosion::push::Mutation::Remove(_))
     ));
+}
+
+/// Tests that we can handle watching multiple k8s namespaces
+///
+/// Currently only checks the `ClusterMap` implementation. Handling multiple namespaces for
+/// corrosion is yet to be implemented
+#[test]
+fn handles_multiple_namespaces() {
+    let clusters = config::Watch::new(net::ClusterMap::new());
+    let state = Arc::new(corrosion::push::LocalState::default());
+    let (mutator, _rx) = corrosion::ServerMutator::testing(state.clone());
+
+    let locality = None;
+    let ns_a = "ns-a".to_string();
+    let ns_b = "ns-b".to_string();
+    let mut processor_a = providers::k8s::EventProcessor {
+        clusters: clusters.clone(),
+        namespace: ns_a.clone(),
+        address_selector: Some(config::AddressSelector {
+            name: "addr".into(),
+            kind: config::AddrKind::Ipv6,
+        }),
+        mutator: Some(mutator.clone()),
+        locality: locality.clone(),
+        servers: Default::default(),
+    };
+    let mut processor_b = providers::k8s::EventProcessor {
+        clusters: clusters.clone(),
+        namespace: ns_b.clone(),
+        address_selector: Some(config::AddressSelector {
+            name: "addr".into(),
+            kind: config::AddrKind::Ipv6,
+        }),
+        mutator: Some(mutator),
+        locality: locality.clone(),
+        servers: Default::default(),
+    };
+
+    // Internal test state to keep track of what gameservers exist
+    let mut gs_id: u16 = 0;
+    let mut gameservers = std::collections::HashMap::new();
+
+    // Init -> apply many servers to ns-a
+    {
+        processor_a.process_event(Event::Init);
+
+        for _ in 0..10 {
+            gs_id = gs_id.strict_add(1);
+            let gs = GS::new(gs_id).with_namespace(Some(ns_a.clone())).build();
+            gameservers.insert(gs_id, gs.clone());
+            processor_a.process_event(Event::InitApply(DeserializeGuard(Ok(gs))));
+        }
+
+        processor_a.process_event(Event::InitDone);
+    }
+
+    // Init -> apply many servers to ns-b
+    {
+        processor_b.process_event(Event::Init);
+
+        for _ in 0..10 {
+            gs_id = gs_id.strict_add(1);
+            let gs = GS::new(gs_id).with_namespace(Some(ns_a.clone())).build();
+            gameservers.insert(gs_id, gs.clone());
+            processor_b.process_event(Event::InitApply(DeserializeGuard(Ok(gs))));
+        }
+
+        processor_b.process_event(Event::InitDone);
+    }
+
+    // Initial state check
+    {
+        let guard = clusters.read();
+        let endpoint_set = guard.get(&locality).unwrap();
+        assert_eq!(endpoint_set.len(), gameservers.len());
+        for (_id, gs) in gameservers.iter() {
+            assert!(endpoint_set.contains(&get_endpoint(gs)));
+        }
+    }
+
+    // Apply some servers to each namespace
+    for _ in 0..3 {
+        // ns-a
+        {
+            gs_id = gs_id.strict_add(1);
+            let gs = GS::new(gs_id).with_namespace(Some(ns_a.clone())).build();
+            gameservers.insert(gs_id, gs.clone());
+            processor_a.process_event(Event::Apply(DeserializeGuard(Ok(gs))));
+        }
+        // ns-b
+        {
+            gs_id = gs_id.strict_add(1);
+            let gs = GS::new(gs_id).with_namespace(Some(ns_b.clone())).build();
+            gameservers.insert(gs_id, gs.clone());
+            processor_b.process_event(Event::Apply(DeserializeGuard(Ok(gs))));
+        }
+    }
+
+    // State check
+    {
+        let guard = clusters.read();
+        let endpoint_set = guard.get(&locality).unwrap();
+        assert_eq!(endpoint_set.len(), gameservers.len());
+        for (_id, gs) in gameservers.iter() {
+            assert!(endpoint_set.contains(&get_endpoint(gs)));
+        }
+    }
+
+    // Re-Init ns-a
+    {
+        {
+            // Remove all gameservers that we had from ns-a from the test state
+            let ns_a_opt = Some(ns_a.clone());
+            gameservers.retain(|_k, v| v.namespace() != ns_a_opt);
+        }
+
+        processor_a.process_event(Event::Init);
+        for _ in 0..10 {
+            gs_id = gs_id.strict_add(1);
+            let gs = GS::new(gs_id).with_namespace(Some(ns_a.clone())).build();
+            gameservers.insert(gs_id, gs.clone());
+            processor_a.process_event(Event::InitApply(DeserializeGuard(Ok(gs))));
+        }
+        processor_a.process_event(Event::InitDone);
+    }
+
+    // State check
+    {
+        let guard = clusters.read();
+        let endpoint_set = guard.get(&locality).unwrap();
+        assert_eq!(endpoint_set.len(), gameservers.len());
+        for (_id, gs) in gameservers.iter() {
+            assert!(endpoint_set.contains(&get_endpoint(gs)));
+        }
+    }
 }
 
 /// Tests the accumulator and change iterator
