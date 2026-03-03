@@ -1255,6 +1255,22 @@ impl ClusterUpdateBatcher {
         guard.push(update);
     }
 
+    // TEMP for debugging only
+    pub fn temp_get_current(
+        &self,
+        filter: impl Fn(&EndpointMetadata) -> bool,
+    ) -> std::collections::BTreeSet<Endpoint> {
+        self.cluster_map
+            .read()
+            .get(&self.locality)
+            .map(|eps| {
+                eps.endpoint_iter()
+                    .filter(|ep| filter(&ep.metadata))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Partially replace an `EndpointSet` with the given closure to determine what Endpoints belong
     /// to the producer that is resetting state.
     ///
