@@ -102,7 +102,7 @@ pub fn update_filters_from_configmap(
             let event = match event {
                 Ok(event) => event,
                 Err(error) => {
-                    metrics::k8s::errors_total(CONFIGMAP, &error).inc();
+                    metrics::k8s::errors_total(CONFIGMAP, "watch_error").inc();
                     yield Err(error.into());
                     continue;
                 }
@@ -322,7 +322,7 @@ impl EventProcessor {
                 let server = match result.0 {
                     Ok(server) => server,
                     Err(error) => {
-                        metrics::k8s::errors_total(GAMESERVER, &error);
+                        metrics::k8s::errors_total(GAMESERVER, "invalid_object").inc();
                         tracing::debug!(%error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
                         return;
                     }
@@ -394,7 +394,7 @@ impl EventProcessor {
             }
             Err(error) => {
                 tracing::debug!(error=%error.error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
-                metrics::k8s::errors_total(GAMESERVER, &error);
+                metrics::k8s::errors_total(GAMESERVER, "invalid_object").inc();
                 None
             }
         }
@@ -413,6 +413,7 @@ pub fn update_endpoints_from_gameservers(
             let event = match event {
                 Ok(event) => event,
                 Err(error) => {
+                    metrics::k8s::errors_total(GAMESERVER, "watch_error").inc();
                     tracing::warn!(%error, "gameserver watch error");
                     continue;
                 }
