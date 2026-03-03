@@ -494,7 +494,8 @@ where
         if let Some(raddr) = self.localities.get(&locality) {
             if *raddr != remote_addr {
                 eyre::bail!(
-                    "skipping cluster apply, '{locality:?}' is managed by '{raddr:?}', not '{remote_addr:?}'"
+                    "skipping cluster apply, '{locality:?}' is managed by '{}', not '{remote_addr:?}'",
+                    raddr.key()
                 );
             }
         } else {
