@@ -34,7 +34,7 @@ fn setup_tracing() {
     tracing::dispatcher::set_global_default(disp).unwrap();
 }
 
-struct GS {
+struct GameServerBuilder {
     name: Option<String>,
     namespace: Option<String>,
     uid: Option<String>,
@@ -42,7 +42,7 @@ struct GS {
     address: String,
 }
 
-impl GS {
+impl GameServerBuilder {
     fn new(id: u16) -> Self {
         Self {
             name: Some(format!("gs-{}", id)),
@@ -173,7 +173,7 @@ fn corrosion_matches_xds() {
 
     // Add a single server
     {
-        processor.process_event(Event::Apply(GS::new(0).guard()));
+        processor.process_event(Event::Apply(GameServerBuilder::new(0).guard()));
         matches(&mut rx, &clusters, &state);
     }
 
@@ -182,7 +182,7 @@ fn corrosion_matches_xds() {
         processor.process_event(Event::Init);
 
         for i in 0..10 {
-            processor.process_event(Event::InitApply(GS::new(i).guard()));
+            processor.process_event(Event::InitApply(GameServerBuilder::new(i).guard()));
         }
 
         processor.process_event(Event::InitDone);
@@ -194,7 +194,7 @@ fn corrosion_matches_xds() {
         processor.process_event(Event::Init);
 
         for i in 0..10 {
-            processor.process_event(Event::InitApply(GS::new(i).guard()));
+            processor.process_event(Event::InitApply(GameServerBuilder::new(i).guard()));
         }
 
         processor.process_event(Event::InitDone);
@@ -205,9 +205,9 @@ fn corrosion_matches_xds() {
     {
         for i in 0..10 {
             if i % 2 == 0 {
-                processor.process_event(Event::Delete(GS::new(i).guard()));
+                processor.process_event(Event::Delete(GameServerBuilder::new(i).guard()));
             }
-            processor.process_event(Event::Apply(GS::new(i).guard()));
+            processor.process_event(Event::Apply(GameServerBuilder::new(i).guard()));
         }
 
         matches(&mut rx, &clusters, &state);
@@ -219,7 +219,7 @@ fn corrosion_matches_xds() {
 
         for i in 0..10 {
             if i % 2 == 1 {
-                processor.process_event(Event::InitApply(GS::new(i).guard()));
+                processor.process_event(Event::InitApply(GameServerBuilder::new(i).guard()));
             }
         }
 
@@ -251,13 +251,15 @@ fn handles_missing_invalid_uid() {
         servers: Default::default(),
     };
 
-    processor.process_event(Event::Apply(GS::new(0).with_uid(None).guard()));
+    processor.process_event(Event::Apply(
+        GameServerBuilder::new(0).with_uid(None).guard(),
+    ));
     assert!(rx.try_recv().is_err());
 
     processor.process_event(Event::Init);
     for i in 0..10 {
         processor.process_event(Event::InitApply(
-            GS::new(i)
+            GameServerBuilder::new(i)
                 .with_uid(if i % 2 == 0 {
                     None
                 } else {
@@ -271,7 +273,9 @@ fn handles_missing_invalid_uid() {
 
     let valid = uuid::Uuid::from_u128(0xdefaced);
     processor.process_event(Event::Apply(
-        GS::new(0).with_uid(Some(valid.to_string())).guard(),
+        GameServerBuilder::new(0)
+            .with_uid(Some(valid.to_string()))
+            .guard(),
     ));
     assert!(matches!(
         rx.try_recv(),
@@ -279,12 +283,16 @@ fn handles_missing_invalid_uid() {
     ));
 
     processor.process_event(Event::Delete(
-        GS::new(0).with_uid(Some("invalid".into())).guard(),
+        GameServerBuilder::new(0)
+            .with_uid(Some("invalid".into()))
+            .guard(),
     ));
     assert!(rx.try_recv().is_err());
 
     processor.process_event(Event::Delete(
-        GS::new(0).with_uid(Some(valid.to_string())).guard(),
+        GameServerBuilder::new(0)
+            .with_uid(Some(valid.to_string()))
+            .guard(),
     ));
     assert!(matches!(
         rx.try_recv(),
@@ -338,7 +346,9 @@ fn handles_multiple_namespaces() {
 
         for _ in 0..10 {
             gs_id = gs_id.strict_add(1);
-            let gs = GS::new(gs_id).with_namespace(Some(ns_a.clone())).build();
+            let gs = GameServerBuilder::new(gs_id)
+                .with_namespace(Some(ns_a.clone()))
+                .build();
             gameservers.insert(gs_id, gs.clone());
             processor_a.process_event(Event::InitApply(DeserializeGuard(Ok(gs))));
         }
@@ -352,7 +362,9 @@ fn handles_multiple_namespaces() {
 
         for _ in 0..10 {
             gs_id = gs_id.strict_add(1);
-            let gs = GS::new(gs_id).with_namespace(Some(ns_a.clone())).build();
+            let gs = GameServerBuilder::new(gs_id)
+                .with_namespace(Some(ns_a.clone()))
+                .build();
             gameservers.insert(gs_id, gs.clone());
             processor_b.process_event(Event::InitApply(DeserializeGuard(Ok(gs))));
         }
@@ -375,14 +387,18 @@ fn handles_multiple_namespaces() {
         // ns-a
         {
             gs_id = gs_id.strict_add(1);
-            let gs = GS::new(gs_id).with_namespace(Some(ns_a.clone())).build();
+            let gs = GameServerBuilder::new(gs_id)
+                .with_namespace(Some(ns_a.clone()))
+                .build();
             gameservers.insert(gs_id, gs.clone());
             processor_a.process_event(Event::Apply(DeserializeGuard(Ok(gs))));
         }
         // ns-b
         {
             gs_id = gs_id.strict_add(1);
-            let gs = GS::new(gs_id).with_namespace(Some(ns_b.clone())).build();
+            let gs = GameServerBuilder::new(gs_id)
+                .with_namespace(Some(ns_b.clone()))
+                .build();
             gameservers.insert(gs_id, gs.clone());
             processor_b.process_event(Event::Apply(DeserializeGuard(Ok(gs))));
         }
@@ -409,7 +425,9 @@ fn handles_multiple_namespaces() {
         processor_a.process_event(Event::Init);
         for _ in 0..10 {
             gs_id = gs_id.strict_add(1);
-            let gs = GS::new(gs_id).with_namespace(Some(ns_a.clone())).build();
+            let gs = GameServerBuilder::new(gs_id)
+                .with_namespace(Some(ns_a.clone()))
+                .build();
             gameservers.insert(gs_id, gs.clone());
             processor_a.process_event(Event::InitApply(DeserializeGuard(Ok(gs))));
         }
