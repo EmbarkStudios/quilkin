@@ -87,7 +87,7 @@ struct Admin {
 #[cfg(target_os = "linux")]
 #[derive(serde::Deserialize)]
 struct ProfileParams {
-    seconds: Option<std::time::Duration>,
+    seconds: Option<u64>,
 }
 
 impl Admin {
@@ -129,7 +129,7 @@ impl Admin {
         cfg_if::cfg_if! {
             if #[cfg(target_os = "linux")] {
                 router = router.route("/debug/pprof/profile", axum::routing::get(|params: axum::extract::Query<ProfileParams>| async move {
-                    match collect_pprof(params.seconds).await {
+                    match collect_pprof(params.seconds.map(std::time::Duration::from_secs)).await {
                         Ok(value) => value.into_response(),
                         Err(error) => {
                             tracing::warn!(%error, "admin http server error");

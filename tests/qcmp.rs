@@ -18,22 +18,31 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use tokio::time::Duration;
 
-use quilkin::{codec::qcmp::Protocol, test::TestHelper};
+use quilkin::codec::qcmp::Protocol;
 
 #[tokio::test]
 #[cfg_attr(target_os = "macos", ignore)]
 async fn proxy_ping() {
-    let mut t = TestHelper::default();
-    let qcmp = quilkin::net::raw_socket_with_reuse(0).unwrap();
-    let qcmp_port = quilkin::net::socket_port(&qcmp);
-    let server_proxy = quilkin::components::proxy::Proxy {
-        qcmp,
-        to: vec![(Ipv4Addr::UNSPECIFIED, 0).into()],
-        ..<_>::default()
-    };
-    let server_config = TestHelper::new_config();
-    t.run_server(server_config, Some(server_proxy), None).await;
-    ping(qcmp_port).await;
+    let shutdown_handler = quilkin::signal::spawn_handler();
+    let stx = shutdown_handler.shutdown_tx();
+
+    let providers = quilkin::Providers::default();
+
+    let svc = quilkin::Service::builder().qcmp().qcmp_port(0);
+
+    let config = quilkin::Config::new_rc(
+        None,
+        quilkin_types::IcaoCode::new_testing([b'X'; 4]),
+        &providers,
+        &svc,
+        tokio_util::sync::CancellationToken::new(),
+    );
+
+    let (task, ports) = svc.spawn_services(&config, shutdown_handler).await.unwrap();
+
+    ping(ports.qcmp.expect("didn't spawn QCMP")).await;
+    stx.send(()).unwrap();
+    task.await.unwrap().1.unwrap();
 }
 
 async fn ping(port: u16) {

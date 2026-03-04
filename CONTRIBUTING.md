@@ -62,18 +62,10 @@ When submitting pull requests, make sure to do the following:
 - Ensure any new files have [a trailing newline](https://stackoverflow.com/questions/5813311/no-newline-at-end-of-file)
 
 ## Continuous Integration
-Continuous integration is provided by [Google Cloud Build](https://cloud.google.com/cloud-build),
-through the [cloudbuild.yaml](./cloudbuild.yaml) file found at the root of the directory, and integrated with the
-Github repository via the 
-[Cloud Build Github app](https://cloud.google.com/cloud-build/docs/automating-builds/run-builds-on-github).
+Continuous integration is provided by [GitHub Actions](https://github.com/googleforgames/quilkin/actions),
+through the workflow files found in the [.github/workflows](./.github/workflows) directory.
 
 Build success or failure are displayed on each pull request with relevant details.
-
-To gain access to the details of a specific Cloud Build, join the 
-[quilkin-discuss](https://groups.google.com/forum/#!forum/quilkin-discuss) google group.
-
-See the [Google Cloud Build documentation](https://cloud.google.com/cloud-build/docs/) for more details on
-how to edit and expand the build process.
 
 ## Contributor License Agreement
 

@@ -27,6 +27,7 @@ mod write;
 pub mod capture;
 pub mod concatenate;
 pub mod debug;
+pub mod decryptor;
 pub mod drop;
 pub mod firewall;
 pub mod load_balancer;
@@ -53,6 +54,7 @@ pub use self::{
     chain::FilterChain,
     concatenate::Concatenate,
     debug::Debug,
+    decryptor::Decryptor,
     drop::Drop,
     error::{ConvertProtoConfigError, CreationError, FilterError},
     factory::{CreateFilterArgs, DynFilterFactory, FilterFactory, FilterInstance},
@@ -81,6 +83,7 @@ pub enum FilterKind {
     Capture,
     Concatenate,
     Debug,
+    Decryptor,
     Drop,
     Firewall,
     LoadBalancer,

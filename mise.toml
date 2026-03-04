@@ -3,6 +3,7 @@ cargo-insta = "latest"
 "cargo:mdbook-variables" = "latest"
 gcloud = "latest"
 "github:EmbarkStudios/cargo-about" = "latest"
+"github:EmbarkStudios/proto-gen" = "latest"
 "github:badboy/mdbook-mermaid" = "latest"
 "github:nextest-rs/nextest" = { version = "latest", version_prefix = "cargo-nextest-" }
 "github:pseudomuto/protoc-gen-doc" = "latest"
@@ -10,3 +11,17 @@ helm = "latest"
 mdbook = "latest"
 opentofu = "latest"
 rust = "latest"
+yq = "latest"
+
+[tasks.docker]
+description = "Build the quilkin Docker image"
+run = """
+  version=$(yq '.workspace.package.version' Cargo.toml)
+  sha=$(git rev-parse --short HEAD)
+  # Pass the GITHUB_TOKEN if set to bypass GitHub rate limits.
+  secret_arg=""
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    secret_arg="--secret id=github_token,env=GITHUB_TOKEN"
+  fi
+  podman build --cap-add=all --format docker $secret_arg -t quilkin:"${version}-${sha}" -t quilkin:latest .
+"""

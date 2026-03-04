@@ -208,7 +208,7 @@ pub mod v1 {
     }
 
     /// A DB mutation request to upsert a server
-    #[derive(Deserialize, Serialize)]
+    #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
     pub struct ServerUpsert {
         /// The unique server endpoint to upsert
         #[serde(rename = "a")]
@@ -261,5 +261,97 @@ pub mod v1 {
         Update(Vec<ServerUpdate>),
         #[serde(rename = "m")]
         UpdateMutator(MutatorUpdate),
+    }
+
+    #[derive(Serialize, Copy, Clone)]
+    #[serde(tag = "ty", content = "c")]
+    pub enum IterChange<'i> {
+        /// One or more servers to upsert
+        #[serde(rename = "up")]
+        Upsert(&'i [ServerUpsert]),
+        /// One or more servers to remove
+        #[serde(rename = "r")]
+        Remove(&'i [Endpoint]),
+        /// One or more servers to update
+        #[serde(rename = "u")]
+        Update(&'i [ServerUpdate]),
+    }
+
+    impl<'i> IterChange<'i> {
+        #[inline]
+        pub fn new(sc: &'i ServerChange, index: usize) -> Option<Self> {
+            match sc {
+                ServerChange::Upsert(up) => {
+                    (index < up.len()).then_some(Self::Upsert(&up[index..]))
+                }
+                ServerChange::Remove(r) => (index < r.len()).then_some(Self::Remove(&r[index..])),
+                ServerChange::Update(u) => (index < u.len()).then_some(Self::Update(&u[index..])),
+                ServerChange::UpdateMutator(_) => None,
+            }
+        }
+
+        #[inline]
+        fn halve(&mut self) {
+            match self {
+                Self::Upsert(up) => {
+                    *up = &up[..up.len() / 2];
+                }
+                Self::Remove(r) => {
+                    *r = &r[..r.len() / 2];
+                }
+                Self::Update(u) => {
+                    *u = &u[..u.len() / 2];
+                }
+            }
+        }
+
+        #[inline]
+        fn len(&self) -> usize {
+            match self {
+                Self::Upsert(up) => up.len(),
+                Self::Remove(r) => r.len(),
+                Self::Update(u) => u.len(),
+            }
+        }
+    }
+
+    /// We currently have a 64k limit on each individual buffer we send, so this
+    /// iterator just takes a set of changes and splits them as needed to fit
+    pub struct ServerIter {
+        changes: ServerChange,
+        index: usize,
+    }
+
+    impl ServerIter {
+        #[inline]
+        pub fn new(sc: ServerChange) -> Result<Self, ServerChange> {
+            if matches!(sc, ServerChange::UpdateMutator(_)) {
+                Err(sc)
+            } else {
+                Ok(Self {
+                    changes: sc,
+                    index: 0,
+                })
+            }
+        }
+    }
+
+    impl Iterator for ServerIter {
+        type Item = bytes::BytesMut;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let mut ic = IterChange::new(&self.changes, self.index)?;
+
+            let buf = loop {
+                if let Ok(b) = codec::write_length_prefixed_jsonb(&[ic]) {
+                    break b;
+                } else {
+                    ic.halve();
+                }
+            };
+
+            self.index += ic.len();
+            Some(buf)
+        }
     }
 }

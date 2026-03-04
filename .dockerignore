@@ -1,4 +1,3 @@
-#
 # Copyright 2021 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,34 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
-*.TAG
-*.hbs
-*.md
-*.png
-*.sh
-*.toml
-*.yaml
-*.zip
-*.iml
-.*
+target/
+!target/image/quilkin
+
+# CI / docs / non-build directories
 /agones
 /benches
-/build
 /docs
 /examples
-/macros
-/proto
 /sdks
-/src
 /tests
-/target
 
-# windows files
+# IDE / OS artifacts
+*.iml
 *.exe
 *.rlib
+.idea/
+.vscode/
 
-!target/image/quilkin
-!dependencies-src.zip
-!image/quilkin.yaml
+# Don't include local dev tools
+mise.toml

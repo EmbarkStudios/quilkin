@@ -7,14 +7,14 @@ your local machine through [Cargo](#cargo).
 
 ## Distributions
 
-### [OCI Image](https://us-docker.pkg.dev/quilkin/release/quilkin)
+### [OCI Image](https://github.com/embarkstudios/quilkin/pkgs/container/quilkin)
 
 <dl>
   <dt><strong>Source / Method</strong></dt>
   <dd>
 
-```
-us-docker.pkg.dev/quilkin/release/quilkin:{{QUILKIN_VERSION}}
+```shell
+docker pull ghcr.io/embarkstudios/quilkin:<version>-<short_commit>
 ```
 
   </dd>
