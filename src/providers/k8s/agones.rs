@@ -59,6 +59,10 @@ impl GameServer {
                     "name".into(),
                     self.metadata.name.clone().unwrap_or_default().into(),
                 );
+                map.insert(
+                    "namespace".into(),
+                    self.metadata.namespace.clone().unwrap_or_default().into(),
+                );
                 map
             };
 

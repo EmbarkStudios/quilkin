@@ -17,7 +17,6 @@
 //! Quilkin configuration.
 
 use std::{
-    collections::BTreeSet,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering::Relaxed},
@@ -657,17 +656,7 @@ impl Config {
                         let resource = crate::xds::Resource::Cluster(
                             quilkin_xds::generated::quilkin::config::v1alpha1::Cluster {
                                 locality: key.clone().map(|l| l.into()),
-                                endpoints: value
-                                    .endpoints
-                                    .iter()
-                                    .map(|(addr, md)| {
-                                        crate::net::Endpoint {
-                                            address: addr.clone(),
-                                            metadata: md.clone(),
-                                        }
-                                        .into()
-                                    })
-                                    .collect(),
+                                endpoints: value.endpoint_iter().map(|ep| ep.into()).collect(),
                             },
                         );
 
@@ -889,22 +878,6 @@ impl Config {
         }
 
         Ok(())
-    }
-
-    pub fn cluster(
-        self,
-        remote_addr: Option<std::net::IpAddr>,
-        locality: Option<quilkin_xds::locality::Locality>,
-        cluster: BTreeSet<crate::net::Endpoint>,
-    ) -> Self {
-        let Some(clusters) = self.dyn_cfg.clusters() else {
-            return self;
-        };
-
-        clusters.modify(|clusters| {
-            clusters.insert(remote_addr, locality, cluster);
-        });
-        self
     }
 
     #[inline]

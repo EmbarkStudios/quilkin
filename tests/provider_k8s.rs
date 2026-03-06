@@ -4,7 +4,7 @@ use ::corrosion::{
 };
 use futures::StreamExt;
 use k8s_openapi::{api::core::v1::NodeAddress, apimachinery::pkg::apis::meta::v1::ObjectMeta};
-use kube::runtime::watcher::Event;
+use kube::{ResourceExt, runtime::watcher::Event};
 use kube_core::DeserializeGuard;
 use quilkin::{
     config, net,
@@ -34,6 +34,97 @@ fn setup_tracing() {
     tracing::dispatcher::set_global_default(disp).unwrap();
 }
 
+struct GameServerBuilder {
+    name: Option<String>,
+    namespace: Option<String>,
+    uid: Option<String>,
+    tokens: Option<quilkin_types::TokenSet>,
+    address: String,
+}
+
+impl GameServerBuilder {
+    fn new(id: u16) -> Self {
+        Self {
+            name: Some(format!("gs-{}", id)),
+            namespace: Some("test".to_string()),
+            uid: Some(uuid::Uuid::from_u128(id as u128).to_string()),
+            tokens: Some((id..id + 5).map(|i| vec![i as u8; i as usize]).collect()),
+            address: std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, id).to_string(),
+        }
+    }
+
+    fn with_uid(mut self, uid: Option<String>) -> Self {
+        self.uid = uid;
+        self
+    }
+
+    fn with_namespace(mut self, namespace: Option<String>) -> Self {
+        self.namespace = namespace;
+        self
+    }
+
+    fn build(self) -> GameServer {
+        let mut annotations = std::collections::BTreeMap::new();
+        if let Some(tokens) = self.tokens {
+            annotations.insert(
+                agones::QUILKIN_TOKEN_LABEL.to_string(),
+                tokens.serialize_to_string(),
+            );
+        };
+        GameServer {
+            metadata: ObjectMeta {
+                name: self.name,
+                namespace: self.namespace,
+                uid: self.uid,
+                annotations: Some(annotations),
+                ..Default::default()
+            },
+            spec: GameServerSpec {
+                container: None,
+                ports: vec![],
+                health: Default::default(),
+                scheduling: agones::SchedulingStrategy::Packed,
+                sdk_server: Default::default(),
+                template: Default::default(),
+            },
+            status: Some(GameServerStatus {
+                state: GameServerState::Allocated,
+                ports: Some(vec![GameServerStatusPort {
+                    name: "addr".into(),
+                    port: 7777,
+                }]),
+                address: self.address.clone(),
+                addresses: vec![NodeAddress {
+                    type_: "addr".into(),
+                    address: self.address.clone(),
+                }],
+                node_name: "node".into(),
+                reserved_until: None,
+            }),
+        }
+    }
+
+    fn guard(self) -> DeserializeGuard<GameServer> {
+        DeserializeGuard(Ok(self.build()))
+    }
+}
+
+fn get_endpoint(gs: &GameServer) -> quilkin::net::Endpoint {
+    quilkin::net::Endpoint::new(quilkin::net::EndpointAddress {
+        host: quilkin_types::AddressKind::Ip(gs.status.as_ref().unwrap().address.parse().unwrap()),
+        port: gs
+            .status
+            .as_ref()
+            .unwrap()
+            .ports
+            .as_ref()
+            .unwrap()
+            .first()
+            .unwrap()
+            .port,
+    })
+}
+
 /// Test that ensures the state of the xDs version of a cluster matches valid
 ///
 /// Note this only provides valid events with the valid data, other tests in
@@ -43,15 +134,18 @@ fn corrosion_matches_xds() {
     let clusters = config::Watch::new(net::ClusterMap::new());
     let state = Arc::new(corrosion::push::LocalState::default());
     let (mutator, mut rx) = corrosion::ServerMutator::testing(state.clone());
+    let namespace = "test".to_string();
 
+    let cluster_update_batcher =
+        crate::net::cluster::ClusterUpdateBatcher::test_batcher(clusters.clone(), None);
     let mut processor = providers::k8s::EventProcessor {
-        clusters: clusters.clone(),
+        namespace: namespace.clone(),
+        cluster_update_batcher: cluster_update_batcher.clone(),
         address_selector: Some(config::AddressSelector {
             name: "addr".into(),
             kind: config::AddrKind::Ipv6,
         }),
         mutator: Some(mutator),
-        locality: None,
         servers: Default::default(),
     };
 
@@ -59,8 +153,10 @@ fn corrosion_matches_xds() {
     fn matches(
         rx: &mut tokio::sync::mpsc::UnboundedReceiver<providers::corrosion::push::Mutation>,
         clusters: &config::Watch<net::ClusterMap>,
+        cluster_update_batcher: &crate::net::cluster::ClusterUpdateBatcher,
         state: &providers::corrosion::push::LocalState,
     ) {
+        cluster_update_batcher.flush();
         // Drain the receiver, we don't care about events in this test
         while rx.try_recv().is_ok() {}
 
@@ -78,56 +174,10 @@ fn corrosion_matches_xds() {
         }
     }
 
-    fn tokens(id: u16) -> std::collections::BTreeMap<String, String> {
-        let mut md = std::collections::BTreeMap::new();
-
-        let ts: quilkin_types::TokenSet = (1..id + 1).map(|i| vec![i as u8; i as usize]).collect();
-        md.insert(agones::QUILKIN_TOKEN_LABEL.into(), ts.serialize_to_string());
-
-        md
-    }
-
-    macro_rules! game_server {
-        ($id:expr) => {{
-            let gs = GameServer {
-                metadata: ObjectMeta {
-                    name: Some($id.to_string()),
-                    uid: Some(uuid::Uuid::from_u128($id as u128).to_string()),
-                    annotations: Some(tokens($id)),
-                    ..Default::default()
-                },
-                spec: GameServerSpec {
-                    container: None,
-                    ports: vec![],
-                    health: Default::default(),
-                    scheduling: agones::SchedulingStrategy::Packed,
-                    sdk_server: Default::default(),
-                    template: Default::default(),
-                },
-                status: Some(GameServerStatus {
-                    state: GameServerState::Allocated,
-                    ports: Some(vec![GameServerStatusPort {
-                        name: "addr".into(),
-                        port: $id,
-                    }]),
-                    address: std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, $id).to_string(),
-                    addresses: vec![NodeAddress {
-                        type_: "addr".into(),
-                        address: std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, $id).to_string(),
-                    }],
-                    node_name: $id.to_string(),
-                    reserved_until: None,
-                }),
-            };
-
-            DeserializeGuard(Ok(gs))
-        }};
-    }
-
     // Add a single server
     {
-        processor.process_event(Event::Apply(game_server!(0)));
-        matches(&mut rx, &clusters, &state);
+        processor.process_event(Event::Apply(GameServerBuilder::new(0).guard()));
+        matches(&mut rx, &clusters, &cluster_update_batcher, &state);
     }
 
     // Init -> apply many servers
@@ -135,11 +185,11 @@ fn corrosion_matches_xds() {
         processor.process_event(Event::Init);
 
         for i in 0..10 {
-            processor.process_event(Event::InitApply(game_server!(i)));
+            processor.process_event(Event::InitApply(GameServerBuilder::new(i).guard()));
         }
 
         processor.process_event(Event::InitDone);
-        matches(&mut rx, &clusters, &state);
+        matches(&mut rx, &clusters, &cluster_update_batcher, &state);
     }
 
     // Init -> apply with only updates of existing servers
@@ -147,23 +197,23 @@ fn corrosion_matches_xds() {
         processor.process_event(Event::Init);
 
         for i in 0..10 {
-            processor.process_event(Event::InitApply(game_server!(i)));
+            processor.process_event(Event::InitApply(GameServerBuilder::new(i).guard()));
         }
 
         processor.process_event(Event::InitDone);
-        matches(&mut rx, &clusters, &state);
+        matches(&mut rx, &clusters, &cluster_update_batcher, &state);
     }
 
     // Remove, update, and add multiple servers
     {
         for i in 0..10 {
             if i % 2 == 0 {
-                processor.process_event(Event::Delete(game_server!(i)));
+                processor.process_event(Event::Delete(GameServerBuilder::new(i).guard()));
             }
-            processor.process_event(Event::Apply(game_server!(i)));
+            processor.process_event(Event::Apply(GameServerBuilder::new(i).guard()));
         }
 
-        matches(&mut rx, &clusters, &state);
+        matches(&mut rx, &clusters, &cluster_update_batcher, &state);
     }
 
     // Same, but in an init block
@@ -172,13 +222,13 @@ fn corrosion_matches_xds() {
 
         for i in 0..10 {
             if i % 2 == 1 {
-                processor.process_event(Event::InitApply(game_server!(i)));
+                processor.process_event(Event::InitApply(GameServerBuilder::new(i).guard()));
             }
         }
 
         processor.process_event(Event::InitDone);
 
-        matches(&mut rx, &clusters, &state);
+        matches(&mut rx, &clusters, &cluster_update_batcher, &state);
     }
 }
 
@@ -190,82 +240,222 @@ fn handles_missing_invalid_uid() {
     let clusters = config::Watch::new(net::ClusterMap::new());
     let state = Arc::new(corrosion::push::LocalState::default());
     let (mutator, mut rx) = corrosion::ServerMutator::testing(state.clone());
+    let namespace = "test".to_string();
 
+    let cluster_update_batcher =
+        crate::net::cluster::ClusterUpdateBatcher::test_batcher(clusters.clone(), None);
     let mut processor = providers::k8s::EventProcessor {
-        clusters: clusters.clone(),
+        namespace: namespace.clone(),
+        cluster_update_batcher: cluster_update_batcher.clone(),
         address_selector: Some(config::AddressSelector {
             name: "addr".into(),
             kind: config::AddrKind::Ipv6,
         }),
         mutator: Some(mutator),
-        locality: None,
         servers: Default::default(),
     };
 
-    fn game_server(uid: Option<String>) -> DeserializeGuard<GameServer> {
-        let gs = GameServer {
-            metadata: ObjectMeta {
-                name: Some("name".into()),
-                uid,
-                annotations: None,
-                ..Default::default()
-            },
-            spec: GameServerSpec {
-                container: None,
-                ports: vec![],
-                health: Default::default(),
-                scheduling: agones::SchedulingStrategy::Packed,
-                sdk_server: Default::default(),
-                template: Default::default(),
-            },
-            status: Some(GameServerStatus {
-                state: GameServerState::Allocated,
-                ports: Some(vec![GameServerStatusPort {
-                    name: "addr".into(),
-                    port: 7777,
-                }]),
-                address: std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1).to_string(),
-                addresses: vec![NodeAddress {
-                    type_: "addr".into(),
-                    address: std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1).to_string(),
-                }],
-                node_name: "name".into(),
-                reserved_until: None,
-            }),
-        };
-
-        DeserializeGuard(Ok(gs))
-    }
-
-    processor.process_event(Event::Apply(game_server(None)));
+    processor.process_event(Event::Apply(
+        GameServerBuilder::new(0).with_uid(None).guard(),
+    ));
     assert!(rx.try_recv().is_err());
 
     processor.process_event(Event::Init);
     for i in 0..10 {
-        processor.process_event(Event::InitApply(game_server(if i % 2 == 0 {
-            None
-        } else {
-            Some(i.to_string())
-        })));
+        processor.process_event(Event::InitApply(
+            GameServerBuilder::new(i)
+                .with_uid(if i % 2 == 0 {
+                    None
+                } else {
+                    Some(i.to_string())
+                })
+                .guard(),
+        ));
     }
     processor.process_event(Event::InitDone);
     assert!(rx.try_recv().is_err());
 
     let valid = uuid::Uuid::from_u128(0xdefaced);
-    processor.process_event(Event::Apply(game_server(Some(valid.to_string()))));
+    processor.process_event(Event::Apply(
+        GameServerBuilder::new(0)
+            .with_uid(Some(valid.to_string()))
+            .guard(),
+    ));
     assert!(matches!(
         rx.try_recv(),
         Ok(providers::corrosion::push::Mutation::Upsert(_))
     ));
 
-    processor.process_event(Event::Delete(game_server(Some("invalid".into()))));
+    processor.process_event(Event::Delete(
+        GameServerBuilder::new(0)
+            .with_uid(Some("invalid".into()))
+            .guard(),
+    ));
     assert!(rx.try_recv().is_err());
 
-    processor.process_event(Event::Delete(game_server(Some(valid.to_string()))));
+    processor.process_event(Event::Delete(
+        GameServerBuilder::new(0)
+            .with_uid(Some(valid.to_string()))
+            .guard(),
+    ));
     assert!(matches!(
         rx.try_recv(),
         Ok(providers::corrosion::push::Mutation::Remove(_))
     ));
+}
+
+/// Tests that we can handle watching multiple k8s namespaces
+///
+/// Currently only checks the `ClusterMap` implementation. Handling multiple namespaces for
+/// corrosion is yet to be implemented
+#[test]
+fn handles_multiple_namespaces() {
+    let clusters = config::Watch::new(net::ClusterMap::new());
+    let state = Arc::new(corrosion::push::LocalState::default());
+    let (mutator, _rx) = corrosion::ServerMutator::testing(state.clone());
+
+    let locality = None;
+    let ns_a = "ns-a".to_string();
+    let ns_b = "ns-b".to_string();
+
+    let cluster_update_batcher_a =
+        crate::net::cluster::ClusterUpdateBatcher::test_batcher(clusters.clone(), locality.clone());
+    let mut processor_a = providers::k8s::EventProcessor {
+        cluster_update_batcher: cluster_update_batcher_a.clone(),
+        namespace: ns_a.clone(),
+        address_selector: Some(config::AddressSelector {
+            name: "addr".into(),
+            kind: config::AddrKind::Ipv6,
+        }),
+        mutator: Some(mutator.clone()),
+        servers: Default::default(),
+    };
+    let cluster_update_batcher_b =
+        crate::net::cluster::ClusterUpdateBatcher::test_batcher(clusters.clone(), locality.clone());
+    let mut processor_b = providers::k8s::EventProcessor {
+        cluster_update_batcher: cluster_update_batcher_b.clone(),
+        namespace: ns_b.clone(),
+        address_selector: Some(config::AddressSelector {
+            name: "addr".into(),
+            kind: config::AddrKind::Ipv6,
+        }),
+        mutator: Some(mutator),
+        servers: Default::default(),
+    };
+
+    // Internal test state to keep track of what gameservers exist
+    let mut gs_id: u16 = 0;
+    let mut gameservers = std::collections::HashMap::new();
+
+    // Init -> apply many servers to ns-a
+    {
+        processor_a.process_event(Event::Init);
+
+        for _ in 0..10 {
+            gs_id = gs_id.strict_add(1);
+            let gs = GameServerBuilder::new(gs_id)
+                .with_namespace(Some(ns_a.clone()))
+                .build();
+            gameservers.insert(gs_id, gs.clone());
+            processor_a.process_event(Event::InitApply(DeserializeGuard(Ok(gs))));
+        }
+
+        processor_a.process_event(Event::InitDone);
+    }
+
+    // Init -> apply many servers to ns-b
+    {
+        processor_b.process_event(Event::Init);
+
+        for _ in 0..10 {
+            gs_id = gs_id.strict_add(1);
+            let gs = GameServerBuilder::new(gs_id)
+                .with_namespace(Some(ns_a.clone()))
+                .build();
+            gameservers.insert(gs_id, gs.clone());
+            processor_b.process_event(Event::InitApply(DeserializeGuard(Ok(gs))));
+        }
+
+        processor_b.process_event(Event::InitDone);
+    }
+
+    // Initial state check
+    {
+        cluster_update_batcher_a.flush();
+        cluster_update_batcher_b.flush();
+        let guard = clusters.read();
+        let endpoint_set = guard.get(&locality).unwrap();
+        assert_eq!(endpoint_set.len(), gameservers.len());
+        for (_id, gs) in gameservers.iter() {
+            assert!(endpoint_set.contains(&get_endpoint(gs)));
+        }
+    }
+
+    // Apply some servers to each namespace
+    for _ in 0..3 {
+        // ns-a
+        {
+            gs_id = gs_id.strict_add(1);
+            let gs = GameServerBuilder::new(gs_id)
+                .with_namespace(Some(ns_a.clone()))
+                .build();
+            gameservers.insert(gs_id, gs.clone());
+            processor_a.process_event(Event::Apply(DeserializeGuard(Ok(gs))));
+        }
+        // ns-b
+        {
+            gs_id = gs_id.strict_add(1);
+            let gs = GameServerBuilder::new(gs_id)
+                .with_namespace(Some(ns_b.clone()))
+                .build();
+            gameservers.insert(gs_id, gs.clone());
+            processor_b.process_event(Event::Apply(DeserializeGuard(Ok(gs))));
+        }
+    }
+
+    // State check
+    {
+        cluster_update_batcher_a.flush();
+        cluster_update_batcher_b.flush();
+        let guard = clusters.read();
+        let endpoint_set = guard.get(&locality).unwrap();
+        assert_eq!(endpoint_set.len(), gameservers.len());
+        for (_id, gs) in gameservers.iter() {
+            assert!(endpoint_set.contains(&get_endpoint(gs)));
+        }
+    }
+
+    // Re-Init ns-a
+    {
+        {
+            // Remove all gameservers that we had from ns-a from the test state
+            let ns_a_opt = Some(ns_a.clone());
+            gameservers.retain(|_k, v| v.namespace() != ns_a_opt);
+        }
+
+        processor_a.process_event(Event::Init);
+        for _ in 0..10 {
+            gs_id = gs_id.strict_add(1);
+            let gs = GameServerBuilder::new(gs_id)
+                .with_namespace(Some(ns_a.clone()))
+                .build();
+            gameservers.insert(gs_id, gs.clone());
+            processor_a.process_event(Event::InitApply(DeserializeGuard(Ok(gs))));
+        }
+        processor_a.process_event(Event::InitDone);
+    }
+
+    // State check
+    {
+        cluster_update_batcher_a.flush();
+        cluster_update_batcher_b.flush();
+        let guard = clusters.read();
+        let endpoint_set = guard.get(&locality).unwrap();
+        assert_eq!(endpoint_set.len(), gameservers.len());
+        for (_id, gs) in gameservers.iter() {
+            assert!(endpoint_set.contains(&get_endpoint(gs)));
+        }
+    }
 }
 
 /// Tests the accumulator and change iterator
