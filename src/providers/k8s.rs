@@ -269,7 +269,9 @@ impl EventProcessor {
 
                 self.cluster_update_batcher.push(Upsert(endpoint));
             }
-            Event::Init => {}
+            Event::Init => {
+                tracing::info!(namespace=%self.namespace, "Init");
+            }
             Event::InitApply(result) => {
                 let span = tracing::trace_span!("k8s::gameservers::init_apply");
                 let _enter = span.enter();
@@ -278,7 +280,7 @@ impl EventProcessor {
                     return;
                 };
 
-                tracing::trace!(namespace=%self.namespace, %endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "applying server");
+                tracing::info!(namespace=%self.namespace, %endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "applying server");
                 metrics::k8s::gameservers_total_valid();
                 self.servers.insert(endpoint, uid);
             }
@@ -311,9 +313,29 @@ impl EventProcessor {
                     mutator.replace(new_set);
                 }
 
-                let servers = std::mem::take(&mut self.servers).into_keys().collect();
+                // TEMP DEBUG
+                let old_endpoints = self
+                    .cluster_update_batcher
+                    .temp_get_current(self.metadata_source_filter());
+
+                let servers: std::collections::BTreeSet<crate::net::Endpoint> =
+                    std::mem::take(&mut self.servers).into_keys().collect();
+
+                tracing::info!(namespace=%self.namespace, old_num_endpoints=%old_endpoints.len(), new_num_endpoints=%servers.len(), "InitDone");
+
+                for ep in old_endpoints.difference(&servers) {
+                    tracing::warn!(namespace=%self.namespace, %ep.address,endpoint.metadata=serde_json::to_string(&ep.metadata).unwrap(), "potentially missing gameserver after InitDone");
+                }
+
+                for ep in servers.difference(&old_endpoints) {
+                    tracing::warn!(namespace=%self.namespace, %ep.address,endpoint.metadata=serde_json::to_string(&ep.metadata).unwrap(), "potentially deleted gameserver after InitDone");
+                }
+
+                let merged: std::collections::BTreeSet<crate::net::Endpoint> =
+                    old_endpoints.union(&servers).cloned().collect();
+
                 self.cluster_update_batcher.partial_replace(
-                    crate::net::cluster::EndpointSet::new(servers),
+                    crate::net::cluster::EndpointSet::new(merged),
                     self.metadata_source_filter(),
                 );
             }
