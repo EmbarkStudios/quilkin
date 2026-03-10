@@ -472,6 +472,13 @@ pub(crate) fn spawn_task(
                             %source,
                             "received QCMP ping",
                         );
+
+                        if source.port() == 0 {
+                            tracing::debug!(%source, "rejecting packet from address with invalid port");
+                            metrics::qcmp::packets_total_invalid(size);
+                            continue;
+                        }
+
                         let received_at = UtcTimestamp::now();
                         let command = match track_error(Protocol::parse(&input_buf[..size])) {
                             Ok(Some(command)) => command,
