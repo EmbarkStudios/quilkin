@@ -808,7 +808,10 @@ impl Service {
     ) -> eyre::Result<()> {
         use corrosion::types;
 
+        tracing::info!(port=%self.corrosion_port, "starting corrosion service");
+
         let db_root = if let Some(cdb) = self.corrosion_db_path.clone() {
+            std::fs::create_dir_all(&cdb)?;
             cdb
         } else {
             let mut dr = if self.testing {

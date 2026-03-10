@@ -293,6 +293,7 @@ impl Providers {
         config: FiltersAndClusters,
         health_check: &AtomicBool,
         locality: Option<crate::net::endpoint::Locality>,
+        mutator: Option<crate::providers::corrosion::ServerMutator>,
     ) -> crate::Result<impl Future<Output = crate::Result<()>> + 'static> {
         let endpoint_tokens = self
             .endpoint_tokens
@@ -309,78 +310,99 @@ impl Providers {
             })
             .transpose()?;
 
-        let endpoints = if let Some((count, length)) = endpoint_tokens {
-            let (unique, overflow) = 256u64.overflowing_pow(length as _);
-            if overflow {
-                panic!(
-                    "can't generate {} tokens of length {length} maximum is {}",
-                    self.endpoints.len() * count,
-                    u64::MAX,
-                );
-            }
+        let endpoints: std::collections::BTreeSet<crate::net::Endpoint> =
+            if let Some((count, length)) = endpoint_tokens {
+                let (unique, overflow) = 256u64.overflowing_pow(length as _);
+                if overflow {
+                    panic!(
+                        "can't generate {} tokens of length {length} maximum is {}",
+                        self.endpoints.len() * count,
+                        u64::MAX,
+                    );
+                }
 
-            if unique < (self.endpoints.len() * count) as u64 {
-                panic!(
-                    "we require {} unique tokens but only {unique} can be generated",
-                    self.endpoints.len() * count,
-                );
-            }
+                if unique < (self.endpoints.len() * count) as u64 {
+                    panic!(
+                        "we require {} unique tokens but only {unique} can be generated",
+                        self.endpoints.len() * count,
+                    );
+                }
 
-            {
-                use crate::filters::StaticFilter as _;
-                let filter_chain = crate::filters::FilterChain::try_create([
-                    crate::filters::Capture::as_filter_config(crate::filters::capture::Config {
-                        metadata_key: crate::filters::capture::CAPTURED_BYTES.into(),
-                        strategy: crate::filters::capture::Strategy::Suffix(
-                            crate::filters::capture::Suffix {
-                                size: length as _,
-                                remove: true,
+                {
+                    use crate::filters::StaticFilter as _;
+                    let filter_chain = crate::filters::FilterChain::try_create([
+                        crate::filters::Capture::as_filter_config(
+                            crate::filters::capture::Config {
+                                metadata_key: crate::filters::capture::CAPTURED_BYTES.into(),
+                                strategy: crate::filters::capture::Strategy::Suffix(
+                                    crate::filters::capture::Suffix {
+                                        size: length as _,
+                                        remove: true,
+                                    },
+                                ),
                             },
-                        ),
-                    })?,
-                    crate::filters::TokenRouter::as_filter_config(None)?,
-                ])?;
-                config.filters.store(filter_chain);
-            }
+                        )?,
+                        crate::filters::TokenRouter::as_filter_config(None)?,
+                    ])?;
+                    config.filters.store(filter_chain);
+                }
 
-            let count = count as u64;
+                let count = count as u64;
 
-            self.endpoints
-                .iter()
-                .enumerate()
-                .map(|(ind, sa)| {
-                    let start = ind as u64 * count;
+                self.endpoints
+                    .iter()
+                    .enumerate()
+                    .map(|(ind, sa)| {
+                        let start = ind as u64 * count;
 
-                    crate::net::endpoint::Endpoint::with_metadata(
-                        (*sa).into(),
-                        crate::net::endpoint::Metadata {
-                            tokens: (start..(start + count))
-                                .map(|i| i.to_le_bytes()[..length].to_vec())
-                                .collect(),
-                        },
-                    )
-                })
-                .collect()
-        } else {
-            self.endpoints
-                .iter()
-                .cloned()
-                .map(crate::net::endpoint::Endpoint::from)
-                .collect()
-        };
+                        crate::net::endpoint::Endpoint::with_metadata(
+                            (*sa).into(),
+                            crate::net::endpoint::Metadata {
+                                tokens: (start..(start + count))
+                                    .map(|i| i.to_le_bytes()[..length].to_vec())
+                                    .collect(),
+                            },
+                        )
+                    })
+                    .collect()
+            } else {
+                self.endpoints
+                    .iter()
+                    .cloned()
+                    .map(crate::net::endpoint::Endpoint::from)
+                    .collect()
+            };
 
         tracing::info!(
             provider = "static",
             endpoints = serde_json::to_string(&endpoints).unwrap(),
             "setting endpoints"
         );
-        config.clusters.modify(|clusters| {
-            clusters.insert(None, locality, endpoints);
-        });
+        if let Some(mutator) = mutator.as_ref() {
+            for endpoint in endpoints.iter() {
+                mutator.upsert_server(
+                    uuid::Uuid::new_v4(),
+                    quilkin_types::Endpoint::new(
+                        endpoint.address.host.clone(),
+                        endpoint.address.port,
+                    ),
+                    endpoint.metadata.known.tokens.clone(),
+                );
+            }
+        } else {
+            config.clusters.modify(|clusters| {
+                clusters.insert(None, locality, endpoints);
+            });
+        }
 
         health_check.store(true, Ordering::SeqCst);
 
-        Ok(std::future::pending())
+        Ok(async move {
+            // Take ownership of the mutator so we don't drop the Sender part of the channel
+            let _mutator = mutator;
+            std::future::pending::<()>().await;
+            Ok(())
+        })
     }
 
     pub fn spawn_k8s_provider(
@@ -705,14 +727,8 @@ impl Providers {
 
         let mutator = self.maybe_spawn_corrosion(config, &health_check, &mut providers);
 
-        if mutator.is_some() {
-            if self.fs_enabled() {
-                tracing::error!("corrosion mutation does not work with file system data");
-            }
-
-            if self.static_enabled() {
-                tracing::error!("corrosion mutation does not work with static data");
-            }
+        if mutator.is_some() && self.fs_enabled() {
+            tracing::error!("corrosion mutation does not work with file system data");
         };
 
         if self.grpc_push_enabled() {
@@ -729,7 +745,7 @@ impl Providers {
                 health_check.clone(),
                 locality.clone(),
                 config,
-                mutator,
+                mutator.clone(),
                 shutdown,
             ));
         }
@@ -772,7 +788,7 @@ impl Providers {
         {
             health_check.store(true, Ordering::SeqCst);
             providers.spawn(
-                self.spawn_static_provider(fc, &health_check, locality.clone())
+                self.spawn_static_provider(fc, &health_check, locality.clone(), mutator)
                     .unwrap(),
             );
         }

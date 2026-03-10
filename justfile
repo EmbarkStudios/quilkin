@@ -66,6 +66,15 @@ start_relay:
         --service.xds --service.xds.port=1780{{ id }} \
         --service.mds --service.mds.port=1790{{ id }}
 
+start_relay_corrosion:
+    cargo run -- \
+        --admin.address=127.0.0.1:1800{{ id }} \
+        --service.id=relay-{{ id }} \
+        --service.qcmp --service.qcmp.port=1760{{ id }} \
+        --service.mds \
+        --service.corrosion.port=1780{{ id }} \
+        --service.corrosion.db-path="/tmp/quilkin-local-relay-{{ id }}"
+
 # Start a quilkin proxy connected to relay `relay_id`
 start_proxy relay_id="0":
     cargo run -- \
@@ -75,6 +84,16 @@ start_proxy relay_id="0":
         --service.phoenix --service.phoenix.port=2760{{ id }} \
         --service.udp \
         --provider.xds.endpoints=http://127.0.0.1:1780{{ relay_id }}
+
+start_proxy_corrosion relay_id="0":
+    cargo run -- \
+        --admin.address=127.0.0.1:2800{{ id }} \
+        --service.id=proxy-{{ id }} \
+        --service.qcmp --service.qcmp.port=2760{{ id }} \
+        --service.phoenix --service.phoenix.port=2760{{ id }} \
+        --service.udp \
+        --provider.corrosion.mode="pull" \
+        --provider.corrosion.endpoints=[::1]:1780{{ relay_id }}
 
 # Start a quilkin agent connected to relay `relay_id`
 start_agent relay_id="0": _check_agent_config
@@ -86,3 +105,15 @@ start_agent relay_id="0": _check_agent_config
         --locality.region={{ region }} \
         --service.qcmp --service.qcmp.port=3760{{ id }} \
         --provider.mds.endpoints=http://localhost:1790{{ relay_id }}
+
+start_agent_corrosion relay_id="0":
+    cargo run -- \
+        --admin.address 127.0.0.1:3800{{ id }} \
+        --service.id=agent-{{ id }} \
+        --locality.icao={{ icao }} \
+        --locality.region={{ region }} \
+        --service.qcmp --service.qcmp.port=3760{{ id }} \
+        --provider.static.endpoints="127.0.0.1:26001" \
+        --provider.static.endpoint-tokens="1:4" \
+        --provider.corrosion.mode="push" \
+        --provider.corrosion.endpoints=[::1]:1780{{ relay_id }}
