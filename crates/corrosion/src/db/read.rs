@@ -157,12 +157,12 @@ impl FromSqlValue for DatacenterRow {
         // handle if it is an ipv4 mapped address
         let ip = ip.to_ipv4_mapped().map_or(IpAddr::V6(ip), IpAddr::V4);
 
-        let icao = get_column!(1, "icao", values).parse()?;
         let qcmp_port = values
-            .get(2)
+            .get(1)
             .context("missing column 'port'")?
             .as_integer()
             .context("column 'port' is not an integer")?;
+        let icao = get_column!(2, "icao", values).parse()?;
 
         let qcmp_port = (*qcmp_port)
             .try_into()
