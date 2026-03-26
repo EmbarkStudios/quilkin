@@ -209,7 +209,7 @@ async fn connect_and_sub(addr: net::SocketAddr, change_ids: &ChangeIds) -> crate
     })
 }
 
-/// The actual core of the event loop, applies the events from the authoratative
+/// The actual core of the event loop, applies the events from the authoritative
 /// server to reflect its state locally
 async fn process_subscription_events(
     state: &State,
@@ -223,10 +223,10 @@ async fn process_subscription_events(
         |events: Option<SubscriptionStream>, cid: &mut Option<ChangeId>| -> crate::Result<()> {
             let events = events.context("subscription was closed")?;
             let Some(servers) = state.dyn_cfg.clusters() else {
-                // TODO: Don't subscribe if we don't have this
                 return Ok(());
             };
 
+            tracing::warn!("received servers");
             *cid = Some(servers.write().corrosion_apply(events));
             Ok(())
         };
@@ -254,7 +254,7 @@ async fn process_subscription_events(
             match event {
                 // The state of row that matches our query changed
                 QueryEvent::Change(ct, _rid, row, id) => {
-                    let dc = db::DatacenterRow::from_sql(&row)?;
+                    let dc = db::DatacenterRow::from_sql(&row).unwrap();
 
                     match ct {
                         ChangeType::Insert | ChangeType::Update => {
@@ -339,7 +339,7 @@ async fn process_subscription_events(
                 }
             };
 
-            match event {
+            match dbg!(event) {
                 // The state of row that matches our query changed
                 QueryEvent::Change(ct, _rid, row, id) => {
                     match ct {
@@ -375,19 +375,40 @@ async fn process_subscription_events(
         Ok(())
     };
 
+    struct Loop;
+
+    impl Loop {
+        fn new() -> Self {
+            tracing::warn!("ENTERED I/O LOOP");
+            Self
+        }
+    }
+
+    impl Drop for Loop {
+        fn drop(&mut self) {
+            tracing::warn!("EXITED I/O LOOP");
+        }
+    }
+
+    let _loop = Loop::new();
+
     loop {
         let res = tokio::select! {
+            biased;
             sc = sstate.servers.stream.rx.recv() => {
+                tracing::error!("GOT SERVERS EVENT");
                 let span = tracing::info_span!("servers");
                 let _s = span.enter();
                 process_server_events(sc, &mut change_ids[Which::Servers]).context("processing 'servers' event")
             }
             dc = sstate.clusters.stream.rx.recv() => {
+                tracing::error!("GOT CLUSTERS EVENT");
                 let span = tracing::info_span!("clusters");
                 let _s = span.enter();
                 process_cluster_events(dc, &mut change_ids[Which::Clusters]).context("processing 'clusters' event")
             }
             fc = sstate.filter.stream.rx.recv() => {
+                tracing::error!("GOT FILTERS EVENT");
                 let span = tracing::info_span!("filter");
                 let _s = span.enter();
                 process_filter_events(fc, &mut change_ids[Which::Filter]).context("processing 'filter' event")
@@ -395,7 +416,7 @@ async fn process_subscription_events(
         };
 
         if let Err(error) = res {
-            tracing::error!(%error, "error processing subscription event");
+            tracing::error!(?error, "error processing subscription event");
         }
     }
 }

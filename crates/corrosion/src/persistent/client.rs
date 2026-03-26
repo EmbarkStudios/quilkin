@@ -365,6 +365,8 @@ impl SubscriptionClient {
     ) -> Result<(Self, SubClientStream), ConnectError> {
         let (mut send, mut recv) = inner.conn.open_bi().await?;
 
+        let query = params.query.query().to_owned();
+
         let res = Self::handshake(&mut send, &mut recv, params).await?;
 
         let (tx, reqrx) = mpsc::unbounded_channel();
@@ -380,7 +382,7 @@ impl SubscriptionClient {
 
         let task = tokio::task::spawn(async move {
             Self::run_subscription_loop(recv, send, tx, srx)
-                .instrument(tracing::info_span!("subscription", %sub_id))
+                .instrument(tracing::info_span!("subscription", %sub_id, query))
                 .await
         });
 
@@ -407,6 +409,7 @@ impl SubscriptionClient {
                 res = codec::read_length_prefixed(&mut recv) => {
                     match res {
                         Ok(buf) => {
+                            tracing::debug!(len = buf.len(), "received event");
                             let stream = pubsub::SubscriptionStream::new(buf);
                             if tx.send(stream).is_err() {
                                 tracing::info!("subscription stream receiver closed, closing stream");
@@ -505,3 +508,9 @@ impl SubscriptionClient {
         self.inner.shutdown().await;
     }
 }
+
+// impl Drop for SubscriptionClient {
+//     fn drop(&mut self) {
+//         panic!("wtf {}", std::backtrace::Backtrace::capture());
+//     }
+// }
