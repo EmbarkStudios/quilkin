@@ -1,18 +1,15 @@
 use std::net::IpAddr;
 
 pub struct BridgeInner {
-    peer: corrosion::Peer,
     tx: super::DbTx,
     statements: Vec<corrosion::api::Statement>,
 }
 
 impl BridgeInner {
-    fn new(config: &super::Config, ip: Option<IpAddr>) -> Option<Self> {
-        let peer = ip.map(corrosion::ip_to_peer)?;
+    fn new(config: &super::Config) -> Option<Self> {
         let tx = config.dyn_cfg.db_tx()?;
 
         Some(Self {
-            peer,
             tx,
             statements: Vec::new(),
         })
@@ -38,14 +35,14 @@ pub struct Bridge<'m> {
 }
 
 impl<'m> Bridge<'m> {
-    pub fn new(config: &'m super::Config, ip: Option<IpAddr>) -> Self {
+    pub fn new(config: &'m super::Config) -> Self {
         Self {
             maps: config
                 .dyn_cfg
                 .datacenters()
                 .map(|dc| dc.write())
                 .zip(config.dyn_cfg.clusters().map(|c| c.write())),
-            b: BridgeInner::new(config, ip),
+            b: BridgeInner::new(config),
         }
     }
 
@@ -167,27 +164,17 @@ impl<'m> Bridge<'m> {
             return;
         }
 
-        let Some((bridge, icao)) = self.b.as_mut().zip(icao) else {
+        let Some(peer) = ip.map(corrosion::ip_to_peer) else {
             return;
         };
 
-        let mut statements = corro::SmallVec::<[_; 100]>::new();
+        let Some((bri, icao)) = self.b.as_mut().zip(icao) else {
+            return;
+        };
+
+        let mut statements = corrosion::SmallVec::<[_; 100]>::new();
         {
-            let mut stx = corro::db::write::Server::for_peer(*peer, &mut statements);
-
-            if let Some((r, u)) = STATEMENTS.lock().remove(peer.ip()) {
-                if !r.is_empty() {
-                    for rm_srv in r {
-                        stx.remove_deferred(&rm_srv);
-                    }
-                }
-
-                if !u.is_empty() {
-                    for (ep, ts) in u {
-                        stx.upsert(&ep, icao, &ts);
-                    }
-                }
-            }
+            let mut stx = corrosion::db::write::Server::for_peer(peer, &mut statements);
 
             if !rm.is_empty() {
                 for rm_srv in rm {
@@ -202,6 +189,6 @@ impl<'m> Bridge<'m> {
             }
         }
 
-        self.1.extend(statements);
+        bri.statements.extend(statements);
     }
 }

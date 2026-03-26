@@ -80,4 +80,5 @@ rustflags = [
     "-Wnonstandard_style",
     "-Wrust_2018_idioms",
     "-Wlet-underscore",
+    "-Aclippy::question_mark",
 ]

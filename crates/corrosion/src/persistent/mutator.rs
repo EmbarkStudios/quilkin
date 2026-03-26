@@ -83,8 +83,6 @@ impl BroadcastingTransactor {
     {
         let mut conn = self.pool.write_priority().await?;
 
-        print_table(&conn, "before");
-
         let mut book_writer = self
             .book
             .write::<&str, _>("make_broadcastable_changes(booked writer)", None)
@@ -130,8 +128,6 @@ impl BroadcastingTransactor {
                 version: insert_info.as_ref().map(|info| info.db_version),
             })?;
 
-            print_table(&conn, "after");
-
             let elapsed = start.elapsed();
 
             match insert_info {
@@ -151,17 +147,11 @@ impl BroadcastingTransactor {
                     let tx = self.tx.clone();
 
                     spawn::spawn_counted(async move {
-                        match broadcast_changes(
-                            &pool, actor_id, &subs, tx, db_version, last_seq, ts,
-                        )
-                        .await
+                        if let Err(error) =
+                            broadcast_changes(&pool, actor_id, &subs, tx, db_version, last_seq, ts)
+                                .await
                         {
-                            Ok(_) => {
-                                tracing::debug!("changes broadcast");
-                            }
-                            Err(error) => {
-                                tracing::error!(%error, "failed to broadcast changes");
-                            }
+                            tracing::error!(%error, "failed to broadcast changes");
                         }
                     });
 
@@ -197,50 +187,6 @@ pub fn query_to_string(
     let mut out = Vec::new();
     tab.print(&mut out).unwrap();
     String::from_utf8(out).unwrap()
-}
-
-fn print_table(conn: &corro_types::agent::WriteConn, header: &str) {
-    use pt::Cell;
-    use std::io::Write;
-    let statement = conn
-        .prepare("SELECT endpoint,icao,tokens,json(contributors) FROM servers")
-        .unwrap();
-
-    let mut out = String::new();
-    out.push_str(header);
-    out.push('\n');
-
-    out.push_str(&query_to_string(statement, |srow, prow| {
-        prow.add_cell(Cell::new(&srow.get::<_, String>(0).unwrap()));
-        prow.add_cell(Cell::new(&srow.get::<_, String>(1).unwrap()));
-        prow.add_cell(Cell::new(
-            srow.get_ref(2)
-                .unwrap()
-                .as_str_or_null()
-                .unwrap()
-                .unwrap_or_default(),
-        ));
-        prow.add_cell(Cell::new(&srow.get::<_, String>(3).unwrap()));
-    }));
-    out.push('\n');
-    let statement = conn
-        .prepare("SELECT ip,icao,json(servers) FROM dc")
-        .unwrap();
-    out.push_str(&query_to_string(statement, |srow, prow| {
-        prow.add_cell(Cell::new(&srow.get::<_, String>(0).unwrap()));
-        prow.add_cell(Cell::new(&srow.get::<_, String>(1).unwrap()));
-        prow.add_cell(Cell::new(&srow.get::<_, String>(2).unwrap()));
-    }));
-
-    out.push('\n');
-    out.push('\n');
-    std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open("db.txt")
-        .unwrap()
-        .write_all(out.as_bytes())
-        .unwrap();
 }
 
 #[async_trait::async_trait]
@@ -304,8 +250,6 @@ impl super::server::DbMutator for BroadcastingTransactor {
                 }
             }
         }
-
-        tracing::warn!(statements = ?v, "writing");
 
         let mut results = Vec::with_capacity(statements.len());
 

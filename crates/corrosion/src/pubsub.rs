@@ -882,44 +882,39 @@ impl futures::Stream for BufferingSubStream {
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         // First try to pull any buffers from the receiver
-        let res = 'b: {
-            match self.rx.poll_recv(cx) {
-                Poll::Ready(Some(eve)) => {
-                    let span = tracing::info_span!("sub event", sub_id = %self.id);
+        match self.rx.poll_recv(cx) {
+            Poll::Ready(Some(eve)) => {
+                let span = tracing::info_span!("sub event", sub_id = %self.id);
 
-                    // We can't borrow multiple mutable fields from a pin, thus this weird copy
-                    let mut cid = self.change_id;
-                    let maybe_buf = span.in_scope(|| {
-                        handle_sub_event(self.max_size, &mut self.buffer, eve, &mut cid)
-                    });
-                    self.change_id = cid;
+                // We can't borrow multiple mutable fields from a pin, thus this weird copy
+                let mut cid = self.change_id;
+                let maybe_buf = span
+                    .in_scope(|| handle_sub_event(self.max_size, &mut self.buffer, eve, &mut cid));
+                self.change_id = cid;
 
-                    // This will be Some if the buffer was over the configured maximum
-                    if let Some(buf) = maybe_buf {
-                        let new_time = tokio::time::Instant::now() + self.max_time;
-                        self.sleep.as_mut().reset(new_time);
-                        break 'b Poll::Ready(Some(buf));
-                    }
-                }
-                Poll::Ready(None) => break 'b Poll::Ready(None),
-                Poll::Pending => {}
-            }
-
-            // If we didn't receive a new buffer, check if we have buffered events
-            // and the configured timeout has elapsed
-            if let Poll::Ready(()) = self.sleep.as_mut().poll(cx) {
-                let new_time = tokio::time::Instant::now() + self.max_time;
-                self.sleep.as_mut().reset(new_time);
-
-                if let Some(buf) = self.buffer.freeze() {
-                    break 'b Poll::Ready(Some(buf));
+                // This will be Some if the buffer was over the configured maximum
+                if let Some(buf) = maybe_buf {
+                    let new_time = tokio::time::Instant::now() + self.max_time;
+                    self.sleep.as_mut().reset(new_time);
+                    return Poll::Ready(Some(buf));
                 }
             }
+            Poll::Ready(None) => return Poll::Ready(None),
+            Poll::Pending => {}
+        }
 
-            Poll::Pending
-        };
+        // If we didn't receive a new buffer, check if we have buffered events
+        // and the configured timeout has elapsed
+        if let Poll::Ready(()) = self.sleep.as_mut().poll(cx) {
+            let new_time = tokio::time::Instant::now() + self.max_time;
+            self.sleep.as_mut().reset(new_time);
 
-        res
+            if let Some(buf) = self.buffer.freeze() {
+                return Poll::Ready(Some(buf));
+            }
+        }
+
+        Poll::Pending
     }
 }
 

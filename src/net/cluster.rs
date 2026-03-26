@@ -333,9 +333,9 @@ impl EndpointSet {
     ) {
         let old = std::mem::replace(&mut self.endpoints, replacement.endpoints);
 
-        for (addr, md) in dbg!(&self.endpoints) {
+        for (addr, md) in &self.endpoints {
             if let Some(o) = old.get(addr) {
-                if dbg!(md.known.tokens != o.known.tokens) {
+                if md.known.tokens != o.known.tokens {
                     upserted.push((
                         quilkin_types::Endpoint {
                             address: addr.host.clone(),
@@ -365,8 +365,6 @@ impl EndpointSet {
                 });
             }
         }
-
-        dbg!(upserted, removed);
 
         let old_tm = if replacement.hash == 0 {
             self.update()
@@ -449,11 +447,13 @@ impl EndpointSet {
         &mut self,
         ss: corrosion::pubsub::SubscriptionStream,
         token_map: &DashMap<u64, BTreeSet<EndpointAddress>>,
-    ) -> ChangeId {
+    ) -> (ChangeId, isize) {
         use corrosion::{
             api::{TypedQueryEvent as tqe, sqlite::ChangeType},
             db::read::{self, FromSqlValue},
         };
+
+        let start = self.endpoints.len() as isize;
 
         for eve in ss {
             let eve = match eve {
@@ -463,8 +463,6 @@ impl EndpointSet {
                     continue;
                 }
             };
-
-            tracing::warn!(event = ?eve, "received change");
 
             let (cty, srow, row_id) = match eve {
                 tqe::Change(cty, rid, row, cid) => {
@@ -492,8 +490,6 @@ impl EndpointSet {
                     continue;
                 }
             };
-
-            tracing::warn!(kind = ?cty, ?row, ?srow, "row change");
 
             let insert = |this: &mut TokenAddressMap, addr: &EndpointAddress, tok: &[u8]| {
                 let tok = Token::new(tok);
@@ -595,7 +591,7 @@ impl EndpointSet {
             }
         }
 
-        self.change_id
+        (self.change_id, self.endpoints.len() as isize - start)
     }
 }
 
@@ -746,7 +742,7 @@ where
                     .insert(*token_hash, addrs.iter().cloned().collect());
             }
 
-            upserted.extend(dbg!(cluster.to_map()));
+            upserted.extend(cluster.to_map());
 
             self.map.insert(locality, cluster);
             self.num_endpoints.fetch_add(new_len, Relaxed);
@@ -957,15 +953,18 @@ where
         static CORRO: std::sync::LazyLock<Locality> =
             std::sync::LazyLock::new(|| Locality::new("corrosion", "", ""));
 
-        tracing::debug!("before: {self:?}");
-
-        let id = self
+        let (id, diff) = self
             .map
             .entry(Some((*CORRO).clone()))
             .or_insert_with(|| EndpointSet::new(BTreeSet::default()))
             .corrosion_apply(ss, &self.token_map);
 
-        tracing::debug!("after: {self:?}");
+        // If we don't update the num_endpoints and it's 0, no filter will run!
+        if diff >= 0 {
+            self.num_endpoints.fetch_add(diff as usize, Relaxed);
+        } else {
+            self.num_endpoints.fetch_sub(diff.unsigned_abs(), Relaxed);
+        }
 
         id
     }

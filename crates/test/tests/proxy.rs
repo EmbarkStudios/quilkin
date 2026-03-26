@@ -266,14 +266,14 @@ trace_test!(xds_bridge_to_corrosion, {
         );
     });
 
-    agent_config.update(|config| {
-        config.clusters.insert_default(
-            [quilkin::net::Endpoint::new(
-                (std::net::Ipv4Addr::new(1, 2, 3, 4), 6700).into(),
-            )]
-            .into(),
-        );
-    });
+    // agent_config.update(|config| {
+    //     config.clusters.insert_default(
+    //         [quilkin::net::Endpoint::new(
+    //             (std::net::Ipv4Addr::new(1, 2, 3, 4), 6700).into(),
+    //         )]
+    //         .into(),
+    //     );
+    // });
 
     let client = sb.client();
 
@@ -283,20 +283,4 @@ trace_test!(xds_bridge_to_corrosion, {
     sending.extend_from_slice(b"tok");
     sb.block_until_packet_gets_through(&sending, msg, &client, &local_addr, &mut rx)
         .await;
-
-    // loop {
-    //     {
-
-    //         client.send_to(&msg, &local_addr).await.unwrap();
-    //     }
-
-    //     let result = sb.timeout(1000, rx.recv()).await.0.unwrap();
-    //     assert_eq!(result.as_bytes(), msg);
-
-    //     // // search for the filter strings.
-    //     // let Some(Some(result)) = sb.maybe_timeout(10, rx.recv()).await else {
-    //     //     continue;
-    //     // };
-    //     // assert!(result.starts_with(&format!("{msg}:odr:[::1]:")));
-    // }
 });

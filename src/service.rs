@@ -915,6 +915,10 @@ impl Service {
             }
 
             tokio::spawn(async move {
+                // Set the initial state, at this early stage we _probably_ won't
+                // have subscribers, but we do the full DB + publish just in case
+                update_filters(&btx, &mut filters).await;
+
                 loop {
                     tokio::select! {
                         _fc = filters_sub.recv() => {
@@ -946,21 +950,8 @@ impl Service {
                 btx: &BroadcastingTransactor,
                 statements: Vec<corrosion::api::Statement>,
             ) {
-                {
-                    use std::io::Write;
-                    let out = format!("{statements:#?}\n");
-
-                    std::fs::OpenOptions::new()
-                        .append(true)
-                        .create(true)
-                        .open("db.txt")
-                        .unwrap()
-                        .write_all(out.as_bytes())
-                        .unwrap();
-                }
-
                 tracing::warn!(
-                    statements = ?statements,
+                    statement_count = statements.len(),
                     "forwarding xDS changes to DB"
                 );
 

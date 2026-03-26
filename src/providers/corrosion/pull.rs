@@ -226,7 +226,6 @@ async fn process_subscription_events(
                 return Ok(());
             };
 
-            tracing::warn!("received servers");
             *cid = Some(servers.write().corrosion_apply(events));
             Ok(())
         };
@@ -254,7 +253,13 @@ async fn process_subscription_events(
             match event {
                 // The state of row that matches our query changed
                 QueryEvent::Change(ct, _rid, row, id) => {
-                    let dc = db::DatacenterRow::from_sql(&row).unwrap();
+                    let dc = match db::DatacenterRow::from_sql(&row) {
+                        Ok(dc) => dc,
+                        Err(error) => {
+                            tracing::error!(%error, "failed to deserialize datacenter row");
+                            continue;
+                        }
+                    };
 
                     match ct {
                         ChangeType::Insert | ChangeType::Update => {
@@ -279,7 +284,14 @@ async fn process_subscription_events(
                 }
                 // The state of a row in the initial query
                 QueryEvent::Row(_rid, row) => {
-                    let dc = db::DatacenterRow::from_sql(&row)?;
+                    let dc = match db::DatacenterRow::from_sql(&row) {
+                        Ok(dc) => dc,
+                        Err(error) => {
+                            tracing::error!(%error, "failed to deserialize datacenter row");
+                            continue;
+                        }
+                    };
+
                     dcs.modify(|dcs| {
                         dcs.insert(
                             dc.ip,
@@ -317,7 +329,7 @@ async fn process_subscription_events(
         };
 
         let update_filter = |row: &[SqliteValue]| -> crate::Result<()> {
-            let column = row.get(1).context("missing 'filter' column")?;
+            let column = row.first().context("missing 'filter' column")?;
 
             let filter = column.as_str().with_context(|| {
                 format!(
@@ -339,7 +351,7 @@ async fn process_subscription_events(
                 }
             };
 
-            match dbg!(event) {
+            match event {
                 // The state of row that matches our query changed
                 QueryEvent::Change(ct, _rid, row, id) => {
                     match ct {
@@ -375,40 +387,20 @@ async fn process_subscription_events(
         Ok(())
     };
 
-    struct Loop;
-
-    impl Loop {
-        fn new() -> Self {
-            tracing::warn!("ENTERED I/O LOOP");
-            Self
-        }
-    }
-
-    impl Drop for Loop {
-        fn drop(&mut self) {
-            tracing::warn!("EXITED I/O LOOP");
-        }
-    }
-
-    let _loop = Loop::new();
-
     loop {
         let res = tokio::select! {
             biased;
             sc = sstate.servers.stream.rx.recv() => {
-                tracing::error!("GOT SERVERS EVENT");
                 let span = tracing::info_span!("servers");
                 let _s = span.enter();
                 process_server_events(sc, &mut change_ids[Which::Servers]).context("processing 'servers' event")
             }
             dc = sstate.clusters.stream.rx.recv() => {
-                tracing::error!("GOT CLUSTERS EVENT");
                 let span = tracing::info_span!("clusters");
                 let _s = span.enter();
                 process_cluster_events(dc, &mut change_ids[Which::Clusters]).context("processing 'clusters' event")
             }
             fc = sstate.filter.stream.rx.recv() => {
-                tracing::error!("GOT FILTERS EVENT");
                 let span = tracing::info_span!("filter");
                 let _s = span.enter();
                 process_filter_events(fc, &mut change_ids[Which::Filter]).context("processing 'filter' event")

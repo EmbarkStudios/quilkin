@@ -508,6 +508,7 @@ dependencies = [
 [[package]]
 name = "backoff"
 version = "0.1.0"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "rand 0.9.4",
 ]
@@ -923,6 +924,7 @@ dependencies = [
 [[package]]
 name = "consul-client"
 version = "0.1.0-alpha.0"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "camino",
  "http",
@@ -974,6 +976,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 [[package]]
 name = "corro-agent"
 version = "0.1.0"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "antithesis_sdk",
  "arc-swap",
@@ -1040,6 +1043,7 @@ dependencies = [
 [[package]]
 name = "corro-api-types"
 version = "0.1.0-alpha.1"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "camino",
  "compact_str",
@@ -1058,6 +1062,7 @@ dependencies = [
 [[package]]
 name = "corro-base-types"
 version = "0.1.0-alpha.1"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "camino",
  "compact_str",
@@ -1077,6 +1082,7 @@ dependencies = [
 [[package]]
 name = "corro-pg"
 version = "0.1.0"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "bytes",
  "chrono",
@@ -1111,6 +1117,7 @@ dependencies = [
 [[package]]
 name = "corro-types"
 version = "0.1.0-alpha.1"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "antithesis_sdk",
  "arc-swap",
@@ -1164,6 +1171,7 @@ dependencies = [
 [[package]]
 name = "corro-utils"
 version = "0.1.0"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "eyre",
  "tokio",
@@ -4751,9 +4759,9 @@ dependencies = [
 
 [[package]]
 name = "rcgen"
-version = "0.14.6"
+version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ec0a99f2de91c3cddc84b37e7db80e4d96b743e05607f647eb236fc0455907f"
+checksum = "10b99e0098aa4082912d4c649628623db6aba77335e4f4569ff5083a6448b32e"
 dependencies = [
  "pem",
  "ring",
@@ -5540,6 +5548,7 @@ dependencies = [
 [[package]]
 name = "spawn"
 version = "0.1.0"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "futures",
  "parking_lot",
@@ -5593,6 +5602,7 @@ dependencies = [
 [[package]]
 name = "sqlite-functions"
 version = "0.1.0"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -5601,6 +5611,7 @@ dependencies = [
 [[package]]
 name = "sqlite-pool"
 version = "0.1.0"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "arc-swap",
  "deadpool",
@@ -6339,6 +6350,7 @@ dependencies = [
 [[package]]
 name = "tripwire"
 version = "0.1.0-alpha.0"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#b15842c20500b85f186a3531e36a88c784203539"
 dependencies = [
  "futures",
  "futures-util",
@@ -7146,9 +7158,9 @@ dependencies = [
 
 [[package]]
 name = "x509-parser"
-version = "0.18.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb3e137310115a65136898d2079f003ce33331a6c4b0d51f1531d1be082b6425"
+checksum = "d43b0f71ce057da06bc0851b23ee24f3f86190b07203dd8f567d0b706a185202"
 dependencies = [
  "asn1-rs",
  "data-encoding",
