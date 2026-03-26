@@ -934,7 +934,7 @@ impl Service {
             });
         }
 
-        // We explicitly set this up in init_config so if it's a bug if that is not called
+        // We explicitly set this up in init_config so it's a bug if that is not called
         {
             let mut rx = self
                 .xds_to_corrosion
