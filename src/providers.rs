@@ -291,6 +291,11 @@ impl Providers {
         self
     }
 
+    pub fn corrosion_mode(mut self, mode: corrosion::CorrosionMode) -> Self {
+        self.corrosion_mode = Some(mode);
+        self
+    }
+
     pub fn spawn_static_provider(
         &self,
         config: FiltersAndClusters,

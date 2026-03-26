@@ -17,6 +17,7 @@
 //! Quilkin configuration.
 
 use std::{
+    collections,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering::Relaxed},
@@ -31,9 +32,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
+    config::corro::Bridge,
     generated::envoy::service::discovery::v3::Resource as XdsResource,
     net::{
-        cluster::{self, ClusterMap},
+        cluster::{self, ClusterMap, EndpointSet},
         servers::Servers,
     },
     xds::{self, ResourceType},
@@ -48,6 +50,7 @@ pub use self::{
 };
 
 mod config_type;
+mod corro;
 mod datacenter;
 mod error;
 pub mod filter;
@@ -115,9 +118,24 @@ impl typemap_rev::TypeMapKey for LeaderLock {
     type Value = LeaderLock;
 }
 
+#[derive(Clone, Debug)]
+pub struct DbTx {
+    pub tx: tokio::sync::mpsc::UnboundedSender<Vec<corrosion::api::Statement>>,
+}
+
+impl typemap_rev::TypeMapKey for DbTx {
+    type Value = DbTx;
+}
+
 impl DynamicConfig {
+    #[inline]
     pub fn clusters(&self) -> Option<&Watch<ClusterMap>> {
         self.typemap.get::<ClusterMap>()
+    }
+
+    #[inline]
+    pub fn db_tx(&self) -> Option<DbTx> {
+        self.typemap.get::<DbTx>().cloned()
     }
 
     #[inline]
@@ -395,7 +413,7 @@ impl Config {
         id: Option<String>,
         icao_code: IcaoCode,
         providers: &crate::Providers,
-        service: &crate::Service,
+        service: &mut crate::Service,
     ) -> Self {
         let mut config = Config {
             dyn_cfg: DynamicConfig {
@@ -423,7 +441,7 @@ impl Config {
         id: Option<String>,
         icao_code: IcaoCode,
         providers: &crate::Providers,
-        service: &crate::Service,
+        service: &mut crate::Service,
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Arc<Self> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<std::net::SocketAddr>();
@@ -718,6 +736,18 @@ impl Config {
     ) -> crate::Result<()> {
         let resource_type = type_url.parse::<ResourceType>()?;
 
+        static STATEMENTS: std::sync::LazyLock<
+            parking_lot::Mutex<
+                std::collections::BTreeMap<
+                    std::net::Ipv6Addr,
+                    (
+                        Vec<quilkin_types::Endpoint>,
+                        Vec<(quilkin_types::Endpoint, quilkin_types::TokenSet)>,
+                    ),
+                >,
+            >,
+        > = std::sync::LazyLock::new(|| Default::default());
+
         match resource_type {
             ResourceType::FilterChain => {
                 let Some(filters) = self.dyn_cfg.filters() else {
@@ -763,116 +793,135 @@ impl Config {
                     return Ok(());
                 };
 
-                datacenters.modify(|wg| {
-                    if let Some(ip) = remote_addr.filter(|_| !removed_resources.is_empty()) {
-                        wg.remove(ip);
-                    }
+                let mut bridge = corro::Bridge::new(self, remote_addr);
 
-                    for res in resources {
-                        let Some(resource) = res.resource else {
-                            eyre::bail!("a datacenter resource could not be applied because it didn't contain an actual payload");
-                        };
+                if let Some(ip) = remote_addr.filter(|_| !removed_resources.is_empty()) {
+                    bridge.remove_dc(ip);
+                }
 
-                        let dc = match crate::xds::Resource::try_decode(resource) {
-                            Ok(crate::xds::Resource::Datacenter(dc)) => dc,
-                            Ok(other) => {
-                                eyre::bail!("a datacenter resource could not be applied because the resource payload was '{}'", other.type_url());
-                            }
-                            Err(error) => {
-                                return Err(error.wrap_err("a datacenter resource could not be applied because the resource payload could not be decoded"));
-                            }
-                        };
+                for res in resources {
+                    let Some(resource) = res.resource else {
+                        eyre::bail!(
+                            "a datacenter resource could not be applied because it didn't contain an actual payload"
+                        );
+                    };
 
-                        let host = if dc.host.is_empty() {
-                            if let Some(ra) = remote_addr {
-                                ra
-                            } else {
+                    let dc = match crate::xds::Resource::try_decode(resource) {
+                        Ok(crate::xds::Resource::Datacenter(dc)) => dc,
+                        Ok(other) => {
+                            eyre::bail!(
+                                "a datacenter resource could not be applied because the resource payload was '{}'",
+                                other.type_url()
+                            );
+                        }
+                        Err(error) => {
+                            return Err(error.wrap_err("a datacenter resource could not be applied because the resource payload could not be decoded"));
+                        }
+                    };
+
+                    let host = if dc.host.is_empty() {
+                        if let Some(ra) = remote_addr {
+                            ra
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        match dc.host.parse() {
+                            Ok(host) => host,
+                            Err(_err) => {
+                                tracing::warn!(
+                                    "datacenter host not set, and there is not a remote address"
+                                );
                                 continue;
                             }
-                        } else {
-                            match dc.host.parse() {
-                                Ok(host) => host,
-                                Err(_err) => {
-                                    tracing::warn!("datacenter host not set, and there is not remote address");
-                                    continue;
-                                }
-                            }
+                        }
+                    };
+
+                    let parse_payload = || -> crate::Result<Datacenter> {
+                        use eyre::Context;
+                        let dc = Datacenter {
+                            qcmp_port: dc
+                                .qcmp_port
+                                .try_into()
+                                .context("unable to parse datacenter QCMP port")?,
+                            icao_code: dc
+                                .icao_code
+                                .parse()
+                                .context("unable to parse datacenter ICAO")?,
                         };
 
-                        let parse_payload = || -> crate::Result<Datacenter> {
-                            use eyre::Context;
-                            let dc = Datacenter {
-                                qcmp_port: dc.qcmp_port.try_into().context("unable to parse datacenter QCMP port")?,
-                                icao_code: dc.icao_code.parse().context("unable to parse datacenter ICAO")?,
-                            };
+                        Ok(dc)
+                    };
 
-                            Ok(dc)
-                        };
-
-                        let datacenter = parse_payload()?;
-                        wg.insert(
-                            host,
-                            datacenter,
-                        );
-                    }
-
-                    Ok(())
-                })?;
+                    let datacenter = parse_payload()?;
+                    bridge.insert_dc(host, datacenter);
+                }
             }
             ResourceType::Cluster => {
                 let Some(clusters) = self.dyn_cfg.clusters() else {
                     return Ok(());
                 };
 
-                clusters.modify(|guard| -> crate::Result<()> {
-                    for removed in removed_resources {
-                        let locality = if removed.is_empty() {
-                            None
-                        } else {
-                            Some(removed.parse()?)
-                        };
-                        guard.remove_locality(remote_addr, &locality);
-                    }
+                let mut bridge = corro::Bridge::new(self, remote_addr);
 
-                    for res in resources {
-                        let Some(resource) = res.resource else {
-                            eyre::bail!("a cluster resource could not be applied because it didn't contain an actual payload");
-                        };
+                for removed in removed_resources {
+                    let locality = if removed.is_empty() {
+                        None
+                    } else {
+                        Some(removed.parse()?)
+                    };
 
-                        let cluster = match crate::xds::Resource::try_decode(resource) {
-                            Ok(crate::xds::Resource::Cluster(c)) => c,
-                            Ok(other) => {
-                                eyre::bail!("a cluster resource could not be applied because the resource payload was '{}'", other.type_url());
-                            }
-                            Err(error) => {
-                                return Err(error.wrap_err("a cluster resource could not be applied because the resource payload could not be decoded"));
-                            }
-                        };
+                    bridge.remove_locality(remote_addr, &locality);
+                }
 
-                        let parsed_version = res.version.parse()?;
+                let icao = self
+                    .dyn_cfg
+                    .datacenters()
+                    .zip(remote_addr)
+                    .and_then(|(dc, ra)| dc.read().get(&ra).map(|dc| dc.icao_code));
 
-                        let endpoints = match cluster
-                                .endpoints
-                                .into_iter()
-                                .map(crate::net::endpoint::Endpoint::try_from)
-                                .collect::<Result<_, _>>() {
-                            Ok(eps) => eps,
-                            Err(error) => {
-                                return Err(error.wrap_err("a cluster resource could not be applied because one or more endpoints could not be parsed"));
-                            }
-                        };
-
-                        let endpoints = crate::config::cluster::EndpointSet::with_version(
-                            endpoints,
-                            parsed_version,
+                for res in resources {
+                    let Some(resource) = res.resource else {
+                        eyre::bail!(
+                            "a cluster resource could not be applied because it didn't contain an actual payload"
                         );
+                    };
 
-                        let locality = cluster.locality.map(crate::net::endpoint::Locality::from);
-                        guard.apply(remote_addr, locality, endpoints)?;
-                    }
+                    let cluster = match crate::xds::Resource::try_decode(resource) {
+                        Ok(crate::xds::Resource::Cluster(c)) => c,
+                        Ok(other) => {
+                            eyre::bail!(
+                                "a cluster resource could not be applied because the resource payload was '{}'",
+                                other.type_url()
+                            );
+                        }
+                        Err(error) => {
+                            return Err(error.wrap_err("a cluster resource could not be applied because the resource payload could not be decoded"));
+                        }
+                    };
 
-                    Ok(())
-                })?;
+                    let parsed_version = res.version.parse()?;
+
+                    let endpoints = match cluster
+                        .endpoints
+                        .into_iter()
+                        .map(crate::net::endpoint::Endpoint::try_from)
+                        .collect::<Result<_, _>>()
+                    {
+                        Ok(eps) => eps,
+                        Err(error) => {
+                            return Err(error.wrap_err("a cluster resource could not be applied because one or more endpoints could not be parsed"));
+                        }
+                    };
+
+                    let endpoints = crate::config::cluster::EndpointSet::with_version(
+                        endpoints,
+                        parsed_version,
+                    );
+
+                    let locality = cluster.locality.map(crate::net::endpoint::Locality::from);
+                    bridge.apply_changes(remote_addr, locality, icao, es);
+                }
 
                 self.apply_metrics();
             }

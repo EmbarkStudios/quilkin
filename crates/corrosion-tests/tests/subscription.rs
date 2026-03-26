@@ -324,10 +324,10 @@ async fn server_subscriptions() {
 
 use corrosion::pubsub;
 
-/// Tests that a single subscription works
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn single_sub() {
-    qt::init_logging(qt::Level::DEBUG, "corro_types");
+qt::trace_test!(
+    /// Tests that a single subscription works
+    single_sub, {
+    //qt::init_logging(qt::Level::DEBUG, "corro_types");
 
     let pool = TestSubsDb::new(corrosion::schema::SCHEMA, "single_sub").await;
     let ctx = pool.pubsub_ctx();
@@ -465,7 +465,7 @@ async fn single_sub() {
             .await;
         }
     }
-}
+});
 
 /// Tests that multiple subscriptions for the same query works
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
