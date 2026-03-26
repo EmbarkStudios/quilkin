@@ -266,15 +266,6 @@ trace_test!(xds_bridge_to_corrosion, {
         );
     });
 
-    // agent_config.update(|config| {
-    //     config.clusters.insert_default(
-    //         [quilkin::net::Endpoint::new(
-    //             (std::net::Ipv4Addr::new(1, 2, 3, 4), 6700).into(),
-    //         )]
-    //         .into(),
-    //     );
-    // });
-
     let client = sb.client();
 
     let msg = "hello";
