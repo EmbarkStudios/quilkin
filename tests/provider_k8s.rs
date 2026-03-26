@@ -26,9 +26,7 @@ fn setup_tracing() {
         .with_filter(tracing_subscriber::filter::LevelFilter::from_level(
             tracing::Level::TRACE,
         ))
-        .with_filter(tracing_subscriber::EnvFilter::new(
-            "quilkin=trace,corrosion=trace,corro_types=trace",
-        ));
+        .with_filter(tracing_subscriber::EnvFilter::new("quilkin=trace"));
     let sub = tracing_subscriber::Registry::default().with(layer);
     let disp = tracing::dispatcher::Dispatch::new(sub);
     tracing::dispatcher::set_global_default(disp).unwrap();
