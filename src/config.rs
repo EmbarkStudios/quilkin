@@ -17,7 +17,6 @@
 //! Quilkin configuration.
 
 use std::{
-    collections,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering::Relaxed},
@@ -32,10 +31,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    config::corro::Bridge,
     generated::envoy::service::discovery::v3::Resource as XdsResource,
     net::{
-        cluster::{self, ClusterMap, EndpointSet},
+        cluster::{self, ClusterMap},
         servers::Servers,
     },
     xds::{self, ResourceType},
@@ -735,18 +733,6 @@ impl Config {
     ) -> crate::Result<()> {
         let resource_type = type_url.parse::<ResourceType>()?;
 
-        static STATEMENTS: std::sync::LazyLock<
-            parking_lot::Mutex<
-                std::collections::BTreeMap<
-                    std::net::Ipv6Addr,
-                    (
-                        Vec<quilkin_types::Endpoint>,
-                        Vec<(quilkin_types::Endpoint, quilkin_types::TokenSet)>,
-                    ),
-                >,
-            >,
-        > = std::sync::LazyLock::new(|| Default::default());
-
         match resource_type {
             ResourceType::FilterChain => {
                 let Some(filters) = self.dyn_cfg.filters() else {
@@ -788,11 +774,11 @@ impl Config {
                 filters.store(fc);
             }
             ResourceType::Datacenter => {
-                let Some(datacenters) = self.dyn_cfg.datacenters() else {
+                if self.dyn_cfg.datacenters().is_none() {
                     return Ok(());
-                };
+                }
 
-                let mut bridge = corro::Bridge::new(self, remote_addr);
+                let mut bridge = corro::Bridge::new(self);
 
                 if let Some(ip) = remote_addr.filter(|_| !removed_resources.is_empty()) {
                     bridge.remove_dc(ip);
@@ -857,11 +843,11 @@ impl Config {
                 }
             }
             ResourceType::Cluster => {
-                let Some(clusters) = self.dyn_cfg.clusters() else {
+                if self.dyn_cfg.clusters().is_none() {
                     return Ok(());
-                };
+                }
 
-                let mut bridge = corro::Bridge::new(self, remote_addr);
+                let mut bridge = corro::Bridge::new(self);
 
                 for removed in removed_resources {
                     let locality = if removed.is_empty() {
@@ -919,7 +905,7 @@ impl Config {
                     );
 
                     let locality = cluster.locality.map(crate::net::endpoint::Locality::from);
-                    bridge.apply_changes(remote_addr, locality, icao, es);
+                    bridge.apply_changes(remote_addr, locality, icao, endpoints);
                 }
 
                 self.apply_metrics();

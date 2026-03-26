@@ -204,12 +204,6 @@ impl ShutdownHandler {
             );
         }
 
-        (self.tx.clone(), self.rx.clone())
-    }
-}
-
-impl Drop for ShutdownHandler {
-    fn drop(&mut self) {
-        //tracing::error!("how in the fuck {}", std::backtrace::Backtrace::capture());
+        (self.tx, self.rx)
     }
 }

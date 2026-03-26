@@ -346,10 +346,7 @@ mod v1_impl {
                         tokio::select! {
                             buf = bs.next() => {
                                 if let Some(buf) = buf {
-                                    let len = buf.len();
-                                    let res = send.write_chunk(buf).await;
-                                    tracing::warn!(?res, len, "sent");
-                                    res?;
+                                    send.write_chunk(buf).await?;
                                 } else {
                                     tracing::info!(%peer, %sub_id, "subscription sender was closed");
                                     // This should maybe be an error?

@@ -272,20 +272,20 @@ camino = "1.2"
 rusqlite = "=0.38"
 uhlc = "0.7"
 
-# corro-agent = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-# corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-# corro-client = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-# corro-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-# spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-# sqlite-pool = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-# tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-corro-agent = { path = "../corrosion/crates/corro-agent" }
-corro-api-types = { path = "../corrosion/crates/corro-api-types" }
-corro-client = { path = "../corrosion/crates/corro-client" }
-corro-types = { path = "../corrosion/crates/corro-types" }
-spawn = { path = "../corrosion/crates/spawn" }
-sqlite-pool = { path = "../corrosion/crates/sqlite-pool" }
-tripwire = { path = "../corrosion/crates/tripwire" }
+corro-agent = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+corro-client = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+corro-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+sqlite-pool = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+# corro-agent = { path = "../corrosion/crates/corro-agent" }
+# corro-api-types = { path = "../corrosion/crates/corro-api-types" }
+# corro-client = { path = "../corrosion/crates/corro-client" }
+# corro-types = { path = "../corrosion/crates/corro-types" }
+# spawn = { path = "../corrosion/crates/spawn" }
+# sqlite-pool = { path = "../corrosion/crates/sqlite-pool" }
+# tripwire = { path = "../corrosion/crates/tripwire" }
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
