@@ -83,6 +83,8 @@ impl BroadcastingTransactor {
     {
         let mut conn = self.pool.write_priority().await?;
 
+        print_table(&conn, "before");
+
         let mut book_writer = self
             .book
             .write::<&str, _>("make_broadcastable_changes(booked writer)", None)
@@ -128,6 +130,8 @@ impl BroadcastingTransactor {
                 version: insert_info.as_ref().map(|info| info.db_version),
             })?;
 
+            print_table(&conn, "after");
+
             let elapsed = start.elapsed();
 
             match insert_info {
@@ -147,8 +151,18 @@ impl BroadcastingTransactor {
                     let tx = self.tx.clone();
 
                     spawn::spawn_counted(async move {
-                        broadcast_changes(&pool, actor_id, &subs, tx, db_version, last_seq, ts)
-                            .await
+                        match broadcast_changes(
+                            &pool, actor_id, &subs, tx, db_version, last_seq, ts,
+                        )
+                        .await
+                        {
+                            Ok(_) => {
+                                tracing::debug!("changes broadcast");
+                            }
+                            Err(error) => {
+                                tracing::error!(%error, "failed to broadcast changes");
+                            }
+                        }
                     });
 
                     Ok::<_, ChangeError>((ret, Some(db_version), elapsed))
@@ -156,6 +170,77 @@ impl BroadcastingTransactor {
             }
         })
     }
+}
+
+use prettytable as pt;
+
+pub fn query_to_string(
+    mut statement: rusqlite::Statement<'_>,
+    conv: impl Fn(&rusqlite::Row<'_>, &mut pt::Row),
+) -> String {
+    let mut tab = pt::Table::new();
+    tab.set_titles(pt::Row::new(
+        statement
+            .column_names()
+            .into_iter()
+            .map(pt::Cell::new)
+            .collect(),
+    ));
+
+    let mut rows = statement.query([]).unwrap();
+    while let Some(row) = rows.next().unwrap() {
+        let mut ptrow = pt::Row::empty();
+        conv(row, &mut ptrow);
+        tab.add_row(ptrow);
+    }
+
+    let mut out = Vec::new();
+    tab.print(&mut out).unwrap();
+    String::from_utf8(out).unwrap()
+}
+
+fn print_table(conn: &corro_types::agent::WriteConn, header: &str) {
+    use pt::Cell;
+    use std::io::Write;
+    let statement = conn
+        .prepare("SELECT endpoint,icao,tokens,json(contributors) FROM servers")
+        .unwrap();
+
+    let mut out = String::new();
+    out.push_str(header);
+    out.push('\n');
+
+    out.push_str(&query_to_string(statement, |srow, prow| {
+        prow.add_cell(Cell::new(&srow.get::<_, String>(0).unwrap()));
+        prow.add_cell(Cell::new(&srow.get::<_, String>(1).unwrap()));
+        prow.add_cell(Cell::new(
+            srow.get_ref(2)
+                .unwrap()
+                .as_str_or_null()
+                .unwrap()
+                .unwrap_or_default(),
+        ));
+        prow.add_cell(Cell::new(&srow.get::<_, String>(3).unwrap()));
+    }));
+    out.push('\n');
+    let statement = conn
+        .prepare("SELECT ip,icao,json(servers) FROM dc")
+        .unwrap();
+    out.push_str(&query_to_string(statement, |srow, prow| {
+        prow.add_cell(Cell::new(&srow.get::<_, String>(0).unwrap()));
+        prow.add_cell(Cell::new(&srow.get::<_, String>(1).unwrap()));
+        prow.add_cell(Cell::new(&srow.get::<_, String>(2).unwrap()));
+    }));
+
+    out.push('\n');
+    out.push('\n');
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("db.txt")
+        .unwrap()
+        .write_all(out.as_bytes())
+        .unwrap();
 }
 
 #[async_trait::async_trait]
@@ -219,6 +304,8 @@ impl super::server::DbMutator for BroadcastingTransactor {
                 }
             }
         }
+
+        tracing::warn!(statements = ?v, "writing");
 
         let mut results = Vec::with_capacity(statements.len());
 
@@ -390,6 +477,7 @@ pub async fn broadcast_changes(
         let rows = prepped.query_map([db_version], change::row_to_change)?;
         let chunked =
             change::ChunkedChanges::new(rows, CrsqlSeq(0), last_seq, change::MAX_CHANGES_BYTE_SIZE);
+
         for changes_seqs in chunked {
             match changes_seqs {
                 Ok((changes, seqs)) => {

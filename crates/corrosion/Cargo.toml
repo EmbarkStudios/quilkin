@@ -34,6 +34,7 @@ tokio-util.workspace = true
 tracing.workspace = true
 uhlc.workspace = true
 uuid.workspace = true
+prettytable = "0.10"
 
 corro-agent.workspace = true
 corro-api-types.workspace = true

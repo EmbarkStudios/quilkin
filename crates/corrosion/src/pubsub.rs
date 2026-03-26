@@ -537,8 +537,7 @@ const MAX_UNSUB_TIME: Duration = Duration::from_secs(10 * 60);
 // this should be a fraction of the `MAX_UNSUB_TIME`
 const RECEIVERS_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Processes a single matcher mpsc channel to sent it to the broadcast channel
-/// in the case of multiple subscriptions to the same query
+/// Forwards a matcher mpsc channel a broadcast channel in the case of multiple subscriptions to the same query
 pub async fn process_sub_channel(
     subs: SubsManager,
     id: Uuid,
@@ -568,7 +567,10 @@ pub async fn process_sub_channel(
 
         let query_evt = tokio::select! {
             biased;
-            Some(query_evt) = evt_rx.recv() => query_evt,
+            query_evt = evt_rx.recv() => {
+                let Some(evt) = query_evt else { break; };
+                evt
+            }
             _ = deadline_check => {
                 if tx.receiver_count() == 0 {
                     info!(sub_id = %id, "All listeners for subscription are gone and didn't come back within {MAX_UNSUB_TIME:?}");
@@ -588,9 +590,6 @@ pub async fn process_sub_channel(
                     deadline = None;
                 };
                 continue;
-            },
-            else => {
-                break;
             }
         };
 
@@ -694,6 +693,39 @@ impl MatcherCache {
 
 pub type SharedMatcherCache = Arc<tokio::sync::RwLock<MatcherCache>>;
 
+/// Corrosion uses a "tripwire" handle to signal to end async tasks, this just
+/// wraps it so it's easier to use, and removes boilerplate
+pub struct Trip {
+    tripwire: tripwire::Tripwire,
+    worker: tripwire::TripwireWorker<tokio_stream::wrappers::ReceiverStream<()>>,
+    tx: tokio::sync::mpsc::Sender<()>,
+}
+
+impl Trip {
+    #[inline]
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        let (tripwire, worker, tx) = tripwire::Tripwire::new_simple();
+        Self {
+            tripwire,
+            worker,
+            tx,
+        }
+    }
+
+    #[inline]
+    pub fn tripwire(&self) -> tripwire::Tripwire {
+        self.tripwire.clone()
+    }
+
+    #[inline]
+    pub async fn shutdown(self) {
+        self.tx.send(()).await.ok();
+        self.worker.await;
+        spawn::wait_for_all_pending_handles().await;
+    }
+}
+
 /// The context needed to create and manage subscriptions
 #[derive(Clone)]
 pub struct PubsubContext {
@@ -710,9 +742,9 @@ pub struct PubsubContext {
     /// same query, and thus the same [`Matcher`], they need to be funnelled through
     /// a broadcaster so that each individual subscriber gets the events
     pub cache: SharedMatcherCache,
-    pub tripwire: Tripwire,
     /// The path where subscriptions are stored
     pub path: PathBuf,
+    pub tripwire: Tripwire,
 }
 
 impl PubsubContext {
@@ -850,39 +882,44 @@ impl futures::Stream for BufferingSubStream {
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         // First try to pull any buffers from the receiver
-        match self.rx.poll_recv(cx) {
-            Poll::Ready(Some(eve)) => {
-                let span = tracing::info_span!("sub event", sub_id = %self.id);
+        let res = 'b: {
+            match self.rx.poll_recv(cx) {
+                Poll::Ready(Some(eve)) => {
+                    let span = tracing::info_span!("sub event", sub_id = %self.id);
 
-                // We can't borrow multiple mutable fields from a pin, thus this weird copy
-                let mut cid = self.change_id;
-                let maybe_buf = span
-                    .in_scope(|| handle_sub_event(self.max_size, &mut self.buffer, eve, &mut cid));
-                self.change_id = cid;
+                    // We can't borrow multiple mutable fields from a pin, thus this weird copy
+                    let mut cid = self.change_id;
+                    let maybe_buf = span.in_scope(|| {
+                        handle_sub_event(self.max_size, &mut self.buffer, eve, &mut cid)
+                    });
+                    self.change_id = cid;
 
-                // This will be Some if the buffer was over the configured maximum
-                if let Some(buf) = maybe_buf {
-                    let new_time = tokio::time::Instant::now() + self.max_time;
-                    self.sleep.as_mut().reset(new_time);
-                    return Poll::Ready(Some(buf));
+                    // This will be Some if the buffer was over the configured maximum
+                    if let Some(buf) = maybe_buf {
+                        let new_time = tokio::time::Instant::now() + self.max_time;
+                        self.sleep.as_mut().reset(new_time);
+                        break 'b Poll::Ready(Some(buf));
+                    }
+                }
+                Poll::Ready(None) => break 'b Poll::Ready(None),
+                Poll::Pending => {}
+            }
+
+            // If we didn't receive a new buffer, check if we have buffered events
+            // and the configured timeout has elapsed
+            if let Poll::Ready(()) = self.sleep.as_mut().poll(cx) {
+                let new_time = tokio::time::Instant::now() + self.max_time;
+                self.sleep.as_mut().reset(new_time);
+
+                if let Some(buf) = self.buffer.freeze() {
+                    break 'b Poll::Ready(Some(buf));
                 }
             }
-            Poll::Ready(None) => return Poll::Ready(None),
-            Poll::Pending => {}
-        }
 
-        // If we didn't receive a new buffer, check if we have buffered events
-        // and the configured timeout has elapsed
-        if let Poll::Ready(()) = self.sleep.as_mut().poll(cx) {
-            let new_time = tokio::time::Instant::now() + self.max_time;
-            self.sleep.as_mut().reset(new_time);
+            Poll::Pending
+        };
 
-            if let Some(buf) = self.buffer.freeze() {
-                return Poll::Ready(Some(buf));
-            }
-        }
-
-        Poll::Pending
+        res
     }
 }
 
