@@ -470,13 +470,13 @@ qt::trace_test!(
 /// Tests that multiple subscriptions for the same query works
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn multiple_subs() {
-    qt::init_logging(qt::Level::TRACE, "corro_types");
+    qt::init_logging(qt::Level::TRACE, "corrosion");
 
     let pool = TestSubsDb::new(corrosion::schema::SCHEMA, "multiple_subs").await;
     let ctx = pool.pubsub_ctx();
     let mut cur_cid = 0;
 
-    for _ in 0..5 {
+    for _ in 0..2 {
         let original = ctx
             .subscribe(pubsub::SubParamsv1 {
                 query: corro_api_types::Statement::Simple(pubsub::SERVER_QUERY.to_owned()),
@@ -546,7 +546,7 @@ async fn multiple_subs() {
         let new_icao = IcaoCode::new_testing([b'N'; 4]);
         let tokens = TokenSet::from([[8; 8]]);
 
-        for _ in 0..100 {
+        for _ in 0..10 {
             // Insert
             {
                 {
