@@ -54,7 +54,10 @@ pub fn init_logging(level: Level, test_pkg: &'static str) {
         .with_test_writer()
         .with_filter(tracing_subscriber::filter::LevelFilter::from_level(level))
         .with_filter(tracing_subscriber::EnvFilter::new(format!(
-            "{test_pkg}=trace,qt=trace,corrosion=trace,corro_types=trace,tripwire=trace,quilkin=debug"
+            // NOTE: corrosion is _EXTREMELY_ spammy at the trace level, so don't enable these unless you are trying
+            // to see everything that could go on, but it's so noisy it can actually make it harder to diagnose issues
+            // corrosion=trace,corro_types=trace,tripwire=trace
+            "{test_pkg}=trace,qt=trace,quilkin=debug"
         )));
     let sub = tracing_subscriber::Registry::default().with(layer);
     let disp = tracing::dispatcher::Dispatch::new(sub);

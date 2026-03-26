@@ -409,7 +409,6 @@ impl SubscriptionClient {
                 res = codec::read_length_prefixed(&mut recv) => {
                     match res {
                         Ok(buf) => {
-                            tracing::debug!(len = buf.len(), "received event");
                             let stream = pubsub::SubscriptionStream::new(buf);
                             if tx.send(stream).is_err() {
                                 tracing::info!("subscription stream receiver closed, closing stream");
@@ -508,9 +507,3 @@ impl SubscriptionClient {
         self.inner.shutdown().await;
     }
 }
-
-// impl Drop for SubscriptionClient {
-//     fn drop(&mut self) {
-//         panic!("wtf {}", std::backtrace::Backtrace::capture());
-//     }
-// }
