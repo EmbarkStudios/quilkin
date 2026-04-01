@@ -209,7 +209,7 @@ async fn connect_and_sub(addr: net::SocketAddr, change_ids: &ChangeIds) -> crate
     })
 }
 
-/// The actual core of the event loop, applies the events from the authoratative
+/// The actual core of the event loop, applies the events from the authoritative
 /// server to reflect its state locally
 async fn process_subscription_events(
     state: &State,
@@ -223,7 +223,6 @@ async fn process_subscription_events(
         |events: Option<SubscriptionStream>, cid: &mut Option<ChangeId>| -> crate::Result<()> {
             let events = events.context("subscription was closed")?;
             let Some(servers) = state.dyn_cfg.clusters() else {
-                // TODO: Don't subscribe if we don't have this
                 return Ok(());
             };
 
@@ -254,7 +253,13 @@ async fn process_subscription_events(
             match event {
                 // The state of row that matches our query changed
                 QueryEvent::Change(ct, _rid, row, id) => {
-                    let dc = db::DatacenterRow::from_sql(&row)?;
+                    let dc = match db::DatacenterRow::from_sql(&row) {
+                        Ok(dc) => dc,
+                        Err(error) => {
+                            tracing::error!(%error, "failed to deserialize datacenter row");
+                            continue;
+                        }
+                    };
 
                     match ct {
                         ChangeType::Insert | ChangeType::Update => {
@@ -279,7 +284,14 @@ async fn process_subscription_events(
                 }
                 // The state of a row in the initial query
                 QueryEvent::Row(_rid, row) => {
-                    let dc = db::DatacenterRow::from_sql(&row)?;
+                    let dc = match db::DatacenterRow::from_sql(&row) {
+                        Ok(dc) => dc,
+                        Err(error) => {
+                            tracing::error!(%error, "failed to deserialize datacenter row");
+                            continue;
+                        }
+                    };
+
                     dcs.modify(|dcs| {
                         dcs.insert(
                             dc.ip,
@@ -317,7 +329,7 @@ async fn process_subscription_events(
         };
 
         let update_filter = |row: &[SqliteValue]| -> crate::Result<()> {
-            let column = row.get(1).context("missing 'filter' column")?;
+            let column = row.first().context("missing 'filter' column")?;
 
             let filter = column.as_str().with_context(|| {
                 format!(
@@ -377,6 +389,7 @@ async fn process_subscription_events(
 
     loop {
         let res = tokio::select! {
+            biased;
             sc = sstate.servers.stream.rx.recv() => {
                 let span = tracing::info_span!("servers");
                 let _s = span.enter();
@@ -395,7 +408,7 @@ async fn process_subscription_events(
         };
 
         if let Err(error) = res {
-            tracing::error!(%error, "error processing subscription event");
+            tracing::error!(?error, "error processing subscription event");
         }
     }
 }

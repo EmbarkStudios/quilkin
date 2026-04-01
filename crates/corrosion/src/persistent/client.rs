@@ -365,6 +365,8 @@ impl SubscriptionClient {
     ) -> Result<(Self, SubClientStream), ConnectError> {
         let (mut send, mut recv) = inner.conn.open_bi().await?;
 
+        let query = params.query.query().to_owned();
+
         let res = Self::handshake(&mut send, &mut recv, params).await?;
 
         let (tx, reqrx) = mpsc::unbounded_channel();
@@ -380,7 +382,7 @@ impl SubscriptionClient {
 
         let task = tokio::task::spawn(async move {
             Self::run_subscription_loop(recv, send, tx, srx)
-                .instrument(tracing::info_span!("subscription", %sub_id))
+                .instrument(tracing::info_span!("subscription", %sub_id, query))
                 .await
         });
 

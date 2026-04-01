@@ -135,18 +135,36 @@ impl<'s, const N: usize> Server<'s, N> {
 
         params.push(endpoint.to_sql());
         params.push(icao.to_sql());
-        params.push(tokens.to_sql());
 
         let peer_ip = self.peer.ip().to_string();
 
-        self.statements.push(Statement::WithParams(
-            format!("INSERT INTO servers (endpoint,icao,tokens,contributors,cont_update) VALUES (?,?,?,jsonb('{{\"{peer_ip}\":{{}}}}'),unixepoch('now'))
-             ON CONFLICT(endpoint) DO UPDATE SET
-                contributors = jsonb_patch(contributors,'{{\"{peer_ip}\":{{}}}}'),
-                cont_update = unixepoch('now')
-             WHERE excluded.icao = servers.icao"),
-            params,
-        ));
+        match tokens.to_sql() {
+            SqliteParam::Text(token_str) => {
+                self.statements.push(Statement::WithParams(
+                    format!("INSERT INTO servers (endpoint,icao,tokens,contributors,cont_update) VALUES (?,?,'{token_str}',jsonb('{{\"{peer_ip}\":{{}}}}'),unixepoch('now'))
+                    ON CONFLICT(endpoint) DO UPDATE SET
+                        contributors = jsonb_patch(contributors,'{{\"{peer_ip}\":{{}}}}'),
+                        cont_update = unixepoch('now'),
+                        icao = '{icao}',
+                        tokens = '{token_str}'"
+                    ),
+                    params,
+                ));
+            }
+            SqliteParam::Null => {
+                self.statements.push(Statement::WithParams(
+                    format!("INSERT INTO servers (endpoint,icao,tokens,contributors,cont_update) VALUES (?,?,NULL,jsonb('{{\"{peer_ip}\":{{}}}}'),unixepoch('now'))
+                    ON CONFLICT(endpoint) DO UPDATE SET
+                        contributors = jsonb_patch(contributors,'{{\"{peer_ip}\":{{}}}}'),
+                        cont_update = unixepoch('now'),
+                        icao = '{icao}',
+                        tokens = NULL"
+                    ),
+                    params,
+                ));
+            }
+            _ => unreachable!(),
+        }
 
         let server = endpoint.address.to_string();
 
@@ -283,7 +301,12 @@ impl<const N: usize> Datacenter<'_, N> {
         ];
 
         self.0.push(Statement::WithParams(
-            "INSERT INTO dc (ip,port,icao,servers) VALUES (?,?,?,jsonb('{}'))".into(),
+            format!(
+                "INSERT INTO dc (ip,port,icao,servers) VALUES (?,?,?,jsonb('{{}}'))
+            ON CONFLICT(ip) DO UPDATE SET
+                port = {qcmp},
+                icao = '{icao}'",
+            ),
             params,
         ));
     }

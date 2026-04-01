@@ -47,18 +47,20 @@ impl DatacenterMap {
     }
 
     #[inline]
-    pub fn remove(&self, ip: IpAddr) {
+    pub fn remove(&self, ip: IpAddr) -> Option<std::net::SocketAddrV6> {
         let mut lock = self.removed.lock();
         let mut version = 0;
 
         let Some((_k, v)) = self.map.remove(&ip) else {
-            return;
+            return None;
         };
 
         lock.push((ip, v.qcmp_port).into());
         version += 1;
 
         self.version.fetch_add(version, Relaxed);
+
+        Some(corrosion::ip_to_peer(ip))
     }
 
     #[inline]
@@ -120,7 +122,7 @@ impl PartialEq for DatacenterMap {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct Datacenter {
     pub qcmp_port: u16,
     pub icao_code: super::IcaoCode,

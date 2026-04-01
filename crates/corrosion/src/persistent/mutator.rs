@@ -147,8 +147,12 @@ impl BroadcastingTransactor {
                     let tx = self.tx.clone();
 
                     spawn::spawn_counted(async move {
-                        broadcast_changes(&pool, actor_id, &subs, tx, db_version, last_seq, ts)
-                            .await
+                        if let Err(error) =
+                            broadcast_changes(&pool, actor_id, &subs, tx, db_version, last_seq, ts)
+                                .await
+                        {
+                            tracing::error!(%error, "failed to broadcast changes");
+                        }
                     });
 
                     Ok::<_, ChangeError>((ret, Some(db_version), elapsed))
@@ -156,6 +160,33 @@ impl BroadcastingTransactor {
             }
         })
     }
+}
+
+use prettytable as pt;
+
+pub fn query_to_string(
+    mut statement: rusqlite::Statement<'_>,
+    conv: impl Fn(&rusqlite::Row<'_>, &mut pt::Row),
+) -> String {
+    let mut tab = pt::Table::new();
+    tab.set_titles(pt::Row::new(
+        statement
+            .column_names()
+            .into_iter()
+            .map(pt::Cell::new)
+            .collect(),
+    ));
+
+    let mut rows = statement.query([]).unwrap();
+    while let Some(row) = rows.next().unwrap() {
+        let mut ptrow = pt::Row::empty();
+        conv(row, &mut ptrow);
+        tab.add_row(ptrow);
+    }
+
+    let mut out = Vec::new();
+    tab.print(&mut out).unwrap();
+    String::from_utf8(out).unwrap()
 }
 
 #[async_trait::async_trait]
@@ -390,6 +421,7 @@ pub async fn broadcast_changes(
         let rows = prepped.query_map([db_version], change::row_to_change)?;
         let chunked =
             change::ChunkedChanges::new(rows, CrsqlSeq(0), last_seq, change::MAX_CHANGES_BYTE_SIZE);
+
         for changes_seqs in chunked {
             match changes_seqs {
                 Ok((changes, seqs)) => {

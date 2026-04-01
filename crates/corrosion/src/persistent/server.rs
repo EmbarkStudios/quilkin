@@ -147,7 +147,6 @@ impl Server {
                     update_metric(&metrics.rx_count, &mut rx_count, stats.udp_rx.datagrams);
                     update_metric(&metrics.rx_bytes, &mut rx_bytes, stats.udp_rx.bytes);
 
-
                     loop {
                         tokio::select! {
                             res = Self::read_request(peer, &connection) => {
@@ -155,6 +154,7 @@ impl Server {
                                     Ok(vr) => {
                                         let mutator = mutator.clone();
                                         let usbs = usbs.clone();
+
                                         tokio::spawn(async move {
                                             Self::handle_request(vr, mutator, usbs).await;
                                         });
@@ -415,7 +415,14 @@ mod v1_impl {
     ) -> Result<(), IoLoopError> {
         match request {
             v1::Request::Mutate(mreq) => handle_mutate(mreq, peer, send, recv, mutator).await,
-            v1::Request::Subscribe(sreq) => handle_subscribe(sreq, peer, send, subs).await,
+            v1::Request::Subscribe(sreq) => {
+                let query = sreq.0.query.query().to_owned();
+                handle_subscribe(sreq, peer, send, subs)
+                    .instrument(
+                        tracing::debug_span!("subscribe", %peer, id = recv.id().index(), query),
+                    )
+                    .await
+            }
         }
     }
 }
