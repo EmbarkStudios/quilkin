@@ -708,7 +708,7 @@ where
             if *raddr != remote_addr {
                 eyre::bail!(
                     "skipping cluster apply, '{locality:?}' is managed by '{:?}', not '{remote_addr:?}'",
-                    raddr.key()
+                    raddr.value()
                 );
             }
         } else {
