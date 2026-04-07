@@ -72,6 +72,22 @@ fn get_external_remote_addr<T>(request: &tonic::Request<T>) -> Option<std::net::
                 .and_then(|value| value.parse().ok())
         })
         .or_else(|| request.remote_addr().map(|addr| addr.ip()))
+        .or_else(|| {
+            // tonic::Request::remote_addr() only checks tonic::transport types.
+            // When using tonic_rustls::Server, connect info is injected as tonic_rustls types.
+            request
+                .extensions()
+                .get::<tonic_rustls::server::TlsConnectInfo<tonic_rustls::server::TcpConnectInfo>>()
+                .and_then(|i| i.get_ref().remote_addr())
+                .map(|addr| addr.ip())
+        })
+        .or_else(|| {
+            request
+                .extensions()
+                .get::<tonic_rustls::server::TcpConnectInfo>()
+                .and_then(|i| i.remote_addr())
+                .map(|addr| addr.ip())
+        })
         .map(|ip| ip.to_canonical())
 }
 
