@@ -289,9 +289,12 @@ sqlite-pool = { git = "https://github.com/EmbarkStudios/corrosion", branch = "mi
 tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 uhlc = "0.7"
 
+# TEMPORARY PATCHES
 [patch.crates-io]
-spiffe = { path = "../rust-spiffe/spiffe" }
-spiffe-rustls = { path = "../rust-spiffe/spiffe-rustls" }
+# spiffe = { path = "../rust-spiffe/spiffe" }
+# spiffe-rustls = { path = "../rust-spiffe/spiffe-rustls" }
+spiffe = { git = "https://github.com/glindstedt/rust-spiffe", branch = "fixes" }
+spiffe-rustls = { git = "https://github.com/glindstedt/rust-spiffe", branch = "fixes" }
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
