@@ -399,10 +399,10 @@ impl Service {
         };
 
         {
-            tracing::info!("GETTING SERVER CONFIG");
+            // tracing::info!("GETTING SERVER CONFIG");
             let server_config = self.server_config(spiffe_config)?;
-            tracing::info!(?server_config, "server config");
-            tracing::info!("GOT SERVER CONFIG");
+            // tracing::info!(?server_config, "server config");
+            // tracing::info!("GOT SERVER CONFIG");
             let shutdown = &mut shutdown;
             self.publish_mds(config, shutdown, &mut ports, server_config.clone()).await?;
             self.publish_phoenix(config, shutdown, &mut ports)?;

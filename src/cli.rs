@@ -98,27 +98,8 @@ pub struct SpiffeCli {
     #[clap(
         long = "spiffe.enabled",
         env = "QUILKIN_SPIFFE_ENABLED",
-        // requires("spiffe_server_trust_domain_policy")
     )]
     spiffe_enabled: bool,
-    #[clap(
-        long = "spiffe.server.trust-domain-policy.allowlist",
-        env = "QUILKIN_SPIFFE_SERVER_TRUST_DOMAIN_POLICY_ALLOWLIST",
-        value_delimiter = ',',
-        // required = false,
-        requires("spiffe_enabled"),
-        group = "spiffe_server_trust_domain_policy"
-    )]
-    spiffe_server_trust_domain_policy_allowlist: Vec<String>,
-    #[clap(
-        long = "spiffe.server.authorizer.spiffe_ids",
-        env = "QUILKIN_SPIFFE_SERVER_AUTHORIZER_SPIFFE_IDS",
-        value_delimiter = ',',
-        // required = false,
-        requires("spiffe_enabled"),
-        group = "spiffe_server_authorizer"
-    )]
-    spiffe_server_spiffe_ids: Vec<String>,
 }
 
 impl SpiffeCli {
@@ -134,15 +115,15 @@ impl SpiffeCli {
                     .timeout(std::time::Duration::from_secs(5))
                     .await
                     .wrap_err("timed out connecting to SPIFFE workload API")??;
-                let trust_domains: Vec<spiffe::TrustDomain> = self
-                    .spiffe_server_trust_domain_policy_allowlist
-                    .iter()
-                    .map(|td| TryInto::<spiffe::TrustDomain>::try_into(td.as_str()))
-                    .collect::<Result<Vec<spiffe::TrustDomain>, spiffe::SpiffeIdError>>()?;
+                // let trust_domains: Vec<spiffe::TrustDomain> = self
+                //     .spiffe_server_trust_domain_policy_allowlist
+                //     .iter()
+                //     .map(|td| TryInto::<spiffe::TrustDomain>::try_into(td.as_str()))
+                //     .collect::<Result<Vec<spiffe::TrustDomain>, spiffe::SpiffeIdError>>()?;
                 Ok(Some(SpiffeConfig {
                     source,
-                    server_trust_domains: trust_domains,
-                    server_spiffe_ids: self.spiffe_server_spiffe_ids.clone(),
+                    // server_trust_domains: trust_domains,
+                    // server_spiffe_ids: self.spiffe_server_spiffe_ids.clone(),
                 }))
             }
             false => Ok(None),
@@ -153,14 +134,14 @@ impl SpiffeCli {
 #[derive(Debug, Clone)]
 pub struct SpiffeConfig {
     pub source: spiffe::X509Source,
-    server_trust_domains: Vec<spiffe::TrustDomain>,
-    server_spiffe_ids: Vec<String>,
+    // server_trust_domains: Vec<spiffe::TrustDomain>,
+    // server_spiffe_ids: Vec<String>,
 }
 
 impl SpiffeConfig {
     /// Provides a default `ClientConfigBuilder` with settings from cli args applied
     pub fn client_builder(&self) -> crate::Result<spiffe_rustls::ClientConfigBuilder> {
-        tracing::info!("CLIENT BUILDER");
+        // tracing::info!("CLIENT BUILDER");
         let mut builder = spiffe_rustls::mtls_client(self.source.clone());
         // Allow clients to establish mTLS to anywhere
         builder = builder.authorize(spiffe_rustls::authorizer::any());
@@ -169,26 +150,28 @@ impl SpiffeConfig {
 
     /// Provides a default `ServerConfigBuilder` with settings from cli args applied
     pub fn server_builder(&self) -> crate::Result<spiffe_rustls::ServerConfigBuilder> {
-        tracing::info!("SERVER BUILDER");
-        if self.server_spiffe_ids.is_empty() && self.server_trust_domains.is_empty() {
-            // TODO think about this
-            return Err(eyre::eyre!(
-                "must specify either trust domains or spiffe ids for server"
-            ));
-        }
-        tracing::info!(is_healthy=%self.source.is_healthy(), "SOURCE HEALTH");
+        // tracing::info!("SERVER BUILDER");
+        // if self.server_spiffe_ids.is_empty() && self.server_trust_domains.is_empty() {
+        //     // TODO think about this
+        //     return Err(eyre::eyre!(
+        //         "must specify either trust domains or spiffe ids for server"
+        //     ));
+        // }
+        // tracing::info!(is_healthy=%self.source.is_healthy(), "SOURCE HEALTH");
         let mut builder = spiffe_rustls::mtls_server(self.source.clone());
-        if self.server_spiffe_ids.len() > 0 {
-            builder = builder.authorize(spiffe_rustls::authorizer::exact(
-                self.server_spiffe_ids.iter().map(String::as_str),
-            )?);
-        }
-        if self.server_trust_domains.len() > 0 {
-            builder = builder.trust_domain_policy(spiffe_rustls::AllowList(
-                std::collections::BTreeSet::from_iter(self.server_trust_domains.iter().cloned()),
-            ))
-        }
-        tracing::info!(is_healthy=%self.source.is_healthy(), "RETURNING BUILDER");
+        // Allow server to accept any client allowed by the trust bundles
+        builder = builder.authorize(spiffe_rustls::authorizer::any());
+        // if self.server_spiffe_ids.len() > 0 {
+        //     builder = builder.authorize(spiffe_rustls::authorizer::exact(
+        //         self.server_spiffe_ids.iter().map(String::as_str),
+        //     )?);
+        // }
+        // if self.server_trust_domains.len() > 0 {
+        //     builder = builder.trust_domain_policy(spiffe_rustls::AllowList(
+        //         std::collections::BTreeSet::from_iter(self.server_trust_domains.iter().cloned()),
+        //     ))
+        // }
+        // tracing::info!(is_healthy=%self.source.is_healthy(), "RETURNING BUILDER");
         Ok(builder)
     }
 }

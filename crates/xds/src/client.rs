@@ -575,7 +575,7 @@ impl DeltaServerStream {
             })
             .await?;
 
-        tracing::debug!("STARTING STREAM");
+        // tracing::debug!("STARTING STREAM");
         let stream = client
             .delta_aggregated_resources(tokio_stream::wrappers::ReceiverStream::new(responses_rx))
             .in_current_span()

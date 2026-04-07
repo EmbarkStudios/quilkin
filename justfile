@@ -71,7 +71,6 @@ start_relay:
 start_relay_spiffe:
     cargo run -- \
         --spiffe.enabled \
-        --spiffe.server.trust-domain-policy.allowlist "spiffe://example.com" \
         --admin.address=127.0.0.1:1800{{ id }} \
         --service.id=relay-{{ id }} \
         --service.qcmp --service.qcmp.port=1760{{ id }} \
@@ -131,7 +130,6 @@ start_agent relay_id="0": _check_agent_config
 start_agent_spiffe relay_id="0": _check_agent_config
     cargo run -- \
         --spiffe.enabled \
-        --spiffe.server.trust-domain-policy.allowlist "spiffe://example.com" \
         --admin.address 127.0.0.1:3800{{ id }} \
         --service.id=agent-{{ id }} \
         --config={{ _agent_config_path }} \

@@ -715,7 +715,7 @@ impl Providers {
     ) -> tokio::task::JoinSet<crate::Result<()>> {
         let mut providers = tokio::task::JoinSet::new();
 
-        tracing::info!(?client_config, "client config");
+        // tracing::info!(?client_config, "client config");
 
         if !self.any_provider_enabled() {
             tracing::info!("no configuration providers specified");
