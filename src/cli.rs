@@ -176,7 +176,7 @@ impl SpiffeConfig {
     }
 }
 
-fn resolve_rustls_client_config(
+pub fn resolve_rustls_client_config(
     spiffe_config: &Option<SpiffeConfig>,
 ) -> crate::Result<rustls::ClientConfig> {
     if let Some(spiffe_config) = spiffe_config {

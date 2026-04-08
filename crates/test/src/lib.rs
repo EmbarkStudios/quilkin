@@ -1,6 +1,6 @@
 #![allow(clippy::unimplemented)]
 
-use quilkin::{Config, net::TcpListener, signal::ShutdownTx, test::TestConfig};
+use quilkin::{Config, signal::ShutdownTx, test::TestConfig};
 
 pub use serde_json::json;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -298,7 +298,7 @@ impl Pail {
                 .testing();
             let (tx, rx) = quilkin::signal::channel();
             let sh = quilkin::signal::ShutdownHandler::new(tx.clone(), rx);
-            let (task, _ports) = svc.spawn_services(&rp.config, sh).await.unwrap();
+            let (task, _ports) = svc.spawn_services(&rp.config, sh, None).await.unwrap();
 
             rp.shutdown = tx;
             rp.task = Some(task);
@@ -399,11 +399,13 @@ impl Pail {
                     None,
                     None,
                     shutdown_rx.clone(),
+                    quilkin::cli::resolve_rustls_client_config(&None).unwrap(),
                 );
                 let (task, ports) = svc
                     .spawn_services(
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
+                        None,
                     )
                     .await
                     .unwrap();
@@ -487,11 +489,13 @@ impl Pail {
                     None,
                     None,
                     shutdown_rx.clone(),
+                    quilkin::cli::resolve_rustls_client_config(&None).unwrap(),
                 );
                 let (task, ports) = svc
                     .spawn_services(
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
+                        None,
                     )
                     .await
                     .unwrap();
@@ -591,11 +595,13 @@ impl Pail {
                     None,
                     Some(rttx),
                     shutdown_rx.clone(),
+                    quilkin::cli::resolve_rustls_client_config(&None).unwrap(),
                 );
                 let (task, ports) = svc
                     .spawn_services(
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
+                        None,
                     )
                     .await
                     .unwrap();
