@@ -95,10 +95,7 @@ impl LocalityCli {
 #[derive(Debug, clap::Parser)]
 #[command(next_help_heading = "SPIFFE Options")]
 pub struct SpiffeCli {
-    #[clap(
-        long = "spiffe.enabled",
-        env = "QUILKIN_SPIFFE_ENABLED",
-    )]
+    #[clap(long = "spiffe.enabled", env = "QUILKIN_SPIFFE_ENABLED")]
     spiffe_enabled: bool,
 }
 
@@ -186,9 +183,14 @@ pub fn resolve_rustls_client_config(
             // .with_alpn_protocols([b"h2"])
             .build()?)
     } else {
-        Ok(rustls::ClientConfig::builder()
+        Ok(
+            rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+                rustls::crypto::ring::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()?
             .with_webpki_roots()
-            .with_no_client_auth())
+            .with_no_client_auth(),
+        )
     }
 }
 

@@ -147,7 +147,7 @@ pub struct Providers {
         value_delimiter = ',',
         hide = true
     )]
-    relay: Vec<tonic::transport::Endpoint>,
+    relay: Vec<tonic::transport::Uri>,
     /// The remote URL or local file path to retrieve the Maxmind database.
     #[clap(
         long = "provider.mmdb.endpoints",
@@ -177,7 +177,7 @@ pub struct Providers {
         value_delimiter = ',',
         hide = true
     )]
-    xds_endpoints: Vec<tonic::transport::Endpoint>,
+    xds_endpoints: Vec<tonic::transport::Uri>,
     /// One or more `quilkin relay` endpoints to push or pull configuration changes to/from
     #[clap(
         long = "provider.corrosion.endpoints",
@@ -267,18 +267,12 @@ impl Providers {
         !self.endpoints.is_empty()
     }
 
-    pub fn grpc_push_endpoints(
-        mut self,
-        endpoints: impl Into<Vec<tonic::transport::Endpoint>>,
-    ) -> Self {
+    pub fn grpc_push_endpoints(mut self, endpoints: impl Into<Vec<tonic::transport::Uri>>) -> Self {
         self.relay = endpoints.into();
         self
     }
 
-    pub fn grpc_pull_endpoints(
-        mut self,
-        endpoints: impl Into<Vec<tonic::transport::Endpoint>>,
-    ) -> Self {
+    pub fn grpc_pull_endpoints(mut self, endpoints: impl Into<Vec<tonic::transport::Uri>>) -> Self {
         self.xds_endpoints = endpoints.into();
         self
     }
@@ -589,19 +583,19 @@ impl Providers {
         let config = config.clone();
         let endpoints = self.relay.clone();
         let control_plane_id = locality.map_or_else(|| config.id(), |l| l.region().to_string());
-        let client_connector = crate::net::xds::client::xds_client_connector(client_config);
+        let connector = crate::net::xds::client::XdsConnector::new(client_config);
         Self::task("mds_provider".into(), health_check.clone(), move || {
             let config = config.clone();
             let endpoints = endpoints.clone();
             let control_plane_id = control_plane_id.clone();
             let health_check = health_check.clone();
             let shutdown = shutdown.clone();
-            let client_connector = client_connector.clone();
+            let connector = connector.clone();
             async move {
                 let stream = crate::net::xds::client::MdsClient::connect(
                     control_plane_id,
                     endpoints,
-                    client_connector,
+                    connector,
                 )
                 .await?
                 .delta_stream(config.clone(), health_check.clone(), shutdown)
@@ -624,21 +618,21 @@ impl Providers {
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let config = config.clone();
         let endpoints = self.xds_endpoints.clone();
-        let client_connector = crate::net::xds::client::xds_client_connector(client_config);
+        let connector = crate::net::xds::client::XdsConnector::new(client_config);
 
         Self::task("xds_provider".into(), health_check.clone(), move || {
             let config = config.clone();
             let endpoints = endpoints.clone();
             let health_check = health_check.clone();
             let tx = notifier.clone();
-            let client_connector = client_connector.clone();
+            let connector = connector.clone();
             async move {
                 let identifier = config.id();
                 let stream = crate::net::xds::delta_subscribe(
                     config,
                     identifier,
                     endpoints,
-                    client_connector,
+                    connector,
                     health_check.clone(),
                     tx,
                     Self::SUBS,

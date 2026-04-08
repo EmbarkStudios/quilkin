@@ -4416,6 +4416,7 @@ dependencies = [
  "spiffe-rustls",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tonic",
  "tonic-rustls",

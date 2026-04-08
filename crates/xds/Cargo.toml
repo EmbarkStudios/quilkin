@@ -45,4 +45,5 @@ tryhard.workspace = true
 uuid.workspace = true
 url.workspace = true
 http = "1.4.0"
-tower = { workspace = true, features = ["tokio", "tracing"] }
+tokio-rustls = "0.26"
+tower = { workspace = true, features = ["buffer", "tokio", "tracing"] }

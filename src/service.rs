@@ -404,7 +404,8 @@ impl Service {
             // tracing::info!(?server_config, "server config");
             // tracing::info!("GOT SERVER CONFIG");
             let shutdown = &mut shutdown;
-            self.publish_mds(config, shutdown, &mut ports, server_config.clone()).await?;
+            self.publish_mds(config, shutdown, &mut ports, server_config.clone())
+                .await?;
             self.publish_phoenix(config, shutdown, &mut ports)?;
             // We need to call this before qcmp since if we use XDP we handle QCMP
             // internally without a separate task
