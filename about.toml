@@ -35,6 +35,9 @@ workarounds = ["ring"]
 [ring]
 accepted = ["OpenSSL"]
 
+[aws-lc-sys]
+accepted = ["OpenSSL"]
+
 [xxhash-rust]
 accepted = ["BSL-1.0"]
 
