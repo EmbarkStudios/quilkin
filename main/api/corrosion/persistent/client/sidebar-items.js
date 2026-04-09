@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ConnectError","StreamError","SubscriptionStop","TransactionError"],"struct":["Client","MutationClient","SubClientStream","SubscriptionClient"]};
+window.SIDEBAR_ITEMS = {"enum":["ConnectError","ExecResult","StreamError","SubscriptionStop","TransactionError"],"struct":["Client","ExecResponse","MutationClient","SubClientStream","SubscriptionClient"],"type":["QueryEvent"]};

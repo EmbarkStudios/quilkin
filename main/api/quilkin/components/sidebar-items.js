@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["admin","proxy"],"struct":["RunArgs"]};
+window.SIDEBAR_ITEMS = {"mod":["admin"]};

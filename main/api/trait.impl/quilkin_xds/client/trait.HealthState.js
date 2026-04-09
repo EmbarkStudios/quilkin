@@ -1,9 +1,9 @@
 (function() {
-    var implementors = Object.fromEntries([["quilkin_xds",[]]]);
+    const implementors = Object.fromEntries([["quilkin_xds",[]]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
         window.pending_implementors = implementors;
     }
 })()
-//{"start":57,"fragment_lengths":[18]}
+//{"start":59,"fragment_lengths":[18]}

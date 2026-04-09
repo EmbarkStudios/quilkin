@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["pool","ttl"]};
+window.SIDEBAR_ITEMS = {"mod":["ttl"]};

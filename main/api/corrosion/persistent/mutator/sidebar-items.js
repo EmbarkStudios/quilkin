@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["broadcast_changes","insert_local_changes"],"struct":["BroadcastingTransactor"],"type":["BroadcastTx"]};
