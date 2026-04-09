@@ -147,6 +147,15 @@ async fn connect_channel(uri: &Uri, connector: &XdsConnector) -> eyre::Result<Xd
             let tls_stream = tls
                 .connect(server_name, tcp)
                 .await
+                .map_err(|e| {
+                    tracing::debug!(
+                        %uri,
+                        error = %e,
+                        error_debug = ?e,
+                        "TLS handshake failed"
+                    );
+                    e
+                })
                 .wrap_err("TLS handshake failed")?;
             drive_http2_connection(tls_stream).await?
         }
