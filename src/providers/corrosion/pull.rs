@@ -145,7 +145,7 @@ async fn connect_and_sub(
     addr: &crate::net::EndpointAddress,
     change_ids: &ChangeIds,
 ) -> crate::Result<SubState> {
-    let addr = addr.to_socket_addr()?;
+    let addr = addr.to_socket_addr_async().await?;
     let root = client::Client::connect_insecure(
         addr,
         persistent::Metrics::new(crate::metrics::registry()),
