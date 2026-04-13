@@ -26,7 +26,7 @@
 <a href=#26 id=26 data-nosnippet>26</a>    },
 <a href=#27 id=27 data-nosnippet>27</a>};
 <a href=#28 id=28 data-nosnippet>28</a>
-<a href=#29 id=29 data-nosnippet>29</a><span class="kw">use </span>crate::{config, metrics::provider_task_failures_total, providers::k8s::EventProcessor};
+<a href=#29 id=29 data-nosnippet>29</a><span class="kw">use </span>crate::{config, metrics::provider_task_failures_total, providers::k8s::EventProcessor, net::EndpointAddress};
 <a href=#30 id=30 data-nosnippet>30</a><span class="kw">use </span>eyre::Context;
 <a href=#31 id=31 data-nosnippet>31</a><span class="kw">use </span>futures::TryStreamExt;
 <a href=#32 id=32 data-nosnippet>32</a>
@@ -160,7 +160,7 @@
 <a href=#160 id=160 data-nosnippet>160</a>        env = <span class="string">"QUILKIN_PROVIDERS_STATIC_ENDPOINTS"</span>,
 <a href=#161 id=161 data-nosnippet>161</a>        value_delimiter = <span class="string">','
 <a href=#162 id=162 data-nosnippet>162</a>    </span>)]
-<a href=#163 id=163 data-nosnippet>163</a>    </span>endpoints: Vec&lt;SocketAddr&gt;,
+<a href=#163 id=163 data-nosnippet>163</a>    </span>endpoints: Vec&lt;EndpointAddress&gt;,
 <a href=#164 id=164 data-nosnippet>164</a>    <span class="doccomment">/// Assigns dynamic tokens to each address in the `--to` argument
 <a href=#165 id=165 data-nosnippet>165</a>    ///
 <a href=#166 id=166 data-nosnippet>166</a>    /// Format is `&lt;number of unique tokens&gt;:&lt;length of token suffix for each packet&gt;`
@@ -352,11 +352,11 @@
 <a href=#352 id=352 data-nosnippet>352</a>                <span class="self">self</span>.endpoints
 <a href=#353 id=353 data-nosnippet>353</a>                    .iter()
 <a href=#354 id=354 data-nosnippet>354</a>                    .enumerate()
-<a href=#355 id=355 data-nosnippet>355</a>                    .map(|(ind, sa)| {
+<a href=#355 id=355 data-nosnippet>355</a>                    .map(|(ind, addr)| {
 <a href=#356 id=356 data-nosnippet>356</a>                        <span class="kw">let </span>start = ind <span class="kw">as </span>u64 * count;
 <a href=#357 id=357 data-nosnippet>357</a>
 <a href=#358 id=358 data-nosnippet>358</a>                        <span class="kw">crate</span>::net::endpoint::Endpoint::with_metadata(
-<a href=#359 id=359 data-nosnippet>359</a>                            (<span class="kw-2">*</span>sa).into(),
+<a href=#359 id=359 data-nosnippet>359</a>                            addr.clone(),
 <a href=#360 id=360 data-nosnippet>360</a>                            <span class="kw">crate</span>::net::endpoint::Metadata {
 <a href=#361 id=361 data-nosnippet>361</a>                                tokens: (start..(start + count))
 <a href=#362 id=362 data-nosnippet>362</a>                                    .map(|i| i.to_le_bytes()[..length].to_vec())
