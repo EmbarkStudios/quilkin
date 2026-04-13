@@ -70,7 +70,7 @@ pub(super) async fn corrosion_subscribe(
             for addr in endpoints.iter().cloned() {
                 let cids = change_ids.clone();
                 js.spawn(async move {
-                    let res = connect_and_sub(addr, &cids)
+                    let res = connect_and_sub(&addr, &cids)
                         .instrument(tracing::debug_span!("connect_and_sub"))
                         .await;
 
@@ -141,7 +141,11 @@ pub(super) async fn corrosion_subscribe(
 
 /// Attempts to connect to and subscribe to the queries to keep this proxy up to
 /// date with cluster status
-async fn connect_and_sub(addr: net::SocketAddr, change_ids: &ChangeIds) -> crate::Result<SubState> {
+async fn connect_and_sub(
+    addr: &crate::net::EndpointAddress,
+    change_ids: &ChangeIds,
+) -> crate::Result<SubState> {
+    let addr = addr.to_socket_addr()?;
     let root = client::Client::connect_insecure(
         addr,
         persistent::Metrics::new(crate::metrics::registry()),
