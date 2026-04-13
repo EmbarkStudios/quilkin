@@ -1,6 +1,5 @@
 use eyre::{Context, ContextCompat as _};
 use std::{
-    net,
     sync::{Arc, atomic},
     time::Duration,
 };
@@ -10,7 +9,7 @@ pub mod push;
 
 pub use push::ServerMutator;
 
-type CorrosionAddrs = Vec<std::net::SocketAddr>;
+type CorrosionAddrs = Vec<crate::net::EndpointAddress>;
 type HealthCheck = Arc<atomic::AtomicBool>;
 type State = Arc<crate::config::Config>;
 
