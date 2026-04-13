@@ -477,7 +477,7 @@ async fn connect(
     addr: &crate::net::EndpointAddress,
     info: AgentInfo,
 ) -> crate::Result<client::MutationClient> {
-    let addr = addr.to_socket_addr()?;
+    let addr = addr.to_socket_addr_async().await?;
     let root = client::Client::connect_insecure(
         addr,
         persistent::Metrics::new(crate::metrics::registry()),
