@@ -556,7 +556,7 @@ async fn applies_changes() {
     let sub_path = root.join("subs");
     let db_path = root.join("db.db");
 
-    let db = ::corrosion::db::InitializedDb::setup(&db_path, ::corrosion::schema::SCHEMA)
+    let db = ::corrosion::db::InitializedDb::setup(&db_path, ::corrosion::schema::SCHEMA, None)
         .await
         .expect("failed to initialize DB");
 

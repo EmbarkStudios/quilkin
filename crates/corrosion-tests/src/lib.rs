@@ -29,7 +29,7 @@ impl TestSubsDb {
         let sub_path = root.join("subs");
         let db_path = root.join("db.db");
 
-        let db = corrosion::db::InitializedDb::setup(&db_path, schema)
+        let db = corrosion::db::InitializedDb::setup(&db_path, schema, None)
             .await
             .expect("failed to initialize DB");
 
