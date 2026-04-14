@@ -64,8 +64,15 @@ impl EndpointAddress {
     /// if present.
     #[inline]
     pub fn to_socket_addr(&self) -> std::io::Result<SocketAddr> {
-        let handle = tokio::runtime::Handle::current();
-        handle.block_on(self.to_socket_addr_async())
+        let ip = match &self.host {
+            AddressKind::Ip(ip) => SocketAddr::from((*ip, self.port)),
+            AddressKind::Name(_name) => {
+                let handle = tokio::runtime::Handle::current();
+                handle.block_on(self.to_socket_addr_async())?
+            }
+        };
+
+        Ok(ip)
     }
 
     pub async fn to_socket_addr_async(&self) -> std::io::Result<SocketAddr> {
