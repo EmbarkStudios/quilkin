@@ -495,11 +495,8 @@ impl Pail {
                             return None;
                         };
                         corrosion_port.filter(|_a| apc.corrosion).map(|p| {
-                            SocketAddr::V6(std::net::SocketAddrV6::new(
-                                std::net::Ipv6Addr::LOCALHOST,
-                                p,
-                                0,
-                                0,
+                            quilkin::net::EndpointAddress::from(SocketAddr::V6(
+                                std::net::SocketAddrV6::new(std::net::Ipv6Addr::LOCALHOST, p, 0, 0),
                             ))
                         })
                     })
@@ -563,11 +560,13 @@ impl Pail {
                                 return None;
                             };
                             corrosion_port.map(|p| {
-                                SocketAddr::V6(std::net::SocketAddrV6::new(
-                                    std::net::Ipv6Addr::LOCALHOST,
-                                    p,
-                                    0,
-                                    0,
+                                quilkin::net::EndpointAddress::from(SocketAddr::V6(
+                                    std::net::SocketAddrV6::new(
+                                        std::net::Ipv6Addr::LOCALHOST,
+                                        p,
+                                        0,
+                                        0,
+                                    ),
                                 ))
                             })
                         })
