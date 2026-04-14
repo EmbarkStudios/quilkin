@@ -854,7 +854,12 @@ impl Service {
         let sub_path = db_root.join("subs");
         let db_path = db_root.join("db.db");
 
-        let db = corrosion::db::InitializedDb::setup(&db_path, corrosion::schema::SCHEMA).await?;
+        let db = corrosion::db::InitializedDb::setup(
+            &db_path,
+            corrosion::schema::SCHEMA,
+            Some(corrosion::db::DBMaintenance::default()),
+        )
+        .await?;
         let subs = types::pubsub::SubsManager::default();
 
         let btx = corrosion::persistent::mutator::BroadcastingTransactor::new(
