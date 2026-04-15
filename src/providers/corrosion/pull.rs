@@ -413,6 +413,7 @@ async fn process_subscription_events(
 
         if let Err(error) = res {
             tracing::error!(?error, "error processing subscription event");
+            return Err(error);
         }
     }
 }
