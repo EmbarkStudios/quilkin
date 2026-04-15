@@ -91,13 +91,23 @@ impl From<IoLoopError> for ErrorCode {
 }
 
 impl Server {
+    fn transport_config() -> quinn::TransportConfig {
+        let mut tc = quinn::TransportConfig::default();
+        // By default quinn uses an idle timeout of 30 seconds
+        tc.keep_alive_interval(Some(std::time::Duration::from_secs(20)));
+        tc
+    }
+
     pub fn new_unencrypted(
         addr: SocketAddr,
         mutator: impl DbMutator + 'static,
         subs: impl SubManager + 'static,
         metrics: super::Metrics,
     ) -> std::io::Result<Self> {
-        let endpoint = quinn::Endpoint::server(quinn_plaintext::server_config(), addr)?;
+        let mut sc = quinn_plaintext::server_config();
+        sc.transport_config(std::sync::Arc::new(Self::transport_config()));
+
+        let endpoint = quinn::Endpoint::server(sc, addr)?;
 
         let local_addr = endpoint.local_addr()?;
         let ep = endpoint.clone();
