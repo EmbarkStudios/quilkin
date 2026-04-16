@@ -988,6 +988,10 @@ pub async fn restore_subscriptions(
     // If we error trying to restore a subscription, delete it
     let mut to_cleanup = Vec::new();
 
+    let mut restored = 0;
+    let mut failed = 0;
+    let mut cleaned = 0;
+
     if let Ok(mut dir) = tokio::fs::read_dir(&subs_path).await {
         loop {
             let entry = match dir.next_entry().await {
@@ -1019,7 +1023,7 @@ pub async fn restore_subscriptions(
 
             match res {
                 Ok((_, created)) => {
-                    info!(%sub_id, "Restored subscription");
+                    restored += 1;
 
                     let (sub_tx, _) = tokio::sync::broadcast::channel(MAX_EVENTS_BUFFER_SIZE);
 
@@ -1032,8 +1036,8 @@ pub async fn restore_subscriptions(
 
                     subs_bcast_cache.insert(sub_id, sub_tx);
                 }
-                Err(error) => {
-                    error!(%sub_id, %error, "could not restore subscription");
+                Err(_error) => {
+                    failed += 1;
                     to_cleanup.push(sub_id);
                 }
             }
@@ -1042,10 +1046,12 @@ pub async fn restore_subscriptions(
 
     for sub_id in to_cleanup {
         debug!(%sub_id, "Cleaning up unclean subscription");
-        if let Err(error) = Matcher::cleanup(sub_id, &Matcher::sub_path(subs_path, sub_id)) {
-            warn!(%error, %sub_id, "failed to cleanup subscription");
+        if Matcher::cleanup(sub_id, &Matcher::sub_path(subs_path, sub_id)).is_ok() {
+            cleaned += 1;
         }
     }
+
+    tracing::info!(restored, failed, cleaned, "restored subscriptions");
 
     Ok(Arc::new(tokio::sync::RwLock::new(MatcherCache(
         subs_bcast_cache,
