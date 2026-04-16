@@ -955,11 +955,6 @@ impl Service {
                 btx: &BroadcastingTransactor,
                 statements: Vec<corrosion::api::Statement>,
             ) {
-                tracing::warn!(
-                    statement_count = statements.len(),
-                    "forwarding xDS changes to DB"
-                );
-
                 let res = btx
                     .make_broadcastable_changes(None, |tx| {
                         let mut rows = 0;
