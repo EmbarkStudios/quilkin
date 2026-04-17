@@ -55,8 +55,8 @@ pub struct SendPacket {
     pub asn_info: Option<crate::net::maxmind_db::MetricsIpNetEntry>,
 }
 
-cfg_if::cfg_if! {
-    if #[cfg(target_os = "linux")] {
+cfg_select! {
+    target_os = "linux" => {
         pub type PacketQueueReceiver = crate::net::io::completion::io_uring::EventFd;
         type PacketQueueNotifier = crate::net::io::completion::io_uring::EventFdWriter;
 
@@ -69,7 +69,8 @@ cfg_if::cfg_if! {
         fn push(notify: &PacketQueueNotifier) {
             notify.write(1);
         }
-    } else {
+    }
+    _ => {
         pub type PacketQueueReceiver = tokio::sync::watch::Receiver<bool>;
         type PacketQueueNotifier = tokio::sync::watch::Sender<bool>;
 

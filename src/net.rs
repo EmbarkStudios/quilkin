@@ -31,10 +31,11 @@ use std::{
 
 use socket2::{Protocol, Socket, Type};
 
-cfg_if::cfg_if! {
-    if #[cfg(target_os = "linux")] {
+cfg_select! {
+    target_os = "linux" => {
         use std::net::UdpSocket;
-    } else {
+    }
+    _ => {
         use tokio::net::UdpSocket;
     }
 }
@@ -52,11 +53,12 @@ pub use {
 };
 
 fn socket_with_reuse_and_address(addr: SocketAddr) -> IoResult<UdpSocket> {
-    cfg_if::cfg_if! {
-        if #[cfg(target_os = "linux")] {
+    cfg_select! {
+        target_os = "linux" => {
             raw_socket_with_reuse_and_address(addr)
                 .map(From::from)
-        } else {
+        }
+        _ => {
             epoll_socket_with_reuse_and_address(addr)
         }
     }
@@ -128,10 +130,11 @@ impl DualStackLocalSocket {
     pub fn from_raw(socket: Socket) -> Self {
         let socket: std::net::UdpSocket = socket.into();
         let local_addr = socket.local_addr().unwrap();
-        cfg_if::cfg_if! {
-            if #[cfg(target_os = "linux")] {
+        cfg_select! {
+            target_os = "linux" => {
                 let socket = socket;
-            } else {
+            }
+            _ => {
                 // This is only for macOS and Windows (non-production platforms),
                 // and should never happen anyway, so unwrap here is fine.
                 let socket = UdpSocket::from_std(socket).unwrap();
@@ -167,8 +170,15 @@ impl DualStackLocalSocket {
         })
     }
 
-    cfg_if::cfg_if! {
-        if #[cfg(not(target_os = "linux"))] {
+    cfg_select! {
+        target_os = "linux" => {
+            #[inline]
+            pub fn raw_fd(&self) -> ::io_uring::types::Fd {
+                use std::os::fd::AsRawFd;
+                ::io_uring::types::Fd(self.socket.as_raw_fd())
+            }
+        }
+        _ => {
             pub async fn recv_from<B: std::ops::DerefMut<Target = [u8]>>(&self, mut buf: B) -> (IoResult<(usize, SocketAddr)>, B) {
                 let result = self.socket.recv_from(&mut buf).await;
                 (result, buf)
@@ -178,12 +188,6 @@ impl DualStackLocalSocket {
                 let result = self.socket.send_to(&buf, target).await;
                 (result, buf)
             }
-        } else {
-            #[inline]
-            pub fn raw_fd(&self) -> ::io_uring::types::Fd {
-                use std::os::fd::AsRawFd;
-                ::io_uring::types::Fd(self.socket.as_raw_fd())
-            }
         }
     }
 
@@ -192,10 +196,11 @@ impl DualStackLocalSocket {
     }
 }
 
-cfg_if::cfg_if! {
-    if #[cfg(target_os = "linux")] {
+cfg_select! {
+    target_os = "linux" => {
         pub type DualStackLocalSocketRc = std::rc::Rc<DualStackLocalSocket>;
-    } else {
+    }
+    _ => {
         pub type DualStackLocalSocketRc = std::sync::Arc<DualStackLocalSocket>;
     }
 }

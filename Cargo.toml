@@ -71,7 +71,6 @@ base64.workspace = true
 base64-serde = "0.8.0"
 bytes.workspace = true
 camino.workspace = true
-cfg-if = "1.0"
 chacha20 = { version = "0.10", default-features = false, features = ["cipher"] }
 crossbeam-utils = { version = "0.8", optional = true }
 clap = { version = "4.5.54", features = ["cargo", "derive", "env"] }

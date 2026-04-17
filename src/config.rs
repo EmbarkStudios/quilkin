@@ -364,10 +364,11 @@ fn resolve_id(id: Option<String>) -> String {
     }
 
     fn hostname() -> Option<String> {
-        cfg_if::cfg_if! {
-            if #[cfg(target_os = "linux")] {
+        cfg_select! {
+            target_os = "linux" => {
                 sys_info::hostname().ok()
-            } else {
+            }
+            _ => {
                 None
             }
         }

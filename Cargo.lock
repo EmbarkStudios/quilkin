@@ -4215,7 +4215,6 @@ dependencies = [
  "base64-serde",
  "bytes",
  "camino",
- "cfg-if",
  "chacha20",
  "clap",
  "corrosion",
