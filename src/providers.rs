@@ -26,7 +26,10 @@ use std::{
     },
 };
 
-use crate::{config, metrics::provider_task_failures_total, providers::k8s::EventProcessor, net::EndpointAddress};
+use crate::{
+    config, metrics::provider_task_failures_total, net::EndpointAddress,
+    providers::k8s::EventProcessor,
+};
 use eyre::Context;
 use futures::TryStreamExt;
 
