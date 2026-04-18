@@ -38,7 +38,10 @@ async fn proxy_ping() {
         tokio_util::sync::CancellationToken::new(),
     );
 
-    let (task, ports) = svc.spawn_services(&config, shutdown_handler).await.unwrap();
+    let (task, ports) = svc
+        .spawn_services(&config, shutdown_handler, None)
+        .await
+        .unwrap();
 
     ping(ports.qcmp.expect("didn't spawn QCMP")).await;
     stx.send(()).unwrap();

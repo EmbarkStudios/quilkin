@@ -18,8 +18,10 @@ use std::{path::PathBuf, sync::Arc};
 
 use clap::builder::TypedValueParser;
 use clap::crate_version;
-
+use eyre::WrapErr;
+use hyper_rustls::ConfigBuilderExt;
 use strum_macros::{Display, EnumString};
+use tokio_util::time::FutureExt;
 
 pub use self::{generate_config_schema::GenerateConfigSchema, qcmp::Qcmp};
 
@@ -90,6 +92,108 @@ impl LocalityCli {
     }
 }
 
+#[derive(Debug, clap::Parser)]
+#[command(next_help_heading = "SPIFFE Options")]
+pub struct SpiffeCli {
+    #[clap(long = "spiffe.enabled", env = "QUILKIN_SPIFFE_ENABLED")]
+    spiffe_enabled: bool,
+}
+
+impl SpiffeCli {
+    async fn to_config(&self) -> crate::Result<Option<SpiffeConfig>> {
+        match self.spiffe_enabled {
+            true => {
+                // TODO await both timeout and allow ctrl-c
+                // TODO builder with .metrics()
+                let source = spiffe::X509SourceBuilder::new()
+                    // .shutdown_timeout(Some(std::time::Duration::from_secs(10)))
+                    // .reconnect_backoff(std::time::Duration::from, max_backoff)
+                    .build()
+                    .timeout(std::time::Duration::from_secs(5))
+                    .await
+                    .wrap_err("timed out connecting to SPIFFE workload API")??;
+                // let trust_domains: Vec<spiffe::TrustDomain> = self
+                //     .spiffe_server_trust_domain_policy_allowlist
+                //     .iter()
+                //     .map(|td| TryInto::<spiffe::TrustDomain>::try_into(td.as_str()))
+                //     .collect::<Result<Vec<spiffe::TrustDomain>, spiffe::SpiffeIdError>>()?;
+                Ok(Some(SpiffeConfig {
+                    source,
+                    // server_trust_domains: trust_domains,
+                    // server_spiffe_ids: self.spiffe_server_spiffe_ids.clone(),
+                }))
+            }
+            false => Ok(None),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SpiffeConfig {
+    pub source: spiffe::X509Source,
+    // server_trust_domains: Vec<spiffe::TrustDomain>,
+    // server_spiffe_ids: Vec<String>,
+}
+
+impl SpiffeConfig {
+    /// Provides a default `ClientConfigBuilder` with settings from cli args applied
+    pub fn client_builder(&self) -> crate::Result<spiffe_rustls::ClientConfigBuilder> {
+        // tracing::info!("CLIENT BUILDER");
+        let mut builder = spiffe_rustls::mtls_client(self.source.clone());
+        // Allow clients to establish mTLS to anywhere
+        builder = builder.authorize(spiffe_rustls::authorizer::any());
+        Ok(builder)
+    }
+
+    /// Provides a default `ServerConfigBuilder` with settings from cli args applied
+    pub fn server_builder(&self) -> crate::Result<spiffe_rustls::ServerConfigBuilder> {
+        // tracing::info!("SERVER BUILDER");
+        // if self.server_spiffe_ids.is_empty() && self.server_trust_domains.is_empty() {
+        //     // TODO think about this
+        //     return Err(eyre::eyre!(
+        //         "must specify either trust domains or spiffe ids for server"
+        //     ));
+        // }
+        // tracing::info!(is_healthy=%self.source.is_healthy(), "SOURCE HEALTH");
+        let mut builder = spiffe_rustls::mtls_server(self.source.clone());
+        // Allow server to accept any client allowed by the trust bundles
+        builder = builder.authorize(spiffe_rustls::authorizer::any());
+        // if self.server_spiffe_ids.len() > 0 {
+        //     builder = builder.authorize(spiffe_rustls::authorizer::exact(
+        //         self.server_spiffe_ids.iter().map(String::as_str),
+        //     )?);
+        // }
+        // if self.server_trust_domains.len() > 0 {
+        //     builder = builder.trust_domain_policy(spiffe_rustls::AllowList(
+        //         std::collections::BTreeSet::from_iter(self.server_trust_domains.iter().cloned()),
+        //     ))
+        // }
+        // tracing::info!(is_healthy=%self.source.is_healthy(), "RETURNING BUILDER");
+        Ok(builder)
+    }
+}
+
+pub fn resolve_rustls_client_config(
+    spiffe_config: &Option<SpiffeConfig>,
+) -> crate::Result<rustls::ClientConfig> {
+    if let Some(spiffe_config) = spiffe_config {
+        Ok(spiffe_config
+            .client_builder()?
+            // TODO hyper_rustls says it panics with this set
+            // .with_alpn_protocols([b"h2"])
+            .build()?)
+    } else {
+        Ok(
+            rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+                rustls::crypto::ring::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()?
+            .with_webpki_roots()
+            .with_no_client_auth(),
+        )
+    }
+}
+
 /// Quilkin: a non-transparent UDP proxy specifically designed for use with
 /// large scale multiplayer dedicated game servers deployments, to
 /// ensure security, access control, telemetry data, metrics and more.
@@ -126,6 +230,8 @@ pub struct Cli {
     pub admin: AdminCli,
     #[command(flatten)]
     pub locality: LocalityCli,
+    #[command(flatten)]
+    pub spiffe: SpiffeCli,
     #[command(flatten)]
     pub providers: crate::Providers,
     #[command(flatten)]
@@ -291,18 +397,21 @@ impl Cli {
         // Just call this early so there isn't a potential race when spawning xDS
         quilkin_xds::metrics::set_registry(crate::metrics::registry());
 
+        let spiffe_config = self.spiffe.to_config().await?;
+
         let mut provider_tasks = self.providers.spawn_providers(
             &config,
             ready.clone(),
             locality.clone(),
             None,
             shutdown_handler.shutdown_rx(),
+            resolve_rustls_client_config(&spiffe_config)?,
         );
 
         let shutdown_tx = shutdown_handler.shutdown_tx();
         let (mut service_task, _) = self
             .service
-            .spawn_services(&config, shutdown_handler)
+            .spawn_services(&config, shutdown_handler, spiffe_config)
             .await?;
 
         if provider_tasks.is_empty() {

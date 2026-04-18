@@ -329,15 +329,48 @@ impl Service {
         self
     }
 
-    fn tls_identity(&self) -> crate::Result<Option<quilkin_xds::server::TlsIdentity>> {
-        if let Some((cert, key)) = self.tls_cert.as_ref().zip(self.tls_key.as_ref()) {
-            Ok(Some(quilkin_xds::server::TlsIdentity::from_raw(cert, key)))
+    // TODO read more on using shared ServerConfig and decide if it's a good idea or if we should
+    // let each server construct its own
+    fn server_config(
+        &self,
+        spiffe_config: Option<crate::cli::SpiffeConfig>,
+    ) -> crate::Result<Option<rustls::ServerConfig>> {
+        use eyre::WrapErr as _;
+        use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject as _};
+        use std::io::Cursor;
+        if let Some(spiffe_config) = spiffe_config {
+            // TODO for now same spiffe config for all services, perhaps in the future we'll want
+            // to configure per-service?
+            Ok(Some(
+                spiffe_config
+                    .server_builder()?
+                    .with_alpn_protocols([b"h2"])
+                    .build()?,
+            ))
+        } else if let Some((cert, key)) = self.tls_cert.as_ref().zip(self.tls_key.as_ref()) {
+            let cert_der = CertificateDer::pem_reader_iter(&mut Cursor::new(cert))
+                .collect::<Result<Vec<_>, _>>()?;
+            let key_der = PrivateKeyDer::from_pem_reader(&mut Cursor::new(key))?;
+            Ok(Some(
+                rustls::ServerConfig::builder()
+                    .with_no_client_auth()
+                    .with_single_cert(cert_der, key_der)?,
+            ))
         } else if let Some((certp, keyp)) =
             self.tls_cert_path.as_ref().zip(self.tls_key_path.as_ref())
         {
-            Ok(Some(quilkin_xds::server::TlsIdentity::from_files(
-                certp, keyp,
-            )?))
+            let cert = std::fs::read(certp)
+                .with_context(|| format!("failed to read PEM certificate from {certp:?}"))?;
+            let key =
+                std::fs::read(keyp).with_context(|| format!("failed to read key from {keyp:?}"))?;
+            let cert_der = CertificateDer::pem_reader_iter(&mut Cursor::new(cert))
+                .collect::<Result<Vec<_>, _>>()?;
+            let key_der = PrivateKeyDer::from_pem_reader(&mut Cursor::new(key))?;
+            Ok(Some(
+                rustls::ServerConfig::builder()
+                    .with_no_client_auth()
+                    .with_single_cert(cert_der, key_der)?,
+            ))
         } else {
             Ok(None)
         }
@@ -351,6 +384,7 @@ impl Service {
         mut self,
         config: &Arc<Config>,
         mut shutdown: ShutdownHandler,
+        spiffe_config: Option<crate::cli::SpiffeConfig>,
     ) -> crate::Result<(
         tokio::task::JoinHandle<(ShutdownHandler, crate::Result<()>)>,
         ServicePorts,
@@ -365,16 +399,22 @@ impl Service {
         };
 
         {
+            // tracing::info!("GETTING SERVER CONFIG");
+            let server_config = self.server_config(spiffe_config)?;
+            // tracing::info!(?server_config, "server config");
+            // tracing::info!("GOT SERVER CONFIG");
             let shutdown = &mut shutdown;
-            self.publish_mds(config, shutdown, &mut ports).await?;
+            self.publish_mds(config, shutdown, &mut ports, server_config.clone())
+                .await?;
             self.publish_phoenix(config, shutdown, &mut ports)?;
             // We need to call this before qcmp since if we use XDP we handle QCMP
             // internally without a separate task
             self.publish_udp(config, shutdown, &mut ports)?;
             self.publish_qcmp(config, shutdown, &mut ports)?;
-            self.publish_xds(config, shutdown, &mut ports)?;
+            self.publish_xds(config, shutdown, &mut ports, server_config)?;
         }
 
+        tracing::info!("returing from spawn_services");
         Ok((
             tokio::spawn(async move {
                 let (tx, rx, results) = shutdown.await_any_then_shutdown().await;
@@ -502,6 +542,7 @@ impl Service {
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
         ports: &mut ServicePorts,
+        server_config: Option<rustls::ServerConfig>,
     ) -> crate::Result<()> {
         if !self.xds_enabled && !self.grpc_enabled {
             return Ok(());
@@ -518,7 +559,7 @@ impl Service {
             crate::components::admin::IDLE_REQUEST_INTERVAL,
             srx,
         )
-        .management_server(listener, self.tls_identity()?)?;
+        .management_server(listener, server_config)?;
 
         tokio::spawn(async move {
             let res = xds_server.await;
@@ -534,6 +575,7 @@ impl Service {
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
         ports: &mut ServicePorts,
+        server_config: Option<rustls::ServerConfig>,
     ) -> crate::Result<()> {
         if !self.mds_enabled {
             return Ok(());
@@ -560,7 +602,7 @@ impl Service {
             crate::components::admin::IDLE_REQUEST_INTERVAL,
             srx,
         )
-        .relay_server(listener, self.tls_identity()?)?;
+        .relay_server(listener, server_config)?;
 
         tokio::spawn(async move {
             let res = mds_server.await;

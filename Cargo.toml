@@ -81,13 +81,9 @@ eyre.workspace = true
 fixedstr.workspace = true
 futures.workspace = true
 futures-util.workspace = true
-http-body-util = "0.1"
-hyper = { version = "1.8", features = ["http2", "http1", "server"] }
-hyper-rustls = { version = "0.27", default-features = false, features = [
-    "http2",
-    "webpki-roots",
-    "ring",
-] }
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-rustls.workspace = true
 ipnetwork = { version = "0.21.1", features = ["serde"] } # keep in sync with maxmind
 kube-lease-manager.workspace = true
 k8s-openapi.workspace = true
@@ -105,12 +101,15 @@ prost.workspace = true
 prost-types.workspace = true
 rand.workspace = true
 regex.workspace = true
+rustls.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_regex = "1.1.0"
 serde_yaml = "0.9.34"
 socket2.workspace = true
+spiffe.workspace = true
+spiffe-rustls.workspace = true
 stable-eyre = "0.2.2"
 thiserror.workspace = true
 time.workspace = true
@@ -139,7 +138,6 @@ libflate = "2.2.1"
 form_urlencoded = "1.2.2"
 enum_dispatch = "0.3.13"
 gxhash = "3.5.0"
-rustls = { version = "0.23", default-features = false }
 tracing-appender.workspace = true
 axum.workspace = true
 hyper-util.workspace = true
@@ -207,6 +205,13 @@ eyre = "0.6.12"
 fixedstr = { version = "0.5", features = ["flex-str"] }
 futures = "0.3.31"
 futures-util = "0.3.31"
+http-body-util = "0.1"
+hyper = { version = "1.8", features = ["http2", "http1", "server"] }
+hyper-rustls = { version = "0.27", default-features = false, features = [
+    "http2",
+    "webpki-roots",
+    "ring",
+] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy"] }
 jemalloc_pprof = { version = "0.8", features = ["symbolize"] }
 kube = { version = "3.0", features = [
@@ -235,10 +240,14 @@ quilkin-types = { version = "0.10.0", path = "crates/types" }
 quilkin-xds = { version = "0.10.0", path = "crates/xds" }
 rand = "0.9"
 regex = "1.12.2"
+rustls = { version = "0.23", default-features = false }
 schemars = { version = "1.2", features = ["bytes1", "url2"] }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.149"
 socket2 = { version = "0.6", features = ["all"] }
+spiffe = { version = "0.12.0", features = ["x509-source", "tracing"] }
+spiffe-rustls = "0.4.8"
+spiffe-rustls-tokio = "0.1.2"
 tempfile = "3.24.0"
 thiserror = "2.0.17"
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"] }
@@ -256,6 +265,7 @@ tokio-stream = { version = "0.1.18", features = ["net", "sync"] }
 tokio-util = "0.7.18"
 tonic = { version = "0.14", default-features = false, features = ["codegen", "router", "tls-ring", "transport"] }
 tonic-prost = "0.14"
+tonic-rustls = "0.3.0"
 tower = "0.5"
 tracing = "0.1.44"
 tracing-appender = "0.2.4"
@@ -278,6 +288,13 @@ spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 sqlite-pool = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 uhlc = "0.7"
+
+# TEMPORARY PATCHES
+[patch.crates-io]
+# spiffe = { path = "../rust-spiffe/spiffe" }
+# spiffe-rustls = { path = "../rust-spiffe/spiffe-rustls" }
+spiffe = { git = "https://github.com/glindstedt/rust-spiffe", branch = "fixes" }
+spiffe-rustls = { git = "https://github.com/glindstedt/rust-spiffe", branch = "fixes" }
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"

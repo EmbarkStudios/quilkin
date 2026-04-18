@@ -72,31 +72,23 @@ fn get_external_remote_addr<T>(request: &tonic::Request<T>) -> Option<std::net::
                 .and_then(|value| value.parse().ok())
         })
         .or_else(|| request.remote_addr().map(|addr| addr.ip()))
-        .map(|ip| ip.to_canonical())
-}
-
-#[derive(Clone)]
-pub struct TlsIdentity {
-    identity: tonic::transport::Identity,
-}
-
-impl TlsIdentity {
-    pub fn from_raw(cert: &[u8], key: &[u8]) -> Self {
-        Self {
-            identity: tonic::transport::Identity::from_pem(cert, key),
-        }
-    }
-
-    pub fn from_files(cert: &std::path::Path, key: &std::path::Path) -> eyre::Result<Self> {
-        use eyre::WrapErr as _;
-        let cert = std::fs::read(cert)
-            .with_context(|| format!("failed to read PEM certificate from {cert:?}"))?;
-        let key = std::fs::read(key).with_context(|| format!("failed to read key from {key:?}"))?;
-
-        Ok(Self {
-            identity: tonic::transport::Identity::from_pem(cert, key),
+        .or_else(|| {
+            // tonic::Request::remote_addr() only checks tonic::transport types.
+            // When using tonic_rustls::Server, connect info is injected as tonic_rustls types.
+            request
+                .extensions()
+                .get::<tonic_rustls::server::TlsConnectInfo<tonic_rustls::server::TcpConnectInfo>>()
+                .and_then(|i| i.get_ref().remote_addr())
+                .map(|addr| addr.ip())
         })
-    }
+        .or_else(|| {
+            request
+                .extensions()
+                .get::<tonic_rustls::server::TcpConnectInfo>()
+                .and_then(|i| i.remote_addr())
+                .map(|addr| addr.ip())
+        })
+        .map(|ip| ip.to_canonical())
 }
 
 const RESPONSE_PROPAGATION_INTERVAL: Duration = Duration::from_millis(100);
@@ -177,8 +169,9 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         }
     }
 
-    fn server_builder() -> tonic::transport::Server {
-        tonic::transport::Server::builder()
+    fn server_builder() -> tonic_rustls::Server {
+        // TODO think about this dep
+        tonic_rustls::Server::builder()
             .http2_keepalive_interval(Some(crate::HTTP2_KEEPALIVE_INTERVAL))
             .http2_keepalive_timeout(Some(crate::HTTP2_KEEPALIVE_TIMEOUT))
     }
@@ -186,7 +179,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
     pub fn management_server(
         self,
         listener: TcpListener,
-        tls: Option<TlsIdentity>,
+        server_config: Option<rustls::ServerConfig>,
     ) -> eyre::Result<impl std::future::Future<Output = crate::Result<()>>> {
         let srx = self.shutdown.clone();
         tokio::spawn({
@@ -199,8 +192,8 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
             .max_encoding_message_size(crate::config::max_grpc_message_size());
         let builder = Self::server_builder();
 
-        let mut builder = if let Some(tls) = tls {
-            builder.tls_config(tonic::transport::ServerTlsConfig::new().identity(tls.identity))?
+        let mut builder = if let Some(server_config) = server_config {
+            builder.tls_config(server_config)?
         } else {
             builder
         };
@@ -217,7 +210,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
     pub fn relay_server(
         self,
         listener: TcpListener,
-        tls: Option<TlsIdentity>,
+        server_config: Option<rustls::ServerConfig>,
     ) -> eyre::Result<impl std::future::Future<Output = crate::Result<()>>> {
         let srx = self.shutdown.clone();
         tokio::spawn({
@@ -230,8 +223,8 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
             .max_encoding_message_size(crate::config::max_grpc_message_size());
         let builder = Self::server_builder();
 
-        let mut builder = if let Some(tls) = tls {
-            builder.tls_config(tonic::transport::ServerTlsConfig::new().identity(tls.identity))?
+        let mut builder = if let Some(server_config) = server_config {
+            builder.tls_config(server_config)?
         } else {
             builder
         };
