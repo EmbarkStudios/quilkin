@@ -1018,7 +1018,7 @@ impl Service {
         // Spin up a UDP socket to receive state mutations from agents and send
         // events to proxy subscribers
         let udp_server = corrosion::persistent::server::Server::new_unencrypted(
-            (std::net::Ipv6Addr::UNSPECIFIED, self.corrosion_port).into(),
+            (std::net::Ipv4Addr::UNSPECIFIED, self.corrosion_port).into(),
             btx,
             ps_ctx,
             corrosion::persistent::Metrics::new(crate::metrics::registry()),
