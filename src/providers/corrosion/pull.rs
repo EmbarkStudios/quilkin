@@ -169,7 +169,7 @@ async fn connect_and_sub(
     });
     js.spawn({
         let root = root.clone();
-        let from = change_ids[Which::Servers];
+        let from = change_ids[Which::Clusters];
 
         async move {
             let mut sp = SubParams::new(pubsub::DC_QUERY);
@@ -182,7 +182,7 @@ async fn connect_and_sub(
     });
     js.spawn({
         let root = root.clone();
-        let from = change_ids[Which::Servers];
+        let from = change_ids[Which::Filter];
 
         async move {
             let mut sp = SubParams::new(pubsub::FILTER_QUERY);
