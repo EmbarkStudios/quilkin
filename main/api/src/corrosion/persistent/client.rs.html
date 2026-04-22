@@ -101,7 +101,7 @@
 <a href=#101 id=101 data-nosnippet>101</a>        addr: SocketAddr,
 <a href=#102 id=102 data-nosnippet>102</a>        metrics: <span class="kw">super</span>::Metrics,
 <a href=#103 id=103 data-nosnippet>103</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ConnectError&gt; {
-<a href=#104 id=104 data-nosnippet>104</a>        <span class="kw">let </span>ep = quinn::Endpoint::client((std::net::Ipv6Addr::LOCALHOST, <span class="number">0</span>).into())<span class="question-mark">?</span>;
+<a href=#104 id=104 data-nosnippet>104</a>        <span class="kw">let </span>ep = quinn::Endpoint::client((std::net::Ipv6Addr::UNSPECIFIED, <span class="number">0</span>).into())<span class="question-mark">?</span>;
 <a href=#105 id=105 data-nosnippet>105</a>
 <a href=#106 id=106 data-nosnippet>106</a>        <span class="kw">let </span>conn = ep
 <a href=#107 id=107 data-nosnippet>107</a>            .connect_with(
