@@ -101,12 +101,7 @@ impl Client {
         addr: SocketAddr,
         metrics: super::Metrics,
     ) -> Result<Self, ConnectError> {
-        let lh: SocketAddr = if addr.is_ipv4() {
-            (std::net::Ipv4Addr::LOCALHOST, 0).into()
-        } else {
-            (std::net::Ipv6Addr::LOCALHOST, 0).into()
-        };
-        let ep = quinn::Endpoint::client(lh)?;
+        let ep = quinn::Endpoint::client((std::net::Ipv6Addr::UNSPECIFIED, 0).into())?;
 
         let conn = ep
             .connect_with(
