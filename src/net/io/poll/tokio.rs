@@ -116,10 +116,11 @@ impl crate::net::io::Listener {
                 let _ = tx.send(());
             };
 
-            cfg_if::cfg_if! {
-                if #[cfg(debug_assertions)] {
+            cfg_select! {
+                debug_assertions => {
                     uring_inner_spawn!(inner_task.instrument(tracing::debug_span!("upstream").or_current()));
-                } else {
+                }
+                _ => {
                     uring_inner_spawn!(inner_task);
                 }
             }

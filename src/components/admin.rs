@@ -112,9 +112,11 @@ impl Admin {
             .route("/readyz", axum::routing::get(ready))
             .route("/config", axum::routing::get(config));
 
-        cfg_if::cfg_if! {
-            if #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))] {
-                router = router.route("/debug/pprof/allocs", axum::routing::get(|| async {
+        #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
+        {
+            router = router.route(
+                "/debug/pprof/allocs",
+                axum::routing::get(|| async {
                     match handle_get_heap().await {
                         Ok(response) => response,
                         Err((status_code, msg)) => Response::builder()
@@ -122,13 +124,15 @@ impl Admin {
                             .body(Body::new(Bytes::from(msg)))
                             .unwrap(),
                     }
-                }));
-            }
+                }),
+            );
         }
 
-        cfg_if::cfg_if! {
-            if #[cfg(target_os = "linux")] {
-                router = router.route("/debug/pprof/profile", axum::routing::get(|params: axum::extract::Query<ProfileParams>| async move {
+        #[cfg(target_os = "linux")]
+        {
+            router = router.route(
+                "/debug/pprof/profile",
+                axum::routing::get(|params: axum::extract::Query<ProfileParams>| async move {
                     match collect_pprof(params.seconds.map(std::time::Duration::from_secs)).await {
                         Ok(value) => value.into_response(),
                         Err(error) => {
@@ -136,8 +140,8 @@ impl Admin {
                             (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
                         }
                     }
-                }));
-            }
+                }),
+            );
         }
 
         router.with_state(self)
