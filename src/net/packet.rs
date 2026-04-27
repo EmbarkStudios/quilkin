@@ -247,7 +247,6 @@ mod tests {
 
     use quilkin_xds::locality::Locality;
 
-    use crate::collections::BufferPool;
     use crate::net::Endpoint;
     use crate::test::alloc_buffer;
 
@@ -261,14 +260,21 @@ mod tests {
         let nl1 = Locality::with_region("nl-1");
         let endpoint = Endpoint::new((Ipv4Addr::LOCALHOST, 7777).into());
 
-        let config = Arc::new(Config::default_agent().cluster(
-            None,
-            Some(nl1.clone()),
-            [endpoint.clone()].into(),
-        ));
-        let buffer_pool = Arc::new(BufferPool::new(1, 10));
-        let session_manager = SessionPool::new(config.clone(), vec![], buffer_pool.clone());
+        let providers = crate::Providers::default();
+        let service = crate::Service::default();
+        let mut config = Config::new(None, Default::default(), &providers, &service);
+        // FilterChain is not inserted by Service::default() unless a network
+        // service is enabled; insert it manually for this test.
+        crate::config::insert_default::<crate::filters::FilterChain>(&mut config.dyn_cfg.typemap);
+        config.dyn_cfg.clusters().unwrap().modify(|clusters| {
+            clusters.insert(None, Some(nl1.clone()), [endpoint.clone()].into());
+        });
+        let config = Arc::new(config);
 
+        let cached_filter_chain = config.dyn_cfg.cached_filter_chain().unwrap();
+        let session_manager = SessionPool::new(vec![], cached_filter_chain);
+
+        let filter_chain = crate::filters::FilterChain::default();
         let packet_data: [u8; 4] = [1, 2, 3, 4];
         for ip in [
             IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -286,6 +292,7 @@ mod tests {
                     IpAddr::V4(ipv4) => SocketAddr::V4(SocketAddrV4::new(ipv4, 0)),
                     IpAddr::V6(ipv6) => SocketAddr::V6(SocketAddrV6::new(ipv6, 0, 0, 0)),
                 },
+                filters: &filter_chain,
             };
 
             let mut endpoints = vec![endpoint.address.clone()];

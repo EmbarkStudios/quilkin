@@ -16,6 +16,7 @@
 
 pub mod corrosion;
 pub mod fs;
+pub mod http;
 pub mod k8s;
 
 use std::{
@@ -194,6 +195,21 @@ pub struct Providers {
         env = "QUILKIN_PROVIDERS_CORROSION_MODE"
     )]
     corrosion_mode: Option<corrosion::CorrosionMode>,
+    /// Enable the HTTP provider, which exposes a REST API for managing endpoints
+    /// and the filter chain.
+    #[arg(
+        long = "provider.http",
+        env = "QUILKIN_PROVIDERS_HTTP",
+        default_value_t = false
+    )]
+    http_enabled: bool,
+    /// The socket address the HTTP provider listens on.
+    #[arg(
+        long = "provider.http.address",
+        env = "QUILKIN_PROVIDERS_HTTP_ADDRESS",
+        requires("http_enabled")
+    )]
+    http_address: Option<SocketAddr>,
 }
 
 #[derive(Clone)]
@@ -288,6 +304,16 @@ impl Providers {
 
     pub fn corrosion_endpoints(mut self, endpoints: impl Into<Vec<SocketAddr>>) -> Self {
         self.corrosion_endpoints = endpoints.into();
+        self
+    }
+
+    pub fn http(mut self) -> Self {
+        self.http_enabled = true;
+        self
+    }
+
+    pub fn http_address(mut self, addr: SocketAddr) -> Self {
+        self.http_address = Some(addr);
         self
     }
 
@@ -675,11 +701,16 @@ impl Providers {
             .is_some_and(|_cm| !self.corrosion_endpoints.is_empty())
     }
 
+    pub fn http_enabled(&self) -> bool {
+        self.http_enabled
+    }
+
     pub fn any_provider_enabled(&self) -> bool {
         self.agones_enabled()
             || self.fs_enabled()
             || self.grpc_pull_enabled()
             || self.grpc_push_enabled()
+            || self.http_enabled()
             || self.k8s_enabled()
             || self.mmdb_enabled()
             || self.static_enabled()
@@ -718,6 +749,7 @@ impl Providers {
             self.fs_enabled().then_some("fs"),
             self.grpc_pull_enabled().then_some("mDS"),
             self.grpc_push_enabled().then_some("xDS"),
+            self.http_enabled().then_some("http"),
             self.k8s_enabled().then_some("k8s"),
             self.mmdb_enabled().then_some("mmdb"),
             self.static_enabled().then_some("static"),
@@ -781,6 +813,21 @@ impl Providers {
                         )
                     }
                 },
+            ));
+        }
+
+        if self.http_enabled()
+            && let Some(fc) = FiltersAndClusters::new(config)
+        {
+            let address = self
+                .http_address
+                .unwrap_or_else(|| (std::net::Ipv6Addr::UNSPECIFIED, http::DEFAULT_PORT).into());
+            let health_check = health_check.clone();
+
+            providers.spawn(Self::task(
+                "http_provider".into(),
+                health_check.clone(),
+                move || http::serve(fc.clone(), address, health_check.clone()),
             ));
         }
 
