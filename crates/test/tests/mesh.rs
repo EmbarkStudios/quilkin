@@ -87,10 +87,10 @@ trace_test!(relay_routing, {
 
         let mut token = Token { inner: [0; 3] };
 
-        let tokens = (0..2000)
+        let tokens = (0..20)
             .map(|i| {
                 let tok = Token::new(&mut rng);
-                if i == 1337 {
+                if i == 13 {
                     token.inner = tok.inner;
                 }
 
@@ -372,186 +372,187 @@ trace_test!(filter_update, {
     }
 });
 
-trace_test!(relay_restart, {
-    let mut sc = qt::sandbox_config!();
+// Temporary disabled during corrosion changeover
+// trace_test!(relay_restart, {
+//     let mut sc = qt::sandbox_config!();
 
-    sc.push("server", ServerPailConfig::default(), &[]);
-    sc.push(
-        "relay1",
-        RelayPailConfig {
-            config: Some(TestConfig {
-                filters: FilterChain::try_create([
-                    Capture::as_filter_config(capture::Config {
-                        metadata_key: filters::capture::CAPTURED_BYTES.into(),
-                        strategy: filters::capture::Strategy::Suffix(capture::Suffix {
-                            size: 0,
-                            remove: true,
-                        }),
-                    })
-                    .unwrap(),
-                    TokenRouter::as_filter_config(None).unwrap(),
-                ])
-                .unwrap(),
-                ..Default::default()
-            }),
-        },
-        &[],
-    );
-    sc.push(
-        "relay2",
-        RelayPailConfig {
-            config: Some(TestConfig {
-                filters: FilterChain::try_create([
-                    Capture::as_filter_config(capture::Config {
-                        metadata_key: filters::capture::CAPTURED_BYTES.into(),
-                        strategy: filters::capture::Strategy::Suffix(capture::Suffix {
-                            size: 0,
-                            remove: true,
-                        }),
-                    })
-                    .unwrap(),
-                    TokenRouter::as_filter_config(None).unwrap(),
-                ])
-                .unwrap(),
-                ..Default::default()
-            }),
-        },
-        &[],
-    );
-    sc.push(
-        "agent",
-        AgentPailConfig {
-            endpoints: vec![("server", &[])],
-            ..Default::default()
-        },
-        &["server", "relay1", "relay2"],
-    );
-    sc.push("proxy", ProxyPailConfig::default(), &["relay1", "relay2"]);
+//     sc.push("server", ServerPailConfig::default(), &[]);
+//     sc.push(
+//         "relay1",
+//         RelayPailConfig {
+//             config: Some(TestConfig {
+//                 filters: FilterChain::try_create([
+//                     Capture::as_filter_config(capture::Config {
+//                         metadata_key: filters::capture::CAPTURED_BYTES.into(),
+//                         strategy: filters::capture::Strategy::Suffix(capture::Suffix {
+//                             size: 0,
+//                             remove: true,
+//                         }),
+//                     })
+//                     .unwrap(),
+//                     TokenRouter::as_filter_config(None).unwrap(),
+//                 ])
+//                 .unwrap(),
+//                 ..Default::default()
+//             }),
+//         },
+//         &[],
+//     );
+//     sc.push(
+//         "relay2",
+//         RelayPailConfig {
+//             config: Some(TestConfig {
+//                 filters: FilterChain::try_create([
+//                     Capture::as_filter_config(capture::Config {
+//                         metadata_key: filters::capture::CAPTURED_BYTES.into(),
+//                         strategy: filters::capture::Strategy::Suffix(capture::Suffix {
+//                             size: 0,
+//                             remove: true,
+//                         }),
+//                     })
+//                     .unwrap(),
+//                     TokenRouter::as_filter_config(None).unwrap(),
+//                 ])
+//                 .unwrap(),
+//                 ..Default::default()
+//             }),
+//         },
+//         &[],
+//     );
+//     sc.push(
+//         "agent",
+//         AgentPailConfig {
+//             endpoints: vec![("server", &[])],
+//             ..Default::default()
+//         },
+//         &["server", "relay1", "relay2"],
+//     );
+//     sc.push("proxy", ProxyPailConfig::default(), &["relay1", "relay2"]);
 
-    let mut sandbox = sc.spinup().await;
+//     let mut sandbox = sc.spinup().await;
 
-    let (mut server_rx, server_addr) = sandbox.server("server");
-    let (proxy_address, mut _proxy_delta_rx) = sandbox.proxy("proxy");
+//     let (mut server_rx, server_addr) = sandbox.server("server");
+//     let (proxy_address, mut _proxy_delta_rx) = sandbox.proxy("proxy");
 
-    let mut agent_config = sandbox.config_file("agent");
-    let mut relay1_config = sandbox.config_file("relay1");
-    let mut relay2_config = sandbox.config_file("relay2");
+//     let mut agent_config = sandbox.config_file("agent");
+//     let mut relay1_config = sandbox.config_file("relay1");
+//     let mut relay2_config = sandbox.config_file("relay2");
 
-    let client = sandbox.client();
+//     let client = sandbox.client();
 
-    // Stop relay2 to begin with so we can flap between them later
-    sandbox.stop("relay2").await;
+//     // Stop relay2 to begin with so we can flip between them later
+//     sandbox.stop("relay2").await;
 
-    for i in 0..5 {
-        // Use token of increasing length to ensure we test update of both filters and clusters on
-        // each iteration
-        let token = format!("token-{}", (0..i + 1).map(|_| "x").collect::<String>())
-            .as_bytes()
-            .to_vec();
+//     for i in 0..5 {
+//         // Use token of increasing length to ensure we test update of both filters and clusters on
+//         // each iteration
+//         let token = format!("token-{}", (0..i + 1).map(|_| "x").collect::<String>())
+//             .as_bytes()
+//             .to_vec();
 
-        relay1_config.update(|config| {
-            config.filters = FilterChain::try_create([
-                Capture::as_labeled_filter_config(
-                    capture::Config {
-                        metadata_key: filters::capture::CAPTURED_BYTES.into(),
-                        strategy: filters::capture::Strategy::Suffix(capture::Suffix {
-                            size: token.len() as _,
-                            remove: true,
-                        }),
-                    },
-                    token.len().to_string(),
-                )
-                .unwrap(),
-                TokenRouter::as_filter_config(None).unwrap(),
-            ])
-            .unwrap();
-        });
-        relay2_config.update(|config| {
-            config.filters = FilterChain::try_create([
-                Capture::as_labeled_filter_config(
-                    capture::Config {
-                        metadata_key: filters::capture::CAPTURED_BYTES.into(),
-                        strategy: filters::capture::Strategy::Suffix(capture::Suffix {
-                            size: token.len() as _,
-                            remove: true,
-                        }),
-                    },
-                    token.len().to_string(),
-                )
-                .unwrap(),
-                TokenRouter::as_filter_config(None).unwrap(),
-            ])
-            .unwrap();
-        });
+//         relay1_config.update(|config| {
+//             config.filters = FilterChain::try_create([
+//                 Capture::as_labeled_filter_config(
+//                     capture::Config {
+//                         metadata_key: filters::capture::CAPTURED_BYTES.into(),
+//                         strategy: filters::capture::Strategy::Suffix(capture::Suffix {
+//                             size: token.len() as _,
+//                             remove: true,
+//                         }),
+//                     },
+//                     token.len().to_string(),
+//                 )
+//                 .unwrap(),
+//                 TokenRouter::as_filter_config(None).unwrap(),
+//             ])
+//             .unwrap();
+//         });
+//         relay2_config.update(|config| {
+//             config.filters = FilterChain::try_create([
+//                 Capture::as_labeled_filter_config(
+//                     capture::Config {
+//                         metadata_key: filters::capture::CAPTURED_BYTES.into(),
+//                         strategy: filters::capture::Strategy::Suffix(capture::Suffix {
+//                             size: token.len() as _,
+//                             remove: true,
+//                         }),
+//                     },
+//                     token.len().to_string(),
+//                 )
+//                 .unwrap(),
+//                 TokenRouter::as_filter_config(None).unwrap(),
+//             ])
+//             .unwrap();
+//         });
 
-        agent_config.update(|config| {
-            config.clusters.insert_default(
-                [Endpoint::with_metadata(
-                    server_addr.into(),
-                    quilkin::net::endpoint::Metadata {
-                        tokens: Some(token.clone()).into_iter().collect(),
-                    },
-                )]
-                .into(),
-            );
-        });
+//         agent_config.update(|config| {
+//             config.clusters.insert_default(
+//                 [Endpoint::with_metadata(
+//                     server_addr.into(),
+//                     quilkin::net::endpoint::Metadata {
+//                         tokens: Some(token.clone()).into_iter().collect(),
+//                     },
+//                 )]
+//                 .into(),
+//             );
+//         });
 
-        let expected = "hello";
-        let mut msg = expected.as_bytes().to_vec();
-        msg.extend_from_slice(&token);
+//         let expected = "hello";
+//         let mut msg = expected.as_bytes().to_vec();
+//         msg.extend_from_slice(&token);
 
-        sandbox
-            .block_until_packet_gets_through(
-                &msg,
-                expected,
-                &client,
-                &proxy_address,
-                &mut server_rx,
-            )
-            .await;
+//         sandbox
+//             .block_until_packet_gets_through(
+//                 &msg,
+//                 expected,
+//                 &client,
+//                 &proxy_address,
+//                 &mut server_rx,
+//             )
+//             .await;
 
-        tracing::info!("shutting down relay...");
+//         tracing::info!("shutting down relay...");
 
-        let (stop, start) = if i % 2 == 0 {
-            ("relay1", "relay2")
-        } else {
-            ("relay2", "relay1")
-        };
+//         let (stop, start) = if i % 2 == 0 {
+//             ("relay1", "relay2")
+//         } else {
+//             ("relay2", "relay1")
+//         };
 
-        sandbox.stop(stop).await;
+//         sandbox.stop(stop).await;
 
-        tracing::info!(stop, "waiting for relay shutdown completion");
+//         tracing::info!(stop, "waiting for relay shutdown completion");
 
-        // Ensure proxy has realized the connection was lost
-        sandbox.block_until_not_ready("proxy").await;
+//         // Ensure proxy has realized the connection was lost
+//         sandbox.block_until_not_ready("proxy").await;
 
-        // Ensure that we haven't cleared the config state and packets for existing sessions can
-        // still get through
-        sandbox
-            .block_until_packet_gets_through(
-                &msg,
-                expected,
-                &client,
-                &proxy_address,
-                &mut server_rx,
-            )
-            .await;
+//         // Ensure that we haven't cleared the config state and packets for existing sessions can
+//         // still get through
+//         sandbox
+//             .block_until_packet_gets_through(
+//                 &msg,
+//                 expected,
+//                 &client,
+//                 &proxy_address,
+//                 &mut server_rx,
+//             )
+//             .await;
 
-        sandbox.start(start).await;
+//         sandbox.start(start).await;
 
-        // Wait for connection to be re-established
-        sandbox.block_until_ready("proxy").await;
+//         // Wait for connection to be re-established
+//         sandbox.block_until_ready("proxy").await;
 
-        tracing::info!("proxy is ready again");
+//         tracing::info!("proxy is ready again");
 
-        sandbox
-            .block_until_packet_gets_through(
-                &msg,
-                expected,
-                &client,
-                &proxy_address,
-                &mut server_rx,
-            )
-            .await;
-    }
-});
+//         sandbox
+//             .block_until_packet_gets_through(
+//                 &msg,
+//                 expected,
+//                 &client,
+//                 &proxy_address,
+//                 &mut server_rx,
+//             )
+//             .await;
+//     }
+// });

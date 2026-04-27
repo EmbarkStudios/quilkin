@@ -17,6 +17,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
+    net::IpAddr,
     sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
 };
 
@@ -229,6 +230,16 @@ impl EndpointSet {
     }
 
     #[inline]
+    pub fn into_endpoints(self) -> impl Iterator<Item = quilkin_types::Endpoint> {
+        self.endpoints
+            .into_keys()
+            .map(|addr| quilkin_types::Endpoint {
+                address: addr.host,
+                port: addr.port,
+            })
+    }
+
+    #[inline]
     pub fn endpoint_iter(&self) -> impl Iterator<Item = Endpoint> {
         self.endpoints.iter().map(|(addr, md)| Endpoint {
             address: addr.clone(),
@@ -314,11 +325,46 @@ impl EndpointSet {
     fn replace(
         &mut self,
         replacement: Self,
+        removed: &mut Vec<quilkin_types::Endpoint>,
+        upserted: &mut Vec<(quilkin_types::Endpoint, quilkin_types::TokenSet)>,
     ) -> (
         usize,
         std::collections::HashMap<u64, Option<BTreeSet<EndpointAddress>>>,
     ) {
-        let old_len = std::mem::replace(&mut self.endpoints, replacement.endpoints).len();
+        let old = std::mem::replace(&mut self.endpoints, replacement.endpoints);
+
+        for (addr, md) in &self.endpoints {
+            if let Some(o) = old.get(addr) {
+                if md.known.tokens != o.known.tokens {
+                    upserted.push((
+                        quilkin_types::Endpoint {
+                            address: addr.host.clone(),
+                            port: addr.port,
+                        },
+                        md.known.tokens.clone(),
+                    ));
+                }
+            } else {
+                upserted.push((
+                    quilkin_types::Endpoint {
+                        address: addr.host.clone(),
+                        port: addr.port,
+                    },
+                    md.known.tokens.clone(),
+                ));
+            }
+        }
+
+        let old_len = old.len();
+
+        for (addr, _md) in old {
+            if !self.endpoints.contains_key(&addr) {
+                removed.push(quilkin_types::Endpoint {
+                    address: addr.host,
+                    port: addr.port,
+                });
+            }
+        }
 
         let old_tm = if replacement.hash == 0 {
             self.update()
@@ -401,11 +447,13 @@ impl EndpointSet {
         &mut self,
         ss: corrosion::pubsub::SubscriptionStream,
         token_map: &DashMap<u64, BTreeSet<EndpointAddress>>,
-    ) -> ChangeId {
+    ) -> (ChangeId, isize) {
         use corrosion::{
             api::{TypedQueryEvent as tqe, sqlite::ChangeType},
             db::read::{self, FromSqlValue},
         };
+
+        let start = self.endpoints.len() as isize;
 
         for eve in ss {
             let eve = match eve {
@@ -416,7 +464,7 @@ impl EndpointSet {
                 }
             };
 
-            let (cty, row, row_id) = match eve {
+            let (cty, srow, row_id) = match eve {
                 tqe::Change(cty, rid, row, cid) => {
                     // It's possible? to get a change id that is smaller than the current one,
                     // we still apply it, but we only ever keep the highest one
@@ -425,10 +473,17 @@ impl EndpointSet {
                     (cty, row, rid)
                 }
                 tqe::Row(rid, row) => (ChangeType::Insert, row, rid),
+                tqe::EndOfQuery { change_id, .. } => {
+                    if let Some(cid) = change_id {
+                        self.change_id = ChangeId(cid.0.max(self.change_id.0));
+                    }
+
+                    continue;
+                }
                 _ => continue,
             };
 
-            let row = match read::ServerRow::from_sql(&row) {
+            let row = match read::ServerRow::from_sql(&srow) {
                 Ok(sr) => sr,
                 Err(error) => {
                     tracing::warn!(%error, row_id = row_id.0, "failed to deserialize server row");
@@ -536,7 +591,7 @@ impl EndpointSet {
             }
         }
 
-        self.change_id
+        (self.change_id, self.endpoints.len() as isize - start)
     }
 }
 
@@ -626,24 +681,34 @@ where
     #[inline]
     pub fn insert(
         &self,
-        remote_addr: Option<std::net::IpAddr>,
+        remote_addr: Option<IpAddr>,
         locality: Option<Locality>,
         cluster: BTreeSet<Endpoint>,
     ) {
-        let _res = self.apply(remote_addr, locality, EndpointSet::new(cluster));
+        let mut r = Vec::new();
+        let mut u = Vec::new();
+        let _res = self.apply(
+            remote_addr,
+            locality,
+            EndpointSet::new(cluster),
+            &mut r,
+            &mut u,
+        );
     }
 
     pub fn apply(
         &self,
-        remote_addr: Option<std::net::IpAddr>,
+        remote_addr: Option<IpAddr>,
         locality: Option<Locality>,
         cluster: EndpointSet,
+        removed: &mut Vec<quilkin_types::Endpoint>,
+        upserted: &mut Vec<(quilkin_types::Endpoint, quilkin_types::TokenSet)>,
     ) -> crate::Result<()> {
         if let Some(raddr) = self.localities.get(&locality) {
             if *raddr != remote_addr {
                 eyre::bail!(
                     "skipping cluster apply, '{locality:?}' is managed by '{:?}', not '{remote_addr:?}'",
-                    raddr.key()
+                    raddr.value()
                 );
             }
         } else {
@@ -654,7 +719,7 @@ where
         if let Some(mut current) = self.map.get_mut(&locality) {
             let current = current.value_mut();
 
-            let (old_len, token_map_diff) = current.replace(cluster);
+            let (old_len, token_map_diff) = current.replace(cluster, removed, upserted);
 
             if new_len >= old_len {
                 self.num_endpoints.fetch_add(new_len - old_len, Relaxed);
@@ -676,6 +741,8 @@ where
                 self.token_map
                     .insert(*token_hash, addrs.iter().cloned().collect());
             }
+
+            upserted.extend(cluster.to_map());
 
             self.map.insert(locality, cluster);
             self.num_endpoints.fetch_add(new_len, Relaxed);
@@ -703,6 +770,18 @@ where
     #[inline]
     pub fn insert_default(&self, endpoints: BTreeSet<Endpoint>) {
         self.insert(None, None, endpoints);
+    }
+
+    #[inline]
+    pub fn locality_for_ip(&self, ip: IpAddr) -> Option<Locality> {
+        let ip = &Some(ip);
+        self.localities.iter().find_map(|entry| {
+            if entry.value() == ip {
+                entry.key().clone()
+            } else {
+                None
+            }
+        })
     }
 
     /// Applies a batch of updates to the `ClusterMap`
@@ -874,10 +953,20 @@ where
         static CORRO: std::sync::LazyLock<Locality> =
             std::sync::LazyLock::new(|| Locality::new("corrosion", "", ""));
 
-        self.map
+        let (id, diff) = self
+            .map
             .entry(Some((*CORRO).clone()))
             .or_insert_with(|| EndpointSet::new(BTreeSet::default()))
-            .corrosion_apply(ss, &self.token_map)
+            .corrosion_apply(ss, &self.token_map);
+
+        // If we don't update the num_endpoints and it's 0, no filter will run!
+        if diff >= 0 {
+            self.num_endpoints.fetch_add(diff as usize, Relaxed);
+        } else {
+            self.num_endpoints.fetch_sub(diff.unsigned_abs(), Relaxed);
+        }
+
+        id
     }
 }
 

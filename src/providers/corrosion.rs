@@ -1,6 +1,5 @@
 use eyre::{Context, ContextCompat as _};
 use std::{
-    net,
     sync::{Arc, atomic},
     time::Duration,
 };
@@ -10,7 +9,7 @@ pub mod push;
 
 pub use push::ServerMutator;
 
-type CorrosionAddrs = Vec<std::net::SocketAddr>;
+type CorrosionAddrs = Vec<crate::net::EndpointAddress>;
 type HealthCheck = Arc<atomic::AtomicBool>;
 type State = Arc<crate::config::Config>;
 
@@ -50,8 +49,6 @@ impl super::Providers {
     ///    and send those mutations to a remote corrosion DB
     /// 1. If `[CorrosionMode::Pull]`, spawns a provider that subscribes to changes from a remote
     ///    corrosion DB and applies events to the local state
-    /// 1. If `[CorrosionMode::Db]`, creates or opens a corrosion DB and spins up a
-    ///    server that remote clients can push or pull changes to/from
     pub(super) fn maybe_spawn_corrosion(
         &self,
         config: &State,

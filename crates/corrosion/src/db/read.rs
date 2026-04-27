@@ -25,14 +25,15 @@ pub struct ServerRow {
     pub tokens: TokenSet,
 }
 
-pub fn deserialize_token_set(s: &str) -> eyre::Result<TokenSet> {
+pub fn deserialize_token_set(s: Option<&str>) -> eyre::Result<TokenSet> {
     let mut ts = BTreeSet::default();
 
-    let mut tokens = data_encoding::BASE64_NOPAD.decode(s.as_bytes())?;
-
-    if tokens.is_empty() {
+    let Some(mut tokens) = s.and_then(|s| {
+        let dec = data_encoding::BASE64_NOPAD.decode(s.as_bytes()).ok()?;
+        (!dec.is_empty()).then_some(dec)
+    }) else {
         return Ok(TokenSet(ts));
-    }
+    };
 
     if tokens[0] & 0x80u8 != 0 {
         let len = (tokens[0] & !0x80) as usize;
@@ -76,7 +77,15 @@ macro_rules! get_column {
         $v.get($index)
             .context(concat!("missing column '", $name, "'"))?
             .as_str()
-            .context(concat!("column '", $name, "' is not a string"))?
+    };
+    (req $index:expr, $name:literal, $v:expr) => {
+        get_column!($index, $name, $v).with_context(|| {
+            format!(
+                "{}: {}",
+                concat!("column '", $name, "(", $index, ")' is not a string"),
+                $v[$index]
+            )
+        })?
     };
 }
 
@@ -91,8 +100,9 @@ macro_rules! get_json {
 
 impl FromSqlValue for ServerRow {
     fn from_sql(values: &[SqliteValue]) -> eyre::Result<Self> {
-        let endpoint = parse_endpoint(get_column!(0, "endpoint", values))?;
-        let icao = get_column!(1, "icao", values).parse()?;
+        let endpoint = parse_endpoint(get_column!(req 0, "endpoint", values))?;
+        let icao =
+            get_column!(1, "icao", values).map_or(Ok(IcaoCode::default()), IcaoCode::from_str)?;
         let tokens = deserialize_token_set(get_column!(2, "tokens", values))?;
 
         Ok(Self {
@@ -150,7 +160,7 @@ pub struct DatacenterRow {
 
 impl FromSqlValue for DatacenterRow {
     fn from_sql(values: &[SqliteValue]) -> eyre::Result<Self> {
-        let ip = get_column!(0, "ip", values).parse::<Ipv6Addr>()?;
+        let ip = get_column!(req 0, "ip", values).parse::<Ipv6Addr>()?;
 
         // We always store in IPv6, but (currently) the datacenter map
         // uses IpAddr, so convert here, but note that IpAddr::from does not
@@ -162,11 +172,12 @@ impl FromSqlValue for DatacenterRow {
             .context("missing column 'port'")?
             .as_integer()
             .context("column 'port' is not an integer")?;
-        let icao = get_column!(2, "icao", values).parse()?;
 
         let qcmp_port = (*qcmp_port)
             .try_into()
             .context("qcmp port was not within expected range")?;
+
+        let icao = get_column!(req 2, "icao", values).parse()?;
 
         Ok(Self {
             ip,

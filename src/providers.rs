@@ -18,12 +18,9 @@ pub mod corrosion;
 pub mod fs;
 pub mod k8s;
 
-use std::{
-    net::SocketAddr,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 use crate::{
@@ -187,7 +184,7 @@ pub struct Providers {
         env = "QUILKIN_PROVIDERS_CORROSION_ENDPOINTS",
         value_delimiter = ','
     )]
-    corrosion_endpoints: Vec<SocketAddr>,
+    corrosion_endpoints: Vec<EndpointAddress>,
     /// What mode to run corrosion in
     #[clap(
         long = "provider.corrosion.mode",
@@ -286,8 +283,13 @@ impl Providers {
         self
     }
 
-    pub fn corrosion_endpoints(mut self, endpoints: impl Into<Vec<SocketAddr>>) -> Self {
+    pub fn corrosion_endpoints(mut self, endpoints: impl Into<Vec<EndpointAddress>>) -> Self {
         self.corrosion_endpoints = endpoints.into();
+        self
+    }
+
+    pub fn corrosion_mode(mut self, mode: corrosion::CorrosionMode) -> Self {
+        self.corrosion_mode = Some(mode);
         self
     }
 

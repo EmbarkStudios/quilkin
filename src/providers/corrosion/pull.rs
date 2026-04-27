@@ -70,7 +70,7 @@ pub(super) async fn corrosion_subscribe(
             for addr in endpoints.iter().cloned() {
                 let cids = change_ids.clone();
                 js.spawn(async move {
-                    let res = connect_and_sub(addr, &cids)
+                    let res = connect_and_sub(&addr, &cids)
                         .instrument(tracing::debug_span!("connect_and_sub"))
                         .await;
 
@@ -131,9 +131,13 @@ pub(super) async fn corrosion_subscribe(
         tracing::info!(%address, "successfully subscribed to corrosion server");
         hc.store(true, atomic::Ordering::Relaxed);
 
-        process_subscription_events(&state, sstate, &mut change_ids)
-            .await
-            .instrument(tracing::debug_span!("corrosion subscription events", %address));
+        {
+            let _metrics = crate::metrics::ActiveProviderMetrics::new(address.to_string());
+
+            process_subscription_events(&state, sstate, &mut change_ids)
+                .await
+                .instrument(tracing::debug_span!("corrosion subscription events", %address));
+        }
 
         hc.store(false, atomic::Ordering::Relaxed);
     }
@@ -141,7 +145,11 @@ pub(super) async fn corrosion_subscribe(
 
 /// Attempts to connect to and subscribe to the queries to keep this proxy up to
 /// date with cluster status
-async fn connect_and_sub(addr: net::SocketAddr, change_ids: &ChangeIds) -> crate::Result<SubState> {
+async fn connect_and_sub(
+    addr: &crate::net::EndpointAddress,
+    change_ids: &ChangeIds,
+) -> crate::Result<SubState> {
+    let addr = addr.to_socket_addr_async().await?;
     let root = client::Client::connect_insecure(
         addr,
         persistent::Metrics::new(crate::metrics::registry()),
@@ -165,7 +173,7 @@ async fn connect_and_sub(addr: net::SocketAddr, change_ids: &ChangeIds) -> crate
     });
     js.spawn({
         let root = root.clone();
-        let from = change_ids[Which::Servers];
+        let from = change_ids[Which::Clusters];
 
         async move {
             let mut sp = SubParams::new(pubsub::DC_QUERY);
@@ -178,7 +186,7 @@ async fn connect_and_sub(addr: net::SocketAddr, change_ids: &ChangeIds) -> crate
     });
     js.spawn({
         let root = root.clone();
-        let from = change_ids[Which::Servers];
+        let from = change_ids[Which::Filter];
 
         async move {
             let mut sp = SubParams::new(pubsub::FILTER_QUERY);
@@ -209,7 +217,7 @@ async fn connect_and_sub(addr: net::SocketAddr, change_ids: &ChangeIds) -> crate
     })
 }
 
-/// The actual core of the event loop, applies the events from the authoratative
+/// The actual core of the event loop, applies the events from the authoritative
 /// server to reflect its state locally
 async fn process_subscription_events(
     state: &State,
@@ -223,7 +231,6 @@ async fn process_subscription_events(
         |events: Option<SubscriptionStream>, cid: &mut Option<ChangeId>| -> crate::Result<()> {
             let events = events.context("subscription was closed")?;
             let Some(servers) = state.dyn_cfg.clusters() else {
-                // TODO: Don't subscribe if we don't have this
                 return Ok(());
             };
 
@@ -254,7 +261,13 @@ async fn process_subscription_events(
             match event {
                 // The state of row that matches our query changed
                 QueryEvent::Change(ct, _rid, row, id) => {
-                    let dc = db::DatacenterRow::from_sql(&row)?;
+                    let dc = match db::DatacenterRow::from_sql(&row) {
+                        Ok(dc) => dc,
+                        Err(error) => {
+                            tracing::error!(%error, "failed to deserialize datacenter row");
+                            continue;
+                        }
+                    };
 
                     match ct {
                         ChangeType::Insert | ChangeType::Update => {
@@ -279,7 +292,14 @@ async fn process_subscription_events(
                 }
                 // The state of a row in the initial query
                 QueryEvent::Row(_rid, row) => {
-                    let dc = db::DatacenterRow::from_sql(&row)?;
+                    let dc = match db::DatacenterRow::from_sql(&row) {
+                        Ok(dc) => dc,
+                        Err(error) => {
+                            tracing::error!(%error, "failed to deserialize datacenter row");
+                            continue;
+                        }
+                    };
+
                     dcs.modify(|dcs| {
                         dcs.insert(
                             dc.ip,
@@ -317,7 +337,7 @@ async fn process_subscription_events(
         };
 
         let update_filter = |row: &[SqliteValue]| -> crate::Result<()> {
-            let column = row.get(1).context("missing 'filter' column")?;
+            let column = row.first().context("missing 'filter' column")?;
 
             let filter = column.as_str().with_context(|| {
                 format!(
@@ -377,6 +397,7 @@ async fn process_subscription_events(
 
     loop {
         let res = tokio::select! {
+            biased;
             sc = sstate.servers.stream.rx.recv() => {
                 let span = tracing::info_span!("servers");
                 let _s = span.enter();
@@ -395,7 +416,8 @@ async fn process_subscription_events(
         };
 
         if let Err(error) = res {
-            tracing::error!(%error, "error processing subscription event");
+            tracing::error!(?error, "error processing subscription event");
+            return Err(error);
         }
     }
 }

@@ -268,7 +268,7 @@ impl Pusher {
                 for addr in self.endpoints.iter().cloned() {
                     let info = self.agent_info;
                     js.spawn(async move {
-                        let res = connect(addr, info)
+                        let res = connect(&addr, info)
                             .instrument(tracing::debug_span!("connect"))
                             .await;
 
@@ -473,7 +473,11 @@ impl Pusher {
     }
 }
 
-async fn connect(addr: net::SocketAddr, info: AgentInfo) -> crate::Result<client::MutationClient> {
+async fn connect(
+    addr: &crate::net::EndpointAddress,
+    info: AgentInfo,
+) -> crate::Result<client::MutationClient> {
+    let addr = addr.to_socket_addr_async().await?;
     let root = client::Client::connect_insecure(
         addr,
         persistent::Metrics::new(crate::metrics::registry()),

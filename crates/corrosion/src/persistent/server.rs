@@ -91,13 +91,23 @@ impl From<IoLoopError> for ErrorCode {
 }
 
 impl Server {
+    fn transport_config() -> quinn::TransportConfig {
+        let mut tc = quinn::TransportConfig::default();
+        // By default quinn uses an idle timeout of 30 seconds
+        tc.keep_alive_interval(Some(std::time::Duration::from_secs(20)));
+        tc
+    }
+
     pub fn new_unencrypted(
         addr: SocketAddr,
         mutator: impl DbMutator + 'static,
         subs: impl SubManager + 'static,
         metrics: super::Metrics,
     ) -> std::io::Result<Self> {
-        let endpoint = quinn::Endpoint::server(quinn_plaintext::server_config(), addr)?;
+        let mut sc = quinn_plaintext::server_config();
+        sc.transport_config(std::sync::Arc::new(Self::transport_config()));
+
+        let endpoint = quinn::Endpoint::server(sc, addr)?;
 
         let local_addr = endpoint.local_addr()?;
         let ep = endpoint.clone();
@@ -147,7 +157,6 @@ impl Server {
                     update_metric(&metrics.rx_count, &mut rx_count, stats.udp_rx.datagrams);
                     update_metric(&metrics.rx_bytes, &mut rx_bytes, stats.udp_rx.bytes);
 
-
                     loop {
                         tokio::select! {
                             res = Self::read_request(peer, &connection) => {
@@ -155,6 +164,7 @@ impl Server {
                                     Ok(vr) => {
                                         let mutator = mutator.clone();
                                         let usbs = usbs.clone();
+
                                         tokio::spawn(async move {
                                             Self::handle_request(vr, mutator, usbs).await;
                                         });
@@ -415,7 +425,14 @@ mod v1_impl {
     ) -> Result<(), IoLoopError> {
         match request {
             v1::Request::Mutate(mreq) => handle_mutate(mreq, peer, send, recv, mutator).await,
-            v1::Request::Subscribe(sreq) => handle_subscribe(sreq, peer, send, subs).await,
+            v1::Request::Subscribe(sreq) => {
+                let query = sreq.0.query.query().to_owned();
+                handle_subscribe(sreq, peer, send, subs)
+                    .instrument(
+                        tracing::debug_span!("subscribe", %peer, id = recv.id().index(), query),
+                    )
+                    .await
+            }
         }
     }
 }

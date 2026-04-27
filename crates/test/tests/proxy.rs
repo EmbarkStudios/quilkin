@@ -67,6 +67,7 @@ trace_test!(with_filter, {
         "proxy",
         ProxyPailConfig {
             config: Some(TestConfig::new()),
+            corrosion: false,
         },
         &["server"],
     );
@@ -92,12 +93,12 @@ trace_test!(uring_receiver, {
 
     let (mut packet_rx, endpoint) = sb.server("server");
 
-    let service = quilkin::Service::builder().udp();
+    let mut service = quilkin::Service::builder().udp();
     let config = std::sync::Arc::new(quilkin::Config::new(
         None,
         Default::default(),
         &Default::default(),
-        &service,
+        &mut service,
     ));
     config
         .dyn_cfg
@@ -147,7 +148,7 @@ trace_test!(
             None,
             Default::default(),
             &Default::default(),
-            &Default::default(),
+            &mut Default::default(),
         ));
         config
             .dyn_cfg
@@ -198,3 +199,79 @@ trace_test!(
         }
     }
 );
+
+// Temporary test that ensures that an agent communicating with a relay in xDS will be forwarded to corrosion and
+// publish the changes to a proxy
+trace_test!(xds_bridge_to_corrosion, {
+    use quilkin::filters::{self, StaticFilter};
+
+    let mut sc = qt::sandbox_config!();
+
+    sc.push("server", ServerPailConfig::default(), &[]);
+    sc.push(
+        "relay",
+        RelayPailConfig {
+            config: Some(TestConfig {
+                filters: filters::FilterChain::try_create([
+                    filters::Capture::as_filter_config(filters::capture::Config {
+                        metadata_key: filters::capture::CAPTURED_BYTES.into(),
+                        strategy: filters::capture::Strategy::Suffix(filters::capture::Suffix {
+                            size: 3,
+                            remove: true,
+                        }),
+                    })
+                    .unwrap(),
+                    filters::TokenRouter::as_filter_config(None).unwrap(),
+                ])
+                .unwrap(),
+                ..Default::default()
+            }),
+        },
+        &[],
+    );
+    sc.push(
+        "agent",
+        AgentPailConfig {
+            endpoints: vec![("server", &[])],
+            icao_code: quilkin::config::IcaoCode::new_testing([b'A', b'B', b'C', b'D']),
+            corrosion: false,
+            ..Default::default()
+        },
+        &["server", "relay"],
+    );
+    sc.push(
+        "proxy",
+        ProxyPailConfig {
+            corrosion: true,
+            ..Default::default()
+        },
+        &["relay"],
+    );
+
+    let mut sb = sc.spinup().await;
+
+    let (local_addr, _rx) = sb.proxy("proxy");
+    let (mut rx, server_addr) = sb.server("server");
+
+    let mut agent_config = sb.config_file("agent");
+    agent_config.update(|config| {
+        config.clusters.insert_default(
+            [quilkin::net::Endpoint::with_metadata(
+                server_addr.into(),
+                quilkin::net::endpoint::Metadata {
+                    tokens: [b"tok".to_vec()].into(),
+                },
+            )]
+            .into(),
+        );
+    });
+
+    let client = sb.client();
+
+    let msg = "hello";
+
+    let mut sending = msg.as_bytes().to_vec();
+    sending.extend_from_slice(b"tok");
+    sb.block_until_packet_gets_through(&sending, msg, &client, &local_addr, &mut rx)
+        .await;
+});

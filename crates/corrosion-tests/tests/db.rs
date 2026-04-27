@@ -174,7 +174,7 @@ async fn collects_old_servers() {
             row.add_cell(Cell::new(&sql.get::<_, String>(1).unwrap()));
             row.add_cell(Cell::new(&format!(
                 "{:?}",
-                read::deserialize_token_set(&sql.get::<_, String>(2).unwrap()).unwrap()
+                read::deserialize_token_set(Some(&sql.get::<_, String>(2).unwrap())).unwrap()
             )));
             row.add_cell(Cell::new(
                 &serde_json::from_str::<serde_json::Value>(&sql.get::<_, String>(3).unwrap())
@@ -206,7 +206,7 @@ async fn updates_servers() {
             row.add_cell(Cell::new(&sql.get::<_, String>(1).unwrap()));
             row.add_cell(Cell::new(&format!(
                 "{:?}",
-                read::deserialize_token_set(&sql.get::<_, String>(2).unwrap()).unwrap()
+                read::deserialize_token_set(Some(&sql.get::<_, String>(2).unwrap())).unwrap()
             )));
         })
     };

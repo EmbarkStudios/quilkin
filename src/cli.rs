@@ -211,7 +211,7 @@ impl Cli {
     /// Drives the main quilkin application lifecycle using the command line
     /// arguments.
     #[tracing::instrument(skip_all)]
-    pub async fn drive(self) -> crate::Result<()> {
+    pub async fn drive(mut self) -> crate::Result<()> {
         // Configure rolling log file appender if directory has been specified.
         // _log_file_guard should be kept in scope and will trigger the final flush to file when dropped
         let (file_writer, _log_file_guard) = match &self.log_directory {
@@ -264,7 +264,7 @@ impl Cli {
             self.service.id.clone(),
             self.locality.icao_code,
             &self.providers,
-            &self.service,
+            &mut self.service,
             drive_token.child_token(),
         );
         config.read_config(&self.config, locality.clone())?;

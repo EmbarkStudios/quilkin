@@ -5,39 +5,6 @@ use std::sync::Arc;
 
 pub use prettytable::Cell;
 
-/// Corrosion uses a "tripwire" handle to signal to end async tasks, this just
-/// wraps it so it's easier to use, and removes boilerplate
-pub struct Trip {
-    tripwire: tripwire::Tripwire,
-    worker: tripwire::TripwireWorker<tokio_stream::wrappers::ReceiverStream<()>>,
-    tx: tokio::sync::mpsc::Sender<()>,
-}
-
-impl Trip {
-    #[inline]
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        let (tripwire, worker, tx) = tripwire::Tripwire::new_simple();
-        Self {
-            tripwire,
-            worker,
-            tx,
-        }
-    }
-
-    #[inline]
-    pub fn tripwire(&self) -> tripwire::Tripwire {
-        self.tripwire.clone()
-    }
-
-    #[inline]
-    pub async fn shutdown(self) {
-        self.tx.send(()).await.ok();
-        self.worker.await;
-        spawn::wait_for_all_pending_handles().await;
-    }
-}
-
 pub struct TestSubsDb {
     #[allow(dead_code)]
     temp: tempfile::TempDir,
@@ -50,7 +17,7 @@ pub struct TestSubsDb {
     pub pool: types::agent::SplitPool,
     matcher_conns: std::collections::BTreeMap<uuid::Uuid, types::sqlite::CrConn>,
     db_version: usize,
-    pub trip: Trip,
+    pub trip: corrosion::pubsub::Trip,
     pub btx: BroadcastingTransactor,
 }
 
@@ -62,7 +29,7 @@ impl TestSubsDb {
         let sub_path = root.join("subs");
         let db_path = root.join("db.db");
 
-        let db = corrosion::db::InitializedDb::setup(&db_path, schema)
+        let db = corrosion::db::InitializedDb::setup(&db_path, schema, None)
             .await
             .expect("failed to initialize DB");
 
@@ -90,7 +57,7 @@ impl TestSubsDb {
             matcher_conns: Default::default(),
             db_version: 0,
             btx,
-            trip: Trip::new(),
+            trip: corrosion::pubsub::Trip::new(),
         }
     }
 
