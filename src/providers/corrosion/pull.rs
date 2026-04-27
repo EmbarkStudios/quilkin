@@ -131,9 +131,13 @@ pub(super) async fn corrosion_subscribe(
         tracing::info!(%address, "successfully subscribed to corrosion server");
         hc.store(true, atomic::Ordering::Relaxed);
 
-        process_subscription_events(&state, sstate, &mut change_ids)
-            .await
-            .instrument(tracing::debug_span!("corrosion subscription events", %address));
+        {
+            let _metrics = crate::metrics::ActiveProviderMetrics::new(address.to_string());
+
+            process_subscription_events(&state, sstate, &mut change_ids)
+                .await
+                .instrument(tracing::debug_span!("corrosion subscription events", %address));
+        }
 
         hc.store(false, atomic::Ordering::Relaxed);
     }

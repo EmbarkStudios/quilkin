@@ -678,6 +678,44 @@ pub(crate) fn allocated_xdp_packets() -> &'static IntGauge {
     &ALLOCATED
 }
 
+pub struct ActiveProviderMetrics {
+    provider: String,
+}
+
+impl ActiveProviderMetrics {
+    pub fn new(provider: String) -> Self {
+        quilkin_xds::metrics::active_control_planes(&provider).inc();
+        active_providers(&provider).inc();
+
+        Self { provider }
+    }
+}
+
+impl Drop for ActiveProviderMetrics {
+    fn drop(&mut self) {
+        quilkin_xds::metrics::active_control_planes(&self.provider).dec();
+        active_providers(&self.provider).dec();
+    }
+}
+
+pub(crate) fn active_providers(provider: &str) -> IntGauge {
+    const PROVIDER_LABEL: &str = "provider";
+
+    static ACTIVE_PROVIDERS: Lazy<IntGaugeVec> = Lazy::new(|| {
+        prometheus::register_int_gauge_vec_with_registry! {
+            prometheus::opts! {
+                "active_providers",
+                "Total number of active config providers",
+            },
+            &[PROVIDER_LABEL],
+            registry(),
+        }
+        .unwrap()
+    });
+
+    ACTIVE_PROVIDERS.with_label_values(&[provider])
+}
+
 /// Create a generic metrics options.
 /// Use `filter_opts` instead if the intended target is a filter.
 pub fn opts(name: &str, subsystem: &str, description: &str) -> Opts {
