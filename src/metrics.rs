@@ -716,6 +716,48 @@ pub(crate) fn active_providers(provider: &str) -> IntGauge {
     ACTIVE_PROVIDERS.with_label_values(&[provider])
 }
 
+pub(crate) mod corrosion {
+    use super::*;
+
+    #[inline]
+    pub fn subscription_events(stream: &str) -> IntGauge {
+        const STREAM_LABEL: &str = "stream";
+
+        static SUB_EVENTS: Lazy<IntGaugeVec> = Lazy::new(|| {
+            prometheus::register_int_gauge_vec_with_registry! {
+                prometheus::opts! {
+                    "corrosion_subscription_events",
+                    "Total number of subscription events",
+                },
+                &[STREAM_LABEL],
+                registry(),
+            }
+            .unwrap()
+        });
+
+        SUB_EVENTS.with_label_values(&[stream])
+    }
+
+    #[inline]
+    pub fn subscription_failures(stream: &str) -> IntGauge {
+        const STREAM_LABEL: &str = "stream";
+
+        static SUB_EVENTS: Lazy<IntGaugeVec> = Lazy::new(|| {
+            prometheus::register_int_gauge_vec_with_registry! {
+                prometheus::opts! {
+                    "corrosion_subscription_failures",
+                    "Number of errors that occurred processing events",
+                },
+                &[STREAM_LABEL],
+                registry(),
+            }
+            .unwrap()
+        });
+
+        SUB_EVENTS.with_label_values(&[stream])
+    }
+}
+
 /// Create a generic metrics options.
 /// Use `filter_opts` instead if the intended target is a filter.
 pub fn opts(name: &str, subsystem: &str, description: &str) -> Opts {

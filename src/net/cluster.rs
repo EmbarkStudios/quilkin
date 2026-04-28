@@ -447,6 +447,7 @@ impl EndpointSet {
         &mut self,
         ss: corrosion::pubsub::SubscriptionStream,
         token_map: &DashMap<u64, BTreeSet<EndpointAddress>>,
+        subm: &mut corrosion::persistent::SubMetrics,
     ) -> (ChangeId, isize) {
         use corrosion::{
             api::{TypedQueryEvent as tqe, sqlite::ChangeType},
@@ -454,8 +455,11 @@ impl EndpointSet {
         };
 
         let start = self.endpoints.len() as isize;
+        let mut successful = 0;
 
         for eve in ss {
+            subm.total_events += 1;
+
             let eve = match eve {
                 Ok(e) => e,
                 Err(error) => {
@@ -524,6 +528,8 @@ impl EndpointSet {
                 }
             };
 
+            successful += 1;
+
             match cty {
                 ChangeType::Insert => {
                     let address = EndpointAddress {
@@ -590,6 +596,8 @@ impl EndpointSet {
                 }
             }
         }
+
+        subm.failures = subm.total_events - successful;
 
         (self.change_id, self.endpoints.len() as isize - start)
     }
@@ -949,7 +957,11 @@ where
     ///
     /// This adds, updates, and/or removes endpoints from a 'corrosion' locality
     /// that is temporarily used during the transition period
-    pub fn corrosion_apply(&self, ss: corrosion::pubsub::SubscriptionStream) -> ChangeId {
+    pub fn corrosion_apply(
+        &self,
+        ss: corrosion::pubsub::SubscriptionStream,
+        subm: &mut corrosion::persistent::SubMetrics,
+    ) -> ChangeId {
         static CORRO: std::sync::LazyLock<Locality> =
             std::sync::LazyLock::new(|| Locality::new("corrosion", "", ""));
 
@@ -957,7 +969,7 @@ where
             .map
             .entry(Some((*CORRO).clone()))
             .or_insert_with(|| EndpointSet::new(BTreeSet::default()))
-            .corrosion_apply(ss, &self.token_map);
+            .corrosion_apply(ss, &self.token_map, subm);
 
         // If we don't update the num_endpoints and it's 0, no filter will run!
         if diff >= 0 {

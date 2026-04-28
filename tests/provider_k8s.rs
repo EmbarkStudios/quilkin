@@ -657,8 +657,12 @@ async fn applies_changes() {
         ) -> u64 {
             let ss = pubsub::SubscriptionStream::length_prefixed(&mut block).unwrap();
 
+            let mut subm = ::corrosion::persistent::SubMetrics {
+                total_events: 0,
+                failures: 0,
+            };
             let cm = local.write();
-            cm.corrosion_apply(ss).0
+            cm.corrosion_apply(ss, &mut subm).0
         }
 
         let mut cid = local
