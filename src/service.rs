@@ -1018,13 +1018,18 @@ impl Service {
         // Spin up a UDP socket to receive state mutations from agents and send
         // events to proxy subscribers
         let udp_server = corrosion::persistent::server::Server::new_unencrypted(
-            (std::net::Ipv4Addr::UNSPECIFIED, self.corrosion_port).into(),
+            (std::net::Ipv6Addr::UNSPECIFIED, self.corrosion_port).into(),
             btx,
             ps_ctx,
             corrosion::persistent::Metrics::new(crate::metrics::registry()),
         )?;
 
-        ports.corrosion = Some(udp_server.local_addr().port());
+        let port = udp_server.local_addr().port();
+        ports.corrosion = Some(port);
+
+        // Mainly for testing when the requested port is 0 and we bind to an ephemeral
+        // port so the log message at the start is kind of useless
+        tracing::debug!(port, "corrosion service running");
 
         let finished = shutdown.push("corrosion_server");
         let mut srx = shutdown.shutdown_rx();

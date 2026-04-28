@@ -71,7 +71,7 @@ pub(super) async fn corrosion_subscribe(
                 let cids = change_ids.clone();
                 js.spawn(async move {
                     let res = connect_and_sub(&addr, &cids)
-                        .instrument(tracing::debug_span!("connect_and_sub"))
+                        .instrument(tracing::debug_span!("connect_and_sub", address = %addr))
                         .await;
 
                     (res, addr)
@@ -159,7 +159,8 @@ async fn connect_and_sub(
         persistent::Metrics::new(crate::metrics::registry()),
     )
     .await
-    .context("failed to connect")?;
+    .unwrap();
+    //.context("failed to connect")?;
 
     tracing::debug!("connected to corrosion server");
 
