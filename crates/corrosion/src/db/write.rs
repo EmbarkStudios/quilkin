@@ -268,15 +268,14 @@ impl<'s, const N: usize> Server<'s, N> {
         self.statements.push(Statement::WithParams(query, params));
     }
 
-    /// Create a statement to remove servers with no contributors whose last
-    /// update was older
-    ///
-    /// Note that unlike the other methods, the peer for this does not matter
+    /// Create a statement to remove servers with no contributors whose last update is older than the specified duration
+    /// from the current point in time
     #[inline]
-    pub fn reap_old(&mut self, max_age: std::time::Duration) {
-        self.statements.push(Statement::Simple(format!(
-            "DELETE FROM servers WHERE length(contributors) <= 1 AND unixepoch('now') - cont_update > {}", max_age.as_secs()
-        )));
+    pub fn reap_old(max_age: std::time::Duration) -> Statement {
+        Statement::Simple(format!(
+            "DELETE FROM servers WHERE length(contributors) <= 1 AND unixepoch('now') - cont_update > {}",
+            max_age.as_secs()
+        ))
     }
 }
 

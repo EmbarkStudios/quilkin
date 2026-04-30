@@ -154,6 +154,15 @@ pub struct Service {
     )]
     corrosion_db_path: Option<camino::Utf8PathBuf>,
 
+    /// The time in seconds that servers can be kept in the database if there are no contributors (agents) for that server
+    ///
+    /// If not specified, defaults to 10m
+    #[clap(
+        long = "service.corrosion.server-reap",
+        env = "QUILKIN_SERVICE_CORROSION_SERVER_REAP"
+    )]
+    corrosion_server_reap: Option<u32>,
+
     // END CORROSION
     #[clap(long = "termination-timeout")]
     termination_timeout: Option<crate::cli::Duration>,
@@ -197,6 +206,7 @@ impl Default for Service {
             tls_key_path: None,
             corrosion_port: 7901,
             corrosion_db_path: None,
+            corrosion_server_reap: None,
             termination_timeout: None,
             testing: false,
             xds_to_corrosion: None,
@@ -992,6 +1002,60 @@ impl Service {
                             };
 
                             update_db(&btx, statements).await;
+                        }
+                        _ = srx.changed() => {
+                            break;
+                        }
+                    }
+                }
+
+                drop(finished.send(Ok(())));
+            });
+        }
+
+        // Spawn a task to periodically reap old servers whose agents have disconnected abnormally but we want to give
+        // an agent from the same cluster time to renew them if the servers are still valid before removing them entirely
+        {
+            const TEN_MINUTES: u32 = 10 * 60;
+
+            let reap_time = self.corrosion_server_reap.unwrap_or(TEN_MINUTES) as _;
+            let check_interval = std::time::Duration::from_secs(reap_time / 2);
+            let reap_time = std::time::Duration::from_secs(reap_time);
+
+            let finished = shutdown.push("corrosion_reaper");
+            let mut srx = shutdown.shutdown_rx();
+
+            let btx = btx.clone();
+
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(check_interval);
+
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            let statement = corrosion::db::write::Server::<0>::reap_old(reap_time);
+
+                            let res = btx
+                                .make_broadcastable_changes(None, |tx| {
+                                    corrosion::db::write::exec_single_interruptible(tx, statement)
+                                    .map_err(|source| {
+                                        corrosion::types::agent::ChangeError::Rusqlite {
+                                            source,
+                                            actor_id: Some(btx.actor_id()),
+                                            version: None,
+                                        }
+                                    })
+                                })
+                                .await;
+
+                            match res {
+                                Ok((count, version, elapsed)) => {
+                                    tracing::debug!(count, ?version, ?elapsed, "reaped old servers");
+                                }
+                                Err(error) => {
+                                    tracing::error!(%error, "failed to reap old servers");
+                                }
+                            }
                         }
                         _ = srx.changed() => {
                             break;
