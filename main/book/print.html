@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-58f59a45.js";
+            window.path_to_searchindex_js = "searchindex-085db65c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-740ee2a1.js"></script>
+        <script src="toc-e06e99c8.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1324,6 +1324,79 @@ clusters:
 </span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
 </span><span class="boring">assert_eq!(config.filters.load().len(), 1);
 </span><span class="boring">}</span></code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="http-provider"><a class="header" href="#http-provider">HTTP Provider</a></h1>
+<p>The HTTP provider exposes a REST API that allows game server endpoints and the active
+<a href="#packet-filters">filter chain</a> to be managed over plain HTTP. It is useful when you want to
+drive Quilkin’s configuration from an external system — such as a matchmaker, a fleet
+manager, or a test harness — without deploying Kubernetes or a shared database.</p>
+<p>By default the server listens on port <code>9000</code>:</p>
+<pre><code class="language-sh">quilkin --provider.http
+</code></pre>
+<p>A custom address can be specified with <code>--provider.http.address</code>:</p>
+<pre><code class="language-sh">quilkin --provider.http --provider.http.address 0.0.0.0:9000
+</code></pre>
+<h2 id="endpoints-api"><a class="header" href="#endpoints-api">Endpoints API</a></h2>
+<p>Quilkin routes incoming UDP packets to one or more <a href="#endpoints">endpoints</a>. The HTTP
+provider lets you add, replace, and remove endpoints at runtime.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Method</th><th>Path</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>GET</code></td><td><code>/endpoints</code></td><td>List all current endpoints</td></tr>
+<tr><td><code>POST</code></td><td><code>/endpoints</code></td><td>Upsert an endpoint (add or replace by address)</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/endpoints</code></td><td>Remove all endpoints</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/endpoints/{address}</code></td><td>Remove the endpoint at <code>{address}</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Endpoints are represented as JSON objects with an <code>address</code> field and an optional
+<code>metadata</code> field containing <a href="#specialist-endpoint-metadata">access tokens</a>:</p>
+<pre><code class="language-json">{
+  "address": "203.0.113.1:7777",
+  "metadata": {
+    "quilkin.dev": {
+      "tokens": ["MXg3aWp5Ng=="]
+    }
+  }
+}
+</code></pre>
+<p><code>POST /endpoints</code> performs an <strong>upsert</strong>: if an endpoint with the same address already
+exists its metadata is replaced; otherwise a new endpoint is added.</p>
+<p>To remove a single endpoint, include its address in the path:</p>
+<pre><code class="language-sh">curl -X DELETE http://localhost:9000/endpoints/203.0.113.1:7777
+</code></pre>
+<h2 id="filter-chain-api"><a class="header" href="#filter-chain-api">Filter Chain API</a></h2>
+<p>The filter chain determines how packets are processed before they are forwarded to an
+endpoint. See <a href="#packet-filters">Filters</a> for the full list of available filters and their
+configuration options.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Method</th><th>Path</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>GET</code></td><td><code>/filterchain</code></td><td>Get the current filter chain</td></tr>
+<tr><td><code>PUT</code></td><td><code>/filterchain</code></td><td>Replace the filter chain</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/filterchain</code></td><td>Reset the filter chain to empty</td></tr>
+</tbody>
+</table>
+</div>
+<p>The filter chain is expressed in the same JSON/YAML format used by the
+<a href="#configuration-file">configuration file</a>:</p>
+<pre><code class="language-sh">curl -X PUT http://localhost:9000/filterchain \
+  -H 'Content-Type: application/json' \
+  -d '[{"name":"quilkin.filters.debug.v1alpha1.Debug","config":{"id":"http-provider"}}]'
+</code></pre>
+<p><code>DELETE /filterchain</code> resets the chain to empty — packets are forwarded without
+any processing.</p>
+<blockquote>
+<p>Changes made through the HTTP provider are applied immediately and affect all
+in-flight configuration readers. They are not persisted to disk; if Quilkin
+restarts the provider starts with an empty configuration again.</p>
+</blockquote>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="packet-filters"><a class="header" href="#packet-filters">Packet Filters</a></h1>
 <p>In most cases, we would like Quilkin to do some preprocessing of received packets before sending them off to their destination. Because this stage is entirely specific to the use case at hand and differs between Quilkin deployments, we must have a say over what tweaks to perform - this is where filters come in.</p>
