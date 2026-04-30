@@ -13,16 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#pragma once
 
-#include "CoreMinimal.h"
+#include "QuilkinTelemetry.h"
+#include "IPAddress.h"
 
-struct FQuilkinEndpoint;
-class FInternetAddr;
-
-using ReachPair = TPair<FString, int64>;
-
-inline int64 NanosToMillis(int64 Nanoseconds)
+void FQuilkinTelemetry::QuilkinPingError(const FString& Host, const uint16 QcmpPort, const FString& Region, const FString& Error, const FString& Endpoint)
 {
-    return Nanoseconds / 1'000'000;
 }

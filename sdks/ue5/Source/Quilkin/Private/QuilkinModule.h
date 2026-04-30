@@ -17,21 +17,28 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Modules/ModuleInterface.h"
-#include "QuilkinSocketSubsystem.h"
+#include "Modules/ModuleManager.h"
+#include "SocketSubsystemModule.h"
+#include "UObject/NameTypes.h"
+
+#include "Net/QuilkinSocketSubsystem.h"
 #include "QuilkinEndpoint.h"
-#include "QuilkinConcurrentMap.h"
+#include "QuilkinLog.h"
+#include "QuilkinModule.h"
+#include "Quilkin.h"
 
 class FQuilkinModule : public IModuleInterface
 {
 public:
-    //~ Begin IModuleInterface interface
-    virtual void StartupModule() override;
-    virtual void ShutdownModule() override;
-    virtual bool SupportsDynamicReloading() override;
-    virtual bool SupportsAutomaticShutdown() override;
-    //~ End IModuleInterface Interface
+	//~ Begin IModuleInterface interface
+	virtual void StartupModule() override;
+	virtual void ShutdownModule() override;
+	virtual bool SupportsDynamicReloading() override;
+	virtual bool SupportsAutomaticShutdown() override;
+	//~ End IModuleInterface Interface
 
 private:
-    TSharedPtr<FQuilkinSocketSubsystem> QuilkinSocketSubsystem;
+	TSharedPtr<FQuilkinSocketSubsystem> QuilkinSocketSubsystem;
 };

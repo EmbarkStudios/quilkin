@@ -13,16 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
 
 #include "CoreMinimal.h"
+#include "IPAddress.h"
 
-struct FQuilkinEndpoint;
-class FInternetAddr;
+const static FString& QuilkinPingDecodeError = "decode_error";
+const static FString& QuilkinPingInvalidPacket = "invalid_packet";
+const static FString& QuilkinPingNonceMismatch = "nonce_mismatch";
+const static FString& QuilkinPingTimeout = "timeout";
+const static FString& QuilkinPingNoValidSamples = "no_valid_samples";
 
-using ReachPair = TPair<FString, int64>;
-
-inline int64 NanosToMillis(int64 Nanoseconds)
+class FQuilkinTelemetry
 {
-    return Nanoseconds / 1'000'000;
-}
+public:
+	static void QuilkinPingError(const FString& Host, const uint16 QcmpPort, const FString& Region, const FString& Error, const FString& Endpoint);
+};

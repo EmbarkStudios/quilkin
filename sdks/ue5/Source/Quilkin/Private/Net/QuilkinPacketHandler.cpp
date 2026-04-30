@@ -20,20 +20,20 @@
 
 FQuilkinPacketHandler::FQuilkinPacketHandler()
 {
-    auto Settings = UQuilkinConfigSubsystem::Get();
-    RoutingToken = Settings->GetRoutingToken();
-    Enabled = Settings->PacketHandling && Settings->GetEnabled();
+	auto Settings = UQuilkinConfigSubsystem::Get();
+	RoutingToken = Settings->GetRoutingToken();
+	Enabled = Settings->PacketHandling && Settings->GetEnabled();
 
-    if (UE_LOG_ACTIVE(LogQuilkin, Display))
-    {
-        FString Base64Token = FBase64::Encode(RoutingToken);
-        UE_LOG(LogQuilkin, Display, TEXT("Initialising PacketHandler: Packet Handling: %s, Routing Token: %s"), Enabled ? TEXT("Enabled") : TEXT("Disabled"), *Base64Token);
-    }
+	if (UE_LOG_ACTIVE(LogQuilkin, Display))
+	{
+		FString Base64Token = FBase64::Encode(RoutingToken);
+		UE_LOG(LogQuilkin, Display, TEXT("Initialising PacketHandler: Packet Handling: %s, Routing Token: %s"), Enabled ? TEXT("Enabled") : TEXT("Disabled"), *Base64Token);
+	}
 }
 
-bool FQuilkinPacketHandler::IsEnabled()
+bool FQuilkinPacketHandler::IsEnabled() const
 {
-    // If it was disabled when it was initially enabled, keep it disabled,
-    // If it was disabled later while it was enabled, disable it.
-    return Enabled && UQuilkinConfigSubsystem::Get()->GetEnabled();
+	// If it was disabled when it was initially enabled, keep it disabled,
+	// If it was disabled later while it was enabled, disable it.
+	return Enabled && UQuilkinConfigSubsystem::Get()->GetEnabled();
 }

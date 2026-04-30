@@ -36,14 +36,32 @@ public:
         Buffer.PushLast(value);
     }
 
-    bool IsEmpty()
+	void Extend(const CircularBuffer& Values)
     {
-        return Num() == 0;
+	    for (auto& Value : Values.Buffer)
+	    {
+		    Add(Value);
+	    }
     }
 
-    size_t Num()
+    void TryPopLast(T& value)
     {
-        return Buffer.Num();
+		Buffer.TryPopLast(value);
+    }
+
+    void Empty()
+    {
+		Buffer.Empty();
+    }
+
+    bool IsEmpty() const
+    {
+		return Num() == 0;
+    }
+
+    size_t Num() const
+    {
+		return Buffer.Num();
     }
 
     T Median() const
@@ -53,13 +71,13 @@ public:
             return T{}; // Return default value if the buffer is empty
         }
 
-        TArray<T> Sorted;
-        for (const auto& Item : Buffer)
-        {
-            Sorted.Add(Item);
-        }
+		TArray<T> Sorted;
+		for (const auto& Item : Buffer)
+		{
+			Sorted.Add(Item);
+		}
 
-        Sorted.Sort();
+		Sorted.Sort();
 
         size_t Middle = Sorted.Num() / 2;
 
