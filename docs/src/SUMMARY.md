@@ -18,6 +18,7 @@
 
 - [Agones](./providers/agones.md)
 - [Filesystem](./providers/filesystem.md)
+- [HTTP](./providers/http.md)
 
 # Filters
 - [Overview](./filters.md)
