@@ -252,11 +252,6 @@ impl Pusher {
                 });
 
             let connect_to_corrosion = tryhard::retry_fn(|| {
-                tracing::info!(
-                    server_count = self.endpoints.len(),
-                    "attempting to connect to corrosion server"
-                );
-
                 // Attempt to connect to multiple servers in parallel, otherwise
                 // down/slow servers in the list can unnecessarily delay connections
                 // to healthy servers.
@@ -268,8 +263,8 @@ impl Pusher {
                 for addr in self.endpoints.iter().cloned() {
                     let info = self.agent_info;
                     js.spawn(async move {
+                        tracing::debug!(address = %addr, "attempting to connect to corrosion server");
                         let res = connect(&addr, info)
-                            .instrument(tracing::debug_span!("connect"))
                             .await;
 
                         (res, addr)
@@ -296,7 +291,7 @@ impl Pusher {
                                     if join_error.is_panic() {
                                         tracing::error!(
                                             ?join_error,
-                                            "panic occurred in task attempting to connect to xDS endpoint"
+                                            "panic occurred in task attempting to connect to corrosion endpoint"
                                         );
                                     }
                                 }
