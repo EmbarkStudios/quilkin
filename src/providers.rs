@@ -19,14 +19,19 @@ pub mod fs;
 pub mod http;
 pub mod k8s;
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    net::SocketAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use crate::{
-    config, metrics::provider_task_failures_total, net::EndpointAddress,
-    providers::k8s::EventProcessor,
+    config,
+    metrics::provider_task_failures_total,
+    net::EndpointAddress,
+    providers::{corrosion::CorrosionMode, k8s::EventProcessor},
 };
 use eyre::Context;
 use futures::TryStreamExt;
@@ -301,6 +306,11 @@ impl Providers {
 
     pub fn corrosion_endpoints(mut self, endpoints: impl Into<Vec<EndpointAddress>>) -> Self {
         self.corrosion_endpoints = endpoints.into();
+        self
+    }
+
+    pub fn corrosion_mode(mut self, mode: CorrosionMode) -> Self {
+        self.corrosion_mode = Some(mode);
         self
     }
 
