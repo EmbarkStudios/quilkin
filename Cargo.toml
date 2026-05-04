@@ -80,6 +80,10 @@ eyre.workspace = true
 fixedstr.workspace = true
 futures.workspace = true
 futures-util.workspace = true
+hickory-resolver = { version = "0.26", features = [
+    "https-ring",
+    "system-config",
+] }
 http-body-util = "0.1"
 hyper = { version = "1.8", features = ["http2", "http1", "server"] }
 hyper-rustls = { version = "0.27", default-features = false, features = [
@@ -128,10 +132,6 @@ uuid.workspace = true
 lasso = { version = "0.7.3", features = ["multi-threaded"] }
 kube.workspace = true
 kube-core.workspace = true
-hickory-resolver = { version = "0.25.2", features = [
-    "https-ring",
-    "system-config",
-] }
 strum = "0.27"
 strum_macros = "0.27"
 libflate = "2.2.1"
