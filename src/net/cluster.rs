@@ -560,7 +560,17 @@ impl EndpointSet {
                         .get_mut(&address)
                         .map(|md| &mut md.known.tokens.0)
                     else {
-                        tracing::warn!(%address, "address not found for update");
+                        for tok in row.tokens.iter() {
+                            insert(&mut self.token_map, &address, tok);
+                        }
+
+                        self.endpoints.insert(
+                            address,
+                            EndpointMetadata {
+                                known: Metadata { tokens: row.tokens },
+                                unknown: Default::default(),
+                            },
+                        );
                         continue;
                     };
 
