@@ -29,23 +29,23 @@ template <typename TValue, typename TError>
 class TResult
 {
 public:
-    ~TResult() = default;
+	~TResult() = default;
 
-    TResult(TValue InValue)
-        : Data(TInPlaceType<TValue>(), InValue)
-    {
-    }
+	TResult(TValue InValue)
+		: Data(TInPlaceType<TValue>(), InValue)
+	{
+	}
 
-    TResult(TError InError)
-        : Data(TInPlaceType<TError>(), InError)
-    {
-    }
+	TResult(TError InError)
+		: Data(TInPlaceType<TError>(), InError)
+	{
+	}
 
-    bool IsSuccess() const { return Data.template IsType<TValue>(); }
-    bool IsError() const { return Data.template IsType<TError>(); }
-    const TValue& GetValue() const { check(IsSuccess()); return Data.template Get<TValue>(); }
-    const TError& GetError() const { check(IsError()); return Data.template Get<TError>(); }
+	bool IsSuccess() const { return Data.template IsType<TValue>(); }
+	bool IsError() const { return Data.template IsType<TError>(); }
+	const TValue& GetValue() const { check(IsSuccess()); return Data.template Get<TValue>(); }
+	const TError& GetError() const { check(IsError()); return Data.template Get<TError>(); }
 
 private:
-    TVariant<TValue, TError> Data;
+	TVariant<TValue, TError> Data;
 };
