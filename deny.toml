@@ -56,12 +56,12 @@ skip = [
     { crate = "indexmap@1.9.3", reason = "several users of old version in corrosion crates" },
     { crate = "fallible-iterator@0.2.0", reason = "several users of old version in corrosion crates" },
     { crate = "bitflags@1.3.2", reason = "corrosion again" },
-    { crate = "itertools@0.13.0", reason = "ndarray-stats (via nnls) uses an older version" },
+    { crate = "itertools:<0.14", reason = "sigh" },
 ]
 skip-tree = [
     { crate = "thiserror@1.0.69", reason = "many crates use this old version" },
     { crate = "hashbrown:<0.16.0", reason = "we're at *4* different versions :p" },
-    { crate = "rand@0.8.5", reason = "several users of old version in corrosion crates" },
+    { crate = "rand:<0.10", reason = "another version of rand, meaning tons of old versions :p" },
     { crate = "sha2@0.10.9", reason = "old version that uses multiple other old crates" },
 ]
 
