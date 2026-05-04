@@ -1,5 +1,85 @@
 # Changelog
 
+# v0.10.0 (2026-04-30)
+
+## Breaking changes
+
+**Subcommands replaced by service and provider flags.** The `proxy`, `relay`, `manage`, and `agent` subcommands have been removed. Every quilkin instance now runs the same binary and you opt in to the roles you need via `--service.*` flags:
+
+- `--service.udp` — enable the UDP proxy
+- `--service.mds` — enable the mDS relay
+- `--service.xds` — enable the xDS management server
+- `--service.phoenix` — enable the Phoenix network coordinate service
+- `--service.qcmp` — enable QCMP
+
+Configuration sources are controlled separately via `--provider.*` flags (e.g. `--provider.k8s.agones.*` for Agones, static config via file). Any combination of services and providers can be composed in a single instance, replacing the need for distinct deployment roles.
+
+**Compression filter removed.** The built-in compression filter has been removed.
+
+**CLI restructured.** Locality arguments have moved to the top level (`--locality.region`, `--locality.zone`, `--locality.sub-zone`) and admin options are now grouped under `--admin.*`.
+
+**Metric label renames.** The `cluster` label on all metrics has been renamed to `quilkin_cluster` to avoid collisions with other systems. High-cardinality ASN labels have been removed from metrics entirely.
+
+## New features
+
+**XDP I/O path.** Quilkin can now use Linux eXpress Data Path (XDP) for packet processing, bypassing much of the kernel network stack. Enable with `--service.udp.xdp`. Additional flags allow pinning the NIC (`--service.udp.xdp.network-interface`), requiring zero-copy mode (`--service.udp.xdp.zerocopy`), and requiring TX checksum offload (`--service.udp.xdp.tco`). This provides a substantial throughput improvement on supported hardware.
+
+**Corrosion backend.** A new distributed state backend powered by [Corrosion](https://github.com/superfly/corrosion) (SQLite-based) is available as an alternative to the relay/mDS topology. It can also run locally for development without any external dependencies.
+
+**Decryptor filter.** A new `Decryptor` filter has been added for decrypting packets inline in the filter pipeline (ChaCha20).
+
+**xDS config provider.** Configuration can now be sourced from a standard xDS management server, in addition to the existing static and Agones providers.
+
+**TLS support.** TLS options are now available for securing control-plane connections.
+
+**Subscriptions.** Proxies now support a subscription model for receiving incremental config updates, reducing overhead compared to full state refreshes.
+
+**Kubernetes leader election.** When running multiple replicas, quilkin can participate in Kubernetes leader election to coordinate control-plane duties. Enable with `--provider.k8s.leader-election`; optionally override the participant identity with `--provider.k8s.leader-election.id` (defaults to `--service-id`) and the Lease resource name with `--provider.k8s.leader-election.lease-name`.
+
+**Multi-namespace Agones support.** The Agones provider can now watch gameservers across multiple Kubernetes namespaces simultaneously using `--provider.k8s.agones.namespaces` (comma-separated). The old singular `--provider.k8s.agones.namespace` flag is deprecated.
+
+**Origin IP via proxy headers.** When quilkin instances are chained behind a load balancer or another quilkin proxy, the upstream quilkin's real IP can now be read from `X-Forwarded-For` and similar headers rather than the intermediary's address.
+
+**File logging.** Log output can now be directed to a file in addition to (or instead of) stdout. Set `--sys.log.dir` to the target directory and optionally `--sys.log.file-prefix` to control the filename (defaults to `quilkin.log`).
+
+**`--service-id` parameter.** Services now accept an explicit `--service-id` flag to set a stable identity, used as the default Kubernetes leader election ID and the mDS control-plane identifier.
+
+**Phoenix network coordinates.** Phoenix exposes a new `/coordinate` HTTP route returning the node's current network coordinates.
+
+**Improved observability.** Many new metrics have been added:
+
+- `phoenix_distance` — current estimated latency to each peer datacenter
+- QCMP server metrics including ASN information
+- Kubernetes provider event and queue depth metrics
+- HTTP request metrics on the admin and phoenix endpoints
+- jemalloc heap statistics exposed as Prometheus metrics
+- XDP packet allocation counters
+- `quilkin_cluster` label on `active_endpoints`
+
+Continuous memory profiling via pprof is also now enabled in release builds.
+
+**Updated Unreal Engine plugin.** The bundled UE5 plugin has been updated.
+
+## Performance improvements
+
+The filter pipeline is now fully synchronous, eliminating async overhead on the hot path. Additional improvements include: replacing the default hasher with `gxhash`, enabling LTO in release builds, removing async channels for buffer sends, eliminating per-packet destination address allocations, and switching to non-negative least squares (NNLS) for latency estimation in Phoenix.
+
+## Bug fixes
+
+- Config is now preserved locally when the control-plane connection is lost, rather than being cleared
+- Shutdown now correctly waits for all active sessions to drain before exiting
+- Multiple Kubernetes namespaces can be watched simultaneously without interference
+- Agones gameserver watch semantics are consistent across reconnects
+- MMDB provider tasks are now correctly managed and do not terminate prematurely
+- Invalid port numbers are now rejected at the CLI rather than silently accepted
+- Proxies now shut down on panic rather than hanging
+
+## Security
+
+Updated `openssl` (0.10.75 → 0.10.78) and `rustls-webpki` (0.103.8 → 0.103.10).
+
+**Full Changelog**: https://github.com/EmbarkStudios/quilkin/compare/v0.9.0...v0.10.0
+
 # v0.9.0 (2024-08-19)
 
 ## What's Changed
