@@ -1067,6 +1067,37 @@ impl Service {
             });
         }
 
+        // Spawn a task that regularly updates metrics wrt database sizes on disk
+        {
+            let finished = shutdown.push("corrosion_db_metrics");
+            let mut srx = shutdown.shutdown_rx();
+
+            let update_interval = std::time::Duration::from_secs(5 * 60);
+
+            let dbm = corrosion::metrics::DbMetrics::new(
+                crate::metrics::registry(),
+                db_path,
+                sub_path.clone(),
+            );
+
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(update_interval);
+
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            dbm.update();
+                        }
+                        _ = srx.changed() => {
+                            break;
+                        }
+                    }
+                }
+
+                drop(finished.send(Ok(())));
+            });
+        }
+
         // Tripwire is how corrosion communicates a shutdown was requested
         let trip = corrosion::pubsub::Trip::new();
         let ps_ctx = corrosion::pubsub::PubsubContext::new(

@@ -5,6 +5,7 @@ pub use tripwire::Tripwire;
 pub mod agent;
 pub mod codec;
 pub mod db;
+pub mod metrics;
 pub mod persistent;
 pub mod pubsub;
 pub mod schema;
