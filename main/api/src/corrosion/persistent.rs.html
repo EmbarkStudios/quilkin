@@ -82,12 +82,17 @@
 <a href=#82 id=82 data-nosnippet>82</a>    }
 <a href=#83 id=83 data-nosnippet>83</a>}
 <a href=#84 id=84 data-nosnippet>84</a>
-<a href=#85 id=85 data-nosnippet>85</a><span class="attr">#[inline]
-<a href=#86 id=86 data-nosnippet>86</a></span><span class="kw">fn </span>update_metric(metric: <span class="kw-2">&amp;</span>prometheus::IntCounterVec, current: <span class="kw-2">&amp;mut </span>u64, new: u64) {
-<a href=#87 id=87 data-nosnippet>87</a>    <span class="comment">// I'd _assume_ that quinn will never decrement the stats, but just in case
-<a href=#88 id=88 data-nosnippet>88</a>    </span>metric
-<a href=#89 id=89 data-nosnippet>89</a>        .with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[])
-<a href=#90 id=90 data-nosnippet>90</a>        .inc_by(new.saturating_sub(<span class="kw-2">*</span>current));
-<a href=#91 id=91 data-nosnippet>91</a>    <span class="kw-2">*</span>current = (<span class="kw-2">*</span>current).max(new);
-<a href=#92 id=92 data-nosnippet>92</a>}
+<a href=#85 id=85 data-nosnippet>85</a><span class="kw">pub struct </span>SubMetrics {
+<a href=#86 id=86 data-nosnippet>86</a>    <span class="kw">pub </span>total_events: usize,
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">pub </span>failures: usize,
+<a href=#88 id=88 data-nosnippet>88</a>}
+<a href=#89 id=89 data-nosnippet>89</a>
+<a href=#90 id=90 data-nosnippet>90</a><span class="attr">#[inline]
+<a href=#91 id=91 data-nosnippet>91</a></span><span class="kw">fn </span>update_metric(metric: <span class="kw-2">&amp;</span>prometheus::IntCounterVec, current: <span class="kw-2">&amp;mut </span>u64, new: u64) {
+<a href=#92 id=92 data-nosnippet>92</a>    <span class="comment">// I'd _assume_ that quinn will never decrement the stats, but just in case
+<a href=#93 id=93 data-nosnippet>93</a>    </span>metric
+<a href=#94 id=94 data-nosnippet>94</a>        .with_label_values::&lt;<span class="kw-2">&amp;</span>str&gt;(<span class="kw-2">&amp;</span>[])
+<a href=#95 id=95 data-nosnippet>95</a>        .inc_by(new.saturating_sub(<span class="kw-2">*</span>current));
+<a href=#96 id=96 data-nosnippet>96</a>    <span class="kw-2">*</span>current = (<span class="kw-2">*</span>current).max(new);
+<a href=#97 id=97 data-nosnippet>97</a>}
 </code></pre></div></section></main></body></html>

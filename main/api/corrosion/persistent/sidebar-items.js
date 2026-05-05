@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ErrorCode","ExecResult"],"mod":["client","mutator","proto","server"],"struct":["ExecResponse","Metrics"]};
+window.SIDEBAR_ITEMS = {"enum":["ErrorCode","ExecResult"],"mod":["client","mutator","proto","server"],"struct":["ExecResponse","Metrics","SubMetrics"]};

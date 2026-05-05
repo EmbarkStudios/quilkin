@@ -293,12 +293,12 @@
 <a href=#293 id=293 data-nosnippet>293</a>
 <a href=#294 id=294 data-nosnippet>294</a>    <span class="kw">pub fn </span>new_config() -&gt; Arc&lt;Config&gt; {
 <a href=#295 id=295 data-nosnippet>295</a>        <span class="kw">let </span>providers = <span class="kw">crate</span>::Providers::default();
-<a href=#296 id=296 data-nosnippet>296</a>        <span class="kw">let </span>service = <span class="kw">crate</span>::Service::builder().udp().qcmp();
+<a href=#296 id=296 data-nosnippet>296</a>        <span class="kw">let </span><span class="kw-2">mut </span>service = <span class="kw">crate</span>::Service::builder().udp().qcmp();
 <a href=#297 id=297 data-nosnippet>297</a>        <span class="kw">crate</span>::Config::new_rc(
 <a href=#298 id=298 data-nosnippet>298</a>            <span class="prelude-val">Some</span>(<span class="string">"test-server"</span>.into()),
 <a href=#299 id=299 data-nosnippet>299</a>            Default::default(),
 <a href=#300 id=300 data-nosnippet>300</a>            <span class="kw-2">&amp;</span>providers,
-<a href=#301 id=301 data-nosnippet>301</a>            <span class="kw-2">&amp;</span>service,
+<a href=#301 id=301 data-nosnippet>301</a>            <span class="kw-2">&amp;mut </span>service,
 <a href=#302 id=302 data-nosnippet>302</a>            tokio_util::sync::CancellationToken::new(),
 <a href=#303 id=303 data-nosnippet>303</a>        )
 <a href=#304 id=304 data-nosnippet>304</a>    }

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["registry","set_registry"],"struct":["StreamConnectionMetrics"]};
+window.SIDEBAR_ITEMS = {"fn":["active_control_planes","registry","set_registry"],"struct":["StreamConnectionMetrics"]};

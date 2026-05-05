@@ -211,7 +211,7 @@
 <a href=#211 id=211 data-nosnippet>211</a>    <span class="doccomment">/// Drives the main quilkin application lifecycle using the command line
 <a href=#212 id=212 data-nosnippet>212</a>    /// arguments.
 <a href=#213 id=213 data-nosnippet>213</a>    </span><span class="attr">#[tracing::instrument(skip_all)]
-<a href=#214 id=214 data-nosnippet>214</a>    </span><span class="kw">pub async fn </span>drive(<span class="self">self</span>) -&gt; <span class="kw">crate</span>::Result&lt;()&gt; {
+<a href=#214 id=214 data-nosnippet>214</a>    </span><span class="kw">pub async fn </span>drive(<span class="kw-2">mut </span><span class="self">self</span>) -&gt; <span class="kw">crate</span>::Result&lt;()&gt; {
 <a href=#215 id=215 data-nosnippet>215</a>        <span class="comment">// Configure rolling log file appender if directory has been specified.
 <a href=#216 id=216 data-nosnippet>216</a>        // _log_file_guard should be kept in scope and will trigger the final flush to file when dropped
 <a href=#217 id=217 data-nosnippet>217</a>        </span><span class="kw">let </span>(file_writer, _log_file_guard) = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.log_directory {
@@ -264,7 +264,7 @@
 <a href=#264 id=264 data-nosnippet>264</a>            <span class="self">self</span>.service.id.clone(),
 <a href=#265 id=265 data-nosnippet>265</a>            <span class="self">self</span>.locality.icao_code,
 <a href=#266 id=266 data-nosnippet>266</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.providers,
-<a href=#267 id=267 data-nosnippet>267</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.service,
+<a href=#267 id=267 data-nosnippet>267</a>            <span class="kw-2">&amp;mut </span><span class="self">self</span>.service,
 <a href=#268 id=268 data-nosnippet>268</a>            drive_token.child_token(),
 <a href=#269 id=269 data-nosnippet>269</a>        );
 <a href=#270 id=270 data-nosnippet>270</a>        config.read_config(<span class="kw-2">&amp;</span><span class="self">self</span>.config, locality.clone())<span class="question-mark">?</span>;

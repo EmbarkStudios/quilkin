@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["spawn_lock_contention_printer"],"mod":["read","write"],"struct":["InitializedDb"]};
+window.SIDEBAR_ITEMS = {"fn":["spawn_lock_contention_printer"],"mod":["read","write"],"struct":["DBMaintenance","InitializedDb"]};

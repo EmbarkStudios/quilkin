@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["agent","codec","db","persistent","pubsub","schema","server"],"struct":["Path","PathBuf","SmallVec","Tripwire"],"type":["Peer"]};
+window.SIDEBAR_ITEMS = {"fn":["ip_to_peer"],"mod":["agent","codec","db","metrics","persistent","pubsub","schema","server"],"struct":["Path","PathBuf","SmallVec","Tripwire"],"type":["Peer"]};

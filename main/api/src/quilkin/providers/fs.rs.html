@@ -96,19 +96,19 @@
 <a href=#96 id=96 data-nosnippet>96</a>    <span class="attr">#[tokio::test]
 <a href=#97 id=97 data-nosnippet>97</a>    </span><span class="kw">async fn </span>basic() {
 <a href=#98 id=98 data-nosnippet>98</a>        <span class="kw">let </span>providers = Default::default();
-<a href=#99 id=99 data-nosnippet>99</a>        <span class="kw">let </span>service = Default::default();
+<a href=#99 id=99 data-nosnippet>99</a>        <span class="kw">let </span><span class="kw-2">mut </span>service = Default::default();
 <a href=#100 id=100 data-nosnippet>100</a>        <span class="kw">let </span>source = <span class="kw">crate</span>::Config::new_rc(
 <a href=#101 id=101 data-nosnippet>101</a>            <span class="prelude-val">Some</span>(<span class="string">"basic"</span>.into()),
 <a href=#102 id=102 data-nosnippet>102</a>            Default::default(),
 <a href=#103 id=103 data-nosnippet>103</a>            <span class="kw-2">&amp;</span>providers,
-<a href=#104 id=104 data-nosnippet>104</a>            <span class="kw-2">&amp;</span>service,
+<a href=#104 id=104 data-nosnippet>104</a>            <span class="kw-2">&amp;mut </span>service,
 <a href=#105 id=105 data-nosnippet>105</a>            tokio_util::sync::CancellationToken::new(),
 <a href=#106 id=106 data-nosnippet>106</a>        );
 <a href=#107 id=107 data-nosnippet>107</a>        <span class="kw">let </span>dest = <span class="kw">crate</span>::Config::new_rc(
 <a href=#108 id=108 data-nosnippet>108</a>            <span class="prelude-val">Some</span>(<span class="string">"basic"</span>.into()),
 <a href=#109 id=109 data-nosnippet>109</a>            Default::default(),
 <a href=#110 id=110 data-nosnippet>110</a>            <span class="kw-2">&amp;</span>providers,
-<a href=#111 id=111 data-nosnippet>111</a>            <span class="kw-2">&amp;</span>service,
+<a href=#111 id=111 data-nosnippet>111</a>            <span class="kw-2">&amp;mut </span>service,
 <a href=#112 id=112 data-nosnippet>112</a>            tokio_util::sync::CancellationToken::new(),
 <a href=#113 id=113 data-nosnippet>113</a>        );
 <a href=#114 id=114 data-nosnippet>114</a>        <span class="macro">assert_eq!</span>(source, dest);
