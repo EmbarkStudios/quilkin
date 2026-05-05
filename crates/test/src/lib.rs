@@ -1,6 +1,6 @@
 #![allow(clippy::unimplemented)]
 
-use quilkin::{Config, net::TcpListener, signal::ShutdownTx, test::TestConfig};
+use quilkin::{Config, signal::ShutdownTx, test::TestConfig};
 
 pub use serde_json::json;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 #[cfg(target_os = "linux")]
 pub mod xdp_util;
 
-pub const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+pub const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[inline]
 pub fn alloc_buffer(data: impl AsRef<[u8]>) -> bytes::BytesMut {
@@ -54,7 +54,10 @@ pub fn init_logging(level: Level, test_pkg: &'static str) {
         .with_test_writer()
         .with_filter(tracing_subscriber::filter::LevelFilter::from_level(level))
         .with_filter(tracing_subscriber::EnvFilter::new(format!(
-            "{test_pkg}=trace,qt=trace,quilkin=trace,xds=trace,corrosion=trace"
+            // NOTE: corrosion is _EXTREMELY_ spammy at the trace level, so don't enable these unless you are trying
+            // to see everything that could go on, but it's so noisy it can actually make it harder to diagnose issues
+            // corrosion=trace,corro_types=trace,tripwire=trace
+            "{test_pkg}=trace,qt=trace,quilkin=debug"
         )));
     let sub = tracing_subscriber::Registry::default().with(layer);
     let disp = tracing::dispatcher::Dispatch::new(sub);
@@ -65,13 +68,13 @@ pub fn init_logging(level: Level, test_pkg: &'static str) {
 macro_rules! trace_test {
     ($(#[$attr:meta])* $name:ident, $body:block) => {
         $(#[$attr])*
-        #[tokio::test(flavor = "multi_thread")]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $name() {
             // Get the module name
             let fname = $crate::func_name!();
             let mname = fname.rsplit("::").nth(2).unwrap();
 
-            let _guard = init_logging($crate::Level::DEBUG, mname);
+            let _guard = $crate::init_logging($crate::Level::TRACE, mname);
 
             $body
         }
@@ -105,15 +108,26 @@ pub struct RelayPailConfig {
 #[derive(Default)]
 pub struct ProxyPailConfig {
     pub config: Option<quilkin::test::TestConfig>,
+    pub corrosion: bool,
 }
 
 #[derive(Default)]
 pub struct ManagementPailConfig {}
 
-#[derive(Default)]
 pub struct AgentPailConfig {
     pub endpoints: Vec<(&'static str, &'static [&'static str])>,
     pub icao_code: quilkin::config::IcaoCode,
+    pub corrosion: bool,
+}
+
+impl Default for AgentPailConfig {
+    fn default() -> Self {
+        Self {
+            endpoints: Vec::new(),
+            icao_code: Default::default(),
+            corrosion: true,
+        }
+    }
 }
 
 pub enum PailConfig {
@@ -192,7 +206,7 @@ pub type JoinHandle =
 pub type JoinSet = tokio::task::JoinSet<quilkin::Result<()>>;
 
 pub struct ServerPail {
-    /// The server socket's ephmeral port
+    /// The server socket's ephemeral port
     pub port: u16,
     pub packet_rx: Option<mpsc::Receiver<String>>,
     /// The join handle to the task driving the socket. Used to both cancel the task
@@ -205,6 +219,7 @@ abort_task!(ServerPail);
 pub struct RelayPail {
     pub xds_port: u16,
     pub mds_port: u16,
+    pub corrosion_port: Option<u16>,
     pub task: Option<JoinHandle>,
     pub provider_task: JoinSet,
     pub healthy: Arc<std::sync::atomic::AtomicBool>,
@@ -298,9 +313,10 @@ impl Pail {
                 .testing();
             let (tx, rx) = quilkin::signal::channel();
             let sh = quilkin::signal::ShutdownHandler::new(tx.clone(), rx);
-            let (task, _ports) = svc.spawn_services(&rp.config, sh).await.unwrap();
+            let (task, ports) = svc.spawn_services(&rp.config, sh).await.unwrap();
 
             rp.shutdown = tx;
+            rp.corrosion_port = ports.corrosion;
             rp.task = Some(task);
         } else {
             unimplemented!();
@@ -374,7 +390,7 @@ impl Pail {
                 let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
 
                 let providers = quilkin::Providers::default().fs().fs_path(path);
-                let svc = quilkin::Service::default()
+                let mut svc = quilkin::Service::default()
                     .xds()
                     .xds_port(0)
                     .mds()
@@ -387,7 +403,7 @@ impl Pail {
                     Some("test-relay".into()),
                     Default::default(),
                     &providers,
-                    &svc,
+                    &mut svc,
                     pail_token,
                 );
 
@@ -411,6 +427,7 @@ impl Pail {
                 Self::Relay(RelayPail {
                     xds_port: ports.xds.expect("xds not spawned"),
                     mds_port: ports.mds.expect("mds not spawned"),
+                    corrosion_port: ports.corrosion,
                     task: Some(task),
                     provider_task,
                     healthy,
@@ -464,17 +481,40 @@ impl Pail {
                 let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
 
                 let config_path = path.clone();
-                let svc = quilkin::Service::default().qcmp().qcmp_port(0);
+                let mut svc = quilkin::Service::default().qcmp().qcmp_port(0);
                 let providers = quilkin::Providers::default()
                     .fs()
                     .fs_path(path)
                     .grpc_push_endpoints(relay_servers);
 
+                let corrosion_eps = spc
+                    .dependencies
+                    .iter()
+                    .filter_map(|dname| {
+                        let Pail::Relay(RelayPail { corrosion_port, .. }) = &pails[dname] else {
+                            return None;
+                        };
+                        corrosion_port.filter(|_a| apc.corrosion).map(|p| {
+                            quilkin::net::EndpointAddress::from(SocketAddr::V6(
+                                std::net::SocketAddrV6::new(std::net::Ipv6Addr::LOCALHOST, p, 0, 0),
+                            ))
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
+                let providers = if !corrosion_eps.is_empty() {
+                    providers
+                        .corrosion_endpoints(corrosion_eps)
+                        .corrosion_mode(quilkin::providers::corrosion::CorrosionMode::Push)
+                } else {
+                    providers
+                };
+
                 let config = crate::Config::new_rc(
                     Some("test-agent".into()),
                     apc.icao_code,
                     &providers,
-                    &svc,
+                    &mut svc,
                     pail_token,
                 );
 
@@ -510,25 +550,51 @@ impl Pail {
                 })
             }
             PailConfig::Proxy(ppc) => {
-                let management_servers: Vec<_> = spc
-                    .dependencies
-                    .iter()
-                    .filter_map(|dname| {
-                        let Pail::Relay(RelayPail { xds_port, .. }) = &pails[dname] else {
-                            return None;
-                        };
-                        Some(
-                            format!("http://localhost:{xds_port}")
-                                .parse()
-                                .expect("failed to parse endpoint"),
-                        )
-                    })
-                    .collect();
+                let providers = if ppc.corrosion {
+                    let corrosion_eps: Vec<_> = spc
+                        .dependencies
+                        .iter()
+                        .filter_map(|dname| {
+                            let Pail::Relay(RelayPail { corrosion_port, .. }) = &pails[dname]
+                            else {
+                                return None;
+                            };
+                            corrosion_port.map(|p| {
+                                quilkin::net::EndpointAddress::from(SocketAddr::V6(
+                                    std::net::SocketAddrV6::new(
+                                        std::net::Ipv6Addr::LOCALHOST,
+                                        p,
+                                        0,
+                                        0,
+                                    ),
+                                ))
+                            })
+                        })
+                        .collect();
 
-                let providers =
-                    quilkin::Providers::default().grpc_pull_endpoints(management_servers);
+                    quilkin::Providers::default()
+                        .corrosion_endpoints(corrosion_eps)
+                        .corrosion_mode(quilkin::providers::corrosion::CorrosionMode::Pull)
+                } else {
+                    let management_servers: Vec<_> = spc
+                        .dependencies
+                        .iter()
+                        .filter_map(|dname| {
+                            let Pail::Relay(RelayPail { xds_port, .. }) = &pails[dname] else {
+                                return None;
+                            };
+                            Some(
+                                format!("http://localhost:{xds_port}")
+                                    .parse()
+                                    .expect("failed to parse endpoint"),
+                            )
+                        })
+                        .collect();
 
-                let svc = quilkin::Service::default()
+                    quilkin::Providers::default().grpc_pull_endpoints(management_servers)
+                };
+
+                let mut svc = quilkin::Service::default()
                     .udp()
                     .udp_port(0)
                     .qcmp()
@@ -544,7 +610,7 @@ impl Pail {
                     Some("test-proxy".into()),
                     Default::default(),
                     &Default::default(),
-                    &svc,
+                    &mut svc,
                     pail_token,
                 );
 

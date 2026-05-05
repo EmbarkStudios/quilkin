@@ -154,11 +154,22 @@ pub struct Service {
     )]
     corrosion_db_path: Option<camino::Utf8PathBuf>,
 
+    /// The time in seconds that servers can be kept in the database if there are no contributors (agents) for that server
+    ///
+    /// If not specified, defaults to 10m
+    #[clap(
+        long = "service.corrosion.server-reap",
+        env = "QUILKIN_SERVICE_CORROSION_SERVER_REAP"
+    )]
+    corrosion_server_reap: Option<u32>,
+
     // END CORROSION
     #[clap(long = "termination-timeout")]
     termination_timeout: Option<crate::cli::Duration>,
     #[clap(skip)]
     testing: bool,
+    #[clap(skip)]
+    xds_to_corrosion: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<corrosion::api::Statement>>>,
 }
 
 pub type Finalizer = Box<dyn FnOnce() + Send>;
@@ -195,8 +206,10 @@ impl Default for Service {
             tls_key_path: None,
             corrosion_port: 7901,
             corrosion_db_path: None,
+            corrosion_server_reap: None,
             termination_timeout: None,
             testing: false,
+            xds_to_corrosion: None,
         }
     }
 }
@@ -306,12 +319,21 @@ impl Service {
     }
 
     /// Adds the required typemap entries to the config depending on what services are enabled
-    pub fn init_config(&self, config: &mut Config) {
+    pub fn init_config(&mut self, config: &mut Config) {
         use crate::config::{self, insert_default};
 
         if self.udp_enabled || self.xds_enabled || self.mds_enabled {
             insert_default::<crate::filters::FilterChain>(&mut config.dyn_cfg.typemap);
             insert_default::<config::DatacenterMap>(&mut config.dyn_cfg.typemap);
+        }
+
+        if self.mds_enabled {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            config
+                .dyn_cfg
+                .typemap
+                .insert::<crate::config::DbTx>(crate::config::DbTx { tx });
+            self.xds_to_corrosion = Some(rx);
         }
 
         if self.qcmp_enabled {
@@ -381,9 +403,14 @@ impl Service {
 
                 let mut errors = 0;
                 for (task, res) in &results {
-                    if let Err(error) = res {
-                        tracing::error!(task, %error, "service task failed");
-                        errors += 1;
+                    match res {
+                        Ok(_o) => {
+                            tracing::info!(task, "service task finished");
+                        }
+                        Err(error) => {
+                            tracing::error!(task, %error, "service task failed");
+                            errors += 1;
+                        }
                     }
                 }
 
@@ -530,7 +557,7 @@ impl Service {
 
     /// Spawns an xDS server and/or corrosion server if enabled
     async fn publish_mds(
-        &self,
+        &mut self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
         ports: &mut ServicePorts,
@@ -801,7 +828,7 @@ impl Service {
     /// requests and/or subscription requests and be notified when a change has
     /// been made that matches their query
     async fn spawn_corrosion_server(
-        &self,
+        &mut self,
         config: Arc<Config>,
         shutdown: &mut ShutdownHandler,
         ports: &mut ServicePorts,
@@ -837,7 +864,12 @@ impl Service {
         let sub_path = db_root.join("subs");
         let db_path = db_root.join("db.db");
 
-        let db = corrosion::db::InitializedDb::setup(&db_path, corrosion::schema::SCHEMA).await?;
+        let db = corrosion::db::InitializedDb::setup(
+            &db_path,
+            corrosion::schema::SCHEMA,
+            Some(corrosion::db::DBMaintenance::default()),
+        )
+        .await?;
         let subs = types::pubsub::SubsManager::default();
 
         let btx = corrosion::persistent::mutator::BroadcastingTransactor::new(
@@ -850,14 +882,13 @@ impl Service {
         )
         .await;
 
-        // Spawn a task to update the DB and broadcast changes when the filter
-        // changes
+        // Spawn a task to update the DB and broadcast changes when the filter changes
         if let Some((mut filters, mut filters_sub)) = config
             .dyn_cfg
             .cached_filter_chain()
             .zip(config.dyn_cfg.subscribe_filter_changes())
         {
-            let finished = shutdown.push("corrosion_db_mutator");
+            let finished = shutdown.push("corrosion_filter_mutator");
             let mut srx = shutdown.shutdown_rx();
 
             let btx = btx.clone();
@@ -899,6 +930,10 @@ impl Service {
             }
 
             tokio::spawn(async move {
+                // Set the initial state, at this early stage we _probably_ won't
+                // have subscribers, but we do the full DB + publish just in case
+                update_filters(&btx, &mut filters).await;
+
                 loop {
                     tokio::select! {
                         _fc = filters_sub.recv() => {
@@ -914,14 +949,163 @@ impl Service {
             });
         }
 
+        // We explicitly set this up in init_config so it's a bug if that is not called
+        {
+            let mut rx = self
+                .xds_to_corrosion
+                .take()
+                .expect("init_config was not called");
+
+            let finished = shutdown.push("corrosion_mutator");
+            let mut srx = shutdown.shutdown_rx();
+
+            let btx = btx.clone();
+
+            async fn update_db(
+                btx: &BroadcastingTransactor,
+                statements: Vec<corrosion::api::Statement>,
+            ) {
+                let res = btx
+                    .make_broadcastable_changes(None, |tx| {
+                        let mut rows = 0;
+                        for statement in statements {
+                            rows += corrosion::db::write::exec_single_interruptible(tx, statement)
+                                .map_err(|source| {
+                                    corrosion::types::agent::ChangeError::Rusqlite {
+                                        source,
+                                        actor_id: Some(btx.actor_id()),
+                                        version: None,
+                                    }
+                                })?;
+                        }
+                        Ok(rows)
+                    })
+                    .await;
+
+                match res {
+                    Ok((_, version, elapsed)) => {
+                        tracing::debug!(?version, ?elapsed, "updated servers");
+                    }
+                    Err(error) => {
+                        tracing::error!(%error, "failed to update servers");
+                    }
+                }
+            }
+
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        change = rx.recv() => {
+                            let Some(statements) = change else {
+                                tracing::debug!("config shutdown");
+                                break;
+                            };
+
+                            update_db(&btx, statements).await;
+                        }
+                        _ = srx.changed() => {
+                            break;
+                        }
+                    }
+                }
+
+                drop(finished.send(Ok(())));
+            });
+        }
+
+        // Spawn a task to periodically reap old servers whose agents have disconnected abnormally but we want to give
+        // an agent from the same cluster time to renew them if the servers are still valid before removing them entirely
+        {
+            const TEN_MINUTES: u32 = 10 * 60;
+
+            let reap_time = self.corrosion_server_reap.unwrap_or(TEN_MINUTES) as _;
+            let check_interval = std::time::Duration::from_secs(reap_time / 2);
+            let reap_time = std::time::Duration::from_secs(reap_time);
+
+            let finished = shutdown.push("corrosion_reaper");
+            let mut srx = shutdown.shutdown_rx();
+
+            let btx = btx.clone();
+
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(check_interval);
+
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            let statement = corrosion::db::write::Server::<0>::reap_old(reap_time);
+
+                            let res = btx
+                                .make_broadcastable_changes(None, |tx| {
+                                    corrosion::db::write::exec_single_interruptible(tx, statement)
+                                    .map_err(|source| {
+                                        corrosion::types::agent::ChangeError::Rusqlite {
+                                            source,
+                                            actor_id: Some(btx.actor_id()),
+                                            version: None,
+                                        }
+                                    })
+                                })
+                                .await;
+
+                            match res {
+                                Ok((count, version, elapsed)) => {
+                                    tracing::debug!(count, ?version, ?elapsed, "reaped old servers");
+                                }
+                                Err(error) => {
+                                    tracing::error!(%error, "failed to reap old servers");
+                                }
+                            }
+                        }
+                        _ = srx.changed() => {
+                            break;
+                        }
+                    }
+                }
+
+                drop(finished.send(Ok(())));
+            });
+        }
+
+        // Spawn a task that regularly updates metrics wrt database sizes on disk
+        {
+            let finished = shutdown.push("corrosion_db_metrics");
+            let mut srx = shutdown.shutdown_rx();
+
+            let update_interval = std::time::Duration::from_secs(5 * 60);
+
+            let dbm = corrosion::metrics::DbMetrics::new(
+                crate::metrics::registry(),
+                db_path,
+                sub_path.clone(),
+            );
+
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(update_interval);
+
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            dbm.update();
+                        }
+                        _ = srx.changed() => {
+                            break;
+                        }
+                    }
+                }
+
+                drop(finished.send(Ok(())));
+            });
+        }
+
         // Tripwire is how corrosion communicates a shutdown was requested
-        let (tw, _, tw_tx) = corrosion::Tripwire::new_simple();
+        let trip = corrosion::pubsub::Trip::new();
         let ps_ctx = corrosion::pubsub::PubsubContext::new(
             subs,
             sub_path,
             db.pool,
             db.schema,
-            tw,
+            trip.tripwire(),
             types::pubsub::MatcherLoopConfig::default(),
         )
         .await?;
@@ -935,7 +1119,12 @@ impl Service {
             corrosion::persistent::Metrics::new(crate::metrics::registry()),
         )?;
 
-        ports.corrosion = Some(udp_server.local_addr().port());
+        let port = udp_server.local_addr().port();
+        ports.corrosion = Some(port);
+
+        // Mainly for testing when the requested port is 0 and we bind to an ephemeral
+        // port so the log message at the start is kind of useless
+        tracing::debug!(port, "corrosion service running");
 
         let finished = shutdown.push("corrosion_server");
         let mut srx = shutdown.shutdown_rx();
@@ -943,7 +1132,8 @@ impl Service {
         tokio::spawn(async move {
             drop(srx.changed().await);
 
-            let _ = tw_tx.send(()).await;
+            trip.shutdown().await;
+
             udp_server.shutdown("graceful shutdown").await;
 
             drop(finished.send(Ok(())));

@@ -82,8 +82,8 @@ struct HttpHarness {
 impl HttpHarness {
     fn new() -> Self {
         let providers = quilkin::Providers::default().http();
-        let service = quilkin::Service::default();
-        let config = quilkin::Config::new(None, Default::default(), &providers, &service);
+        let mut service = quilkin::Service::default();
+        let config = quilkin::Config::new(None, Default::default(), &providers, &mut service);
         let fc = FiltersAndClusters::new(&config).unwrap();
         Self {
             server: axum_test::TestServer::new(quilkin::providers::http::make_router(fc)).unwrap(),
@@ -207,7 +207,7 @@ impl CombinedHarness {
         // mds()      — enables the Corrosion DB server + MDS relay
         // testing()  — uses a randomised temp directory for the SQLite DB
         // mds_port(0) / corrosion_port(0) — let the OS choose free ports
-        let service = quilkin::Service::default()
+        let mut service = quilkin::Service::default()
             .mds()
             .mds_port(0)
             .corrosion_port(0)
@@ -216,7 +216,7 @@ impl CombinedHarness {
             None,
             Default::default(),
             &providers,
-            &service,
+            &mut service,
         ));
 
         let (tx, rx) = quilkin::signal::channel();

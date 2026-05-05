@@ -82,6 +82,11 @@ impl Metrics {
     }
 }
 
+pub struct SubMetrics {
+    pub total_events: usize,
+    pub failures: usize,
+}
+
 #[inline]
 fn update_metric(metric: &prometheus::IntCounterVec, current: &mut u64, new: u64) {
     // I'd _assume_ that quinn will never decrement the stats, but just in case

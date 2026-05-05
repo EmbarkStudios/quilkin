@@ -62,9 +62,22 @@ impl EndpointAddress {
 
     /// Returns the socket address for the endpoint, resolving any DNS entries
     /// if present.
+    #[inline]
     pub fn to_socket_addr(&self) -> std::io::Result<SocketAddr> {
+        let ip = match &self.host {
+            AddressKind::Ip(ip) => SocketAddr::from((*ip, self.port)),
+            AddressKind::Name(_name) => {
+                let handle = tokio::runtime::Handle::current();
+                handle.block_on(self.to_socket_addr_async())?
+            }
+        };
+
+        Ok(ip)
+    }
+
+    pub async fn to_socket_addr_async(&self) -> std::io::Result<SocketAddr> {
         static DNS: Lazy<TokioResolver> =
-            Lazy::new(|| TokioResolver::builder_tokio().unwrap().build());
+            Lazy::new(|| TokioResolver::builder_tokio().unwrap().build().unwrap());
 
         let ip = match &self.host {
             AddressKind::Ip(ip) => *ip,
@@ -75,18 +88,29 @@ impl EndpointAddress {
                 if let Some(ip) = CACHE.get(name) {
                     **ip
                 } else {
-                    let handle = tokio::runtime::Handle::current();
-                    let set = handle
-                        .block_on(DNS.lookup_ip(&**name))?
-                        .iter()
-                        .collect::<std::collections::HashSet<_>>();
+                    let lookup_res = DNS.lookup_ip(&**name).await;
 
-                    let ip = set
-                        .iter()
-                        .find(|item| matches!(item, IpAddr::V6(_)))
-                        .or_else(|| set.iter().find(|item| matches!(item, IpAddr::V4(_))))
-                        .copied()
-                        .ok_or_else(|| std::io::Error::other("no ip address found"))?;
+                    let ip = match lookup_res {
+                        Ok(lookup) => {
+                            // Prefer v6 addresses
+                            lookup
+                                .iter()
+                                .find(|ip| ip.is_ipv6())
+                                .or_else(|| lookup.iter().next())
+                                .ok_or_else(|| {
+                                    // This should never be hit, hickory-resolver will return an error if there are no records
+                                    // for the query
+                                    std::io::Error::other("no ip address found")
+                                })?
+                        }
+                        Err(err) => {
+                            if err.is_no_records_found() {
+                                return Err(std::io::Error::other("no ip address found"));
+                            } else {
+                                return Err(std::io::Error::other(err));
+                            }
+                        }
+                    };
 
                     CACHE.insert(name.clone(), ip);
                     ip

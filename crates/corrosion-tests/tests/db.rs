@@ -155,9 +155,10 @@ async fn collects_old_servers() {
 
     // Do the actual removal of the servers with no contributors that are older than 30 minutes
     {
-        let mut s = write::Server::for_peer(PREP_PEER, &mut v);
-        s.reap_old(std::time::Duration::from_secs(60 * 30));
-        exec_all(s.statements, &sp).await;
+        v.push(write::Server::<2>::reap_old(
+            std::time::Duration::from_secs(60 * 30),
+        ));
+        exec_all(&mut v, &sp).await;
     }
 
     let only_row = {
@@ -174,7 +175,7 @@ async fn collects_old_servers() {
             row.add_cell(Cell::new(&sql.get::<_, String>(1).unwrap()));
             row.add_cell(Cell::new(&format!(
                 "{:?}",
-                read::deserialize_token_set(&sql.get::<_, String>(2).unwrap()).unwrap()
+                read::deserialize_token_set(Some(&sql.get::<_, String>(2).unwrap())).unwrap()
             )));
             row.add_cell(Cell::new(
                 &serde_json::from_str::<serde_json::Value>(&sql.get::<_, String>(3).unwrap())
@@ -206,7 +207,7 @@ async fn updates_servers() {
             row.add_cell(Cell::new(&sql.get::<_, String>(1).unwrap()));
             row.add_cell(Cell::new(&format!(
                 "{:?}",
-                read::deserialize_token_set(&sql.get::<_, String>(2).unwrap()).unwrap()
+                read::deserialize_token_set(Some(&sql.get::<_, String>(2).unwrap())).unwrap()
             )));
         })
     };

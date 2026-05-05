@@ -28,13 +28,13 @@ async fn proxy_ping() {
 
     let providers = quilkin::Providers::default();
 
-    let svc = quilkin::Service::builder().qcmp().qcmp_port(0);
+    let mut svc = quilkin::Service::builder().qcmp().qcmp_port(0);
 
     let config = quilkin::Config::new_rc(
         None,
         quilkin_types::IcaoCode::new_testing([b'X'; 4]),
         &providers,
-        &svc,
+        &mut svc,
         tokio_util::sync::CancellationToken::new(),
     );
 

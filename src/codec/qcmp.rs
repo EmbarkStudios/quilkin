@@ -454,6 +454,7 @@ pub(crate) fn spawn_task(
                             Err(error) => {
                                 match error {
                                     tokio::sync::broadcast::error::RecvError::Closed => {
+                                        return;
                                     }
                                     tokio::sync::broadcast::error::RecvError::Lagged(missed) => {
                                         tracing::error!(missed, "the port changed many times and we missed changes");

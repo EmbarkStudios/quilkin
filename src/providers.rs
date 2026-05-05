@@ -28,8 +28,10 @@ use std::{
 };
 
 use crate::{
-    config, metrics::provider_task_failures_total, net::EndpointAddress,
-    providers::k8s::EventProcessor,
+    config,
+    metrics::provider_task_failures_total,
+    net::EndpointAddress,
+    providers::{corrosion::CorrosionMode, k8s::EventProcessor},
 };
 use eyre::Context;
 use futures::TryStreamExt;
@@ -188,7 +190,7 @@ pub struct Providers {
         env = "QUILKIN_PROVIDERS_CORROSION_ENDPOINTS",
         value_delimiter = ','
     )]
-    corrosion_endpoints: Vec<SocketAddr>,
+    corrosion_endpoints: Vec<EndpointAddress>,
     /// What mode to run corrosion in
     #[clap(
         long = "provider.corrosion.mode",
@@ -302,8 +304,13 @@ impl Providers {
         self
     }
 
-    pub fn corrosion_endpoints(mut self, endpoints: impl Into<Vec<SocketAddr>>) -> Self {
+    pub fn corrosion_endpoints(mut self, endpoints: impl Into<Vec<EndpointAddress>>) -> Self {
         self.corrosion_endpoints = endpoints.into();
+        self
+    }
+
+    pub fn corrosion_mode(mut self, mode: CorrosionMode) -> Self {
+        self.corrosion_mode = Some(mode);
         self
     }
 
