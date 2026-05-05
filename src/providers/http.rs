@@ -230,8 +230,8 @@ mod tests {
         // Enable the HTTP provider so that init_config inserts both FilterChain
         // and ClusterMap into the typemap.
         let providers = crate::Providers::default().http();
-        let service = crate::Service::default();
-        let config = crate::Config::new(None, Default::default(), &providers, &service);
+        let mut service = crate::Service::default();
+        let config = crate::Config::new(None, Default::default(), &providers, &mut service);
 
         let fc = FiltersAndClusters::new(&config).unwrap();
         let state = HttpState {
