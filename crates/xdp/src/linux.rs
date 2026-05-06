@@ -97,6 +97,13 @@ impl EbpfProgram {
     /// The external port, the port used by clients, must be passed in due to
     /// how globals work in eBPF.
     pub fn load(external_port: u16, qcmp_port: u16) -> Result<Self, LoadError> {
+        let mut loader = aya::EbpfLoader::new();
+        let external_port_no = external_port.to_be_bytes();
+        loader.override_global("EXTERNAL_PORT_NO", &external_port_no, true);
+
+        let qcmp_port_no = qcmp_port.to_be_bytes();
+        loader.override_global("QCMP_PORT_NO", &qcmp_port_no, true);
+
         // We exploit the fact that Linux by default does not assign ephemeral
         // ports in the full range allowed by IANA, but we want to sanity check
         // it here, as otherwise something else could have been assigned an
@@ -162,10 +169,8 @@ impl EbpfProgram {
             self.bpf.map_mut("XSK").expect("failed to retrieve XSK map"),
         )?;
 
-        let queue_count = device_caps.queues.rx_count();
-
-        let mut entries = Vec::with_capacity(queue_count as _);
-        for i in 0..queue_count {
+        let mut entries = Vec::with_capacity(device_caps.queue_count as _);
+        for i in 0..device_caps.queue_count {
             let umem = xdp::Umem::map(umem_cfg)?;
             let mut sb = xdp::socket::XdpSocketBuilder::new()?;
             let (rings, mut bind_flags) = sb.build_wakable_rings(&umem, ring_cfg)?;
@@ -190,18 +195,11 @@ impl EbpfProgram {
         Ok(entries)
     }
 
-    // We use this entrypoint for now, but in the future we could also use
-    // a round robin mode when the xdp lib supports shared Umem
-    fn program_mut(&mut self) -> &mut aya::programs::Xdp {
-        self.bpf
-            .program_mut("all_queues")
-            .expect("failed to locate 'all_queues' program")
-            .try_into()
-            .expect("'all_queues' is not an xdp program")
-    }
-
-    /// Verifies and loads the program into the kernel; call once, before [`Self::attach`].
-    pub fn load_into_kernel(&mut self) -> Result<(), aya::programs::ProgramError> {
+    pub fn attach(
+        &mut self,
+        nic: NicIndex,
+        mode: aya::programs::xdp::XdpMode,
+    ) -> Result<aya::programs::xdp::XdpLinkId, aya::programs::ProgramError> {
         if let Err(_error) = aya_log::EbpfLogger::init(&mut self.bpf) {
             // Would be good to enable this if we do end up adding log messages to
             // the eBPF program, right now we don't so this will error as the ring
@@ -209,16 +207,17 @@ impl EbpfProgram {
             //tracing::warn!(%error, "failed to initialize eBPF logging");
         }
 
-        self.program_mut().load()
-    }
+        // We use this entrypoint for now, but in the future we could also use
+        // a round robin mode when the xdp lib supports shared Umem
+        let program: &mut aya::programs::Xdp = self
+            .bpf
+            .program_mut("all_queues")
+            .expect("failed to locate 'all_queues' program")
+            .try_into()
+            .expect("'all_queues' is not an xdp program");
+        program.load()?;
 
-    /// Attaches the loaded program to `nic`; safe to retry, eg after reconfiguring the NIC.
-    pub fn attach(
-        &mut self,
-        nic: NicIndex,
-        mode: aya::programs::xdp::XdpMode,
-    ) -> Result<aya::programs::xdp::XdpLinkId, aya::programs::ProgramError> {
-        self.program_mut().attach_to_if_index(nic.into(), mode)
+        program.attach_to_if_index(nic.into(), mode)
     }
 
     pub fn detach(
