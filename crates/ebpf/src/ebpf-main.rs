@@ -17,7 +17,7 @@
 #![no_std]
 #![no_main]
 #![allow(internal_features)]
-#![feature(core_intrinsics)]
+//#![feature(core_intrinsics)]
 
 use aya_ebpf::{
     bindings::xdp_action,
@@ -28,7 +28,7 @@ use aya_ebpf::{
 //use aya_log_ebpf::warn;
 use network_types::{
     eth::{EthHdr, EtherType},
-    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
+    ip::{Ipv4Hdr, Ipv6Hdr},
     udp::UdpHdr,
 };
 
@@ -39,16 +39,16 @@ type Action = xdp_action::Type;
 static XSK: XskMap = XskMap::with_max_entries(128, 0);
 
 // Number of sockets in the `XSK` map
-#[no_mangle]
+#[unsafe(no_mangle)]
 static SOCKET_COUNT: u32 = 0;
 static mut COUNTER: u32 = 0;
 
 /// The external port used by clients. Network order.
-#[no_mangle]
-static EXTERNAL_PORT_NO: u16 = u16::to_be(7777);
+#[unsafe(no_mangle)]
+static EXTERNAL_PORT_NO: [u8; 2] = 7777u16.to_be_bytes();
 /// The port used to respond to QCMP messages. Network order.
-#[no_mangle]
-static QCMP_PORT_NO: u16 = u16::to_be(7600);
+#[unsafe(no_mangle)]
+static QCMP_PORT_NO: [u8; 2] = 7600u16.to_be_bytes();
 
 /// The beginning of the port range quilkin will use for server sessions, we
 /// take advantage of the fact that, by default, the range Linux uses for
@@ -81,30 +81,30 @@ pub fn packet_router(ctx: &XdpContext) -> Result<(), ()> {
 
     // Get the destination UDP port, passing all packets we don't care about
     let dest_port = unsafe {
-        match eth_hdr.ether_type {
-            EtherType::Ipv4 => {
+        match eth_hdr.ether_type() {
+            Ok(EtherType::Ipv4) => {
                 let ipv4hdr = ptr_at::<Ipv4Hdr>(&ctx, EthHdr::LEN)?;
                 let v4hdr = &*ipv4hdr;
 
                 match v4hdr.proto {
-                    IpProto::Udp => {
+                    17 /* IpProto::Udp */ => {
                         let udp_hdr = &*ptr_at::<UdpHdr>(&ctx, EthHdr::LEN + Ipv4Hdr::LEN)?;
-                        udp_hdr.dest
+                        udp_hdr.dst
                     }
                     _ => {
                         return Err(());
                     }
                 }
             }
-            EtherType::Ipv6 => {
+            Ok(EtherType::Ipv6) => {
                 let ipv6hdr = ptr_at::<Ipv6Hdr>(&ctx, EthHdr::LEN)?;
                 let v6hdr = &*ipv6hdr;
 
                 // Note this means that we ignore packets that have extensions
                 match v6hdr.next_hdr {
-                    IpProto::Udp => {
+                    17 /* IpProto::Udp */ => {
                         let udp_hdr = &*ptr_at::<UdpHdr>(&ctx, EthHdr::LEN + Ipv6Hdr::LEN)?;
-                        udp_hdr.dest
+                        udp_hdr.dst
                     }
                     _ => {
                         return Err(());
@@ -118,7 +118,7 @@ pub fn packet_router(ctx: &XdpContext) -> Result<(), ()> {
     };
 
     if dest_port == unsafe { core::ptr::read_volatile(&EXTERNAL_PORT_NO) }
-        || u16::from_be(dest_port) >= EPHEMERAL_PORT_START
+        || u16::from_be_bytes(dest_port) >= EPHEMERAL_PORT_START
         || dest_port == unsafe { core::ptr::read_volatile(&QCMP_PORT_NO) }
     {
         Ok(())
@@ -166,6 +166,6 @@ pub fn round_robin(ctx: XdpContext) -> Action {
 
 /// We can't panic, but we still need to satisfy the linker
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
+fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }

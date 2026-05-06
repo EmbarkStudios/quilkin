@@ -13,5 +13,6 @@ clang -target bpf -Wall -O2 -g -c "$EBPF_ROOT/src/dummy.c" -o "$EBPF_ROOT/target
 
 if [[ $1 == '--update' ]]; then
     cp "$EBPF_ROOT/target/bpfel-unknown-none/release/packet-router" "$ROOT/crates/xdp/bin/packet-router.bin"
+    cp "$EBPF_ROOT/target/bpfel-unknown-none/release/packet-router-l2" "$ROOT/crates/xdp/bin/packet-router-l2.bin"
     cp "$EBPF_ROOT/target/bpfel-unknown-none/release/dummy" "$ROOT/crates/xdp/bin/dummy.bin"
 fi

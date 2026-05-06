@@ -98,10 +98,10 @@ impl EbpfProgram {
     /// how globals work in eBPF.
     pub fn load(external_port: u16, qcmp_port: u16) -> Result<Self, LoadError> {
         let mut loader = aya::EbpfLoader::new();
-        let external_port_no = external_port.to_be();
+        let external_port_no = external_port.to_be_bytes();
         loader.set_global("EXTERNAL_PORT_NO", &external_port_no, true);
 
-        let qcmp_port_no = qcmp_port.to_be();
+        let qcmp_port_no = qcmp_port.to_be_bytes();
         loader.set_global("QCMP_PORT_NO", &qcmp_port_no, true);
 
         // We exploit the fact that Linux by default does not assign ephemeral
@@ -137,8 +137,8 @@ impl EbpfProgram {
 
         Ok(Self {
             bpf: loader.load(PROGRAM)?,
-            external_port: xdp::packet::net_types::NetworkU16(external_port_no),
-            qcmp_port: xdp::packet::net_types::NetworkU16(qcmp_port_no),
+            external_port: xdp::packet::net_types::NetworkU16(u16::from_ne_bytes(external_port_no)),
+            qcmp_port: xdp::packet::net_types::NetworkU16(u16::from_ne_bytes(qcmp_port_no)),
         })
     }
 
