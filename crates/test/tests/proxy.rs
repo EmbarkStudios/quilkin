@@ -253,6 +253,9 @@ trace_test!(xds_bridge_to_corrosion, {
     let (local_addr, _rx) = sb.proxy("proxy");
     let (mut rx, server_addr) = sb.server("server");
 
+    // TODO: this should not be here but want to see if it mitigates the CI flakiness
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
     let mut agent_config = sb.config_file("agent");
     agent_config.update(|config| {
         config.clusters.insert_default(
