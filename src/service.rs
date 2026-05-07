@@ -1134,6 +1134,7 @@ impl Service {
 
             trip.shutdown().await;
 
+            tracing::info!("shutting down corrosion server")
             udp_server.shutdown("graceful shutdown").await;
 
             drop(finished.send(Ok(())));

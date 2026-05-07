@@ -1,4 +1,8 @@
-use crate::{Peer, codec, persistent::proto, pubsub};
+use crate::{
+    Peer, codec,
+    persistent::proto,
+    pubsub::{self, PubsubContext},
+};
 use quilkin_types::IcaoCode;
 use quinn::{RecvStream, SendStream};
 use std::net::{IpAddr, SocketAddr};
@@ -30,20 +34,11 @@ pub trait DbMutator: Sync + Send + Clone {
     async fn disconnected(&self, peer: Peer);
 }
 
-/// Trait used by a server implementation to perform database subscriptions
-#[async_trait::async_trait]
-pub trait SubManager: Sync + Send + Clone {
-    async fn subscribe(
-        &self,
-        subp: pubsub::SubParamsv1,
-    ) -> Result<pubsub::Subscription, pubsub::MatcherUpsertError>;
-    async fn remove(&self, sub_id: &uuid::Uuid) -> bool;
-}
-
 pub struct Server {
     endpoint: quinn::Endpoint,
     task: tokio::task::JoinHandle<()>,
     local_addr: SocketAddr,
+    pubsub_ctx: PubsubContext,
 }
 
 struct ValidRequest {
@@ -102,7 +97,7 @@ impl Server {
     pub fn new_unencrypted(
         addr: SocketAddr,
         mutator: impl DbMutator + 'static,
-        subs: impl SubManager + 'static,
+        subs: PubsubContext,
         metrics: super::Metrics,
     ) -> std::io::Result<Self> {
         let mut sc = quinn_plaintext::server_config();
@@ -112,6 +107,8 @@ impl Server {
 
         let local_addr = endpoint.local_addr()?;
         let ep = endpoint.clone();
+        let pubsub_ctx = subs.clone();
+
         let task = tokio::task::spawn(async move {
             while let Some(inc) = ep.accept().await {
                 if !inc.remote_address_validated() {
@@ -199,6 +196,7 @@ impl Server {
             endpoint,
             task,
             local_addr,
+            pubsub_ctx,
         })
     }
 
@@ -236,7 +234,7 @@ impl Server {
     async fn handle_request(
         req: ValidRequest,
         mutator: impl DbMutator + 'static,
-        subs: impl SubManager + 'static,
+        subs: PubsubContext,
     ) {
         let ValidRequest {
             mut send,
@@ -276,6 +274,9 @@ impl Server {
         self.endpoint
             .close(quinn::VarInt::from_u32(0), reason.as_bytes());
         drop(self.task.await);
+
+        // Cleans up all of the subscription databases
+        self.pubsub_ctx.shutdown().await;
     }
 
     #[inline]
@@ -332,7 +333,7 @@ mod v1_impl {
         req: v1::SubscribeRequest,
         peer: Peer,
         send: &mut SendStream,
-        subs: impl SubManager + 'static,
+        subs: PubsubContext,
     ) -> Result<(), IoLoopError> {
         let max_buffer = req.0.max_buffer;
         let max_time = req.0.max_time;
@@ -429,7 +430,7 @@ mod v1_impl {
         send: &mut SendStream,
         recv: &mut RecvStream,
         mutator: impl DbMutator + 'static,
-        subs: impl SubManager + 'static,
+        subs: PubsubContext,
     ) -> Result<(), IoLoopError> {
         match request {
             v1::Request::Mutate(mreq) => handle_mutate(mreq, peer, send, recv, mutator).await,
