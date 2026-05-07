@@ -24,7 +24,7 @@ impl Drop for BridgeInner {
             let count = statements.len();
 
             if self.tx.tx.send(statements).is_ok() {
-                tracing::trace!(count, "sent statements from bridge");
+                tracing::debug!(count, "sent statements from bridge");
             } else {
                 use std::sync::atomic;
 
