@@ -827,7 +827,7 @@ impl PubsubContext {
         match std::fs::remove_dir_all(&self.path) {
             Ok(_) => tracing::info!(path = %self.path, "removed subscription directory"),
             Err(error) => {
-                tracing::error!(path = %self.path, %error, "failed to remove subscription directory")
+                tracing::error!(path = %self.path, %error, "failed to remove subscription directory");
             }
         }
     }
