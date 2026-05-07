@@ -37,6 +37,7 @@ pub trait SubManager: Sync + Send + Clone {
         &self,
         subp: pubsub::SubParamsv1,
     ) -> Result<pubsub::Subscription, pubsub::MatcherUpsertError>;
+    async fn remove(&self, sub_id: &uuid::Uuid) -> bool;
 }
 
 pub struct Server {
@@ -380,6 +381,13 @@ mod v1_impl {
 
                 let res = io_loop().await;
                 tracing::debug!(result = ?res, "subscription stream ended");
+
+                // For now we don't care about restoring subscriptions and just always do state of the world on initial
+                // connection for simplicity
+                if !subs.remove(&sub_id).await {
+                    tracing::warn!(%peer, %sub_id, "failed to find subscription for termination stream");
+                }
+
                 res
             }
             Err(err) => {

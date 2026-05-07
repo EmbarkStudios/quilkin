@@ -798,12 +798,26 @@ impl PubsubContext {
 
         Ok(Subscription { id, query_hash, rx })
     }
+
+    pub async fn remove(&self, uuid: &uuid::Uuid) -> bool {
+        let Some(matcher) = self.subs.remove(uuid) else {
+            return false;
+        };
+
+        matcher.cleanup().await;
+
+        true
+    }
 }
 
 #[async_trait::async_trait]
 impl crate::persistent::server::SubManager for PubsubContext {
     async fn subscribe(&self, subp: SubParamsv1) -> Result<Subscription, MatcherUpsertError> {
         self.subscribe(subp).await
+    }
+
+    async fn remove(&self, uuid: &uuid::Uuid) -> bool {
+        self.remove(uuid).await
     }
 }
 

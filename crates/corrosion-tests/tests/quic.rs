@@ -149,6 +149,9 @@ impl server::SubManager for ServerSub {
     ) -> Result<pubsub::Subscription, pubsub::MatcherUpsertError> {
         self.ctx.subscribe(subp).await
     }
+    async fn remove(&self, sub_id: &uuid::Uuid) -> bool {
+        self.ctx.remove(sub_id).await
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
