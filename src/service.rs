@@ -983,8 +983,8 @@ impl Service {
                     .await;
 
                 match res {
-                    Ok((_, version, elapsed)) => {
-                        tracing::debug!(?version, ?elapsed, "updated servers");
+                    Ok((count, version, elapsed)) => {
+                        tracing::debug!(count, ?version, ?elapsed, "broadcasted server update");
                     }
                     Err(error) => {
                         tracing::error!(%error, "failed to update servers");

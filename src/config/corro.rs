@@ -21,7 +21,24 @@ impl Drop for BridgeInner {
         let statements = std::mem::take(&mut self.statements);
 
         if !statements.is_empty() {
-            let _rx_dropped = self.tx.tx.send(statements);
+            let count = statements.len();
+
+            if self.tx.tx.send(statements).is_ok() {
+                tracing::trace!(count, "sent statements from bridge");
+            } else {
+                use std::sync::atomic;
+
+                static OUTPUT: atomic::AtomicBool = atomic::AtomicBool::new(false);
+
+                if OUTPUT.load(atomic::Ordering::Relaxed) {
+                    return;
+                }
+
+                tracing::error!("xds bridge can no longer send updates, the receiver was closed");
+                OUTPUT.store(true, atomic::Ordering::Relaxed);
+            }
+        } else {
+            tracing::trace!("no statements to send");
         }
     }
 }
