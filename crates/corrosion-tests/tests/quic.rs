@@ -215,7 +215,7 @@ async fn test_quic_stream() {
     };
 
     // We should have bytes on disk even if we haven't actually mutated it yet
-    assert!(dbg!(bytes_on_disk().unwrap()) > 0);
+    assert!(bytes_on_disk().unwrap() > 0);
 
     let mut srx = sub.rx;
 
@@ -364,7 +364,18 @@ async fn test_quic_stream() {
     insta::assert_snapshot!("disconnect", ip.print().await);
     subscriber.shutdown(ErrorCode::Ok).await;
 
-    assert!(bytes_on_disk().is_none());
+    // On my local machine this is "instant", but CI runs on potatoes, so...
+    //assert!(bytes_on_disk().is_none());
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if bytes_on_disk().is_none() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("failed to cleanup sub dir in expected time");
 
     assert_eq!(expected, actual);
 }
