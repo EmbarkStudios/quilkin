@@ -192,6 +192,31 @@ async fn test_quic_stream() {
     .await
     .unwrap();
 
+    let sub_dir = db.sub_path.join(sub.id.simple().to_string());
+
+    let bytes_on_disk = || -> Option<u64> {
+        if !sub_dir.exists() {
+            return None;
+        };
+
+        let mut total = 0;
+
+        for entry in std::fs::read_dir(&sub_dir).ok()? {
+            if let Ok(entry) = entry
+                && let Ok(ft) = entry.file_type()
+                && ft.is_file()
+                && let Ok(md) = entry.metadata()
+            {
+                total += md.len();
+            }
+        }
+
+        Some(total)
+    };
+
+    // We should have bytes on disk even if we haven't actually mutated it yet
+    assert!(dbg!(bytes_on_disk().unwrap()) > 0);
+
     let mut srx = sub.rx;
 
     let mut mutate = async |sc: &[p::ServerChange]| {
@@ -338,6 +363,8 @@ async fn test_quic_stream() {
     mutator.shutdown().await;
     insta::assert_snapshot!("disconnect", ip.print().await);
     subscriber.shutdown(ErrorCode::Ok).await;
+
+    assert!(bytes_on_disk().is_none());
 
     assert_eq!(expected, actual);
 }
