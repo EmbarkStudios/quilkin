@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 #[cfg(target_os = "linux")]
 pub mod xdp_util;
 
-pub const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+pub const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[inline]
 pub fn alloc_buffer(data: impl AsRef<[u8]>) -> bytes::BytesMut {
