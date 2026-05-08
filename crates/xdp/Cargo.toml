@@ -12,9 +12,9 @@ thiserror.workspace = true
 xdp.workspace = true
 # Used to load and attach eBPF programs
 aya = "0.13.1"
-# Allows forwarding trace messages from eBPF programs to a global logger
-aya-log = "0.2.1"
 libc.workspace = true
+# TODO: Replace this with inline code https://github.com/EmbarkStudios/quilkin/issues/1395
+rtnetlink = "0.21"
 
 [lints]
 workspace = true

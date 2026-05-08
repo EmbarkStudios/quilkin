@@ -392,7 +392,7 @@ impl Service {
             self.publish_phoenix(config, shutdown, &mut ports)?;
             // We need to call this before qcmp since if we use XDP we handle QCMP
             // internally without a separate task
-            self.publish_udp(config, shutdown, &mut ports)?;
+            self.publish_udp(config, shutdown, &mut ports).await?;
             self.publish_qcmp(config, shutdown, &mut ports)?;
             self.publish_xds(config, shutdown, &mut ports)?;
         }
@@ -597,7 +597,7 @@ impl Service {
         Ok(())
     }
 
-    pub fn publish_udp(
+    pub async fn publish_udp(
         &mut self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
@@ -611,7 +611,7 @@ impl Service {
 
         #[cfg(target_os = "linux")]
         {
-            match self.spawn_xdp(config.clone(), self.xdp.force_xdp) {
+            match self.spawn_xdp(config.clone(), self.xdp.force_xdp).await {
                 Ok(xdp) => {
                     if let Some(xdp) = xdp {
                         // Disable this so that we don't create a separate user-space
@@ -777,7 +777,11 @@ impl Service {
     }
 
     #[cfg(target_os = "linux")]
-    fn spawn_xdp(&self, config: Arc<Config>, force_xdp: bool) -> eyre::Result<Option<Finalizer>> {
+    async fn spawn_xdp(
+        &self,
+        config: Arc<Config>,
+        force_xdp: bool,
+    ) -> eyre::Result<Option<Finalizer>> {
         use crate::net::io::nic::xdp;
         use eyre::{Context as _, ContextCompat as _};
 
@@ -817,6 +821,11 @@ impl Service {
         .context("failed to setup XDP")?;
 
         let io_loop = xdp::spawn(workers, config).context("failed to spawn XDP I/O loop")?;
+
+        // At this point our XDP program has attached and is processing packets, if we are caching layer 2 addresses
+        // this will seed the cache with the current neighbors the kernel is aware of
+        io_loop.seed_layer2_cache().await;
+
         Ok(Some(Box::new(move || {
             io_loop.shutdown(true);
         })))

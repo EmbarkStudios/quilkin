@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
+use std::os::fd::AsFd;
+
 pub use aya;
+use aya::maps::IterableMap;
 pub use xdp::{self, nic::NicIndex};
 
 // object unfortunately has alignment requirements, so we need to make sure
@@ -29,17 +32,24 @@ struct AlignedTo<Align, Bytes: ?Sized> {
 }
 
 // dummy static used to create aligned data
-static ALIGNED: &AlignedTo<u64, [u8]> = &AlignedTo {
+static ALIGNED_MAIN: &AlignedTo<u64, [u8]> = &AlignedTo {
     _align: [],
-    bytes: *include_bytes!("../bin/packet-router.bin"),
+    bytes: *include_bytes!("../bin/main.bin"),
 };
 
-static PROGRAM: &[u8] = &ALIGNED.bytes;
+static PROGRAM_MAIN: &[u8] = &ALIGNED_MAIN.bytes;
+
+static ALIGNED_L2: &AlignedTo<u64, [u8]> = &AlignedTo {
+    _align: [],
+    bytes: *include_bytes!("../bin/layer2.bin"),
+};
+
+static PROGRAM_L2: &[u8] = &ALIGNED_L2.bytes;
 
 #[derive(thiserror::Error, Debug)]
 pub enum BindError {
-    #[error("'XSK' map not found in eBPF program")]
-    MissingXskMap,
+    #[error("'{0}' map not found in eBPF program")]
+    MissingMap(&'static str),
     #[error("failed to insert socket: {0}")]
     Map(#[from] aya::maps::MapError),
     #[error("failed to bind socket: {0}")]
@@ -54,7 +64,7 @@ pub enum BindError {
 pub enum LoadError {
     #[error("eBPF load error")]
     Ebpf(#[from] aya::EbpfError),
-    #[error("failed to read ephemeral port range")]
+    #[error("failed to read ephemeral port range from /proc/sys/net/ipv4/ip_local_port_range")]
     Io(#[from] std::io::Error),
     #[error("the default Linux ephemeral port range 32768..=60999 has been modified to {0}..={1}")]
     DefaultPortRangeModified(u16, u16),
@@ -94,9 +104,30 @@ pub struct EbpfProgram {
 impl EbpfProgram {
     /// Loads the XDP program.
     ///
-    /// The external port, the port used by clients, must be passed in due to
-    /// how globals work in eBPF.
-    pub fn load(external_port: u16, qcmp_port: u16) -> Result<Self, LoadError> {
+    /// The external port, the port used by clients, must be passed in so that
+    /// the global constants can be patched in the object file before load
+    ///
+    /// If `cache_layer2` is set, we load a program that keeps updates a mapping of IP -> MAC addresses so that we can set
+    /// the proper destination MAC address for the outgoing packet
+    pub fn load(external_port: u16, qcmp_port: u16, cache_layer2: bool) -> Result<Self, LoadError> {
+        Self::load_inner(
+            external_port,
+            qcmp_port,
+            if cache_layer2 {
+                PROGRAM_L2
+            } else {
+                PROGRAM_MAIN
+            },
+        )
+    }
+
+    fn load_inner(
+        external_port: u16,
+        qcmp_port: u16,
+        program: &'static [u8],
+    ) -> Result<Self, LoadError> {
+        Self::validate_port_range()?;
+
         let mut loader = aya::EbpfLoader::new();
         let external_port_no = external_port.to_be_bytes();
         loader.set_global("EXTERNAL_PORT_NO", &external_port_no, true);
@@ -104,11 +135,21 @@ impl EbpfProgram {
         let qcmp_port_no = qcmp_port.to_be_bytes();
         loader.set_global("QCMP_PORT_NO", &qcmp_port_no, true);
 
-        // We exploit the fact that Linux by default does not assign ephemeral
-        // ports in the full range allowed by IANA, but we want to sanity check
-        // it here, as otherwise something else could have been assigned an
-        // ephemeral port that we think we can use, which would lead to both
-        // quilkin and whatever program was assigned that port misbehaving
+        let bpf = loader.load(program)?;
+
+        Ok(Self {
+            bpf,
+            external_port: xdp::packet::net_types::NetworkU16(u16::from_ne_bytes(external_port_no)),
+            qcmp_port: xdp::packet::net_types::NetworkU16(u16::from_ne_bytes(qcmp_port_no)),
+        })
+    }
+
+    // Validate the ephemeral port range has not been modified
+    //
+    // We exploit the fact that Linux by default does not assign ephemeral ports in the full range allowed by IANA, but
+    // we want to sanity check it here, as otherwise something else could have been assigned an ephemeral port that we
+    // think we can use, which would lead to both quilkin and whatever program was assigned that port misbehaving
+    fn validate_port_range() -> Result<(), LoadError> {
         let port_range = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range")?;
         let (start, end) =
             port_range
@@ -135,11 +176,7 @@ impl EbpfProgram {
             return Err(LoadError::DefaultPortRangeModified(start, end));
         }
 
-        Ok(Self {
-            bpf: loader.load(PROGRAM)?,
-            external_port: xdp::packet::net_types::NetworkU16(u16::from_ne_bytes(external_port_no)),
-            qcmp_port: xdp::packet::net_types::NetworkU16(u16::from_ne_bytes(qcmp_port_no)),
-        })
+        Ok(())
     }
 
     /// Creates and binds sockets
@@ -153,7 +190,9 @@ impl EbpfProgram {
         use std::os::fd::AsRawFd as _;
 
         let mut xsk_map = aya::maps::XskMap::try_from(
-            self.bpf.map_mut("XSK").expect("failed to retrieve XSK map"),
+            self.bpf
+                .map_mut("XSK")
+                .ok_or(BindError::MissingMap("XSK"))?,
         )?;
 
         let mut entries = Vec::with_capacity(device_caps.queue_count as _);
@@ -182,18 +221,22 @@ impl EbpfProgram {
         Ok(entries)
     }
 
+    pub fn layer2_cache_map(&self) -> Result<std::os::fd::RawFd, BindError> {
+        let map = self
+            .bpf
+            .map("IP_TO_MAC")
+            .ok_or(BindError::MissingMap("IP_TO_MAC"))?;
+
+        let map = aya::maps::HashMap::<_, [u8; 16], u64>::try_from(map)?;
+        use std::os::fd::AsRawFd;
+        Ok(map.map().fd().as_fd().as_raw_fd())
+    }
+
     pub fn attach(
         &mut self,
         nic: NicIndex,
         flags: aya::programs::XdpFlags,
     ) -> Result<aya::programs::xdp::XdpLinkId, aya::programs::ProgramError> {
-        if let Err(_error) = aya_log::EbpfLogger::init(&mut self.bpf) {
-            // Would be good to enable this if we do end up adding log messages to
-            // the eBPF program, right now we don't so this will error as the ring
-            // buffer used to transfer log messages is not created if there are none
-            //tracing::warn!(%error, "failed to initialize eBPF logging");
-        }
-
         // We use this entrypoint for now, but in the future we could also use
         // a round robin mode when the xdp lib supports shared Umem
         let program: &mut aya::programs::Xdp = self

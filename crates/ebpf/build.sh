@@ -7,13 +7,18 @@ set -e
 
 ROOT=$(git rev-parse --show-toplevel)
 EBPF_ROOT="$ROOT/crates/ebpf"
+# Layout the output the same as rust for clarity
+TARGET="$EBPF_ROOT/target/bpfel-unknown-none/release"
+BIN="$ROOT/crates/xdp/bin"
 
-cargo +nightly build -Z build-std=core --release --target bpfel-unknown-none --manifest-path "$EBPF_ROOT/Cargo.toml"
-clang -target bpf -Wall -O2 -g -c "$EBPF_ROOT/src/dummy.c" -o "$EBPF_ROOT/target/bpfel-unknown-none/release/dummy"
-clang -target bpf -Wall -O2 -g -c "$EBPF_ROOT/src/l2-router.c" -o "$EBPF_ROOT/target/bpfel-unknown-none/release/l2-router"
+mkdir -p "$TARGET"
+
+clang -target bpf -Wall -O2 -c "$EBPF_ROOT/src/dummy.c" -o "$TARGET/dummy"
+clang -target bpf -Wall -O2 -c "$EBPF_ROOT/src/main.c" -o "$TARGET/main"
+clang -target bpf -Wall -O2 -c "$EBPF_ROOT/src/layer2.c" -o "$TARGET/layer2"
 
 if [[ $1 == '--update' ]]; then
-    #cp "$EBPF_ROOT/target/bpfel-unknown-none/release/packet-router" "$ROOT/crates/xdp/bin/packet-router.bin"
-    #cp "$EBPF_ROOT/target/bpfel-unknown-none/release/packet-router-l2" "$ROOT/crates/xdp/bin/packet-router-l2.bin"
-    cp "$EBPF_ROOT/target/bpfel-unknown-none/release/dummy" "$ROOT/crates/xdp/bin/dummy.bin"
+    cp "$TARGET/dummy" "$BIN/dummy.bin"
+    cp "$TARGET/main" "$BIN/main.bin"
+    cp "$TARGET/layer2" "$BIN/layer2.bin"
 fi
