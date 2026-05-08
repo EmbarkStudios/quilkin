@@ -3,6 +3,8 @@
 #![allow(internal_features)]
 //#![feature(core_intrinsics)]
 
+use core::sync::atomic;
+
 /// This is the same as ./ebpf-main.rs, except it updates a map of IP -> MAC addresses
 /// shared with userspace so that userspace can set the destination L2 (MAC) address
 use aya_ebpf::{
@@ -26,7 +28,7 @@ type Action = xdp_action::Type;
 static XSK: XskMap = XskMap::with_max_entries(128, 0);
 /// Map of L3 IP -> L2 MAC
 #[map]
-static IP_TO_MAC: HashMap<[u8; 16], [u8; 6]> =
+static IP_TO_MAC: HashMap<[u8; 16], atomic::AtomicU64> =
     HashMap::with_max_entries(16 * 1024, BPF_F_NO_PREALLOC);
 
 // Number of sockets in the `XSK` map
@@ -152,12 +154,14 @@ pub fn packet_router(ctx: &XdpContext) -> Result<(), ()> {
 
                             // For now, only update on solicited advertisements, ie advertisements that we explicitly
                             // asked for (or rather, the kernel did)
-                            if advert.flags_and_reserved & 1u32 << 30 != 0 {
+                            if advert.flags_and_reserved & 1u32 << 26 != 0 {
                                 // SAFETY: the likelihood of getting multiple ICMP neighbor advertisement packets from
                                 // the same source simultaneously on multiple queues is highly unlikely...but for now
                                 // this is just POC
                                 if let Some(src_mac) = IP_TO_MAC.get_ptr_mut(&v6hdr.src_addr) {
-                                    (*src_mac).copy_from_slice(&advert.ll_addr);
+                                    let mut addr = [0u8; 8];
+                                    addr[2..].copy_from_slice(&advert.ll_addr);
+                                    (*src_mac).store(u64::from_be_bytes(addr), atomic::Ordering::Relaxed);
                                 }
                             }
                         }
@@ -198,7 +202,9 @@ pub fn packet_router(ctx: &XdpContext) -> Result<(), ()> {
                     // SAFETY: the likelihood of getting multiple ARP packets from the same source simultaneously on
                     // multiple queues is highly unlikely...but for now this is just POC
                     if let Some(src_mac) = IP_TO_MAC.get_ptr_mut(&src_ip) {
-                        (*src_mac).copy_from_slice(&arphdr.sha);
+                        let mut addr = [0u8; 8];
+                        addr[2..].copy_from_slice(&arphdr.sha);
+                        (*src_mac).store(u64::from_be_bytes(addr), atomic::Ordering::Relaxed);
                     }
                 }
 
