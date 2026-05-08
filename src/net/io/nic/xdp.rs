@@ -61,6 +61,12 @@ pub struct XdpConfig<'n> {
     pub packets_per_queue: u32,
     /// Worker thread scheduling configuration
     pub worker_thread_scheduling: WorkerThreadScheduling,
+    /// If true, Quilkin will cache layer 2 (MAC) addresses in userspace
+    ///
+    /// By default, Quilkin just exchanges layer 2 addresses when forwarding packets, setting this option will cause
+    /// Quilkin to send packets via regular means, triggering ARP/NUD whose responses will be grabbed by the eBPF program
+    /// so that we can forward directly to the destination's MAC + IP the next time
+    pub cache_layer2: bool,
 }
 
 impl Default for XdpConfig<'_> {
@@ -73,6 +79,7 @@ impl Default for XdpConfig<'_> {
             require_tx_checksum: false,
             packets_per_queue: 8 * 1024,
             worker_thread_scheduling: WorkerThreadScheduling::default(),
+            cache_layer2: false,
         }
     }
 }
@@ -87,6 +94,7 @@ pub struct XdpWorkers {
     ipv6: std::net::Ipv6Addr,
     ipv4: std::net::Ipv4Addr,
     worker_thread_scheduling: WorkerThreadScheduling,
+    ip_to_mac: Option<std::os::fd::RawFd>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -327,7 +335,17 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         }
     }
 
-    let mut ebpf_prog = quilkin_xdp::EbpfProgram::load(config.external_port, config.qcmp_port)?;
+    let mut ebpf_prog = quilkin_xdp::EbpfProgram::load(
+        config.external_port,
+        config.qcmp_port,
+        config.cache_layer2,
+    )?;
+
+    let ip_to_mac = if config.cache_layer2 {
+        Some(ebpf_prog.layer2_cache_map()?)
+    } else {
+        None
+    };
 
     // Attach before binding: some drivers (eg gve) need XDP already enabled
     // before a socket can bind a queue with `XDP_ZEROCOPY`.
@@ -426,6 +444,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         ipv4,
         ipv6,
         worker_thread_scheduling,
+        ip_to_mac,
     })
 }
 
@@ -436,6 +455,8 @@ pub struct XdpLoop {
     shutdown: Arc<std::sync::atomic::AtomicBool>,
     terminate: Arc<std::sync::atomic::AtomicBool>,
     sessions: Arc<process::SessionState>,
+    nic_index: NicIndex,
+    ip_to_mac: Option<std::os::fd::RawFd>,
 }
 
 impl XdpLoop {
@@ -495,6 +516,13 @@ impl XdpLoop {
             tracing::error!(%error, "failed to detach eBPF program");
         } else {
             tracing::info!("detached eBPF program");
+        }
+    }
+
+    /// Seeds the mapping of IP -> MAC addresses via netlink, if such a cache has been enabled
+    pub async fn seed_layer2_cache(&self) {
+        if let Some(cache_fd) = self.ip_to_mac {
+            quilkin_xdp::netlink::seed_layer2_cache(cache_fd).await;
         }
     }
 }
@@ -607,6 +635,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
         shutdown,
         terminate,
         sessions: session_state,
+        nic_index: workers.nic,
     })
 }
 
