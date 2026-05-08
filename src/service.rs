@@ -588,7 +588,7 @@ impl Service {
             self.publish_phoenix(config, shutdown, &mut ports)?;
             // We need to call this before qcmp since if we use XDP we handle QCMP
             // internally without a separate task
-            self.publish_udp(config, shutdown, &mut ports)?;
+            self.publish_udp(config, shutdown, &mut ports).await?;
             self.publish_qcmp(config, shutdown, &mut ports)?;
             self.publish_xds(config, shutdown, &mut ports)?;
         }
@@ -793,7 +793,7 @@ impl Service {
         Ok(())
     }
 
-    pub fn publish_udp(
+    pub async fn publish_udp(
         &mut self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,

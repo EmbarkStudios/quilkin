@@ -10,25 +10,18 @@ set -e
 
 ROOT=$(git rev-parse --show-toplevel)
 EBPF_ROOT="$ROOT/crates/ebpf"
-OUT="$EBPF_ROOT/target/bpfel-unknown-none/release"
+# Layout the output the same as rust for clarity
+TARGET="$EBPF_ROOT/target/bpfel-unknown-none/release"
+BIN="$ROOT/crates/xdp/bin"
 
-if ! command -v bpf-linker > /dev/null; then
-    echo "bpf-linker is not installed, run 'cargo install bpf-linker'" >&2
-    exit 1
-fi
+mkdir -p "$TARGET"
 
-cargo +nightly build -Z build-std=core --release --target bpfel-unknown-none --manifest-path "$EBPF_ROOT/Cargo.toml"
-
-if command -v clang > /dev/null; then
-    clang -target bpf -Wall -O2 -g -c "$EBPF_ROOT/src/dummy.c" -o "$OUT/dummy"
-else
-    echo "clang is not installed, skipping dummy.bin" >&2
-fi
+clang -target bpf -Wall -O2 -c "$EBPF_ROOT/src/dummy.c" -o "$TARGET/dummy"
+clang -target bpf -Wall -O2 -c "$EBPF_ROOT/src/main.c" -o "$TARGET/main"
+clang -target bpf -Wall -O2 -c "$EBPF_ROOT/src/layer2.c" -o "$TARGET/layer2"
 
 if [[ $1 == '--update' ]]; then
-    cp "$OUT/packet-router" "$ROOT/crates/xdp/bin/packet-router.bin"
-
-    if [[ -f "$OUT/dummy" ]]; then
-        cp "$OUT/dummy" "$ROOT/crates/xdp/bin/dummy.bin"
-    fi
+    cp "$TARGET/dummy" "$BIN/dummy.bin"
+    cp "$TARGET/main" "$BIN/main.bin"
+    cp "$TARGET/layer2" "$BIN/layer2.bin"
 fi
