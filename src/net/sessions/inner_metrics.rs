@@ -60,6 +60,24 @@ pub(crate) fn total_sessions() -> &'static IntCounter {
     &TOTAL_SESSIONS
 }
 
+pub(crate) fn sessions_rejected_total() -> &'static IntCounter {
+    static SESSIONS_REJECTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+        register(
+            IntCounter::with_opts(
+                Opts::new(
+                    "rejected_total",
+                    "total number of sessions rejected due to the session limit",
+                )
+                .subsystem(SUBSYSTEM)
+                .namespace("quilkin"),
+            )
+            .unwrap(),
+        )
+    });
+
+    &SESSIONS_REJECTED_TOTAL
+}
+
 pub(crate) fn duration_secs() -> &'static Histogram {
     static DURATION_SECS: Lazy<Histogram> = Lazy::new(|| {
         register(

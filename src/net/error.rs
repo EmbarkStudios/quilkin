@@ -23,6 +23,7 @@ pub enum PipelineError {
     Session(super::sessions::SessionError),
     Io(std::io::Error),
     DisallowedSourceIP(std::net::IpAddr),
+    SessionLimit,
 }
 
 impl PipelineError {
@@ -49,6 +50,7 @@ impl PipelineError {
             Self::Session(_) => "session",
             Self::Io(_) => "io",
             Self::DisallowedSourceIP(_) => "disallowed source ip",
+            Self::SessionLimit => "session limit",
         }
     }
 }
@@ -63,6 +65,7 @@ impl fmt::Display for PipelineError {
             Self::Session(session) => write!(f, "session error: {session}"),
             Self::Io(io) => write!(f, "OS level error: {io}"),
             Self::DisallowedSourceIP(ip) => write!(f, "disallowed ip: {ip}"),
+            Self::SessionLimit => f.write_str("session limit reached"),
         }
     }
 }
@@ -82,11 +85,12 @@ impl From<super::sessions::SessionError> for PipelineError {
 impl PartialEq for PipelineError {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::NoUpstreamEndpoints, Self::NoUpstreamEndpoints) => true,
             (Self::Filter(fa), Self::Filter(fb)) => fa.eq(fb),
             (Self::Session(sa), Self::Session(sb)) => sa.eq(sb),
             (Self::Io(ia), Self::Io(ib)) => ia.kind().eq(&ib.kind()),
             (Self::DisallowedSourceIP(ia), Self::DisallowedSourceIP(ib)) => ia.eq(ib),
+            (Self::NoUpstreamEndpoints, Self::NoUpstreamEndpoints)
+            | (Self::SessionLimit, Self::SessionLimit) => true,
             _ => false,
         }
     }
@@ -103,7 +107,7 @@ impl Hash for PipelineError {
             Self::Filter(fe) => Hash::hash(&fe, state),
             Self::Session(se) => Hash::hash(&se, state),
             Self::Io(io) => Hash::hash(&io.kind(), state),
-            Self::NoUpstreamEndpoints => {}
+            Self::NoUpstreamEndpoints | Self::SessionLimit => {}
             Self::DisallowedSourceIP(ip) => Hash::hash(&ip, state),
         }
     }
