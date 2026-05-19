@@ -17,12 +17,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           submodules: true
       - &install-rust
         name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
-        uses: release-plz/action@v0.5
+        uses: release-plz/action@v0.5.129
         with:
           command: release
         env:
@@ -45,20 +46,10 @@ jobs:
         with:
           fetch-depth: 0
       - *install-rust
-      - name: Debug - workspace layout
-        run: ls -lah
-      - name: Debug - git state
-        run: |
-          git status
-          git log --oneline -10
-          git tag --list 'quilkin-*' | sort -V | tail -20
-      - name: Debug - release-plz config
-        run: cat release-plz.toml 2>/dev/null || echo "(no release-plz.toml)"
       - name: Run release-plz
-        uses: release-plz/action@v0.5
+        uses: release-plz/action@v0.5.129
         with:
           command: release-pr
-          verbose: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
