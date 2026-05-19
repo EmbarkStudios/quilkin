@@ -119,6 +119,7 @@ trace_test!(uring_receiver, {
         sessions: quilkin::net::sessions::SessionPool::new(
             vec![pending_sends.0.clone()],
             config.dyn_cfg.cached_filter_chain().unwrap(),
+            usize::MAX,
         ),
     }
     .spawn_io_loop(pending_sends, config.dyn_cfg.cached_filter_chain().unwrap())
@@ -167,6 +168,7 @@ trace_test!(
         let sessions = net::SessionPool::new(
             pending_sends.iter().map(|ps| ps.0.clone()).collect(),
             config.dyn_cfg.cached_filter_chain().unwrap(),
+            usize::MAX,
         );
 
         const WORKER_COUNT: usize = 3;

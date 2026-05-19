@@ -78,6 +78,14 @@ pub struct Service {
     /// Amount of UDP workers to run.
     #[clap(long = "service.udp.workers", env = "QUILKIN_SERVICE_UDP_WORKERS", default_value_t = std::num::NonZeroUsize::new(num_cpus::get()).unwrap())]
     pub udp_workers: std::num::NonZeroUsize,
+    /// Maximum number of concurrent UDP sessions. New sessions are rejected with a
+    /// metric increment once the limit is reached, preventing unbounded memory growth.
+    #[clap(
+        long = "service.udp.sessions.limit",
+        env = "QUILKIN_SERVICE_UDP_SESSIONS_LIMIT",
+        default_value_t = 5_000
+    )]
+    pub udp_session_limit: usize,
     /// Whether to serve xDS requests.
     #[arg(
         long = "service.xds",
@@ -196,6 +204,7 @@ impl Default for Service {
             udp_enabled: <_>::default(),
             udp_port: 7777,
             udp_workers: std::num::NonZeroUsize::new(num_cpus::get()).unwrap(),
+            udp_session_limit: 10_000,
             xds_enabled: <_>::default(),
             xds_port: 7800,
             grpc_enabled: false,
@@ -730,7 +739,7 @@ impl Service {
             .cached_filter_chain()
             .context("a cached FilterChain should have been configured")?;
 
-        let sessions = SessionPool::new(session_sends, cached_filters);
+        let sessions = SessionPool::new(session_sends, cached_filters, self.udp_session_limit);
         crate::net::packet::spawn_receivers(config, socket, worker_sends, &sessions)?;
 
         let finished = shutdown.push("udp");

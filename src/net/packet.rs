@@ -272,7 +272,7 @@ mod tests {
         let config = Arc::new(config);
 
         let cached_filter_chain = config.dyn_cfg.cached_filter_chain().unwrap();
-        let session_manager = SessionPool::new(vec![], cached_filter_chain);
+        let session_manager = SessionPool::new(vec![], cached_filter_chain, usize::MAX);
 
         let filter_chain = crate::filters::FilterChain::default();
         let packet_data: [u8; 4] = [1, 2, 3, 4];

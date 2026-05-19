@@ -94,6 +94,7 @@ pub struct SessionPool {
     downstream_sends: Vec<PacketQueueSender>,
     downstream_index: atomic::AtomicUsize,
     cached_filter_chain: CachedFilterChain,
+    max_sessions: usize,
 }
 
 /// The wrapper struct responsible for holding all of the socket related mappings.
@@ -112,6 +113,7 @@ impl SessionPool {
     pub fn new(
         downstream_sends: Vec<PacketQueueSender>,
         cached_filter_chain: CachedFilterChain,
+        max_sessions: usize,
     ) -> Arc<Self> {
         const SESSION_TIMEOUT_SECONDS: Duration = Duration::from_secs(60);
         const SESSION_EXPIRY_POLL_INTERVAL: Duration = Duration::from_secs(60);
@@ -123,6 +125,7 @@ impl SessionPool {
             downstream_sends,
             downstream_index: atomic::AtomicUsize::new(0),
             cached_filter_chain,
+            max_sessions,
         })
     }
 
@@ -221,11 +224,21 @@ impl SessionPool {
         tracing::trace!(source=%key.source, dest=%key.dest, "SessionPool::get");
         // If we already have a session for the key pairing, return that session.
         if let Some(entry) = self.session_map.get(&key) {
-            tracing::trace!("returning existing session");
             return Ok((
                 entry.asn_info.as_ref().map(MetricsIpNetEntry::from),
                 entry.pending_sends.clone(),
             ));
+        }
+
+        if self.session_map.len() >= self.max_sessions {
+            tracing::warn!(
+                limit = self.max_sessions,
+                source = %key.source,
+                dest = %key.dest,
+                "session limit reached, dropping packet"
+            );
+            inner_metrics::sessions_rejected_total().inc();
+            return Err(super::PipelineError::SessionLimit);
         }
 
         // If there's a socket_set available, it means there are sockets
@@ -557,7 +570,7 @@ mod tests {
         let (pending_sends, _srecv) = crate::net::queue(1).unwrap();
         let fake = crate::config::filter::FilterChainConfig::default();
         (
-            SessionPool::new(vec![pending_sends.clone()], fake.cached()),
+            SessionPool::new(vec![pending_sends.clone()], fake.cached(), usize::MAX),
             pending_sends,
         )
     }
@@ -699,6 +712,68 @@ mod tests {
         let _socket2 = pool.get(key2).unwrap();
 
         task.await.unwrap();
+    }
+
+    fn pool_with_limit(limit: usize) -> (Arc<SessionPool>, PacketQueueSender) {
+        let (pending_sends, _srecv) = crate::net::queue(1).unwrap();
+        let fake = crate::config::filter::FilterChainConfig::default();
+        (
+            SessionPool::new(vec![pending_sends.clone()], fake.cached(), limit),
+            pending_sends,
+        )
+    }
+
+    fn key(source_port: u16, dest_port: u16) -> SessionKey {
+        (
+            (std::net::Ipv4Addr::LOCALHOST, source_port).into(),
+            (std::net::Ipv4Addr::UNSPECIFIED, dest_port).into(),
+        )
+            .into()
+    }
+
+    #[tokio::test]
+    async fn session_limit_rejects_new_sessions_at_capacity() {
+        let (pool, _receiver) = pool_with_limit(2);
+
+        assert!(pool.get(key(8080, 9000)).is_ok());
+        assert!(pool.get(key(8081, 9000)).is_ok());
+
+        assert!(matches!(
+            pool.get(key(8082, 9000)),
+            Err(super::super::PipelineError::SessionLimit)
+        ));
+    }
+
+    #[tokio::test]
+    async fn session_limit_allows_existing_session_at_capacity() {
+        let (pool, _receiver) = pool_with_limit(1);
+
+        assert!(pool.get(key(8080, 9000)).is_ok());
+
+        // Limit hit — new session rejected.
+        assert!(matches!(
+            pool.get(key(8081, 9000)),
+            Err(super::super::PipelineError::SessionLimit)
+        ));
+
+        // But re-fetching the existing session must still succeed.
+        assert!(pool.get(key(8080, 9000)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn session_limit_recovers_after_session_removed() {
+        let (pool, _receiver) = pool_with_limit(1);
+
+        assert!(pool.get(key(8080, 9000)).is_ok());
+        assert!(matches!(
+            pool.get(key(8081, 9000)),
+            Err(super::super::PipelineError::SessionLimit)
+        ));
+
+        pool.drop_session(key(8080, 9000)).await;
+
+        // Slot freed — a new session should be accepted.
+        assert!(pool.get(key(8081, 9000)).is_ok());
     }
 
     #[tokio::test]
