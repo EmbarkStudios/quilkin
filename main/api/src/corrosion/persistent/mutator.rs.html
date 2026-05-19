@@ -425,7 +425,7 @@
 <a href=#425 id=425 data-nosnippet>425</a>        <span class="kw">for </span>changes_seqs <span class="kw">in </span>chunked {
 <a href=#426 id=426 data-nosnippet>426</a>            <span class="kw">match </span>changes_seqs {
 <a href=#427 id=427 data-nosnippet>427</a>                <span class="prelude-val">Ok</span>((changes, seqs)) =&gt; {
-<a href=#428 id=428 data-nosnippet>428</a>                    <span class="macro">tracing::trace!</span>(num_changes = changes.len(), <span class="question-mark">?</span>seqs, <span class="string">"broadcasting changes"</span>);
+<a href=#428 id=428 data-nosnippet>428</a>                    <span class="macro">tracing::debug!</span>(num_changes = changes.len(), <span class="question-mark">?</span>seqs, <span class="string">"broadcasting changes"</span>);
 <a href=#429 id=429 data-nosnippet>429</a>
 <a href=#430 id=430 data-nosnippet>430</a>                    <span class="kw">let </span>changeset = corro_types::broadcast::Changeset::FullV2 {
 <a href=#431 id=431 data-nosnippet>431</a>                        actor_id,
