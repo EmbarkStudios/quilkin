@@ -992,8 +992,8 @@ impl Service {
                     .await;
 
                 match res {
-                    Ok((_, version, elapsed)) => {
-                        tracing::debug!(?version, ?elapsed, "updated servers");
+                    Ok((count, version, elapsed)) => {
+                        tracing::debug!(count, ?version, ?elapsed, "broadcasted server update");
                     }
                     Err(error) => {
                         tracing::error!(%error, "failed to update servers");
@@ -1143,6 +1143,7 @@ impl Service {
 
             trip.shutdown().await;
 
+            tracing::info!("shutting down corrosion server");
             udp_server.shutdown("graceful shutdown").await;
 
             drop(finished.send(Ok(())));

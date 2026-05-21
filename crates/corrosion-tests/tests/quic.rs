@@ -136,21 +136,6 @@ impl server::DbMutator for InstaPrinter {
     }
 }
 
-#[derive(Clone)]
-struct ServerSub {
-    ctx: pubsub::PubsubContext,
-}
-
-#[async_trait::async_trait]
-impl server::SubManager for ServerSub {
-    async fn subscribe(
-        &self,
-        subp: pubsub::SubParamsv1,
-    ) -> Result<pubsub::Subscription, pubsub::MatcherUpsertError> {
-        self.ctx.subscribe(subp).await
-    }
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_quic_stream() {
     let db = ct::TestSubsDb::new(corrosion::schema::SCHEMA, "test_quic_stream").await;
@@ -160,17 +145,13 @@ async fn test_quic_stream() {
         btx: db.btx.clone(),
     };
 
-    let ss = ServerSub {
-        ctx: db.pubsub_ctx(),
-    };
-
     static SERVER_REG: std::sync::OnceLock<prometheus::Registry> = std::sync::OnceLock::new();
     let sreg = SERVER_REG.get_or_init(prometheus::Registry::new);
 
     let server = server::Server::new_unencrypted(
         (std::net::Ipv6Addr::LOCALHOST, 0).into(),
         ip.clone(),
-        ss,
+        db.pubsub_ctx(),
         corrosion::persistent::Metrics::new(sreg),
     )
     .unwrap();
@@ -210,6 +191,31 @@ async fn test_quic_stream() {
     )
     .await
     .unwrap();
+
+    let sub_dir = db.sub_path.join(sub.id.simple().to_string());
+
+    let bytes_on_disk = || -> Option<u64> {
+        if !sub_dir.exists() {
+            return None;
+        };
+
+        let mut total = 0;
+
+        for entry in std::fs::read_dir(&sub_dir).ok()? {
+            if let Ok(entry) = entry
+                && let Ok(ft) = entry.file_type()
+                && ft.is_file()
+                && let Ok(md) = entry.metadata()
+            {
+                total += md.len();
+            }
+        }
+
+        Some(total)
+    };
+
+    // We should have bytes on disk even if we haven't actually mutated it yet
+    assert!(bytes_on_disk().unwrap() > 0);
 
     let mut srx = sub.rx;
 
@@ -357,6 +363,19 @@ async fn test_quic_stream() {
     mutator.shutdown().await;
     insta::assert_snapshot!("disconnect", ip.print().await);
     subscriber.shutdown(ErrorCode::Ok).await;
+
+    // On my local machine this is "instant", but CI runs on potatoes, so...
+    //assert!(bytes_on_disk().is_none());
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if bytes_on_disk().is_none() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("failed to cleanup sub dir in expected time");
 
     assert_eq!(expected, actual);
 }

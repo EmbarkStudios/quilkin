@@ -425,7 +425,7 @@ pub async fn broadcast_changes(
         for changes_seqs in chunked {
             match changes_seqs {
                 Ok((changes, seqs)) => {
-                    tracing::trace!(num_changes = changes.len(), ?seqs, "broadcasting changes");
+                    tracing::debug!(num_changes = changes.len(), ?seqs, "broadcasting changes");
 
                     let changeset = corro_types::broadcast::Changeset::FullV2 {
                         actor_id,

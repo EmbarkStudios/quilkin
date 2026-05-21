@@ -755,10 +755,21 @@ impl PubsubContext {
         pool: SplitPool,
         schema: Arc<Schema>,
         tripwire: Tripwire,
-        loop_config: MatcherLoopConfig,
+        _loop_config: MatcherLoopConfig,
     ) -> eyre::Result<Self> {
-        let cache =
-            restore_subscriptions(&subs, &path, &pool, &schema, &tripwire, loop_config).await?;
+        // For now we never restore subscriptions and require state of the world for both
+        // mutators and subscribers
+        // let cache =
+        //     restore_subscriptions(&subs, &path, &pool, &schema, &tripwire, loop_config).await?;
+        let cache = Arc::new(tokio::sync::RwLock::new(MatcherCache(
+            MatcherCacheInner::default(),
+        )));
+
+        if path.exists() {
+            use eyre::WrapErr;
+            std::fs::remove_dir_all(&path)
+                .wrap_err_with(|| format!("failed to cleanup existing subscription path {path}"))?;
+        }
 
         Ok(Self {
             subs,
@@ -798,12 +809,27 @@ impl PubsubContext {
 
         Ok(Subscription { id, query_hash, rx })
     }
-}
 
-#[async_trait::async_trait]
-impl crate::persistent::server::SubManager for PubsubContext {
-    async fn subscribe(&self, subp: SubParamsv1) -> Result<Subscription, MatcherUpsertError> {
-        self.subscribe(subp).await
+    pub async fn remove(&self, uuid: &uuid::Uuid) -> bool {
+        let Some(matcher) = self.subs.remove(uuid) else {
+            return false;
+        };
+
+        matcher.cleanup().await;
+
+        true
+    }
+
+    pub async fn shutdown(&self) {
+        self.subs.drop_handles().await;
+
+        // Just to be sure, completely nuke the entire subscription directory
+        match std::fs::remove_dir_all(&self.path) {
+            Ok(_) => tracing::info!(path = %self.path, "removed subscription directory"),
+            Err(error) => {
+                tracing::error!(path = %self.path, %error, "failed to remove subscription directory");
+            }
+        }
     }
 }
 
