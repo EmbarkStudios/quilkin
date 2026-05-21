@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["IterChange","OkResponse","Request","Response","ServerChange"],"struct":["MutateRequest","MutateResponse","MutatorUpdate","ServerIter","ServerUpdate","ServerUpsert","SubscribeRequest","SubscribeResponse"]};

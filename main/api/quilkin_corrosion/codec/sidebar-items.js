@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LENGTH_MARKER"],"enum":["LengthPrefixError","LengthReadError"],"fn":["read_length_prefixed","read_length_prefixed_jsonb","reserve_length_prefix","update_length_prefix","write_length_prefixed","write_length_prefixed_jsonb"],"struct":["PrefixedBuf"]};
