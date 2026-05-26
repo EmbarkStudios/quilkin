@@ -22,6 +22,67 @@
 
 ### Other
 
+- set gitattributes to keep lf line endings ([#1401](https://github.com/EmbarkStudios/quilkin/pull/1401))
+- release v0.10.1 ([#1400](https://github.com/EmbarkStudios/quilkin/pull/1400))
+- googleforgames -> EmbarkStudios ([#1398](https://github.com/EmbarkStudios/quilkin/pull/1398))
+- *(deps)* bump openssl from 0.10.79 to 0.10.80 ([#1397](https://github.com/EmbarkStudios/quilkin/pull/1397))
+- remove .* from .gitignore, set version of corrosion dependency
+- Remove sub DB when streams are terminated ([#1393](https://github.com/EmbarkStudios/quilkin/pull/1393))
+- try explicit latest version
+- try setting workspace explicitly
+- set file protocol to allow in release-plz
+- *(deps)* bump openssl from 0.10.78 to 0.10.79 ([#1392](https://github.com/EmbarkStudios/quilkin/pull/1392))
+- rm benches from dockerignore
+- fix benches missing in dockerfile
+- Foward xDS events to corrosion ([#1376](https://github.com/EmbarkStudios/quilkin/pull/1376))
+- update UE5 plugin ([#1384](https://github.com/EmbarkStudios/quilkin/pull/1384))
+- update changelog for 0.10.0 ([#1385](https://github.com/EmbarkStudios/quilkin/pull/1385))
+- *(deps)* bump openssl from 0.10.75 to 0.10.78 ([#1382](https://github.com/EmbarkStudios/quilkin/pull/1382))
+- Bind corrosion client to unspecified address ([#1381](https://github.com/EmbarkStudios/quilkin/pull/1381))
+- Replace `cfg_if!` with `cfg_select!` ([#1380](https://github.com/EmbarkStudios/quilkin/pull/1380))
+- try git_only in release-plz.toml
+- add debug steps to release-plz.yaml
+- don't checkout submodules in release-plz.yaml
+- remove fetch-depth from release-plz.yaml
+- remove persist-credentials in release-plz.yaml
+- *(deps)* bump rustls-webpki from 0.103.8 to 0.103.10 ([#1375](https://github.com/EmbarkStudios/quilkin/pull/1375))
+- Support static provider with corrosion and enable running locally ([#1373](https://github.com/EmbarkStudios/quilkin/pull/1373))
+- Use Non Negative Least Squares for latency measurement ([#1367](https://github.com/EmbarkStudios/quilkin/pull/1367))
+- io-uring changes ([#1361](https://github.com/EmbarkStudios/quilkin/pull/1361))
+- Fix cpu profiling endpoint ([#1368](https://github.com/EmbarkStudios/quilkin/pull/1368))
+- Upgrade `kube` dep to 3.x ([#1360](https://github.com/EmbarkStudios/quilkin/pull/1360))
+- checkout submodules in image build ([#1366](https://github.com/EmbarkStudios/quilkin/pull/1366))
+- Fix `aarch64-linux-unknown-gnu` compilation ([#1365](https://github.com/EmbarkStudios/quilkin/pull/1365))
+- refactor dockerfile to use buildx actions and chef ([#1363](https://github.com/EmbarkStudios/quilkin/pull/1363))
+- Update `time` crate and workaround yq issue ([#1359](https://github.com/EmbarkStudios/quilkin/pull/1359))
+- Add quilkin_allocated_xdp_packets metric ([#1357](https://github.com/EmbarkStudios/quilkin/pull/1357))
+- Add test_success job ([#1355](https://github.com/EmbarkStudios/quilkin/pull/1355))
+- Don't stop admin server on graceful shutdown ([#1354](https://github.com/EmbarkStudios/quilkin/pull/1354))
+- Refactor documentation workflow to use mise action ([#1346](https://github.com/EmbarkStudios/quilkin/pull/1346))
+- fix mdbook build, refactor, layout, remove xDS references ([#1345](https://github.com/EmbarkStudios/quilkin/pull/1345))
+- set submodules true in checkout ([#1344](https://github.com/EmbarkStudios/quilkin/pull/1344))
+- set absolute path ([#1343](https://github.com/EmbarkStudios/quilkin/pull/1343))
+
+## [0.10.1](https://github.com/EmbarkStudios/quilkin/compare/quilkin-v0.10.0...quilkin-v0.10.1) - 2026-05-26
+
+### Added
+
+- add http provider + provider benchmarks ([#1379](https://github.com/EmbarkStudios/quilkin/pull/1379))
+- Batch k8s events to prevent excessive calls to `EndpointSet::update()` ([#1370](https://github.com/EmbarkStudios/quilkin/pull/1370))
+- Initial corrosion integration ([#1348](https://github.com/EmbarkStudios/quilkin/pull/1348))
+- Add decryptor filter ([#1035](https://github.com/EmbarkStudios/quilkin/pull/1035))
+
+### Fixed
+
+- add udp session limit to prevent unbounded growth ([#1396](https://github.com/EmbarkStudios/quilkin/pull/1396))
+- compose example
+- rustdoc errors & warnings
+- reject invalid ports ([#1372](https://github.com/EmbarkStudios/quilkin/pull/1372))
+- fix issue when watching multiple k8s namespaces ([#1369](https://github.com/EmbarkStudios/quilkin/pull/1369))
+- Change how latency to other nodes is measured ([#1364](https://github.com/EmbarkStudios/quilkin/pull/1364))
+
+### Other
+
 - *(deps)* bump openssl from 0.10.79 to 0.10.80 ([#1397](https://github.com/EmbarkStudios/quilkin/pull/1397))
 - remove .* from .gitignore, set version of corrosion dependency
 - Remove sub DB when streams are terminated ([#1393](https://github.com/EmbarkStudios/quilkin/pull/1393))
