@@ -62,7 +62,7 @@ When submitting pull requests, make sure to do the following:
 - Ensure any new files have [a trailing newline](https://stackoverflow.com/questions/5813311/no-newline-at-end-of-file)
 
 ## Continuous Integration
-Continuous integration is provided by [GitHub Actions](https://github.com/googleforgames/quilkin/actions),
+Continuous integration is provided by [GitHub Actions](https://github.com/EmbarkStudios/quilkin/actions),
 through the workflow files found in the [.github/workflows](./.github/workflows) directory.
 
 Build success or failure are displayed on each pull request with relevant details.

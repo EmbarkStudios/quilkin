@@ -18,7 +18,7 @@ Dynamic configuration is available through `UQuilkinConfigSubsystem`, it is init
 
 - `TArray<FQuilkinEndpoint> Endpoints` A set of Quilkin load balancer endpoints that can be used for the following features.
 - `bool MeasureEndpoints` When enabled, the plugin will start a new `Tick` task that executes at a fixed interval (currently 30 seconds), where it will spawn a new background task that will ping each endpoint in `Endpoints`, and track its measurement in a fixed size circular buffer.
-   Pings are handled through Quilkin Control Message Protocol, this is a bespoke protocol for UDP to be able to support situations where for example using ICMP is not possible, see the [Quilkin Book](https://googleforgames.github.io/quilkin/main/book/services/proxy/qcmp.html) for more details on the protocol data unit.
+   Pings are handled through Quilkin Control Message Protocol, this is a bespoke protocol for UDP to be able to support situations where for example using ICMP is not possible, see the [Quilkin Book](https://EmbarkStudios.github.io/quilkin/main/book/services/proxy/qcmp.html) for more details on the protocol data unit.
    **Note** `MeasureEndpoints` is orthogonal to `Enabled` and `UseEndpoints` meaning that you can use `MeasureEndpoints` for latency measurements without being required to also use Quilkin for game traffic.
 - `bool UseEndpoints` Whether to use `Endpoints` for game traffic. When enabled, instead of using the provided `FInternetAddr`, the plugin will choose the lowest latency endpoint available and send traffic through that endpoint to connect to the gameserver, and if the latency should exceed `JitterThreshold` then the plugin will attempt to redirect traffic to the next available endpoint with the lowest latency.
 
