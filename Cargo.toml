@@ -56,7 +56,7 @@ workspace = true
 
 [dependencies]
 # Local
-quilkin-macros = { version = "0.10.0", path = "./crates/macros" }
+quilkin-macros = { version = "0.10.1", path = "./crates/macros" }
 quilkin-proto.workspace = true
 quilkin-system.workspace = true
 quilkin-types.workspace = true
@@ -196,7 +196,7 @@ members = [
 [workspace.package]
 license = "Apache-2.0"
 edition = "2024"
-version = "0.10.0"
+version = "0.10.1"
 
 [workspace.dependencies]
 arc-swap = { version = "1.8.0", features = ["serde"] }
@@ -234,10 +234,10 @@ prometheus-client = { version = "0.24" }
 prost = "0.14"
 prost-types = "0.14"
 quilkin = { path = "." }
-quilkin-proto = { version = "0.10.0", path = "crates/quilkin-proto" }
-quilkin-system = { version = "0.10.0", path = "crates/system" }
-quilkin-types = { version = "0.10.0", path = "crates/types" }
-quilkin-xds = { version = "0.10.0", path = "crates/xds" }
+quilkin-proto = { version = "0.10.1", path = "crates/quilkin-proto" }
+quilkin-system = { version = "0.10.1", path = "crates/system" }
+quilkin-types = { version = "0.10.1", path = "crates/types" }
+quilkin-xds = { version = "0.10.1", path = "crates/xds" }
 rand = "0.9"
 regex = "1.12.2"
 schemars = { version = "1.2", features = ["bytes1", "url2"] }
