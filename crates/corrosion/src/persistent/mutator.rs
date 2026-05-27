@@ -3,6 +3,7 @@
 
 use crate::{
     Peer, db,
+    db::SplitPoolReadExt,
     persistent::proto::{ExecResponse, ExecResult, v1 as p},
 };
 use corro_types::{
@@ -51,7 +52,7 @@ impl BroadcastingTransactor {
             // acquiring the lock here means everything will have to wait for it to be ready
             let mut booked = book.write_owned::<&str, _>("init", None).await;
             async move {
-                let conn = pool.read().await?;
+                let conn = pool.read_readonly().await?;
                 **booked = tokio::task::block_in_place(|| BookedVersions::from_conn(&conn, id))
                     .expect("loading BookedVersions from db failed");
                 Ok::<_, eyre::Report>(())
@@ -406,7 +407,7 @@ pub async fn broadcast_changes(
     last_seq: CrsqlSeq,
     ts: broadcast::Timestamp,
 ) -> Result<(), broadcast::BroadcastError> {
-    let conn = pool.read().await?;
+    let conn = pool.read_readonly().await?;
 
     tokio::task::block_in_place(|| {
         let mut prepped = conn.prepare_cached(

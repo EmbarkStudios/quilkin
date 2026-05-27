@@ -2,7 +2,7 @@
 //!
 //! The Corrosion code was too linked to HTTP, which we may or may not use
 
-use crate::codec::PrefixedBuf;
+use crate::{codec::PrefixedBuf, db::SplitPoolReadExt};
 use bytes::Bytes;
 use camino::{Utf8Path as Path, Utf8PathBuf as PathBuf};
 pub use corro_agent::api::public::pubsub::MatcherUpsertError;
@@ -133,7 +133,7 @@ pub const fn max_buffer() -> u16 {
 }
 
 async fn expand_sql(sp: &SplitPool, stmt: &Statement) -> Result<String, MatcherUpsertError> {
-    let conn = sp.read().await?;
+    let conn = sp.read_readonly().await?;
 
     let mut prepped = conn.prepare(stmt.query())?;
     match stmt {

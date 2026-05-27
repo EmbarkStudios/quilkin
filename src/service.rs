@@ -171,6 +171,23 @@ pub struct Service {
     )]
     corrosion_server_reap: Option<u32>,
 
+    /// Maximum database size as a page count (default page size: 4 KiB, so 262144 = 1 GiB).
+    /// When set, `SQLite` returns `SQLITE_FULL` instead of exhausting disk.
+    /// The volume must have more free space than (`max_page_count` * 4096) + `journal_size_limit`.
+    #[clap(
+        long = "service.corrosion.max-page-count",
+        env = "QUILKIN_SERVICE_CORROSION_MAX_PAGE_COUNT"
+    )]
+    corrosion_max_page_count: Option<u64>,
+
+    /// Maximum WAL file size in bytes left on disk after a checkpoint.
+    /// Prevents unbounded WAL growth when checkpoints lag behind writes.
+    #[clap(
+        long = "service.corrosion.journal-size-limit",
+        env = "QUILKIN_SERVICE_CORROSION_JOURNAL_SIZE_LIMIT"
+    )]
+    corrosion_journal_size_limit: Option<u64>,
+
     // END CORROSION
     #[clap(long = "termination-timeout")]
     termination_timeout: Option<crate::cli::Duration>,
@@ -216,6 +233,8 @@ impl Default for Service {
             corrosion_port: 7901,
             corrosion_db_path: None,
             corrosion_server_reap: None,
+            corrosion_max_page_count: None,
+            corrosion_journal_size_limit: None,
             termination_timeout: None,
             testing: false,
             xds_to_corrosion: None,
@@ -876,7 +895,13 @@ impl Service {
         let db = corrosion::db::InitializedDb::setup(
             &db_path,
             corrosion::schema::SCHEMA,
-            Some(corrosion::db::DBMaintenance::default()),
+            Some(corrosion::db::DBMaintenance {
+                limits: corrosion::db::DBLimits {
+                    max_page_count: self.corrosion_max_page_count,
+                    journal_size_limit: self.corrosion_journal_size_limit.map(|v| v as i64),
+                },
+                ..Default::default()
+            }),
         )
         .await?;
         let subs = types::pubsub::SubsManager::default();

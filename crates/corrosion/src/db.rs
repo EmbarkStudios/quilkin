@@ -2,12 +2,51 @@ use corro_types::{
     actor::ActorId,
     agent::{SplitPool, WriteConn},
     schema::Schema,
-    sqlite::CrConn,
+    sqlite::{CrConn, SqlitePoolError},
 };
 use std::{sync::Arc, time::Duration};
 
 pub mod read;
 pub mod write;
+
+/// Extension trait that makes it impossible to obtain a read connection without the
+/// required session pragmas (`temp_store = MEMORY`, `query_only = ON`).
+///
+/// Always use this instead of [`SplitPool::read`] directly.
+pub trait SplitPoolReadExt {
+    fn read_readonly(
+        &self,
+    ) -> impl std::future::Future<Output = Result<sqlite_pool::Connection<CrConn>, SqlitePoolError>> + Send;
+}
+
+impl SplitPoolReadExt for SplitPool {
+    async fn read_readonly(&self) -> Result<sqlite_pool::Connection<CrConn>, SqlitePoolError> {
+        let conn = self.read().await?;
+        // These are flag-only pragmas; failure means the SQLite handle itself is broken,
+        // in which case every subsequent operation would also fail.
+        conn.pragma_update(None, "temp_store", "MEMORY")
+            .expect("temp_store is a flag pragma; failure means the connection is broken");
+        conn.pragma_update(None, "query_only", true)
+            .expect("query_only is a flag pragma; failure means the connection is broken");
+        Ok(conn)
+    }
+}
+
+/// Hard limits ensuring `SQLite` returns `SQLITE_FULL` before the underlying disk is
+/// exhausted. Disk allocation for the volume must exceed
+/// `(max_page_count × page_size) + journal_size_limit`.
+#[derive(Default)]
+pub struct DBLimits {
+    /// Maximum database file size as a page count (default page size: 4 KiB,
+    /// so 262,144 = 1 GiB). `None` leaves `SQLite`'s very large built-in ceiling in
+    /// place — not recommended in production.
+    pub max_page_count: Option<u64>,
+    /// Maximum WAL size in bytes left on disk after a checkpoint. `-1` (`SQLite`
+    /// default) is unlimited; a few hundred MiB prevents unbounded WAL growth when
+    /// checkpoints lag. `None` leaves the `SQLite` default.
+    pub journal_size_limit: Option<i64>,
+}
+
 
 pub struct DBMaintenance {
     /// The interval at which to run maintenance
@@ -16,6 +55,7 @@ pub struct DBMaintenance {
     pub wal_threshold: u32,
     /// The maximum number of unused free pages that can exist (a page is 4KiB)
     pub max_free_pages: u64,
+    pub limits: DBLimits,
 }
 
 impl Default for DBMaintenance {
@@ -25,6 +65,7 @@ impl Default for DBMaintenance {
             // 2 GiB
             wal_threshold: 2 * 1024,
             max_free_pages: 10000,
+            limits: DBLimits::default(),
         }
     }
 }
@@ -85,7 +126,14 @@ impl InitializedDb {
                 schema
             };
 
-            tokio::task::block_in_place(|| update_schema(&mut conn, old_schema, partial_schema))?
+            let schema = tokio::task::block_in_place(|| {
+                update_schema(&mut conn, old_schema, partial_schema)
+            })?;
+
+            let limits = maintenance.as_ref().map(|m| &m.limits);
+            tokio::task::block_in_place(|| run_startup_checks(&conn, limits))?;
+
+            schema
         };
 
         if let Some(dbm) = maintenance {
@@ -134,11 +182,63 @@ fn update_schema(
     Ok(new_schema)
 }
 
+/// Verifies invariants and applies one-time configuration after schema migration.
+/// Failures are fatal — the database cannot be used safely.
+fn run_startup_checks(conn: &rusqlite::Connection, limits: Option<&DBLimits>) -> eyre::Result<()> {
+    conn.query_row("SELECT crsql_dbversion()", [], |row| row.get::<_, i64>(0))
+        .map_err(|e| eyre::eyre!("cr-sqlite extension not loaded: {e}"))?;
+
+    let mode: String = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+    if mode != "wal" {
+        eyre::bail!("journal_mode is '{mode}', expected 'wal'");
+    }
+
+    let options: Vec<String> = {
+        let mut stmt = conn.prepare("PRAGMA compile_options")?;
+        stmt.query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?
+    };
+    if options.iter().any(|o| o == "THREADSAFE=0") {
+        eyre::bail!("SQLite built with THREADSAFE=0; multi-threaded access is undefined behavior");
+    }
+
+    // mmap bypasses fsync — C extension writes go directly to the file without WAL protection
+    let mmap_size: i64 = conn.pragma_query_value(None, "mmap_size", |row| row.get(0))?;
+    if mmap_size != 0 {
+        tracing::warn!(
+            mmap_size,
+            "mmap enabled; C extension writes bypass fsync and can corrupt the database directly"
+        );
+    }
+
+    // catches corruption left by a previous crash before building on top of it
+    let check: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+    if check != "ok" {
+        eyre::bail!("database corruption detected: {check}");
+    }
+
+    // /tmp in Kubernetes pods is often a size-limited emptyDir; SQLITE_IOERR mid-query
+    // if it fills up
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
+
+    if let Some(limits) = limits {
+        if let Some(max_page_count) = limits.max_page_count {
+            conn.pragma_update(None, "max_page_count", max_page_count)?;
+            tracing::info!(max_page_count, "max_page_count limit applied");
+        }
+        if let Some(journal_size_limit) = limits.journal_size_limit {
+            conn.pragma_update(None, "journal_size_limit", journal_size_limit)?;
+            tracing::info!(journal_size_limit, "journal_size_limit applied");
+        }
+    }
+
+    Ok(())
+}
+
 /// We keep a write-ahead-log, which under write-pressure can grow to multiple gigabytes and needs periodic truncation.
 ///
 /// We don't want to schedule this task too often since it locks the whole DB.
 fn wal_checkpoint(conn: &rusqlite::Connection, timeout: Duration) -> eyre::Result<()> {
-    tracing::debug!("handling db_cleanup (WAL truncation)");
     let start = std::time::Instant::now();
 
     let orig: u64 = conn.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
@@ -146,12 +246,9 @@ fn wal_checkpoint(conn: &rusqlite::Connection, timeout: Duration) -> eyre::Resul
 
     let busy: bool = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE);", [], |row| row.get(0))?;
     if busy {
-        tracing::warn!(
-            ?timeout,
-            "could not truncate sqlite WAL, database busy - with timeout"
-        );
+        tracing::warn!(?timeout, "WAL truncation incomplete: database still busy");
     } else {
-        tracing::info!(elapsed = ?start.elapsed(), "successfully truncated sqlite WAL");
+        tracing::info!(elapsed = ?start.elapsed(), "WAL truncated");
     }
 
     drop(conn.pragma_update(None, "busy_timeout", orig));
@@ -208,7 +305,7 @@ async fn wal_checkpoint_over_threshold(
 /// Continuously runs an [incremental vacuum](https://sqlite.org/lang_vacuum.html) until the number of unused free pages is below the limit
 async fn vacuum_db(pool: &SplitPool, lim: u64) -> eyre::Result<()> {
     let mut freelist: u64 = {
-        let conn = pool.read().await?;
+        let conn = pool.read_readonly().await?;
 
         let vacuum: u64 = conn.pragma_query_value(None, "auto_vacuum", |row| row.get(0))?;
         eyre::ensure!(vacuum == 2, "auto_vacuum has to be set to INCREMENTAL");
