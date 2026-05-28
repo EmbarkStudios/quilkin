@@ -8,9 +8,7 @@ RUN set -eux && \
         build-essential \
         ca-certificates \
         curl \
-        g++-x86-64-linux-gnu \
         git \
-        libssl-dev \
         pkg-config \
         protobuf-compiler \
         wget \
@@ -37,21 +35,19 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 # --- Cook: build dependencies (cached when Cargo.lock unchanged) ---
 FROM chef AS cook
-ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/x86_64-linux-gnu-gcc
 COPY --from=planner /workspace/recipe.json /workspace/recipe.json
 WORKDIR /workspace
 RUN mkdir -p benches && echo 'fn main() {}' > benches/provider.rs && \
-    cargo chef cook --profile lto --target x86_64-unknown-linux-gnu --recipe-path recipe.json
+    cargo chef cook --profile lto --recipe-path recipe.json
 
 # --- Build quilkin ---
 FROM chef AS builder
-ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/x86_64-linux-gnu-gcc
 COPY --from=cook /workspace/target /workspace/target
 COPY . /workspace
 WORKDIR /workspace
 RUN cargo about generate license.html.hbs > license.html
 RUN cargo run -p proto-gen -- generate
-RUN cargo build --profile=lto --target x86_64-unknown-linux-gnu
+RUN cargo build --profile=lto
 # Archive source of MPL/GPL/LGPL/CDDL licensed dependencies for inclusion in the image.
 # Review this list before each release.
 RUN set -eo pipefail && \
@@ -77,7 +73,7 @@ RUN groupadd --gid 65532 nonroot && \
 
 COPY --from=builder /workspace/license.html .
 COPY --from=builder /workspace/dependencies-src.zip .
-COPY --from=builder --chown=nonroot:nonroot /workspace/target/x86_64-unknown-linux-gnu/lto/quilkin .
+COPY --from=builder --chown=nonroot:nonroot /workspace/target/lto/quilkin .
 
 USER nonroot
 ENTRYPOINT ["/quilkin"]

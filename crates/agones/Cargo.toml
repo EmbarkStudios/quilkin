@@ -33,7 +33,7 @@ chrono = "0.4"
 either = "1.15"
 futures.workspace = true
 k8s-openapi.workspace = true
-kube = { workspace = true, features = ["openssl-tls", "client", "derive", "runtime"] }
+kube = { workspace = true, features = ["rustls-tls", "client", "derive", "runtime"] }
 quilkin = { path = "../../" }
 rustls = "0.23.36"
 tokio.workspace = true
