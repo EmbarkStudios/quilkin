@@ -3885,6 +3885,7 @@ dependencies = [
  "chacha20",
  "clap",
  "criterion",
+ "crossbeam-channel",
  "crossbeam-utils",
  "dashmap",
  "either",

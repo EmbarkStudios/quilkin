@@ -46,6 +46,7 @@ typedef struct {
 } Ipv6Hdr;
 
 enum IpProto : u8 {
+    ICMP = 1,
     UDP = 17,
     ICMPv6 = 58,
 };
