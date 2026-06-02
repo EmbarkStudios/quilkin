@@ -1,8 +1,11 @@
 #![allow(dead_code)]
 
-use quilkin_xdp::xdp::{
-    self,
-    nic::{NicIndex, NicName},
+use quilkin_xdp::{
+    aya,
+    xdp::{
+        self,
+        nic::{NicIndex, NicName},
+    },
 };
 use std::sync::Arc;
 pub mod process;
@@ -75,7 +78,10 @@ pub struct XdpWorkers {
     qcmp_port: NetworkU16,
     ipv6: std::net::Ipv6Addr,
     ipv4: std::net::Ipv4Addr,
-    ip_to_mac: Option<std::os::fd::RawFd>,
+    ip_to_mac: Option<(
+        aya::maps::RingBuf<aya::maps::MapData>,
+        super::cache::types::MacAddr,
+    )>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -127,6 +133,8 @@ pub enum XdpSpawnError {
     Thread(#[source] std::io::Error),
     #[error("Failed to attach XDP program: {0}")]
     XdpAttach(#[from] quilkin_xdp::aya::programs::ProgramError),
+    #[error("Failed to spawn layer 2 cache thread: {0}")]
+    L2Cache(#[from] super::cache::CacheSpawnError),
 }
 
 /// Attempts to setup XDP by querying NIC support and allocating ring buffers
@@ -254,7 +262,14 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     )?;
 
     let ip_to_mac = if config.cache_layer2 {
-        Some(ebpf_prog.layer2_cache_map()?)
+        // Theoretically it's possible to have a non-utf8 nic name, but until someone actually files a bug it's such a
+        // niche case it's not worth considering
+        let gateway_mac = super::cache::determine_gateway_mac(
+            name.as_str()
+                .expect("the chosen NIC does not have a utf-8 name"),
+        )?;
+        let ring = ebpf_prog.layer2_ring()?;
+        Some((ring, gateway_mac))
     } else {
         None
     };
@@ -291,25 +306,36 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     })
 }
 
+trait LinkLayer {
+    fn try_fill<const N: usize>(
+        &mut self,
+        packet: xdp::Packet,
+        tx_slab: &mut xdp::slab::StackSlab<N>,
+    );
+    fn update<const N: usize>(&mut self, tx_slab: &mut xdp::slab::StackSlab<N>);
+}
+
 pub struct XdpLoop {
     threads: Vec<std::thread::JoinHandle<()>>,
     ebpf_prog: quilkin_xdp::EbpfProgram,
-    xdp_link: quilkin_xdp::aya::programs::xdp::XdpLinkId,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
     nic_index: NicIndex,
-    ip_to_mac: Option<std::os::fd::RawFd>,
+    l2_cache: Option<(Arc<super::cache::L2Cache>, std::thread::JoinHandle<()>)>,
 }
 
 impl XdpLoop {
     /// Detaches the eBPF program from the attacked NIC and cancels all I/O
     /// threads, waiting for them to exit
     pub fn shutdown(mut self, wait: bool) {
-        if let Err(error) = self.ebpf_prog.detach(self.xdp_link) {
+        if let Err(error) = self.ebpf_prog.detach() {
             tracing::error!(%error, "failed to detach eBPF program");
         }
 
         self.shutdown
             .store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some((cache, _)) = &self.l2_cache {
+            cache.shutdown();
+        }
 
         if !wait {
             return;
@@ -317,21 +343,23 @@ impl XdpLoop {
 
         for jh in self.threads {
             if let Err(error) = jh.join() {
-                if let Some(error) = error.downcast_ref::<&'static str>() {
-                    tracing::error!(error, "XDP I/O thread enountered error");
+                let error = if let Some(error) = error.downcast_ref::<&'static str>() {
+                    error
                 } else if let Some(error) = error.downcast_ref::<String>() {
-                    tracing::error!(error, "XDP I/O thread enountered error");
+                    error.as_str()
                 } else {
                     tracing::error!(?error, "XDP I/O thread enountered error");
+                    continue;
                 };
+
+                tracing::error!(error, "XDP I/O thread enountered error");
             }
         }
-    }
 
-    /// Seeds the mapping of IP -> MAC addresses via netlink, if such a cache has been enabled
-    pub async fn seed_layer2_cache(&self) {
-        if let Some(cache_fd) = self.ip_to_mac {
-            quilkin_xdp::netlink::seed_layer2_cache(cache_fd).await;
+        if let Some((_cache, jh)) = self.l2_cache.take()
+            && let Err(error) = jh.join()
+        {
+            tracing::error!(?error, "layer2 cache thread encountered error");
         }
     }
 }
@@ -346,7 +374,10 @@ impl XdpLoop {
 ///
 /// This can fail if threads can not be spawned for some reason (unlikely), the
 /// more likely reason for failure is the inability to attach the eBPF program
-pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoop, XdpSpawnError> {
+pub fn spawn(
+    mut workers: XdpWorkers,
+    config: process::ConfigState,
+) -> Result<XdpLoop, XdpSpawnError> {
     let external_port = workers.external_port;
     let qcmp_port = workers.qcmp_port;
     let ipv4 = workers.ipv4;
@@ -355,6 +386,8 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
     let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let mut threads = Vec::with_capacity(workers.workers.len());
+    let mut channels = Vec::with_capacity(workers.workers.len());
+
     for (i, mut worker) in workers.workers.into_iter().enumerate() {
         let cfg = config.clone();
         let ss = session_state.clone();
@@ -388,6 +421,12 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
         threads.push(jh);
     }
 
+    let l2_cache = if let Some(i2m) = workers.ip_to_mac.take() {
+        Some(l2_cache::L2Cache::with_channels(channels, i2m)?)
+    } else {
+        None
+    };
+
     // Now that all the io loops are running, attach the eBPF program to route
     // packets to the bound sockets
     let mut ebpf_prog = workers.ebpf_prog;
@@ -397,15 +436,14 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
     // to SKB mode. This allows maximum compatibility, and we already provide
     // flags to force zerocopy, which relies on driver mode, so the user can use
     // that if they don't want the fallback behavior
-    let xdp_link =
-        ebpf_prog.attach(workers.nic, quilkin_xdp::aya::programs::XdpFlags::default())?;
+    ebpf_prog.attach(workers.nic, quilkin_xdp::aya::programs::XdpFlags::default())?;
 
     Ok(XdpLoop {
         threads,
         ebpf_prog,
-        xdp_link,
         shutdown,
         nic_index: workers.nic,
+        l2_cache,
     })
 }
 
@@ -420,7 +458,7 @@ use crate::time::UtcTimestamp;
 /// [`process::process_packets`] code can be cleanly tested without relying on
 /// a fully setup XDP socket/rings, relying only on a `Umem` (memory map)
 #[allow(clippy::too_many_arguments)]
-fn io_loop(
+fn io_loop<LL: LinkLayer>(
     worker: quilkin_xdp::XdpWorker,
     external_port: NetworkU16,
     qcmp_port: NetworkU16,
@@ -429,6 +467,7 @@ fn io_loop(
     local_ipv4: std::net::Ipv4Addr,
     local_ipv6: std::net::Ipv6Addr,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
+    mut ll: LL,
 ) {
     let quilkin_xdp::XdpWorker {
         mut umem,
@@ -496,6 +535,7 @@ fn io_loop(
                 &mut tx_slab,
                 &mut config,
                 &mut state,
+                &mut ll,
             );
 
             let before = tx_slab.len();

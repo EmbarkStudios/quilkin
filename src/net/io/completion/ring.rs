@@ -1,15 +1,15 @@
 use std::{
-    mem, net,
+    io, mem, net,
     sync::atomic::{AtomicU16, Ordering},
 };
 
 pub(super) struct Mmap {
-    pub(super) buf: *mut u8,
+    pub(crate) buf: *mut u8,
     len: usize,
 }
 
 impl Mmap {
-    fn anonymous(len: usize) -> eyre::Result<Self> {
+    fn anonymous(len: usize) -> io::Result<Self> {
         // SAFETY: syscall, we check errors
         unsafe {
             let mmap = libc::mmap(
@@ -21,7 +21,7 @@ impl Mmap {
                 0,
             );
             if mmap == libc::MAP_FAILED {
-                return Err(std::io::Error::last_os_error().into());
+                return Err(io::Error::last_os_error());
             }
 
             Ok(Self {
@@ -51,11 +51,11 @@ pub struct BufferRing {
     /// The length of each buffer in the ring
     length: usize,
     /// The capacity of the ring
-    pub(super) count: u16,
+    pub(crate) count: u16,
     /// The mask to determine the offset within the ring regardless of the index
     mask: u16,
     /// The backing mmap
-    pub(super) mmap: Mmap,
+    pub(crate) mmap: Mmap,
 }
 
 // SAFETY: the pointers live as long as the owned mmap
@@ -67,11 +67,18 @@ const fn ring_size(count: u16, length: usize) -> usize {
 }
 
 impl BufferRing {
-    pub fn new(count: u16, length: u16) -> eyre::Result<Self> {
-        eyre::ensure!(
-            count.is_power_of_two() && length.is_power_of_two(),
-            "count and length must be powers of 2"
-        );
+    pub fn new(count: u16, length: u16) -> io::Result<Self> {
+        if !count.is_power_of_two() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "count must be a power of 2",
+            ));
+        } else if !length.is_power_of_two() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "length must be a power of 2",
+            ));
+        }
 
         let length = length as usize;
 
@@ -206,20 +213,44 @@ impl RingBuffer<'_> {
             // First 2 bytes are the address family
             let family = self.buf[RECV_OUT] as u16 | (self.buf[RECV_OUT + 1] as u16) << 8;
 
-            let addr = match family {
-                2 /*libc::AF_INET*/ => {
-                    eyre::ensure!(out.name == std::mem::size_of::<libc::sockaddr_in>() as u32, "invalid amount of bytes for ipv4 socket address");
+            let addr = match family as i32 {
+                libc::AF_INET => {
+                    eyre::ensure!(
+                        out.name == std::mem::size_of::<libc::sockaddr_in>() as u32,
+                        "invalid amount of bytes for ipv4 socket address"
+                    );
 
-                    let ipv4 = self.buf.as_ptr().byte_add(RECV_OUT).cast::<libc::sockaddr_in>().read_unaligned();
+                    let ipv4 = self
+                        .buf
+                        .as_ptr()
+                        .byte_add(RECV_OUT)
+                        .cast::<libc::sockaddr_in>()
+                        .read_unaligned();
 
-                    net::SocketAddr::V4(net::SocketAddrV4::new(net::Ipv4Addr::from_bits(u32::from_be(ipv4.sin_addr.s_addr)), u16::from_be(ipv4.sin_port)))
+                    net::SocketAddr::V4(net::SocketAddrV4::new(
+                        net::Ipv4Addr::from_bits(u32::from_be(ipv4.sin_addr.s_addr)),
+                        u16::from_be(ipv4.sin_port),
+                    ))
                 }
-                10 /*libc::AF_INET6*/ => {
-                    eyre::ensure!(out.name == std::mem::size_of::<libc::sockaddr_in6>() as u32, "invalid amount of bytes for ipv6 socket address");
+                libc::AF_INET6 => {
+                    eyre::ensure!(
+                        out.name == std::mem::size_of::<libc::sockaddr_in6>() as u32,
+                        "invalid amount of bytes for ipv6 socket address"
+                    );
 
-                    let ipv6 = self.buf.as_ptr().byte_add(RECV_OUT).cast::<libc::sockaddr_in6>().read_unaligned();
+                    let ipv6 = self
+                        .buf
+                        .as_ptr()
+                        .byte_add(RECV_OUT)
+                        .cast::<libc::sockaddr_in6>()
+                        .read_unaligned();
 
-                    net::SocketAddr::V6(net::SocketAddrV6::new(net::Ipv6Addr::from_octets(ipv6.sin6_addr.s6_addr), u16::from_be(ipv6.sin6_port), ipv6.sin6_flowinfo, ipv6.sin6_scope_id))
+                    net::SocketAddr::V6(net::SocketAddrV6::new(
+                        net::Ipv6Addr::from_octets(ipv6.sin6_addr.s6_addr),
+                        u16::from_be(ipv6.sin6_port),
+                        ipv6.sin6_flowinfo,
+                        ipv6.sin6_scope_id,
+                    ))
                 }
                 _ => eyre::bail!("unknown socket address family"),
             };

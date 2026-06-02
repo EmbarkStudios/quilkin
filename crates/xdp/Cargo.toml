@@ -13,8 +13,7 @@ xdp.workspace = true
 # Used to load and attach eBPF programs
 aya = "0.13.1"
 libc.workspace = true
-# TODO: Replace this with inline code https://github.com/EmbarkStudios/quilkin/issues/1395
-rtnetlink = "0.21"
+tracing.workspace = true
 
 [lints]
 workspace = true

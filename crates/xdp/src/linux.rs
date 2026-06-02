@@ -58,6 +58,8 @@ pub enum BindError {
     Xdp(#[from] xdp::error::Error),
     #[error("mmap error: {0}")]
     Mmap(#[from] std::io::Error),
+    #[error("pin error: {0}")]
+    Pin(#[from] aya::pin::PinError),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -99,6 +101,8 @@ pub struct EbpfProgram {
     pub external_port: xdp::packet::net_types::NetworkU16,
     /// The port QCMP packets are sent to
     pub qcmp_port: xdp::packet::net_types::NetworkU16,
+    /// The ID of our linked program, if we are currently attached to an interface
+    link_id: Option<aya::programs::xdp::XdpLinkId>,
 }
 
 impl EbpfProgram {
@@ -141,6 +145,7 @@ impl EbpfProgram {
             bpf,
             external_port: xdp::packet::net_types::NetworkU16(u16::from_ne_bytes(external_port_no)),
             qcmp_port: xdp::packet::net_types::NetworkU16(u16::from_ne_bytes(qcmp_port_no)),
+            link_id: None,
         })
     }
 
@@ -221,22 +226,27 @@ impl EbpfProgram {
         Ok(entries)
     }
 
-    pub fn layer2_cache_map(&self) -> Result<std::os::fd::RawFd, BindError> {
+    /// Returns the ring buffer of IP + MAC entries that is written to by eBPF when receiving an ICMP or ARP packet
+    pub fn layer2_ring(&mut self) -> Result<aya::maps::RingBuf<aya::maps::MapData>, BindError> {
         let map = self
             .bpf
-            .map("IP_TO_MAC")
+            // We exclusively use this in another thread so we need to take ownership of the map to avoid
+            // annoying lifetime issues
+            .take_map("IP_TO_MAC")
             .ok_or(BindError::MissingMap("IP_TO_MAC"))?;
 
-        let map = aya::maps::HashMap::<_, [u8; 16], u64>::try_from(map)?;
-        use std::os::fd::AsRawFd;
-        Ok(map.map().fd().as_fd().as_raw_fd())
+        Ok(aya::maps::RingBuf::try_from(map)?)
     }
 
+    /// Attaches the eBPF program to the specified interface
+    ///
+    /// Once attached, the program controls the RX queues of the interface and forwards packets to our userspace processing,
+    /// or passes them to the kernel
     pub fn attach(
         &mut self,
         nic: NicIndex,
         flags: aya::programs::XdpFlags,
-    ) -> Result<aya::programs::xdp::XdpLinkId, aya::programs::ProgramError> {
+    ) -> Result<(), aya::programs::ProgramError> {
         // We use this entrypoint for now, but in the future we could also use
         // a round robin mode when the xdp lib supports shared Umem
         let program: &mut aya::programs::Xdp = self
@@ -247,19 +257,37 @@ impl EbpfProgram {
             .expect("'all_queues' is not an xdp program");
         program.load()?;
 
-        program.attach_to_if_index(nic.into(), flags)
+        let link_id = program.attach_to_if_index(nic.into(), flags)?;
+        self.link_id = Some(link_id);
+        Ok(())
     }
 
-    pub fn detach(
-        &mut self,
-        link_id: aya::programs::xdp::XdpLinkId,
-    ) -> Result<(), aya::programs::ProgramError> {
+    /// Detaches the eBPF program from the interface, if it is attached
+    ///
+    /// This is also automatically called on drop
+    pub fn detach(&mut self) -> Result<(), aya::programs::ProgramError> {
+        let link_id = self
+            .link_id
+            .take()
+            .ok_or(aya::programs::ProgramError::NotAttached)?;
+
         let program: &mut aya::programs::Xdp = self
             .bpf
             .program_mut("all_queues")
             .expect("failed to locate 'all_queues' program")
             .try_into()
             .expect("'all_queues' is not an xdp program");
+
         program.detach(link_id)
+    }
+}
+
+impl Drop for EbpfProgram {
+    fn drop(&mut self) {
+        if self.link_id.is_some() {
+            if let Err(error) = self.detach() {
+                tracing::error!(%error, "failed to detach eBPF program");
+            }
+        }
     }
 }

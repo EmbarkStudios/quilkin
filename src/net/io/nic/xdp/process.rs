@@ -1,3 +1,4 @@
+use super::LinkLayer;
 use crate::{
     filters::{self, Filter as _},
     metrics::{self, AsnInfo},
@@ -442,12 +443,13 @@ impl SessionState {
 }
 
 #[inline]
-pub fn process_packets<const RXN: usize, const TXN: usize>(
+pub fn process_packets<const RXN: usize, const TXN: usize, LL: LinkLayer>(
     rx_slab: &mut StackSlab<RXN>,
     umem: &mut Umem,
     tx_slab: &mut StackSlab<TXN>,
     config_state: &mut ConfigState,
     state: &mut State,
+    ll: &mut LL,
 ) {
     let filters = config_state.filters.load();
     let cm = config_state.clusters.clone_value();
@@ -490,7 +492,7 @@ pub fn process_packets<const RXN: usize, const TXN: usize>(
             let _timer = metrics::processing_time(direction).start_timer();
 
             if is_client {
-                process_client_packet(packet, umem, filters, &cm, state, tx_slab)
+                process_client_packet(packet, umem, filters, &cm, state, tx_slab, ll)
             } else {
                 process_server_packet(packet, umem, filters, state, tx_slab, jitter)
             }
@@ -546,13 +548,14 @@ fn push_packet<const TXN: usize>(
 }
 
 #[inline]
-fn process_client_packet<const TXN: usize>(
+fn process_client_packet<const TXN: usize, LL: LinkLayer>(
     packet: PacketWrapper,
     umem: &mut Umem,
     filters: &filters::FilterChain,
     cm: &crate::net::ClusterMap,
     state: &mut State,
     tx_slab: &mut StackSlab<TXN>,
+    ll: &mut LL,
 ) -> Result<Option<Packet>, (PipelineError, Packet)> {
     let mut source_addr = packet.headers.source_address();
     source_addr.set_ip(source_addr.ip().to_canonical());

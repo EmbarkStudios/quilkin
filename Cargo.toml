@@ -72,6 +72,7 @@ base64-serde = "0.8.0"
 bytes.workspace = true
 camino.workspace = true
 chacha20 = { version = "0.10", default-features = false, features = ["cipher"] }
+crossbeam-channel = "0.5"
 crossbeam-utils = { version = "0.8", optional = true }
 clap = { version = "4.5.54", features = ["cargo", "derive", "env"] }
 dashmap = { version = "6.1", features = ["serde"] }

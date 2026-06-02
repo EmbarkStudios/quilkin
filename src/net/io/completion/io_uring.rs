@@ -20,10 +20,7 @@
 //! Note there is also the QCMP loop, but that one is simpler and is different
 //! enough that it doesn't make sense to share the same code
 
-use std::{
-    os::fd::{AsRawFd, FromRawFd},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use eyre::Context as _;
 use io_uring::{squeue::Entry, types::Fd};
@@ -67,74 +64,6 @@ impl crate::net::io::Listener {
                 filter_chain,
             )
             .context("failed to spawn io-uring loop")
-    }
-}
-
-/// A simple wrapper around [eventfd](https://man7.org/linux/man-pages/man2/eventfd.2.html)
-///
-/// We use eventfd to signal to io uring loops from async tasks, it is essentially
-/// the equivalent of a signalling 64 bit cross-process atomic
-pub struct EventFd {
-    fd: std::os::fd::OwnedFd,
-    val: u64,
-}
-
-impl EventFd {
-    #[inline]
-    pub(crate) fn new() -> std::io::Result<Self> {
-        // SAFETY: We have no invariants to uphold, but we do need to check the
-        // return value
-        let fd = unsafe { libc::eventfd(0, 0) };
-
-        // This can fail for various reasons mostly around resource limits, if
-        // this is hit there is either something really wrong (OOM, too many file
-        // descriptors), or resource limits were externally placed that were too strict
-        if fd == -1 {
-            return Err(std::io::Error::last_os_error());
-        }
-
-        Ok(Self {
-            // SAFETY: we've validated the file descriptor
-            fd: unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) },
-            val: 0,
-        })
-    }
-
-    #[inline]
-    pub(crate) fn writer(&self) -> EventFdWriter {
-        EventFdWriter {
-            fd: self.fd.as_raw_fd(),
-        }
-    }
-
-    /// Constructs an io-uring entry to read (ie wait) on this eventfd
-    #[inline]
-    pub(crate) fn io_uring_entry(&mut self) -> Entry {
-        io_uring::opcode::Read::new(
-            Fd(self.fd.as_raw_fd()),
-            (&mut self.val as *mut u64).cast(),
-            8,
-        )
-        .build()
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct EventFdWriter {
-    fd: i32,
-}
-
-impl EventFdWriter {
-    #[inline]
-    pub(crate) fn write(&self, val: u64) {
-        // SAFETY: we have a valid descriptor, and most of the errors that apply
-        // to the general write call that eventfd_write wraps are not applicable
-        //
-        // Note that while the docs state eventfd_write is glibc, it is implemented
-        // on musl as well, but really is just a write with 8 bytes
-        unsafe {
-            libc::eventfd_write(self.fd, val);
-        }
     }
 }
 
@@ -249,30 +178,6 @@ fn process_packet(
     }
 }
 
-// io-uring keeps many things private which is incredibly tedious
-const IORING_OP_RECVMSG: u8 = 10;
-const IORING_OP_READ: u8 = 22;
-const IORING_OP_SEND_ZC: u8 = 47;
-
-mod flags {
-    pub type Enum = u32;
-
-    /// If set, the upper 16 bits of the flags field carries the buffer ID that was chosen for this request.
-    ///
-    /// The request must have been issued with `IOSQE_BUFFER_SELECT` set, and used with a request type that supports
-    /// buffer selection. Additionally, buffers must have been provided upfront either via the `IORING_OP_PROVIDE_BUFFERS`
-    /// or the `IORING_REGISTER_PBUF_RING` methods.
-    pub const IORING_CQE_F_BUFFER: Enum = 1 << 0;
-    /// If set, the application should expect more completions from the request.
-    ///
-    /// This is used for requests that can generate multiple completions, such as multi-shot requests, receive, or accept.
-    pub const IORING_CQE_F_MORE: Enum = 1 << 1;
-    /// Set for notification CQEs.
-    ///
-    /// Can be used to distinct them from sends.
-    pub const IORING_CQE_F_NOTIF: Enum = 1 << 3;
-}
-
 struct LoopCtx<'uring> {
     sq: io_uring::squeue::SubmissionQueue<'uring, Entry>,
     backlog: std::collections::VecDeque<Entry>,
@@ -284,6 +189,8 @@ struct LoopCtx<'uring> {
     /// individual recvmsg into the buffer itself, followed by the actual payload
     recv_hdr: libc::msghdr,
 }
+
+use super::{flags, ops};
 
 impl<'uring> LoopCtx<'uring> {
     #[inline]
@@ -299,7 +206,7 @@ impl<'uring> LoopCtx<'uring> {
         self.push(
             io_uring::opcode::RecvMsgMulti::new(self.socket_fd, &self.recv_hdr, BUFFER_RING)
                 .build()
-                .user_data((IORING_OP_RECVMSG as u64) << 56),
+                .user_data((ops::IORING_OP_RECVMSG as u64) << 56),
         );
     }
 
@@ -369,7 +276,7 @@ impl<'uring> LoopCtx<'uring> {
 
             assert!(key < 0xff00000000000000);
 
-            let token = (IORING_OP_SEND_ZC as u64) << 56 | key as u64;
+            let token = (ops::IORING_OP_SEND_ZC as u64) << 56 | key as u64;
 
             io_uring::opcode::SendZc::new(
                 self.socket_fd,
@@ -528,7 +435,7 @@ impl IoUringLoop {
                 };
 
                 loop_ctx.enqueue_recvmsg();
-                loop_ctx.push(pending_sends_event.io_uring_entry().user_data((IORING_OP_READ as u64) << 56));
+                loop_ctx.push(pending_sends_event.io_uring_entry().user_data((ops::IORING_OP_READ as u64) << 56));
 
                 // Sync always needs to be called when entries have been pushed
                 // onto the submission queue for the loop to actually function (ie, similar to await on futures)
@@ -662,69 +569,5 @@ impl SessionPool {
             pending_sends,
             filter_chain,
         )
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    /// This is just a sanity check that eventfd, which we use to notify the io-uring
-    /// loop of events from async tasks, functions as we need to, namely that
-    /// an event posted before the I/O request is submitted to the I/O loop still
-    /// triggers the completion of the I/O request
-    #[test]
-    #[cfg(target_os = "linux")]
-    #[allow(clippy::undocumented_unsafe_blocks)]
-    fn eventfd_works_as_expected() {
-        let mut event = EventFd::new().unwrap();
-        let event_writer = event.writer();
-
-        // Write even before we create the loop
-        event_writer.write(1);
-
-        let mut ring = io_uring::IoUring::new(2).unwrap();
-        let (submitter, mut sq, mut cq) = ring.split();
-
-        unsafe {
-            sq.push(&event.io_uring_entry().user_data(1)).unwrap();
-        }
-
-        sq.sync();
-
-        loop {
-            match submitter.submit_and_wait(1) {
-                Ok(_) => {}
-                Err(ref err) if err.raw_os_error() == Some(libc::EBUSY) => {}
-                Err(error) => {
-                    panic!("oh no {error}");
-                }
-            }
-            cq.sync();
-
-            for cqe in &mut cq {
-                assert_eq!(cqe.result(), 8);
-
-                match cqe.user_data() {
-                    // This was written before the loop started, but now write to the event
-                    // before queuing up the next read
-                    1 => {
-                        assert_eq!(event.val, 1);
-                        event_writer.write(9999);
-
-                        unsafe {
-                            sq.push(&event.io_uring_entry().user_data(2)).unwrap();
-                        }
-                    }
-                    2 => {
-                        assert_eq!(event.val, 9999);
-                        return;
-                    }
-                    _ => unreachable!(),
-                }
-            }
-
-            sq.sync();
-        }
     }
 }
