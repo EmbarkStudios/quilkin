@@ -1,9 +1,12 @@
 #![allow(dead_code)]
 
 use super::ThreadPolicy;
-use quilkin_xdp::xdp::{
-    self,
-    nic::{NicIndex, NicName},
+use quilkin_xdp::{
+    aya,
+    xdp::{
+        self,
+        nic::{NicIndex, NicName},
+    },
 };
 use std::sync::Arc;
 pub mod diagnostics;
@@ -94,7 +97,10 @@ pub struct XdpWorkers {
     ipv6: std::net::Ipv6Addr,
     ipv4: std::net::Ipv4Addr,
     worker_thread_scheduling: WorkerThreadScheduling,
-    ip_to_mac: Option<std::os::fd::RawFd>,
+    ip_to_mac: Option<(
+        aya::maps::RingBuf<aya::maps::MapData>,
+        super::cache::types::MacAddr,
+    )>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -148,6 +154,8 @@ pub enum XdpSetupError {
 pub enum XdpSpawnError {
     #[error("Failed to spawn worker thread: {0}")]
     Thread(#[source] std::io::Error),
+    #[error("Failed to spawn layer 2 cache thread: {0}")]
+    L2Cache(#[from] super::cache::CacheSpawnError),
 }
 
 /// Attempts to setup XDP by querying NIC support and allocating ring buffers
@@ -342,7 +350,14 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     )?;
 
     let ip_to_mac = if config.cache_layer2 {
-        Some(ebpf_prog.layer2_cache_map()?)
+        // Theoretically it's possible to have a non-utf8 nic name, but until someone actually files a bug it's such a
+        // niche case it's not worth considering
+        let gateway_mac = super::cache::determine_gateway_mac(
+            name.as_str()
+                .expect("the chosen NIC does not have a utf-8 name"),
+        )?;
+        let ring = ebpf_prog.layer2_ring()?;
+        Some((ring, gateway_mac))
     } else {
         None
     };
@@ -448,15 +463,23 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     })
 }
 
+trait LinkLayer {
+    fn try_fill<const N: usize>(
+        &mut self,
+        packet: xdp::Packet,
+        tx_slab: &mut xdp::slab::StackSlab<N>,
+    );
+    fn update<const N: usize>(&mut self, tx_slab: &mut xdp::slab::StackSlab<N>);
+}
+
 pub struct XdpLoop {
     threads: Vec<std::thread::JoinHandle<()>>,
     ebpf_prog: quilkin_xdp::EbpfProgram,
-    xdp_link: quilkin_xdp::aya::programs::xdp::XdpLinkId,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
     terminate: Arc<std::sync::atomic::AtomicBool>,
     sessions: Arc<process::SessionState>,
     nic_index: NicIndex,
-    ip_to_mac: Option<std::os::fd::RawFd>,
+    l2_cache: Option<(Arc<super::cache::L2Cache>, std::thread::JoinHandle<()>)>,
 }
 
 impl XdpLoop {
@@ -465,6 +488,9 @@ impl XdpLoop {
     pub async fn shutdown(mut self, termination_timout: Option<std::time::Duration>) {
         self.shutdown
             .store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some((cache, _)) = &self.l2_cache {
+            cache.shutdown();
+        }
 
         tracing::info!(sessions = %self.sessions.len(), "waiting for active XDP sessions to expire");
         let start = std::time::Instant::now();
@@ -517,12 +543,11 @@ impl XdpLoop {
         } else {
             tracing::info!("detached eBPF program");
         }
-    }
 
-    /// Seeds the mapping of IP -> MAC addresses via netlink, if such a cache has been enabled
-    pub async fn seed_layer2_cache(&self) {
-        if let Some(cache_fd) = self.ip_to_mac {
-            quilkin_xdp::netlink::seed_layer2_cache(cache_fd).await;
+        if let Some((_cache, jh)) = self.l2_cache.take()
+            && let Err(error) = jh.join()
+        {
+            tracing::error!(?error, "layer2 cache thread encountered error");
         }
     }
 }
@@ -631,11 +656,11 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
     Ok(XdpLoop {
         threads,
         ebpf_prog,
-        xdp_link,
         shutdown,
         terminate,
         sessions: session_state,
         nic_index: workers.nic,
+        l2_cache,
     })
 }
 
@@ -649,7 +674,7 @@ use crate::time::UtcTimestamp;
 /// [`process::process_packets`] code can be cleanly tested without relying on
 /// a fully setup XDP socket/rings, relying only on a `Umem` (memory map)
 #[allow(clippy::too_many_arguments)]
-fn io_loop(
+fn io_loop<LL: LinkLayer>(
     worker: quilkin_xdp::XdpWorker,
     external_port: NetworkU16,
     qcmp_port: NetworkU16,
@@ -658,7 +683,7 @@ fn io_loop(
     local_ipv4: std::net::Ipv4Addr,
     local_ipv6: std::net::Ipv6Addr,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
-    terminate: Arc<std::sync::atomic::AtomicBool>,
+    mut ll: LL,
 ) {
     let quilkin_xdp::XdpWorker {
         mut umem,
@@ -737,6 +762,7 @@ fn io_loop(
                 &mut tx_slab,
                 &mut config,
                 &mut state,
+                &mut ll,
             );
 
             let before = tx_slab.len();

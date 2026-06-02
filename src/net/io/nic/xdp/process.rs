@@ -1,3 +1,4 @@
+use super::LinkLayer;
 use crate::{
     filters::{self, Filter as _},
     metrics::{self, AsnInfo},
@@ -627,6 +628,7 @@ pub fn process_packets(
     tx_slab: &mut HeapSlab,
     config_state: &mut ConfigState,
     state: &mut State,
+    ll: &mut LL,
 ) {
     let filters = config_state.filters.load();
     let cm = config_state.clusters.clone_value();
@@ -681,7 +683,7 @@ pub fn process_packets(
             let _timer = metrics::processing_time(direction).start_timer();
 
             if is_client {
-                process_client_packet(packet, umem, filters, &cm, state, tx_slab)
+                process_client_packet(packet, umem, filters, &cm, state, tx_slab, ll)
             } else {
                 process_server_packet(packet, umem, filters, state, tx_slab, jitter)
             }
@@ -750,6 +752,7 @@ fn process_client_packet(
     cm: &crate::net::ClusterMap,
     state: &mut State,
     tx_slab: &mut HeapSlab,
+    ll: &mut LL,
 ) -> Result<Option<Packet>, (PipelineError, Packet)> {
     let mut source_addr = packet.headers.source_address();
     source_addr.set_ip(source_addr.ip().to_canonical());

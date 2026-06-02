@@ -1,4 +1,6 @@
-#[cfg(target_os = "linux")]
+#![cfg(target_os = "linux")]
+
+pub mod cache;
 pub mod xdp;
 
 use std::fmt;
