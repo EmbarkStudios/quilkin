@@ -8,12 +8,13 @@ use crate::{
 };
 use corro_types::{
     actor::ActorId,
-    agent::{Booked, BookedVersions, ChangeError, LockRegistry, SplitPool},
+    agent::{Booked, BookedVersions, Bookie, ChangeError, SplitPool},
     base::{CrsqlDbVersion, CrsqlSeq},
     broadcast, change,
     pubsub::SubsManager,
     updates::match_changes,
 };
+use eyre::WrapErr;
 use quilkin_types::IcaoCode;
 use rusqlite::Transaction;
 use sqlite_pool::InterruptibleTransaction;
@@ -29,7 +30,8 @@ pub type BroadcastTx = tokio::sync::mpsc::Sender<broadcast::BroadcastInput>;
 #[derive(Clone)]
 pub struct BroadcastingTransactor {
     pool: SplitPool,
-    book: Booked,
+    bookie: Bookie,
+    booked: Booked,
     subs: SubsManager,
     tx: Option<BroadcastTx>,
     clock: Arc<uhlc::HLC>,
@@ -42,31 +44,30 @@ impl BroadcastingTransactor {
         clock: Arc<uhlc::HLC>,
         pool: SplitPool,
         subs: SubsManager,
-        lock_registry: LockRegistry,
         tx: Option<BroadcastTx>,
-    ) -> Self {
-        let book = Booked::new(BookedVersions::new(id), lock_registry);
+    ) -> eyre::Result<Self> {
+        let start = Instant::now();
+        let all_booked = {
+            let conn = pool
+                .read_readonly()
+                .await
+                .context("failed to acquire read")?;
+            BookedVersions::load_all_from_conn(&conn).context("failed to load booked versions")?
+        };
+        tracing::info!("Loaded booked versions in {:?}", start.elapsed());
 
-        tokio::spawn({
-            let pool = pool.clone();
-            // acquiring the lock here means everything will have to wait for it to be ready
-            let mut booked = book.write_owned::<&str, _>("init", None).await;
-            async move {
-                let conn = pool.read_readonly().await?;
-                **booked = tokio::task::block_in_place(|| BookedVersions::from_conn(&conn, id))
-                    .expect("loading BookedVersions from db failed");
-                Ok::<_, eyre::Report>(())
-            }
-        });
+        let bookie = Bookie::new(all_booked);
+        let booked = bookie.ensure(id);
 
-        Self {
+        Ok(Self {
             pool,
-            book,
+            bookie,
+            booked,
             clock,
             subs,
             id,
             tx,
-        }
+        })
     }
 
     #[inline]
@@ -84,17 +85,15 @@ impl BroadcastingTransactor {
     {
         let mut conn = self.pool.write_priority().await?;
 
-        let mut book_writer = self
-            .book
-            .write::<&str, _>("make_broadcastable_changes(booked writer)", None)
-            .await;
-
         let actor_id = self.id;
         let start = Instant::now();
         let clock = self.clock.clone();
         let ts = broadcast::Timestamp::from(clock.new_timestamp());
 
         tokio::task::block_in_place(move || {
+            let bookie_write = self.bookie.write_lock_blocking();
+            let mut book_writer = bookie_write.write_tx(&self.booked);
+
             let tx = conn
                 .immediate_transaction()
                 .map_err(|source| ChangeError::Rusqlite {
@@ -137,11 +136,10 @@ impl BroadcastingTransactor {
                     db_version,
                     last_seq,
                     ts,
-                    snap,
                 }) => {
                     tracing::debug!(%db_version, ?last_seq, "committed tx");
 
-                    book_writer.commit_snapshot(snap);
+                    book_writer.commit();
 
                     let pool = self.pool.clone();
                     let subs = self.subs.clone();
@@ -332,7 +330,7 @@ pub fn insert_local_changes(
     actor_id: ActorId,
     clock: &uhlc::HLC,
     tx: &rusqlite::Connection,
-    book_writer: &mut tokio::sync::RwLockWriteGuard<'_, BookedVersions>,
+    book_writer: &mut BookedVersions,
 ) -> Result<Option<change::InsertChangesInfo>, ChangeError> {
     let db_version: CrsqlDbVersion = tx
         .prepare_cached("SELECT crsql_peek_next_db_version()")
@@ -380,8 +378,8 @@ pub fn insert_local_changes(
 
             let db_versions = db_version..=db_version;
 
-            let mut snap = book_writer.snapshot();
-            snap.insert_db(tx, [db_versions].into())
+            book_writer
+                .insert_db(tx, [db_versions].into())
                 .map_err(|source| ChangeError::Rusqlite {
                     source,
                     actor_id: Some(actor_id),
@@ -392,7 +390,6 @@ pub fn insert_local_changes(
                 db_version,
                 last_seq,
                 ts,
-                snap,
             }))
         }
     }

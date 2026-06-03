@@ -369,8 +369,10 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
     // to SKB mode. This allows maximum compatibility, and we already provide
     // flags to force zerocopy, which relies on driver mode, so the user can use
     // that if they don't want the fallback behavior
-    let xdp_link =
-        ebpf_prog.attach(workers.nic, quilkin_xdp::aya::programs::XdpFlags::default())?;
+    let xdp_link = ebpf_prog.attach(
+        workers.nic,
+        quilkin_xdp::aya::programs::xdp::XdpMode::default(),
+    )?;
 
     Ok(XdpLoop {
         threads,

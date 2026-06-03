@@ -40,10 +40,10 @@ impl TestSubsDb {
             db.clock.clone(),
             db.pool.clone(),
             subs.clone(),
-            Default::default(),
             None,
         )
-        .await;
+        .await
+        .expect("failed to create broadcaster");
 
         Self {
             temp,
@@ -205,6 +205,7 @@ pub async fn new_split_pool(name: &str, schema: &str) -> corro_types::agent::Spl
     let sp = corro_types::agent::SplitPool::create_in_memory(
         name,
         std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+        -1024,
     )
     .await
     .expect("failed to create split pool");

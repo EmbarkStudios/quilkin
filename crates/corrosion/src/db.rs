@@ -47,7 +47,6 @@ pub struct DBLimits {
     pub journal_size_limit: Option<i64>,
 }
 
-
 pub struct DBMaintenance {
     /// The interval at which to run maintenance
     pub interval: Duration,
@@ -105,8 +104,12 @@ impl InitializedDb {
             })?
         };
 
+        /// We might want to make this configurable, but for now just hardcode to 1GiB, note that this is a negative value
+        /// to inidicate it is in KiB, if it was positive it would be the cache size in pages
+        const ONE_GIB: i64 = -(1024 * 1024);
+
         let write_sema = Arc::new(tokio::sync::Semaphore::new(1));
-        let pool = SplitPool::create(&db_path, write_sema.clone()).await?;
+        let pool = SplitPool::create(&db_path, write_sema.clone(), ONE_GIB).await?;
 
         let clock = Arc::new(
             uhlc::HLCBuilder::default()
@@ -185,22 +188,23 @@ fn update_schema(
 /// Verifies invariants and applies one-time configuration after schema migration.
 /// Failures are fatal — the database cannot be used safely.
 fn run_startup_checks(conn: &rusqlite::Connection, limits: Option<&DBLimits>) -> eyre::Result<()> {
-    conn.query_row("SELECT crsql_dbversion()", [], |row| row.get::<_, i64>(0))
-        .map_err(|e| eyre::eyre!("cr-sqlite extension not loaded: {e}"))?;
+    use eyre::WrapErr;
+
+    conn.query_row("SELECT crsql_db_version()", [], |row| row.get::<_, i64>(0))
+        .context("cr-sqlite extension not loaded")?;
 
     let mode: String = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
-    if mode != "wal" {
-        eyre::bail!("journal_mode is '{mode}', expected 'wal'");
-    }
+    eyre::ensure!(mode == "wal", "journal_mode is '{mode}', expected 'wal'");
 
     let options: Vec<String> = {
         let mut stmt = conn.prepare("PRAGMA compile_options")?;
         stmt.query_map([], |row| row.get(0))?
             .collect::<Result<_, _>>()?
     };
-    if options.iter().any(|o| o == "THREADSAFE=0") {
-        eyre::bail!("SQLite built with THREADSAFE=0; multi-threaded access is undefined behavior");
-    }
+    eyre::ensure!(
+        !options.iter().any(|o| o == "THREADSAFE=0"),
+        "SQLite built with THREADSAFE=0; multi-threaded access is undefined behavior"
+    );
 
     // mmap bypasses fsync — C extension writes go directly to the file without WAL protection
     let mmap_size: i64 = conn.pragma_query_value(None, "mmap_size", |row| row.get(0))?;
@@ -213,9 +217,7 @@ fn run_startup_checks(conn: &rusqlite::Connection, limits: Option<&DBLimits>) ->
 
     // catches corruption left by a previous crash before building on top of it
     let check: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
-    if check != "ok" {
-        eyre::bail!("database corruption detected: {check}");
-    }
+    eyre::ensure!(check == "ok", "database corruption detected: {check}");
 
     // /tmp in Kubernetes pods is often a size-limited emptyDir; SQLITE_IOERR mid-query
     // if it fills up
@@ -385,60 +387,4 @@ fn spawn_db_maintenance(path: &crate::Path, pool: SplitPool, dbm: DBMaintenance)
             }
         }
     });
-}
-
-/// Spawns an async task that periodically prints out locks that have surpassed
-/// the desired limits
-#[inline]
-pub fn spawn_lock_contention_printer(
-    registry: crate::types::agent::LockRegistry,
-    warn_threshold: Duration,
-    error_threshold: Duration,
-    check_interval: Duration,
-) -> tokio::task::JoinHandle<()> {
-    assert!(error_threshold > warn_threshold);
-
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(check_interval);
-
-        let mut top = indexmap::IndexMap::<usize, corro_types::agent::LockMeta>::default();
-        loop {
-            interval.tick().await;
-
-            top.extend(
-                registry
-                    .map
-                    .read()
-                    .iter()
-                    .filter(|(_, meta)| meta.started_at.elapsed() >= warn_threshold)
-                    .take(10) // this is an ordered map, so taking the first few is gonna be the highest values
-                    .map(|(k, v)| (*k, v.clone())),
-            );
-
-            if top.is_empty() {
-                continue;
-            }
-
-            tracing::warn!(
-                held_locks = top.len(),
-                "lock registry shows locks held for a long time!"
-            );
-
-            for (id, lock) in top.drain(..) {
-                let duration = lock.started_at.elapsed();
-
-                if matches!(lock.state, corro_types::agent::LockState::Locked)
-                    && duration >= error_threshold
-                {
-                    tracing::error!(
-                        label = lock.label, id, kind = ?lock.kind, state = ?lock.state, ?duration, "lock exceeded error threshold"
-                    );
-                } else {
-                    tracing::warn!(
-                        label = lock.label, id, kind = ?lock.kind, state = ?lock.state, ?duration, "lock exceeded warning threshold"
-                    );
-                }
-            }
-        }
-    })
 }

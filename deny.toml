@@ -41,26 +41,24 @@ deny = [
     #     "kube-client",
     #     "kube-core",
     #     "kube-leader-election",
-    #     # 
+    #     #
     #     "postgres-types",
     #     "rusqlite",
     # ] },
 ]
 multiple-versions = "deny"
 skip = [
-    { crate = "object@0.32.2", reason = "transitive dependency due to backtrace, backtrace is updated, but stable-eyre using a feature that doesn't exist any longer, and can't update, sigh" },
-    #{ crate = "getrandom@0.2.17", reason = "ring" },
+    { crate = "object@0.32.2", reason = "transitive dependency due to backtrace, backtrace is updated, but stable-eyre is using a feature that doesn't exist any longer, and can't update" },
+    { crate = "object@0.37.3", reason = "extremely deep transitive build dependency" },
+    { crate = "const-oid@0.9.6", reason = "pgwire -> x509-certificate uses this old version" },
     { crate = "miniz_oxide@0.7.4", reason = "pprof_util carries two different versions transitively" },
-    { crate = "prost@0.13.5", reason = "pprof_util has an outdated version" },
-    { crate = "prost-derive@0.13.5", reason = "pprof_util has an outdated version" },
-    { crate = "indexmap@1.9.3", reason = "several users of old version in corrosion crates" },
     { crate = "fallible-iterator@0.2.0", reason = "several users of old version in corrosion crates" },
     { crate = "bitflags@1.3.2", reason = "corrosion again" },
     { crate = "itertools:<0.14", reason = "sigh" },
 ]
 skip-tree = [
     { crate = "thiserror@1.0.69", reason = "many crates use this old version" },
-    { crate = "hashbrown:<0.16.0", reason = "we're at *4* different versions :p" },
+    { crate = "hashbrown:<=0.16.1", reason = "we're at *5* different versions :p" },
     { crate = "rand:<0.10", reason = "another version of rand, meaning tons of old versions :p" },
     { crate = "sha2@0.10.9", reason = "old version that uses multiple other old crates" },
 ]
@@ -94,6 +92,7 @@ exceptions = [
     { crate = "ar_archive_writer", allow = ["Apache-2.0 WITH LLVM-exception"] },
     { crate = "foca", allow = ["MPL-2.0"] },
     { crate = "enquote", allow = ["Unlicense"] },
+    { crate = "x509-certificate", allow = ["MPL-2.0"] }
 ]
 
 [[licenses.clarify]]
@@ -104,4 +103,4 @@ license-files = [
 ]
 
 [sources.allow-org]
-github = ["EmbarkStudios"]
+github = ["EmbarkStudios", "aya-rs"]

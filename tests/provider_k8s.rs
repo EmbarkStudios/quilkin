@@ -26,7 +26,9 @@ fn setup_tracing() {
         .with_filter(tracing_subscriber::filter::LevelFilter::from_level(
             tracing::Level::TRACE,
         ))
-        .with_filter(tracing_subscriber::EnvFilter::new("quilkin=trace"));
+        .with_filter(tracing_subscriber::EnvFilter::new(
+            "quilkin=trace,corro_types=trace",
+        ));
     let sub = tracing_subscriber::Registry::default().with(layer);
     let disp = tracing::dispatcher::Dispatch::new(sub);
     tracing::dispatcher::set_global_default(disp).unwrap();
@@ -567,10 +569,10 @@ async fn applies_changes() {
         db.clock.clone(),
         db.pool.clone(),
         subs.clone(),
-        Default::default(),
         None,
     )
-    .await;
+    .await
+    .expect("failed to create broadcaster");
 
     let mut pusher = Pusher {
         state,

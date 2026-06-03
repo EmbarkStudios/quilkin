@@ -911,10 +911,9 @@ impl Service {
             db.clock.clone(),
             db.pool.clone(),
             subs.clone(),
-            Default::default(),
             None,
         )
-        .await;
+        .await?;
 
         // Spawn a task to update the DB and broadcast changes when the filter changes
         if let Some((mut filters, mut filters_sub)) = config
