@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["read","write"],"struct":["DBLimits","DBMaintenance","InitializedDb"],"trait":["SplitPoolReadExt"]};
+window.SIDEBAR_ITEMS = {"fn":["is_disk_full","recover_space"],"mod":["read","write"],"struct":["DBLimits","DBMaintenance","InitializedDb"],"trait":["SplitPoolReadExt"]};
