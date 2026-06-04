@@ -5,8 +5,6 @@
 use crate::{codec::PrefixedBuf, db::SplitPoolReadExt};
 use bytes::Bytes;
 use camino::{Utf8Path as Path, Utf8PathBuf as PathBuf};
-pub use corro_agent::api::public::pubsub::MatcherUpsertError;
-pub use corro_agent::api::public::pubsub::SubscriptionEvent;
 use corro_api_types::{QueryEventMeta, Statement};
 use corro_types::{
     agent::SplitPool,
@@ -28,6 +26,30 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, warn};
 use tripwire::Tripwire;
 use uuid::Uuid;
+
+#[derive(Clone)]
+pub struct SubscriptionEvent {
+    pub buff: Bytes,
+    pub meta: QueryEventMeta,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum MatcherUpsertError {
+    #[error(transparent)]
+    Pool(#[from] corro_types::sqlite::SqlitePoolError),
+    #[error(transparent)]
+    Sqlite(#[from] rusqlite::Error),
+    #[error("could not expand sql statement")]
+    CouldNotExpand,
+    #[error(transparent)]
+    NormalizeStatement(#[from] Box<corro_types::pubsub::NormalizeStatementError>),
+    #[error(transparent)]
+    Matcher(#[from] MatcherError),
+    #[error("a `from` query param was supplied, but no existing subscription found")]
+    SubFromWithoutMatcher,
+    #[error("found a subscription, but missing broadcaster")]
+    MissingBroadcaster,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatchUpError {

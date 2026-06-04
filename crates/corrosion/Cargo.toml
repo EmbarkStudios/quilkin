@@ -35,10 +35,8 @@ uhlc.workspace = true
 uuid.workspace = true
 prettytable = "0.10"
 
-corro-agent.workspace = true
 corro-api-types.workspace = true
 corro-types.workspace = true
 spawn.workspace = true
 sqlite-pool.workspace = true
 tripwire.workspace = true
-
