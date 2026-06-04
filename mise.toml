@@ -11,7 +11,6 @@ gcloud = "latest"
 helm = "latest"
 mdbook = "latest"
 opentofu = "latest"
-rust = "latest"
 yq = "latest"
 
 [tasks.docker]

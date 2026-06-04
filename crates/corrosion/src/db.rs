@@ -9,10 +9,8 @@ use std::{sync::Arc, time::Duration};
 pub mod read;
 pub mod write;
 
-/// Extension trait that makes it impossible to obtain a read connection without the
-/// required session pragmas (`temp_store = MEMORY`, `query_only = ON`).
-///
-/// Always use this instead of [`SplitPool::read`] directly.
+/// Wraps [`SplitPool::read`] to enforce `temp_store = MEMORY` and `query_only = ON`.
+/// Use this instead of [`SplitPool::read`] directly.
 pub trait SplitPoolReadExt {
     fn read_readonly(
         &self,
@@ -22,8 +20,7 @@ pub trait SplitPoolReadExt {
 impl SplitPoolReadExt for SplitPool {
     async fn read_readonly(&self) -> Result<sqlite_pool::Connection<CrConn>, SqlitePoolError> {
         let conn = self.read().await?;
-        // These are flag-only pragmas; failure means the SQLite handle itself is broken,
-        // in which case every subsequent operation would also fail.
+        // flag-only pragmas; failure means the connection itself is broken
         conn.pragma_update(None, "temp_store", "MEMORY")
             .expect("temp_store is a flag pragma; failure means the connection is broken");
         conn.pragma_update(None, "query_only", true)
@@ -32,19 +29,50 @@ impl SplitPoolReadExt for SplitPool {
     }
 }
 
-/// Hard limits ensuring `SQLite` returns `SQLITE_FULL` before the underlying disk is
-/// exhausted. Disk allocation for the volume must exceed
-/// `(max_page_count × page_size) + journal_size_limit`.
+/// Hard size limits. Volume allocation must exceed `(max_page_count × page_size) + journal_size_limit`.
 #[derive(Default)]
 pub struct DBLimits {
-    /// Maximum database file size as a page count (default page size: 4 KiB,
-    /// so 262,144 = 1 GiB). `None` leaves `SQLite`'s very large built-in ceiling in
-    /// place — not recommended in production.
+    /// Max database file size in pages (4 KiB each; 262,144 = 1 GiB). `None` leaves the built-in ceiling.
     pub max_page_count: Option<u64>,
-    /// Maximum WAL size in bytes left on disk after a checkpoint. `-1` (`SQLite`
-    /// default) is unlimited; a few hundred MiB prevents unbounded WAL growth when
-    /// checkpoints lag. `None` leaves the `SQLite` default.
+    /// Max WAL size in bytes after a checkpoint. `None` leaves the `SQLite` default (unlimited).
     pub journal_size_limit: Option<i64>,
+}
+
+/// Returns `true` if `err` is `SQLITE_FULL`.
+pub fn is_disk_full(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::DiskFull,
+                ..
+            },
+            _
+        )
+    )
+}
+
+/// Checkpoints the WAL and runs incremental vacuum. If `purge_count` is `Some(n)`,
+/// deletes the `n` oldest `servers` rows first to free pages for reuse.
+pub async fn recover_space(pool: &SplitPool, purge_count: Option<usize>) -> eyre::Result<()> {
+    let conn = pool.write_priority().await?;
+    tokio::task::block_in_place(|| {
+        if let Some(count) = purge_count {
+            conn.execute(
+                "DELETE FROM servers WHERE endpoint IN \
+                 (SELECT endpoint FROM servers ORDER BY cont_update ASC LIMIT ?)",
+                rusqlite::params![count],
+            )?;
+            tracing::info!(count, "purged oldest servers to recover disk space");
+        }
+        let busy: bool = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
+        if busy {
+            tracing::warn!("WAL checkpoint during space recovery was busy");
+        }
+        conn.execute_batch("PRAGMA incremental_vacuum")?;
+        Ok::<_, eyre::Error>(())
+    })?;
+    Ok(())
 }
 
 pub struct DBMaintenance {

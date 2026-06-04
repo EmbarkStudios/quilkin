@@ -25,6 +25,21 @@ use std::{
 
 pub type BroadcastTx = tokio::sync::mpsc::Sender<broadcast::BroadcastInput>;
 
+/// Default for [`BroadcastingTransactor::with_full_purge_count`].
+pub const DEFAULT_FULL_PURGE_COUNT: usize = 100;
+
+fn is_disk_full_change_error(err: &ChangeError) -> bool {
+    matches!(err, ChangeError::Rusqlite { source, .. } if db::is_disk_full(source))
+}
+
+fn rusqlite_err(source: rusqlite::Error, actor_id: ActorId) -> ChangeError {
+    ChangeError::Rusqlite {
+        source,
+        actor_id: Some(actor_id),
+        version: None,
+    }
+}
+
 /// A DB mutator that will broadcast changes to any subscribers when a mutation
 /// occurs that matches a subscriber's query
 #[derive(Clone)]
@@ -36,6 +51,7 @@ pub struct BroadcastingTransactor {
     tx: Option<BroadcastTx>,
     clock: Arc<uhlc::HLC>,
     id: ActorId,
+    full_purge_count: usize,
 }
 
 impl BroadcastingTransactor {
@@ -67,7 +83,55 @@ impl BroadcastingTransactor {
             subs,
             id,
             tx,
+            full_purge_count: DEFAULT_FULL_PURGE_COUNT,
         })
+    }
+
+    /// Sets the number of oldest `servers` rows purged on the second recovery attempt.
+    pub fn with_full_purge_count(mut self, count: usize) -> Self {
+        self.full_purge_count = count;
+        self
+    }
+
+    /// Executes `f` as a broadcastable write, retrying up to twice on `SQLITE_FULL`:
+    ///
+    /// 1. First failure: checkpoint WAL + incremental vacuum, then retry.
+    /// 2. Second failure: purge the oldest `full_purge_count` server entries, then retry.
+    /// 3. Third failure: return the error.
+    ///
+    /// `f` must be `Fn` — clone any per-attempt data inside the closure body.
+    pub async fn with_full_recovery<F, T>(
+        &self,
+        timeout: Option<Duration>,
+        f: F,
+    ) -> Result<(T, Option<CrsqlDbVersion>, Duration), ChangeError>
+    where
+        F: Fn(&InterruptibleTransaction<Transaction<'_>>) -> Result<T, ChangeError>,
+    {
+        let strategies: [(Option<usize>, &str); 2] = [
+            (None, "checkpointing WAL and running incremental vacuum"),
+            (
+                Some(self.full_purge_count),
+                "purging oldest server entries then checkpointing",
+            ),
+        ];
+
+        for (purge_count, description) in strategies {
+            let result = self.make_broadcastable_changes(timeout, &f).await;
+            let Err(ref e) = result else {
+                return result;
+            };
+            if !is_disk_full_change_error(e) {
+                return result;
+            }
+            tracing::warn!("SQLITE_FULL: {description}");
+            if let Err(e) = db::recover_space(&self.pool, purge_count).await {
+                // non-fatal: space may have been freed by concurrent ops
+                tracing::error!(%e, "space recovery failed");
+            }
+        }
+
+        self.make_broadcastable_changes(timeout, &f).await
     }
 
     #[inline]
@@ -96,36 +160,22 @@ impl BroadcastingTransactor {
 
             let tx = conn
                 .immediate_transaction()
-                .map_err(|source| ChangeError::Rusqlite {
-                    source,
-                    actor_id: Some(actor_id),
-                    version: None,
-                })?;
+                .map_err(|e| rusqlite_err(e, actor_id))?;
 
             let tx = InterruptibleTransaction::new(tx, timeout, "local_changes");
 
             let _unused = tx
                 .prepare_cached("SELECT crsql_set_ts(?)")
-                .map_err(|source| ChangeError::Rusqlite {
-                    source,
-                    actor_id: Some(actor_id),
-                    version: None,
-                })?
-                .query_row([&ts], |row| row.get::<_, String>(0))
-                .map_err(|source| ChangeError::Rusqlite {
-                    source,
-                    actor_id: Some(actor_id),
-                    version: None,
-                })?;
+                .and_then(|mut s| s.query_row([&ts], |row| row.get::<_, String>(0)))
+                .map_err(|e| rusqlite_err(e, actor_id))?;
 
-            // Execute whatever might mutate state data
             let ret = f(&tx)?;
 
             let insert_info = insert_local_changes(actor_id, &clock, &tx, &mut book_writer)?;
             tx.commit().map_err(|source| ChangeError::Rusqlite {
                 source,
                 actor_id: Some(actor_id),
-                version: insert_info.as_ref().map(|info| info.db_version),
+                version: insert_info.as_ref().map(|i| i.db_version),
             })?;
 
             let elapsed = start.elapsed();
@@ -188,33 +238,34 @@ pub fn query_to_string(
     String::from_utf8(out).unwrap()
 }
 
+impl BroadcastingTransactor {
+    async fn commit_datacenter<const N: usize>(
+        &self,
+        peer: Peer,
+        dc: smallvec::SmallVec<[corro_api_types::Statement; N]>,
+        ok_msg: &'static str,
+        err_msg: &'static str,
+    ) {
+        let id = self.id;
+        let res = self
+            .with_full_recovery(None, move |tx| {
+                db::write::exec_interruptible(tx, dc.clone()).map_err(|e| rusqlite_err(e, id))
+            })
+            .await;
+        match res {
+            Ok((_, _, elapsed)) => tracing::debug!(%peer, ?elapsed, "{ok_msg}"),
+            Err(error) => tracing::error!(%peer, %error, "{err_msg}"),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl super::server::DbMutator for BroadcastingTransactor {
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
         let mut dc = smallvec::SmallVec::<[_; 1]>::new();
-        {
-            let mut dc = db::write::Datacenter(&mut dc);
-            dc.insert(peer, qcmp_port, icao);
-        }
-
-        let res = self
-            .make_broadcastable_changes(None, move |tx| {
-                db::write::exec_interruptible(tx, dc).map_err(|source| ChangeError::Rusqlite {
-                    source,
-                    actor_id: Some(self.id),
-                    version: None,
-                })
-            })
+        db::write::Datacenter(&mut dc).insert(peer, qcmp_port, icao);
+        self.commit_datacenter(peer, dc, "peer added", "failed to insert dc")
             .await;
-
-        match res {
-            Ok((_rows, _version, elapsed)) => {
-                tracing::debug!(%peer, ?elapsed, "peer added");
-            }
-            Err(error) => {
-                tracing::error!(%peer, %error, "failed to insert dc");
-            }
-        }
     }
 
     async fn execute(&self, peer: Peer, statements: &[p::ServerChange]) -> ExecResponse {
@@ -300,29 +351,9 @@ impl super::server::DbMutator for BroadcastingTransactor {
 
     async fn disconnected(&self, peer: Peer) {
         let mut dc = smallvec::SmallVec::<[_; 2]>::new();
-        {
-            let mut dc = db::write::Datacenter(&mut dc);
-            dc.remove(peer, None);
-        }
-
-        let res = self
-            .make_broadcastable_changes(None, move |tx| {
-                db::write::exec_interruptible(tx, dc).map_err(|source| ChangeError::Rusqlite {
-                    source,
-                    actor_id: Some(self.id),
-                    version: None,
-                })
-            })
+        db::write::Datacenter(&mut dc).remove(peer, None);
+        self.commit_datacenter(peer, dc, "peer removed", "failed to remove dc")
             .await;
-
-        match res {
-            Ok((_rows, _version, elapsed)) => {
-                tracing::debug!(%peer, ?elapsed, "peer removed");
-            }
-            Err(error) => {
-                tracing::error!(%peer, %error, "failed to remove dc");
-            }
-        }
     }
 }
 
@@ -334,33 +365,15 @@ pub fn insert_local_changes(
 ) -> Result<Option<change::InsertChangesInfo>, ChangeError> {
     let db_version: CrsqlDbVersion = tx
         .prepare_cached("SELECT crsql_peek_next_db_version()")
-        .map_err(|source| ChangeError::Rusqlite {
-            source,
-            actor_id: Some(actor_id),
-            version: None,
-        })?
-        .query_row((), |row| row.get(0))
-        .map_err(|source| ChangeError::Rusqlite {
-            source,
-            actor_id: Some(actor_id),
-            version: None,
-        })?;
+        .and_then(|mut s| s.query_row((), |row| row.get(0)))
+        .map_err(|e| rusqlite_err(e, actor_id))?;
 
     let version_info: (Option<CrsqlSeq>, Option<broadcast::Timestamp>) = tx
         .prepare_cached(
             "SELECT MAX(seq), MAX(ts) FROM crsql_changes WHERE site_id = ? AND db_version = ?;",
         )
-        .map_err(|source| ChangeError::Rusqlite {
-            source,
-            actor_id: Some(actor_id),
-            version: None,
-        })?
-        .query_row((actor_id, db_version), |row| Ok((row.get(0)?, row.get(1)?)))
-        .map_err(|source| ChangeError::Rusqlite {
-            source,
-            actor_id: Some(actor_id),
-            version: None,
-        })?;
+        .and_then(|mut s| s.query_row((actor_id, db_version), |row| Ok((row.get(0)?, row.get(1)?))))
+        .map_err(|e| rusqlite_err(e, actor_id))?;
 
     match version_info {
         (None, None) => Ok(None),
@@ -380,8 +393,8 @@ pub fn insert_local_changes(
 
             book_writer
                 .insert_db(tx, [db_versions].into())
-                .map_err(|source| ChangeError::Rusqlite {
-                    source,
+                .map_err(|e| ChangeError::Rusqlite {
+                    source: e,
                     actor_id: Some(actor_id),
                     version: Some(db_version),
                 })?;
