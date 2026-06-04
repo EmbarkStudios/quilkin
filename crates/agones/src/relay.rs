@@ -226,12 +226,14 @@ mod tests {
             }
 
             timeout(SLOW, inner(dp, name)).await.map_err(|_err| {
-                kube::Error::Api(kube::error::ErrorResponse {
-                    message: format!("failed to delete deployment {name} within {SLOW:?}"),
-                    status: String::new(),
-                    reason: String::new(),
-                    code: 408,
-                })
+                kube::Error::Api(
+                    kube::core::Status::failure(
+                        &format!("failed to delete deployment {name} within {SLOW:?}"),
+                        "",
+                    )
+                    .with_code(408)
+                    .boxed(),
+                )
             })??;
             println!("deployment {name} deleted");
             Ok(())

@@ -137,7 +137,7 @@ async fn setup_namespace(client: kube::Client) -> String {
     let delay = env::var(DELETE_DELAY_SECONDS)
         .ok()
         .and_then(|s| s.parse::<i64>().ok())
-        .map(chrono::Duration::seconds);
+        .map(k8s_openapi::jiff::SignedDuration::from_secs);
 
     for ns in nss {
         let name = ns.name_unchecked();
@@ -145,7 +145,7 @@ async fn setup_namespace(client: kube::Client) -> String {
         let delete = delay
             .and_then(|duration| {
                 let expiry = ns.creation_timestamp()?.0 + duration;
-                Some(chrono::Utc::now() > expiry)
+                Some(k8s_openapi::jiff::Timestamp::now() > expiry)
             })
             .unwrap_or(true);
         if delete && let Err(err) = namespaces.delete(name.as_str(), &dp).await {
