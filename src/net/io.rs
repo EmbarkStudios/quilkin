@@ -19,10 +19,11 @@
 /// `tracing_subscriber` -> `sharded_slab` for span ids
 macro_rules! uring_span {
     ($span:expr_2021) => {{
-        cfg_if::cfg_if! {
-            if #[cfg(debug_assertions)] {
+        cfg_select! {
+            debug_assertions => {
                 Some($span)
-            } else {
+            }
+            _ => {
                 Option::<tracing::Span>::None
             }
         }
@@ -47,5 +48,4 @@ pub struct Listener {
     pub port: u16,
     pub config: Arc<Config>,
     pub sessions: Arc<crate::net::sessions::SessionPool>,
-    pub buffer_pool: Arc<crate::collections::BufferPool>,
 }

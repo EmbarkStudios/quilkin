@@ -1,0 +1,15 @@
+services:
+  quilkin:
+    build:
+      context: ..
+    command:
+      - --service.udp
+      - --provider.static.endpoints=echo:9001
+    ports:
+      - "7777:7777/udp"
+    depends_on:
+      - echo
+
+  echo:
+    image: alpine/socat
+    command: ["UDP4-RECVFROM:9001,fork", "PIPE"]

@@ -1,12 +1,7 @@
 #![allow(clippy::unimplemented)]
 
-use quilkin::{
-    Config,
-    collections::{BufferPool, PoolBuffer},
-    net::TcpListener,
-    signal::ShutdownTx,
-    test::TestConfig,
-};
+use quilkin::{Config, signal::ShutdownTx, test::TestConfig};
+
 pub use serde_json::json;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
@@ -14,13 +9,11 @@ use tokio::sync::mpsc;
 #[cfg(target_os = "linux")]
 pub mod xdp_util;
 
-pub const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
-pub static BUFFER_POOL: once_cell::sync::Lazy<Arc<BufferPool>> =
-    once_cell::sync::Lazy::new(|| Arc::new(BufferPool::default()));
+pub const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[inline]
-pub fn alloc_buffer(data: impl AsRef<[u8]>) -> PoolBuffer {
-    BUFFER_POOL.clone().alloc_slice(data.as_ref())
+pub fn alloc_buffer(data: impl AsRef<[u8]>) -> bytes::BytesMut {
+    bytes::BytesMut::from(data.as_ref())
 }
 
 /// Macro that can get the function name of the function the macro is invoked
@@ -61,7 +54,10 @@ pub fn init_logging(level: Level, test_pkg: &'static str) {
         .with_test_writer()
         .with_filter(tracing_subscriber::filter::LevelFilter::from_level(level))
         .with_filter(tracing_subscriber::EnvFilter::new(format!(
-            "{test_pkg}=trace,qt=trace,quilkin=trace,xds=trace,corrosion=trace"
+            // NOTE: corrosion is _EXTREMELY_ spammy at the trace level, so don't enable these unless you are trying
+            // to see everything that could go on, but it's so noisy it can actually make it harder to diagnose issues
+            // corrosion=trace,corro_types=trace,tripwire=trace
+            "{test_pkg}=trace,qt=trace,quilkin=debug"
         )));
     let sub = tracing_subscriber::Registry::default().with(layer);
     let disp = tracing::dispatcher::Dispatch::new(sub);
@@ -72,13 +68,13 @@ pub fn init_logging(level: Level, test_pkg: &'static str) {
 macro_rules! trace_test {
     ($(#[$attr:meta])* $name:ident, $body:block) => {
         $(#[$attr])*
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $name() {
             // Get the module name
             let fname = $crate::func_name!();
             let mname = fname.rsplit("::").nth(2).unwrap();
 
-            let _guard = init_logging($crate::Level::DEBUG, mname);
+            let _guard = $crate::init_logging($crate::Level::TRACE, mname);
 
             $body
         }
@@ -88,6 +84,7 @@ macro_rules! trace_test {
 pub struct ServerPailConfig {
     pub packet_size: u16,
     pub num_packets: Option<usize>,
+    pub echo: bool,
 }
 
 impl Default for ServerPailConfig {
@@ -95,6 +92,7 @@ impl Default for ServerPailConfig {
         Self {
             packet_size: 1024,
             num_packets: None,
+            echo: false,
         }
     }
 }
@@ -110,15 +108,26 @@ pub struct RelayPailConfig {
 #[derive(Default)]
 pub struct ProxyPailConfig {
     pub config: Option<quilkin::test::TestConfig>,
+    pub corrosion: bool,
 }
 
 #[derive(Default)]
 pub struct ManagementPailConfig {}
 
-#[derive(Default)]
 pub struct AgentPailConfig {
     pub endpoints: Vec<(&'static str, &'static [&'static str])>,
     pub icao_code: quilkin::config::IcaoCode,
+    pub corrosion: bool,
+}
+
+impl Default for AgentPailConfig {
+    fn default() -> Self {
+        Self {
+            endpoints: Vec::new(),
+            icao_code: Default::default(),
+            corrosion: true,
+        }
+    }
 }
 
 pub enum PailConfig {
@@ -197,7 +206,7 @@ pub type JoinHandle =
 pub type JoinSet = tokio::task::JoinSet<quilkin::Result<()>>;
 
 pub struct ServerPail {
-    /// The server socket's ephmeral port
+    /// The server socket's ephemeral port
     pub port: u16,
     pub packet_rx: Option<mpsc::Receiver<String>>,
     /// The join handle to the task driving the socket. Used to both cancel the task
@@ -210,6 +219,7 @@ abort_task!(ServerPail);
 pub struct RelayPail {
     pub xds_port: u16,
     pub mds_port: u16,
+    pub corrosion_port: Option<u16>,
     pub task: Option<JoinHandle>,
     pub provider_task: JoinSet,
     pub healthy: Arc<std::sync::atomic::AtomicBool>,
@@ -297,12 +307,16 @@ impl Pail {
                 .xds()
                 .xds_port(rp.xds_port)
                 .mds()
-                .mds_port(rp.mds_port);
+                .mds_port(rp.mds_port)
+                .grpc()
+                .corrosion_port(0)
+                .testing();
             let (tx, rx) = quilkin::signal::channel();
             let sh = quilkin::signal::ShutdownHandler::new(tx.clone(), rx);
-            let task = svc.spawn_services(&rp.config, sh).unwrap();
+            let (task, ports) = svc.spawn_services(&rp.config, sh).await.unwrap();
 
             rp.shutdown = tx;
+            rp.corrosion_port = ports.corrosion;
             rp.task = Some(task);
         } else {
             unimplemented!();
@@ -311,7 +325,7 @@ impl Pail {
 }
 
 impl Pail {
-    pub fn construct(spc: SandboxPailConfig, pails: &Pails, td: &std::path::Path) -> Self {
+    pub async fn construct(spc: SandboxPailConfig, pails: &Pails, td: &std::path::Path) -> Self {
         match spc.config {
             PailConfig::Server(sspc) => {
                 let (packet_tx, packet_rx) = mpsc::channel::<String>(10);
@@ -333,16 +347,24 @@ impl Pail {
                     let mut received = 0;
 
                     while num_packets > 0 {
-                        let (size, _) = socket
+                        let (size, addr) = socket
                             .recv_from(&mut buf)
                             .await
                             .expect("failed to receive packet");
                         received += size;
-                        let pstr = std::str::from_utf8(&buf[..size])
-                            .expect("received non-utf8 string in packet")
-                            .to_owned();
 
-                        packet_tx.send(pstr).await.expect("packet receiver dropped");
+                        if sspc.echo {
+                            socket
+                                .send_to(&buf[..size], addr)
+                                .await
+                                .expect("failed to send packet");
+                        } else {
+                            let pstr = std::str::from_utf8(&buf[..size])
+                                .expect("received non-utf8 string in packet")
+                                .to_owned();
+
+                            packet_tx.send(pstr).await.expect("packet receiver dropped");
+                        }
 
                         num_packets -= 1;
                     }
@@ -357,9 +379,6 @@ impl Pail {
                 })
             }
             PailConfig::Relay(rpc) => {
-                let xds_port = TcpListener::bind(None).unwrap().port();
-                let mds_port = TcpListener::bind(None).unwrap().port();
-
                 let path = td.join(spc.name);
                 let mut tc = rpc.config.unwrap_or_default();
                 tc.id = spc.name.into();
@@ -371,17 +390,20 @@ impl Pail {
                 let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
 
                 let providers = quilkin::Providers::default().fs().fs_path(path);
-                let svc = quilkin::Service::default()
+                let mut svc = quilkin::Service::default()
                     .xds()
-                    .xds_port(xds_port)
+                    .xds_port(0)
                     .mds()
-                    .mds_port(mds_port);
+                    .mds_port(0)
+                    .grpc()
+                    .corrosion_port(0)
+                    .testing();
 
                 let config = crate::Config::new_rc(
                     Some("test-relay".into()),
                     Default::default(),
                     &providers,
-                    &svc,
+                    &mut svc,
                     pail_token,
                 );
 
@@ -394,16 +416,18 @@ impl Pail {
                     None,
                     shutdown_rx.clone(),
                 );
-                let task = svc
+                let (task, ports) = svc
                     .spawn_services(
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
                     )
+                    .await
                     .unwrap();
 
                 Self::Relay(RelayPail {
-                    xds_port,
-                    mds_port,
+                    xds_port: ports.xds.expect("xds not spawned"),
+                    mds_port: ports.mds.expect("mds not spawned"),
+                    corrosion_port: ports.corrosion,
                     task: Some(task),
                     provider_task,
                     healthy,
@@ -456,22 +480,41 @@ impl Pail {
                 let (shutdown, shutdown_rx) = quilkin::signal::channel();
                 let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
 
-                let port = quilkin::net::socket_port(
-                    &quilkin::net::raw_socket_with_reuse(0).expect("failed to bind qcmp socket"),
-                );
-
                 let config_path = path.clone();
-                let svc = quilkin::Service::default().qcmp().qcmp_port(port);
+                let mut svc = quilkin::Service::default().qcmp().qcmp_port(0);
                 let providers = quilkin::Providers::default()
                     .fs()
                     .fs_path(path)
                     .grpc_push_endpoints(relay_servers);
 
+                let corrosion_eps = spc
+                    .dependencies
+                    .iter()
+                    .filter_map(|dname| {
+                        let Pail::Relay(RelayPail { corrosion_port, .. }) = &pails[dname] else {
+                            return None;
+                        };
+                        corrosion_port.filter(|_a| apc.corrosion).map(|p| {
+                            quilkin::net::EndpointAddress::from(SocketAddr::V6(
+                                std::net::SocketAddrV6::new(std::net::Ipv6Addr::LOCALHOST, p, 0, 0),
+                            ))
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
+                let providers = if !corrosion_eps.is_empty() {
+                    providers
+                        .corrosion_endpoints(corrosion_eps)
+                        .corrosion_mode(quilkin::providers::corrosion::CorrosionMode::Push)
+                } else {
+                    providers
+                };
+
                 let config = crate::Config::new_rc(
                     Some("test-agent".into()),
                     apc.icao_code,
                     &providers,
-                    &svc,
+                    &mut svc,
                     pail_token,
                 );
 
@@ -485,15 +528,16 @@ impl Pail {
                     None,
                     shutdown_rx.clone(),
                 );
-                let task = svc
+                let (task, ports) = svc
                     .spawn_services(
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
                     )
+                    .await
                     .unwrap();
 
                 Self::Agent(AgentPail {
-                    qcmp_port: port,
+                    qcmp_port: ports.qcmp.expect("failed to spawn QCMP"),
                     task: Some(task),
                     provider_task,
                     healthy,
@@ -506,41 +550,57 @@ impl Pail {
                 })
             }
             PailConfig::Proxy(ppc) => {
-                let socket = quilkin::net::raw_socket_with_reuse(0).expect("failed to bind socket");
-                let qcmp =
-                    quilkin::net::raw_socket_with_reuse(0).expect("failed to bind qcmp socket");
-                let qcmp_port = quilkin::net::socket_port(&qcmp);
-                let phoenix_port = TcpListener::bind(None)
-                    .expect("failed to bind phoenix socket")
-                    .port();
+                let providers = if ppc.corrosion {
+                    let corrosion_eps: Vec<_> = spc
+                        .dependencies
+                        .iter()
+                        .filter_map(|dname| {
+                            let Pail::Relay(RelayPail { corrosion_port, .. }) = &pails[dname]
+                            else {
+                                return None;
+                            };
+                            corrosion_port.map(|p| {
+                                quilkin::net::EndpointAddress::from(SocketAddr::V6(
+                                    std::net::SocketAddrV6::new(
+                                        std::net::Ipv6Addr::LOCALHOST,
+                                        p,
+                                        0,
+                                        0,
+                                    ),
+                                ))
+                            })
+                        })
+                        .collect();
 
-                let port = quilkin::net::socket_port(&socket);
+                    quilkin::Providers::default()
+                        .corrosion_endpoints(corrosion_eps)
+                        .corrosion_mode(quilkin::providers::corrosion::CorrosionMode::Pull)
+                } else {
+                    let management_servers: Vec<_> = spc
+                        .dependencies
+                        .iter()
+                        .filter_map(|dname| {
+                            let Pail::Relay(RelayPail { xds_port, .. }) = &pails[dname] else {
+                                return None;
+                            };
+                            Some(
+                                format!("http://localhost:{xds_port}")
+                                    .parse()
+                                    .expect("failed to parse endpoint"),
+                            )
+                        })
+                        .collect();
 
-                let management_servers: Vec<_> = spc
-                    .dependencies
-                    .iter()
-                    .filter_map(|dname| {
-                        let Pail::Relay(RelayPail { xds_port, .. }) = &pails[dname] else {
-                            return None;
-                        };
-                        Some(
-                            format!("http://localhost:{xds_port}")
-                                .parse()
-                                .expect("failed to parse endpoint"),
-                        )
-                    })
-                    .collect();
+                    quilkin::Providers::default().grpc_pull_endpoints(management_servers)
+                };
 
-                let providers =
-                    quilkin::Providers::default().grpc_pull_endpoints(management_servers);
-
-                let svc = quilkin::Service::default()
+                let mut svc = quilkin::Service::default()
                     .udp()
-                    .udp_port(port)
+                    .udp_port(0)
                     .qcmp()
-                    .qcmp_port(qcmp_port)
+                    .qcmp_port(0)
                     .phoenix()
-                    .phoenix_port(phoenix_port)
+                    .phoenix_port(0)
                     .termination_timeout(None);
 
                 let (shutdown, shutdown_rx) = quilkin::signal::channel();
@@ -550,7 +610,7 @@ impl Pail {
                     Some("test-proxy".into()),
                     Default::default(),
                     &Default::default(),
-                    &svc,
+                    &mut svc,
                     pail_token,
                 );
 
@@ -598,17 +658,18 @@ impl Pail {
                     Some(rttx),
                     shutdown_rx.clone(),
                 );
-                let task = svc
+                let (task, ports) = svc
                     .spawn_services(
                         &config,
                         quilkin::signal::ShutdownHandler::new(shutdown.clone(), shutdown_rx),
                     )
+                    .await
                     .unwrap();
 
                 Self::Proxy(ProxyPail {
-                    port,
-                    qcmp_port,
-                    phoenix_port,
+                    port: ports.udp.expect("failed to spawn proxy"),
+                    qcmp_port: ports.qcmp.expect("failed to spawn qcmp"),
+                    phoenix_port: ports.phoenix.expect("failed to spawn phoenix"),
                     shutdown,
                     task: Some(task),
                     provider_task,
@@ -700,7 +761,7 @@ impl SandboxConfig {
         let mut pails = Pails::new();
         for pc in self.pails {
             let name = pc.name;
-            let pail = Pail::construct(pc, &pails, td.path());
+            let pail = Pail::construct(pc, &pails, td.path()).await;
 
             if pails.insert(name, pail).is_some() {
                 panic!("{name} already existed");

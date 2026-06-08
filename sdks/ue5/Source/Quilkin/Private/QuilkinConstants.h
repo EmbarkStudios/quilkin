@@ -17,21 +17,12 @@
 
 #include "CoreMinimal.h"
 
-inline constexpr uint64_t MillisToNanos(uint64_t milliseconds) {
-    return milliseconds * 1000000;
-}
+struct FQuilkinEndpoint;
+class FInternetAddr;
 
-constexpr int64 DefaultLatencyThreshold = MillisToNanos(150);
-constexpr int64 DefaultPenaltyLatency = MillisToNanos(200);
+using ReachPair = TPair<FString, int64>;
 
 inline int64 NanosToMillis(int64 Nanoseconds)
 {
     return Nanoseconds / 1'000'000;
-}
-
-inline float NanosToSeconds(int64 Nanoseconds)
-{
-    float Nanos = Nanoseconds;
-    // nanos -> millis -> seconds
-    return (Nanos / 1'000'000) / 1000;
 }

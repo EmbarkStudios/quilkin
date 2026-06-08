@@ -15,12 +15,6 @@
  */
 
 #include "QuilkinModule.h"
-#include "QuilkinLog.h"
-
-#include "Modules/ModuleManager.h"
-#include "SocketSubsystemModule.h"
-#include "UObject/NameTypes.h"
-#include "Misc/ConfigCacheIni.h"
 
 #define FIVE_MINUTES 5 * 60
 
@@ -28,57 +22,57 @@ IMPLEMENT_MODULE(FQuilkinModule, Quilkin);
 
 void FQuilkinModule::StartupModule()
 {
-    UE_LOG(LogQuilkin, Log, TEXT("FQuilkinModule::StartupModule()"));
+	UE_LOG(LogQuilkin, Display, TEXT("FQuilkinModule::StartupModule()"));
 
-    bool bEnabled = true;
-    if (GConfig)
-    {
-        GConfig->GetBool(TEXT("Quilkin.SocketSubsystem"), TEXT("Enabled"), bEnabled, GEngineIni);
-    }
-    UE_LOG(LogQuilkin, Log, TEXT("QuilkinSocketSubsystem is %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
+	bool bEnabled = true;
+	if (GConfig)
+	{
+		GConfig->GetBool(TEXT("Quilkin.SocketSubsystem"), TEXT("Enabled"), bEnabled, GEngineIni);
+	}
+	UE_LOG(LogQuilkin, Log, TEXT("QuilkinSocketSubsystem is %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
 
-    if (!bEnabled)
-    {
-        return;
-    }
+	if (!bEnabled)
+	{
+		return;
+	}
 
-    FSocketSubsystemModule& SocketSubsystemModule = FModuleManager::LoadModuleChecked<FSocketSubsystemModule>("Sockets");
+	FSocketSubsystemModule& SocketSubsystemModule = FModuleManager::LoadModuleChecked<FSocketSubsystemModule>("Sockets");
 
-    ISocketSubsystem* DefaultSocketSubsystem = SocketSubsystemModule.GetSocketSubsystem();
-    if (DefaultSocketSubsystem == nullptr)
-    {
-        UE_LOG(LogQuilkin, Log, TEXT("No default SocketSubsystem was set. Will not use Quilkin SocketSubsystem"));
-        return;
-    }
-    UE_LOG(LogQuilkin, Log, TEXT("Overriding default SocketSubsystem with QuilkinSocketSubsystem"));
+	ISocketSubsystem* DefaultSocketSubsystem = SocketSubsystemModule.GetSocketSubsystem();
+	if (DefaultSocketSubsystem == nullptr)
+	{
+		UE_LOG(LogQuilkin, Log, TEXT("No default SocketSubsystem was set. Will not use Quilkin SocketSubsystem"));
+		return;
+	}
+	UE_LOG(LogQuilkin, Log, TEXT("Overriding default SocketSubsystem with QuilkinSocketSubsystem"));
 
-    QuilkinSocketSubsystem = MakeShared<FQuilkinSocketSubsystem>(DefaultSocketSubsystem);
-    FString Unused;
-    QuilkinSocketSubsystem->Init(Unused);
-    SocketSubsystemModule.RegisterSocketSubsystem(QUILKIN_SOCKETSUBSYSTEM_NAME, QuilkinSocketSubsystem.Get(), true);
+	QuilkinSocketSubsystem = MakeShared<FQuilkinSocketSubsystem>(DefaultSocketSubsystem);
+	FString Unused;
+	QuilkinSocketSubsystem->Init(Unused);
+	SocketSubsystemModule.RegisterSocketSubsystem(QUILKIN_SOCKETSUBSYSTEM_NAME, QuilkinSocketSubsystem.Get(), true);
 }
 
 void FQuilkinModule::ShutdownModule()
 {
-    UE_LOG(LogQuilkin, Log, TEXT("FQuilkinModule::ShutdownModule()"));
+	UE_LOG(LogQuilkin, Log, TEXT("FQuilkinModule::ShutdownModule()"));
 
-    if (!QuilkinSocketSubsystem.IsValid())
-    {
-        return;
-    }
+	if (!QuilkinSocketSubsystem.IsValid())
+	{
+		return;
+	}
 
-    FSocketSubsystemModule& SocketSubsystemModule = FModuleManager::LoadModuleChecked<FSocketSubsystemModule>("Sockets");
-    SocketSubsystemModule.UnregisterSocketSubsystem(QUILKIN_SOCKETSUBSYSTEM_NAME);
-    QuilkinSocketSubsystem.Reset();
+	FSocketSubsystemModule& SocketSubsystemModule = FModuleManager::LoadModuleChecked<FSocketSubsystemModule>("Sockets");
+	SocketSubsystemModule.UnregisterSocketSubsystem(QUILKIN_SOCKETSUBSYSTEM_NAME);
+	QuilkinSocketSubsystem.Reset();
 }
 
 bool FQuilkinModule::SupportsDynamicReloading()
 {
-    return false;
+	return false;
 }
 
 bool FQuilkinModule::SupportsAutomaticShutdown()
 {
-    // Shutdown gets called by the SocketSubsystem, if we were registered (and we don't do anything if we weren't)
-    return false;
+	// Shutdown gets called by the SocketSubsystem, if we were registered (and we don't do anything if we weren't)
+	return false;
 }

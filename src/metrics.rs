@@ -230,7 +230,7 @@ pub(crate) mod k8s {
         METRIC.with_label_values(&[&success.to_string()]).inc();
     }
 
-    pub(crate) fn errors_total(kind: &'static str, reason: &impl std::fmt::Display) -> IntCounter {
+    pub(crate) fn errors_total(kind: &'static str, reason: impl ToString) -> IntCounter {
         static METRIC: Lazy<IntCounterVec> = Lazy::new(|| {
             prometheus::register_int_counter_vec_with_registry! {
                 prometheus::opts! {
@@ -491,20 +491,43 @@ pub(crate) fn phoenix_coordinates(icao: crate::config::IcaoCode, axis: &str) -> 
     PHOENIX_COORDINATES.with_label_values(&[icao.as_ref(), axis])
 }
 
-pub(crate) fn phoenix_coordinates_alpha(icao: crate::config::IcaoCode) -> Gauge {
-    static PHOENIX_COORDINATES_ALPHA: Lazy<GaugeVec> = Lazy::new(|| {
+#[derive(Clone, Copy, Debug)]
+enum CoordinateDirection {
+    Incoming,
+    Outgoing,
+}
+
+impl CoordinateDirection {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Incoming => "incoming",
+            Self::Outgoing => "outgoing",
+        }
+    }
+}
+
+pub(crate) fn phoenix_nnls_outgoing_residual() -> Gauge {
+    phoenix_nnls_residual(CoordinateDirection::Outgoing)
+}
+
+pub(crate) fn phoenix_nnls_incoming_residual() -> Gauge {
+    phoenix_nnls_residual(CoordinateDirection::Incoming)
+}
+
+fn phoenix_nnls_residual(direction: CoordinateDirection) -> Gauge {
+    static PHOENIX_NNLS_RESIDUAL: Lazy<GaugeVec> = Lazy::new(|| {
         prometheus::register_gauge_vec_with_registry! {
             prometheus::opts! {
-                "quilkin_phoenix_coordinates_alpha",
-                "The alpha used when adjusting coordinates",
+                "quilkin_phoenix_nnls_residual",
+                "The NNLS residual norm from the most recent coordinate computation",
             },
-            &["icao"],
+            &["direction"],
             registry(),
         }
         .unwrap()
     });
 
-    PHOENIX_COORDINATES_ALPHA.with_label_values(&[icao.as_ref()])
+    PHOENIX_NNLS_RESIDUAL.with_label_values(&[direction.label()])
 }
 
 pub(crate) fn phoenix_distance_error_estimate(icao: crate::config::IcaoCode) -> Gauge {
@@ -653,6 +676,86 @@ pub(crate) fn allocated_xdp_packets() -> &'static IntGauge {
     });
 
     &ALLOCATED
+}
+
+pub struct ActiveProviderMetrics {
+    provider: String,
+}
+
+impl ActiveProviderMetrics {
+    pub fn new(provider: String) -> Self {
+        quilkin_xds::metrics::active_control_planes(&provider).inc();
+        active_providers(&provider).inc();
+
+        Self { provider }
+    }
+}
+
+impl Drop for ActiveProviderMetrics {
+    fn drop(&mut self) {
+        quilkin_xds::metrics::active_control_planes(&self.provider).dec();
+        active_providers(&self.provider).dec();
+    }
+}
+
+pub(crate) fn active_providers(provider: &str) -> IntGauge {
+    const PROVIDER_LABEL: &str = "provider";
+
+    static ACTIVE_PROVIDERS: Lazy<IntGaugeVec> = Lazy::new(|| {
+        prometheus::register_int_gauge_vec_with_registry! {
+            prometheus::opts! {
+                "active_providers",
+                "Total number of active config providers",
+            },
+            &[PROVIDER_LABEL],
+            registry(),
+        }
+        .unwrap()
+    });
+
+    ACTIVE_PROVIDERS.with_label_values(&[provider])
+}
+
+pub(crate) mod corrosion {
+    use super::*;
+
+    #[inline]
+    pub fn subscription_events(stream: &str) -> IntGauge {
+        const STREAM_LABEL: &str = "stream";
+
+        static SUB_EVENTS: Lazy<IntGaugeVec> = Lazy::new(|| {
+            prometheus::register_int_gauge_vec_with_registry! {
+                prometheus::opts! {
+                    "corrosion_subscription_events",
+                    "Total number of subscription events",
+                },
+                &[STREAM_LABEL],
+                registry(),
+            }
+            .unwrap()
+        });
+
+        SUB_EVENTS.with_label_values(&[stream])
+    }
+
+    #[inline]
+    pub fn subscription_failures(stream: &str) -> IntGauge {
+        const STREAM_LABEL: &str = "stream";
+
+        static SUB_EVENTS: Lazy<IntGaugeVec> = Lazy::new(|| {
+            prometheus::register_int_gauge_vec_with_registry! {
+                prometheus::opts! {
+                    "corrosion_subscription_failures",
+                    "Number of errors that occurred processing events",
+                },
+                &[STREAM_LABEL],
+                registry(),
+            }
+            .unwrap()
+        });
+
+        SUB_EVENTS.with_label_values(&[stream])
+    }
 }
 
 /// Create a generic metrics options.

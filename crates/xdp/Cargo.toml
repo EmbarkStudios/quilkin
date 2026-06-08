@@ -10,10 +10,12 @@ thiserror.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 xdp.workspace = true
-# Used to load and attach eBPF programs
-aya = "0.13.1"
-# Allows forwarding trace messages from eBPF programs to a global logger
-aya-log = "0.2.1"
+# Used to load and attach eBPF programs, note we use a git dependency here as aya has updated many dependencies but has
+# not made a release in over half a year
+aya = { git = "https://github.com/aya-rs/aya", rev = "2453204" }
+# Allows forwarding trace messages from eBPF programs to a global logger, note we use a git dependency here as aya has
+# updated many dependencies but has not made a release in over half a year
+aya-log = { git = "https://github.com/aya-rs/aya", rev = "2453204" }
 libc.workspace = true
 
 [lints]

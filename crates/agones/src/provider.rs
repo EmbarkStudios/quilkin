@@ -37,7 +37,6 @@ mod tests {
         api::{DeleteParams, PostParams},
         runtime::wait::await_condition,
     };
-    use serial_test::serial;
     use tokio::time::timeout;
 
     use quilkin::{
@@ -55,10 +54,8 @@ mod tests {
     const SLOW: Duration = Duration::from_secs(60);
 
     #[tokio::test]
-    #[serial]
-    /// Test for Agones Provider integration. Since this will look at all `GameServers` in the namespace
-    /// for this test, we should only run Agones integration test in a serial manner, since they
-    /// could easily collide with each other.
+    /// Test for Agones Provider integration. Each test runs in its own namespace, so they can run
+    /// in parallel.
     async fn agones_token_router() {
         let client = Client::new().await;
 
@@ -138,7 +135,8 @@ mod tests {
             .as_mut()
             .map(|annotations| annotations.remove(TOKEN_KEY).unwrap());
         gameservers.replace(name.as_str(), &pp, &gs).await.unwrap();
-        // now we should send a packet, and not get a response.
+        // now we should send a packet, and not get a response. removing the token has to
+        // propagate, so delay between attempts rather than spinning while packets still arrive.
         let mut failed = false;
         for i in 0..30 {
             println!("Disconnection Attempt: {i}");
@@ -152,6 +150,7 @@ mod tests {
                 failed = true;
                 break;
             }
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
         if !failed {
             debug_pods(&client, format!("role={PROXY_DEPLOYMENT}")).await;

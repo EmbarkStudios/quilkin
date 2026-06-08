@@ -104,12 +104,12 @@ mod tests {
     #[test]
     fn deserialise_client() {
         let providers = Default::default();
-        let service = Default::default();
+        let mut service = Default::default();
         let config = Config::new(
             Some("deserialize_client".into()),
             Default::default(),
             &providers,
-            &service,
+            &mut service,
         );
         config.dyn_cfg.clusters().unwrap().modify(|clusters| {
             clusters.insert_default([Endpoint::new("127.0.0.1:25999".parse().unwrap())].into());
@@ -121,12 +121,12 @@ mod tests {
     #[test]
     fn deserialise_server() {
         let providers = Default::default();
-        let service = Default::default();
+        let mut service = Default::default();
         let config = Config::new(
             Some("deserialize_server".into()),
             Default::default(),
             &providers,
-            &service,
+            &mut service,
         );
         config.dyn_cfg.clusters().unwrap().modify(|clusters| {
             clusters.insert_default(
@@ -144,13 +144,13 @@ mod tests {
     #[test]
     fn parse_default_values() {
         let providers = Default::default();
-        let service = Default::default();
+        let mut service = Default::default();
         let before = String::from("parse_default_values");
         let config = Config::new(
             Some(before.clone()),
             Default::default(),
             &providers,
-            &service,
+            &mut service,
         );
         assert!(!before.is_empty());
         config
@@ -170,12 +170,12 @@ mod tests {
     #[test]
     fn parse_client() {
         let providers = Default::default();
-        let service = Default::default();
+        let mut service = Default::default();
         let config = Config::new(
             Some("parse_client".into()),
             Default::default(),
             &providers,
-            &service,
+            &mut service,
         );
         config
             .update_from_json(
@@ -204,12 +204,12 @@ mod tests {
     #[test]
     fn parse_ipv6_endpoint() {
         let providers = Default::default();
-        let service = Default::default();
+        let mut service = Default::default();
         let config = Config::new(
             Some("parse_ipv6_endpoint".into()),
             Default::default(),
             &providers,
-            &service,
+            &mut service,
         );
         config
             .update_from_json(
@@ -247,12 +247,12 @@ mod tests {
     #[test]
     fn parse_server() {
         let providers = Default::default();
-        let service = Default::default();
+        let mut service = Default::default();
         let config = Config::new(
             Some("parse_server".into()),
             Default::default(),
             &providers,
-            &service,
+            &mut service,
         );
         config
             .update_from_json(
@@ -366,12 +366,12 @@ dynamic:
         ];
 
         let providers = crate::Providers::default();
-        let service = crate::Service::default();
+        let mut service = crate::Service::default();
         let mut config = Config::new(
             Some("deny_unused_fields".into()),
             Default::default(),
             &providers,
-            &service,
+            &mut service,
         );
         insert_default::<crate::filters::FilterChain>(&mut config.dyn_cfg.typemap);
 

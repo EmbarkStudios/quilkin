@@ -8,6 +8,22 @@ impl TokenSet {
     pub fn iter(&self) -> std::collections::btree_set::Iter<'_, Vec<u8>> {
         self.0.iter()
     }
+
+    /// Emulates the encoding of token sets to a k8s label value
+    #[inline]
+    pub fn serialize_to_string(&self) -> String {
+        let mut s = String::with_capacity(1024);
+
+        for (i, token) in self.0.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+
+            data_encoding::BASE64.encode_append(token, &mut s);
+        }
+
+        s
+    }
 }
 
 impl IntoIterator for TokenSet {

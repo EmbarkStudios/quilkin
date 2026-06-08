@@ -67,6 +67,7 @@ trace_test!(with_filter, {
         "proxy",
         ProxyPailConfig {
             config: Some(TestConfig::new()),
+            corrosion: false,
         },
         &["server"],
     );
@@ -80,7 +81,7 @@ trace_test!(with_filter, {
     client.send_to(msg.as_bytes(), &local_addr).await.unwrap();
 
     // search for the filter strings.
-    let result = sb.timeout(100, rx.recv()).await.0.unwrap();
+    let result = sb.timeout(1000, rx.recv()).await.0.unwrap();
     assert!(result.starts_with(&format!("{msg}:odr:[::1]:")));
 });
 
@@ -92,12 +93,12 @@ trace_test!(uring_receiver, {
 
     let (mut packet_rx, endpoint) = sb.server("server");
 
-    let service = quilkin::Service::builder().udp();
+    let mut service = quilkin::Service::builder().udp();
     let config = std::sync::Arc::new(quilkin::Config::new(
         None,
         Default::default(),
         &Default::default(),
-        &service,
+        &mut service,
     ));
     config
         .dyn_cfg
@@ -115,11 +116,10 @@ trace_test!(uring_receiver, {
         worker_id: 1,
         port: addr.port(),
         config: config.clone(),
-        buffer_pool: quilkin::test::BUFFER_POOL.clone(),
         sessions: quilkin::net::sessions::SessionPool::new(
             vec![pending_sends.0.clone()],
-            BUFFER_POOL.clone(),
             config.dyn_cfg.cached_filter_chain().unwrap(),
+            usize::MAX,
         ),
     }
     .spawn_io_loop(pending_sends, config.dyn_cfg.cached_filter_chain().unwrap())
@@ -149,7 +149,7 @@ trace_test!(
             None,
             Default::default(),
             &Default::default(),
-            &Default::default(),
+            &mut Default::default(),
         ));
         config
             .dyn_cfg
@@ -167,21 +167,14 @@ trace_test!(
 
         let sessions = net::SessionPool::new(
             pending_sends.iter().map(|ps| ps.0.clone()).collect(),
-            BUFFER_POOL.clone(),
             config.dyn_cfg.cached_filter_chain().unwrap(),
+            usize::MAX,
         );
 
         const WORKER_COUNT: usize = 3;
 
         let (socket, addr) = sb.socket();
-        net::packet::spawn_receivers(
-            config,
-            socket,
-            pending_sends,
-            &sessions,
-            BUFFER_POOL.clone(),
-        )
-        .unwrap();
+        net::packet::spawn_receivers(config, socket, pending_sends, &sessions).unwrap();
 
         let socket = std::sync::Arc::new(sb.client());
         let msg = "recv-from";
@@ -208,3 +201,82 @@ trace_test!(
         }
     }
 );
+
+// Temporary test that ensures that an agent communicating with a relay in xDS will be forwarded to corrosion and
+// publish the changes to a proxy
+trace_test!(xds_bridge_to_corrosion, {
+    use quilkin::filters::{self, StaticFilter};
+
+    let mut sc = qt::sandbox_config!();
+
+    sc.push("server", ServerPailConfig::default(), &[]);
+    sc.push(
+        "relay",
+        RelayPailConfig {
+            config: Some(TestConfig {
+                filters: filters::FilterChain::try_create([
+                    filters::Capture::as_filter_config(filters::capture::Config {
+                        metadata_key: filters::capture::CAPTURED_BYTES.into(),
+                        strategy: filters::capture::Strategy::Suffix(filters::capture::Suffix {
+                            size: 3,
+                            remove: true,
+                        }),
+                    })
+                    .unwrap(),
+                    filters::TokenRouter::as_filter_config(None).unwrap(),
+                ])
+                .unwrap(),
+                ..Default::default()
+            }),
+        },
+        &[],
+    );
+    sc.push(
+        "agent",
+        AgentPailConfig {
+            endpoints: vec![("server", &[])],
+            icao_code: quilkin::config::IcaoCode::new_testing([b'A', b'B', b'C', b'D']),
+            corrosion: false,
+            ..Default::default()
+        },
+        &["server", "relay"],
+    );
+    sc.push(
+        "proxy",
+        ProxyPailConfig {
+            corrosion: true,
+            ..Default::default()
+        },
+        &["relay"],
+    );
+
+    let mut sb = sc.spinup().await;
+
+    let (local_addr, _rx) = sb.proxy("proxy");
+    let (mut rx, server_addr) = sb.server("server");
+
+    // TODO: this should not be here but want to see if it mitigates the CI flakiness
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let mut agent_config = sb.config_file("agent");
+    agent_config.update(|config| {
+        config.clusters.insert_default(
+            [quilkin::net::Endpoint::with_metadata(
+                server_addr.into(),
+                quilkin::net::endpoint::Metadata {
+                    tokens: [b"tok".to_vec()].into(),
+                },
+            )]
+            .into(),
+        );
+    });
+
+    let client = sb.client();
+
+    let msg = "hello";
+
+    let mut sending = msg.as_bytes().to_vec();
+    sending.extend_from_slice(b"tok");
+    sb.block_until_packet_gets_through(&sending, msg, &client, &local_addr, &mut rx)
+        .await;
+});

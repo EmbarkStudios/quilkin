@@ -41,7 +41,7 @@ pub fn registry() -> &'static Registry {
     unsafe { REGISTRY }.expect("set_registry must be called")
 }
 
-pub(crate) fn active_control_planes(control_plane: &str) -> prometheus::IntGauge {
+pub fn active_control_planes(control_plane: &str) -> prometheus::IntGauge {
     static ACTIVE_CONTROL_PLANES: Lazy<IntGaugeVec> = Lazy::new(|| {
         prometheus::register_int_gauge_vec_with_registry! {
             prometheus::opts! {

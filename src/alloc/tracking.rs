@@ -16,22 +16,19 @@
 
 use std::alloc::Layout;
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "mimalloc")] {
+cfg_select! {
+    feature = "mimalloc" => {
         type RealAllocator = mimalloc::MiMalloc;
-    } else {
-        type RealAllocator = std::alloc::System;
-    }
-}
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "mimalloc")] {
         #[global_allocator]
         pub static GLOBAL_ALLOCATOR: Allocator = Allocator {
             inner: mimalloc::MiMalloc,
             stats_accumulator: StatsAccumulator::new(),
         };
-    } else {
+    }
+    _ => {
+        type RealAllocator = std::alloc::System;
+
         #[global_allocator]
         pub static GLOBAL_ALLOCATOR: Allocator = Allocator {
             inner: std::alloc::System,

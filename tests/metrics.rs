@@ -42,7 +42,6 @@ async fn metrics_server() {
     let server_port = t
         .run_server(
             server_config,
-            None,
             Some(Some((std::net::Ipv4Addr::UNSPECIFIED, metrics_port).into())),
         )
         .await;
@@ -61,7 +60,7 @@ async fn metrics_server() {
                 .into(),
             );
         });
-    let client_port = t.run_server(client_config, None, None).await;
+    let client_port = t.run_server(client_config, None).await;
 
     // let's send the packet
     let (mut recv_chan, socket) = t.open_socket_and_recv_multiple_packets().await;

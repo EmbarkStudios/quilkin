@@ -2,11 +2,9 @@
 //!
 //! The Corrosion code was too linked to HTTP, which we may or may not use
 
-use crate::codec::PrefixedBuf;
+use crate::{codec::PrefixedBuf, db::SplitPoolReadExt};
 use bytes::Bytes;
 use camino::{Utf8Path as Path, Utf8PathBuf as PathBuf};
-pub use corro_agent::api::public::pubsub::MatcherUpsertError;
-pub use corro_agent::api::public::pubsub::SubscriptionEvent;
 use corro_api_types::{QueryEventMeta, Statement};
 use corro_types::{
     agent::SplitPool,
@@ -15,7 +13,7 @@ use corro_types::{
     updates::Handle,
 };
 pub use corro_types::{
-    api::{ChangeId, QueryEvent, TypedQueryEvent},
+    api::{ChangeId, QueryEvent, TypedQueryEvent, sqlite::ChangeType},
     pubsub::{MatchCandidates, MatcherError, MatcherHandle, SubsManager},
 };
 use serde::{Deserialize, Serialize};
@@ -28,6 +26,30 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, warn};
 use tripwire::Tripwire;
 use uuid::Uuid;
+
+#[derive(Clone)]
+pub struct SubscriptionEvent {
+    pub buff: Bytes,
+    pub meta: QueryEventMeta,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum MatcherUpsertError {
+    #[error(transparent)]
+    Pool(#[from] corro_types::sqlite::SqlitePoolError),
+    #[error(transparent)]
+    Sqlite(#[from] rusqlite::Error),
+    #[error("could not expand sql statement")]
+    CouldNotExpand,
+    #[error(transparent)]
+    NormalizeStatement(#[from] Box<corro_types::pubsub::NormalizeStatementError>),
+    #[error(transparent)]
+    Matcher(#[from] MatcherError),
+    #[error("a `from` query param was supplied, but no existing subscription found")]
+    SubFromWithoutMatcher,
+    #[error("found a subscription, but missing broadcaster")]
+    MissingBroadcaster,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatchUpError {
@@ -48,6 +70,8 @@ pub enum CatchUpError {
 pub type BodySender = mpsc::Sender<Bytes>;
 
 pub const SERVER_QUERY: &str = "SELECT endpoint,icao,tokens FROM servers";
+pub const DC_QUERY: &str = "SELECT ip,port,icao FROM dc";
+pub const FILTER_QUERY: &str = "SELECT filter FROM filter";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SubParamsv1 {
@@ -64,7 +88,7 @@ pub struct SubParamsv1 {
     ///
     /// If events are buffered below this threshold, they will be emitted on
     /// the next `max_time` interval
-    #[serde(default, rename = "mb")]
+    #[serde(default = "max_buffer", rename = "mb")]
     pub max_buffer: u16,
     /// The maximum amount of time that buffered events beneath the `max_buffer`
     /// threshold will be kept before being sent
@@ -90,23 +114,48 @@ pub struct SubParamsv1 {
     pub change_threshold: usize,
 }
 
-/// The default [`SubParams::process_interval`]
+impl SubParamsv1 {
+    /// Creates [`Self`] with the specified query and the rest of the items
+    /// set to their default
+    pub fn new(query: &str) -> Self {
+        Self {
+            query: query.into(),
+            from: None,
+            skip_rows: false,
+            max_buffer: max_buffer(),
+            max_time: max_time(),
+            process_interval: process_interval(),
+            change_threshold: change_threshold(),
+        }
+    }
+}
+
+/// The default [`SubParamsv1::process_interval`]
+#[inline]
 pub const fn process_interval() -> Duration {
     Duration::from_millis(600)
 }
 
-/// The default [`SubParams::change_threshold`]
+/// The default [`SubParamsv1::change_threshold`]
+#[inline]
 pub const fn change_threshold() -> usize {
     1000
 }
 
-/// The default [`SubParams::max_time`]
+/// The default [`SubParamsv1::max_time`]
+#[inline]
 pub const fn max_time() -> Duration {
     Duration::from_millis(10)
 }
 
+/// The default [`SubParamsv1::max_buffer`]
+#[inline]
+pub const fn max_buffer() -> u16 {
+    1500 /* Ethernet MTU */ - 20 /* max size of a quic header */
+}
+
 async fn expand_sql(sp: &SplitPool, stmt: &Statement) -> Result<String, MatcherUpsertError> {
-    let conn = sp.read().await?;
+    let conn = sp.read_readonly().await?;
 
     let mut prepped = conn.prepare(stmt.query())?;
     match stmt {
@@ -145,6 +194,7 @@ async fn expand_sql(sp: &SplitPool, stmt: &Statement) -> Result<String, MatcherU
         .ok_or(MatcherUpsertError::CouldNotExpand)
 }
 
+#[inline]
 fn handle_sub_event(
     max_size: u16,
     buf: &mut PrefixedBuf,
@@ -509,8 +559,7 @@ const MAX_UNSUB_TIME: Duration = Duration::from_secs(10 * 60);
 // this should be a fraction of the `MAX_UNSUB_TIME`
 const RECEIVERS_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Processes a single matcher mpsc channel to sent it to the broadcast channel
-/// in the case of multiple subscriptions to the same query
+/// Forwards a matcher mpsc channel a broadcast channel in the case of multiple subscriptions to the same query
 pub async fn process_sub_channel(
     subs: SubsManager,
     id: Uuid,
@@ -540,7 +589,10 @@ pub async fn process_sub_channel(
 
         let query_evt = tokio::select! {
             biased;
-            Some(query_evt) = evt_rx.recv() => query_evt,
+            query_evt = evt_rx.recv() => {
+                let Some(evt) = query_evt else { break; };
+                evt
+            }
             _ = deadline_check => {
                 if tx.receiver_count() == 0 {
                     info!(sub_id = %id, "All listeners for subscription are gone and didn't come back within {MAX_UNSUB_TIME:?}");
@@ -560,9 +612,6 @@ pub async fn process_sub_channel(
                     deadline = None;
                 };
                 continue;
-            },
-            else => {
-                break;
             }
         };
 
@@ -666,6 +715,39 @@ impl MatcherCache {
 
 pub type SharedMatcherCache = Arc<tokio::sync::RwLock<MatcherCache>>;
 
+/// Corrosion uses a "tripwire" handle to signal to end async tasks, this just
+/// wraps it so it's easier to use, and removes boilerplate
+pub struct Trip {
+    tripwire: tripwire::Tripwire,
+    worker: tripwire::TripwireWorker<tokio_stream::wrappers::ReceiverStream<()>>,
+    tx: tokio::sync::mpsc::Sender<()>,
+}
+
+impl Trip {
+    #[inline]
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        let (tripwire, worker, tx) = tripwire::Tripwire::new_simple();
+        Self {
+            tripwire,
+            worker,
+            tx,
+        }
+    }
+
+    #[inline]
+    pub fn tripwire(&self) -> tripwire::Tripwire {
+        self.tripwire.clone()
+    }
+
+    #[inline]
+    pub async fn shutdown(self) {
+        self.tx.send(()).await.ok();
+        self.worker.await;
+        spawn::wait_for_all_pending_handles().await;
+    }
+}
+
 /// The context needed to create and manage subscriptions
 #[derive(Clone)]
 pub struct PubsubContext {
@@ -682,13 +764,46 @@ pub struct PubsubContext {
     /// same query, and thus the same [`Matcher`], they need to be funnelled through
     /// a broadcaster so that each individual subscriber gets the events
     pub cache: SharedMatcherCache,
-    pub tripwire: Tripwire,
     /// The path where subscriptions are stored
     pub path: PathBuf,
+    pub tripwire: Tripwire,
 }
 
 impl PubsubContext {
-    /// Creates a subscription for the specified [`PubusbContext`]
+    /// Creates a new [`Self`], attempting to restore subscriptions
+    pub async fn new(
+        subs: SubsManager,
+        path: PathBuf,
+        pool: SplitPool,
+        schema: Arc<Schema>,
+        tripwire: Tripwire,
+        _loop_config: MatcherLoopConfig,
+    ) -> eyre::Result<Self> {
+        // For now we never restore subscriptions and require state of the world for both
+        // mutators and subscribers
+        // let cache =
+        //     restore_subscriptions(&subs, &path, &pool, &schema, &tripwire, loop_config).await?;
+        let cache = Arc::new(tokio::sync::RwLock::new(MatcherCache(
+            MatcherCacheInner::default(),
+        )));
+
+        if path.exists() {
+            use eyre::WrapErr;
+            std::fs::remove_dir_all(&path)
+                .wrap_err_with(|| format!("failed to cleanup existing subscription path {path}"))?;
+        }
+
+        Ok(Self {
+            subs,
+            path,
+            pool,
+            schema,
+            tripwire,
+            cache,
+        })
+    }
+
+    /// Creates a subscription for the specified [`PubsubContext`]
     ///
     /// Database mutations that match the query specified in the params will
     /// cause subscription events to be emitted to the receiver
@@ -716,44 +831,34 @@ impl PubsubContext {
 
         Ok(Subscription { id, query_hash, rx })
     }
+
+    pub async fn remove(&self, uuid: &uuid::Uuid) -> bool {
+        let Some(matcher) = self.subs.remove(uuid) else {
+            return false;
+        };
+
+        matcher.cleanup().await;
+
+        true
+    }
+
+    pub async fn shutdown(&self) {
+        self.subs.drop_handles().await;
+
+        // Just to be sure, completely nuke the entire subscription directory
+        match std::fs::remove_dir_all(&self.path) {
+            Ok(_) => tracing::info!(path = %self.path, "removed subscription directory"),
+            Err(error) => {
+                tracing::error!(path = %self.path, %error, "failed to remove subscription directory");
+            }
+        }
+    }
 }
 
 pub struct Subscription {
     pub id: Uuid,
     pub query_hash: String,
     pub rx: mpsc::Receiver<SubscriptionEvent>,
-}
-
-/// Creates a subscription for the specified [`PubusbContext`]
-///
-/// Database mutations that match the query specified in the params will
-/// cause subscription events to be emitted to the receiver
-pub async fn subscribe(
-    params: SubParamsv1,
-    ctx: &PubsubContext,
-) -> Result<Subscription, MatcherUpsertError> {
-    let query = expand_sql(&ctx.pool, &params.query).await?;
-    let mut bcast_write = ctx.cache.write().await;
-
-    let (handle, created) = ctx.subs.get_or_insert(
-        &query,
-        &ctx.path,
-        &ctx.schema,
-        &ctx.pool,
-        ctx.tripwire.clone(),
-        MatcherLoopConfig {
-            changes_threshold: params.change_threshold,
-            process_buffer_interval: params.process_interval,
-            ..Default::default()
-        },
-    )?;
-
-    let (tx, rx) = mpsc::channel(MAX_EVENTS_BUFFER_SIZE);
-
-    let query_hash = handle.hash().to_owned();
-    let id = upsert_sub(handle, created, &ctx.subs, &mut bcast_write, params, tx).await?;
-
-    Ok(Subscription { id, query_hash, rx })
 }
 
 /// An async stream that buffers events, used by senders to batch changes
@@ -803,6 +908,15 @@ impl BufferingSubStream {
         }
 
         self.buffer.freeze()
+    }
+
+    #[inline]
+    pub fn pop(&mut self) -> Option<Bytes> {
+        self.rx
+            .try_recv()
+            .ok()
+            .and_then(|event| handle_sub_event(0, &mut self.buffer, event, &mut self.change_id))
+            .or_else(|| self.buffer.freeze())
     }
 }
 
@@ -862,7 +976,7 @@ pub fn read_length_prefixed_bytes(b: &mut Bytes) -> Option<Bytes> {
         return None;
     }
 
-    let len = (b[0] as u16 | ((b[1] as u16) << 8)) as usize;
+    let len = u16::from_le_bytes([b[0], b[1]]) as usize;
 
     if len > b.len() - 2 {
         return None;
@@ -873,6 +987,8 @@ pub fn read_length_prefixed_bytes(b: &mut Bytes) -> Option<Bytes> {
 }
 
 /// The read side of a [`BufferingSubStream`]
+///
+/// This is an iterator over the events in a discrete block of events
 ///
 /// This is intentionally sans-io for easier testing
 pub struct SubscriptionStream {
@@ -920,6 +1036,10 @@ pub async fn restore_subscriptions(
     // If we error trying to restore a subscription, delete it
     let mut to_cleanup = Vec::new();
 
+    let mut restored = 0;
+    let mut failed = 0;
+    let mut cleaned = 0;
+
     if let Ok(mut dir) = tokio::fs::read_dir(&subs_path).await {
         loop {
             let entry = match dir.next_entry().await {
@@ -951,7 +1071,7 @@ pub async fn restore_subscriptions(
 
             match res {
                 Ok((_, created)) => {
-                    info!(%sub_id, "Restored subscription");
+                    restored += 1;
 
                     let (sub_tx, _) = tokio::sync::broadcast::channel(MAX_EVENTS_BUFFER_SIZE);
 
@@ -964,8 +1084,8 @@ pub async fn restore_subscriptions(
 
                     subs_bcast_cache.insert(sub_id, sub_tx);
                 }
-                Err(error) => {
-                    error!(%sub_id, %error, "could not restore subscription");
+                Err(_error) => {
+                    failed += 1;
                     to_cleanup.push(sub_id);
                 }
             }
@@ -974,10 +1094,12 @@ pub async fn restore_subscriptions(
 
     for sub_id in to_cleanup {
         debug!(%sub_id, "Cleaning up unclean subscription");
-        if let Err(error) = Matcher::cleanup(sub_id, &Matcher::sub_path(subs_path, sub_id)) {
-            warn!(%error, %sub_id, "failed to cleanup subscription");
+        if Matcher::cleanup(sub_id, &Matcher::sub_path(subs_path, sub_id)).is_ok() {
+            cleaned += 1;
         }
     }
+
+    tracing::info!(restored, failed, cleaned, "restored subscriptions");
 
     Ok(Arc::new(tokio::sync::RwLock::new(MatcherCache(
         subs_bcast_cache,

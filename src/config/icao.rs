@@ -6,7 +6,7 @@ pub use quilkin_types::IcaoCode;
 #[cfg_attr(test, derive(Debug))]
 pub struct NotifyingIcaoCode {
     icao: Arc<parking_lot::Mutex<IcaoCode>>,
-    channel: tokio::sync::broadcast::Sender<()>,
+    channel: tokio::sync::broadcast::Sender<IcaoCode>,
 }
 
 impl Default for NotifyingIcaoCode {
@@ -37,7 +37,7 @@ impl NotifyingIcaoCode {
             *cur = icao;
         }
 
-        let _ = self.channel.send(());
+        let _ = self.channel.send(icao);
     }
 
     #[inline]
@@ -46,7 +46,7 @@ impl NotifyingIcaoCode {
     }
 
     #[inline]
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<()> {
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<IcaoCode> {
         self.channel.subscribe()
     }
 }

@@ -179,8 +179,7 @@ where
 
             let code = result
                 .as_ref()
-                .map(|response| response.status().as_u16())
-                .unwrap_or(0);
+                .map_or(0, |response| response.status().as_u16());
 
             // Update total and latency metrics
             let http_labels = HttpLabels {

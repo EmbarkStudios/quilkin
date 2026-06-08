@@ -1,7 +1,12 @@
+use corrosion::persistent::mutator::BroadcastingTransactor;
 use eyre::ContextCompat;
 use std::sync::Arc;
 
-use crate::{components::proxy::SessionPool, config::Config, signal::ShutdownHandler};
+use crate::{
+    config::{Config, filter::CachedFilterChain},
+    net::SessionPool,
+    signal::ShutdownHandler,
+};
 
 #[derive(Debug, clap::Parser)]
 #[command(next_help_heading = "Service Options")]
@@ -73,6 +78,14 @@ pub struct Service {
     /// Amount of UDP workers to run.
     #[clap(long = "service.udp.workers", env = "QUILKIN_SERVICE_UDP_WORKERS", default_value_t = std::num::NonZeroUsize::new(num_cpus::get()).unwrap())]
     pub udp_workers: std::num::NonZeroUsize,
+    /// Maximum number of concurrent UDP sessions. New sessions are rejected with a
+    /// metric increment once the limit is reached, preventing unbounded memory growth.
+    #[clap(
+        long = "service.udp.sessions.limit",
+        env = "QUILKIN_SERVICE_UDP_SESSIONS_LIMIT",
+        default_value_t = 5_000
+    )]
+    pub udp_session_limit: usize,
     /// Whether to serve xDS requests.
     #[arg(
         long = "service.xds",
@@ -131,13 +144,69 @@ pub struct Service {
         hide = true
     )]
     tls_key_path: Option<std::path::PathBuf>,
+
+    // START CORROSION OPTIONS
+    #[clap(
+        long = "service.corrosion.port",
+        env = "QUILKIN_SERVICE_CORROSION_PORT",
+        default_value_t = 7901
+    )]
+    corrosion_port: u16,
+
+    /// Path to the root directory where the `SQLite` databases are stored
+    ///
+    /// If not specified, defaults to `$TMPDIR/quilkin_db`
+    #[clap(
+        long = "service.corrosion.db-path",
+        env = "QUILKIN_SERVICE_CORROSION_DB_PATH"
+    )]
+    corrosion_db_path: Option<camino::Utf8PathBuf>,
+
+    /// The time in seconds that servers can be kept in the database if there are no contributors (agents) for that server
+    ///
+    /// If not specified, defaults to 10m
+    #[clap(
+        long = "service.corrosion.server-reap",
+        env = "QUILKIN_SERVICE_CORROSION_SERVER_REAP"
+    )]
+    corrosion_server_reap: Option<u32>,
+
+    /// Maximum database size as a page count (default page size: 4 KiB, so 262144 = 1 GiB).
+    /// When set, `SQLite` returns `SQLITE_FULL` instead of exhausting disk.
+    /// The volume must have more free space than (`max_page_count` * 4096) + `journal_size_limit`.
+    #[clap(
+        long = "service.corrosion.max-page-count",
+        env = "QUILKIN_SERVICE_CORROSION_MAX_PAGE_COUNT"
+    )]
+    corrosion_max_page_count: Option<u64>,
+
+    /// Maximum WAL file size in bytes left on disk after a checkpoint.
+    /// Prevents unbounded WAL growth when checkpoints lag behind writes.
+    #[clap(
+        long = "service.corrosion.journal-size-limit",
+        env = "QUILKIN_SERVICE_CORROSION_JOURNAL_SIZE_LIMIT"
+    )]
+    corrosion_journal_size_limit: Option<u64>,
+
+    // END CORROSION
     #[clap(long = "termination-timeout")]
     termination_timeout: Option<crate::cli::Duration>,
     #[clap(skip)]
     testing: bool,
+    #[clap(skip)]
+    xds_to_corrosion: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<corrosion::api::Statement>>>,
 }
 
 pub type Finalizer = Box<dyn FnOnce() + Send>;
+
+pub struct ServicePorts {
+    pub mds: Option<u16>,
+    pub phoenix: Option<u16>,
+    pub qcmp: Option<u16>,
+    pub udp: Option<u16>,
+    pub xds: Option<u16>,
+    pub corrosion: Option<u16>,
+}
 
 impl Default for Service {
     fn default() -> Self {
@@ -152,6 +221,7 @@ impl Default for Service {
             udp_enabled: <_>::default(),
             udp_port: 7777,
             udp_workers: std::num::NonZeroUsize::new(num_cpus::get()).unwrap(),
+            udp_session_limit: 10_000,
             xds_enabled: <_>::default(),
             xds_port: 7800,
             grpc_enabled: false,
@@ -160,8 +230,14 @@ impl Default for Service {
             tls_key: None,
             tls_cert_path: None,
             tls_key_path: None,
+            corrosion_port: 7901,
+            corrosion_db_path: None,
+            corrosion_server_reap: None,
+            corrosion_max_page_count: None,
+            corrosion_journal_size_limit: None,
             termination_timeout: None,
             testing: false,
+            xds_to_corrosion: None,
         }
     }
 }
@@ -181,6 +257,12 @@ impl Service {
     pub fn udp_port(mut self, port: u16) -> Self {
         self.udp_port = port;
         self
+    }
+
+    /// Gets the UDP port for the UDP service if it is enabled
+    #[inline]
+    pub fn get_udp_port(&self) -> Option<u16> {
+        self.udp_enabled.then_some(self.udp_port)
     }
 
     /// Enables the QCMP service.
@@ -204,6 +286,12 @@ impl Service {
     /// Sets the mDS service port.
     pub fn mds_port(mut self, port: u16) -> Self {
         self.mds_port = port;
+        self
+    }
+
+    /// Set the port used for the corrosion service
+    pub fn corrosion_port(mut self, port: u16) -> Self {
+        self.corrosion_port = port;
         self
     }
 
@@ -259,12 +347,21 @@ impl Service {
     }
 
     /// Adds the required typemap entries to the config depending on what services are enabled
-    pub fn init_config(&self, config: &mut Config) {
+    pub fn init_config(&mut self, config: &mut Config) {
         use crate::config::{self, insert_default};
 
         if self.udp_enabled || self.xds_enabled || self.mds_enabled {
             insert_default::<crate::filters::FilterChain>(&mut config.dyn_cfg.typemap);
             insert_default::<config::DatacenterMap>(&mut config.dyn_cfg.typemap);
+        }
+
+        if self.mds_enabled {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            config
+                .dyn_cfg
+                .typemap
+                .insert::<crate::config::DbTx>(crate::config::DbTx { tx });
+            self.xds_to_corrosion = Some(rx);
         }
 
         if self.qcmp_enabled {
@@ -296,56 +393,77 @@ impl Service {
         }
     }
 
-    /// The main entrypoint for listening network servers. When called will
-    /// spawn any and all enabled services, if successful returning a future
-    /// that can be await to wait on services to be cancelled.
-    pub fn spawn_services(
+    /// The main entrypoint for listening network servers.
+    ///
+    /// When called will spawn any and all enabled services, if successful
+    /// returning a future that can be await to wait on services to be cancelled.
+    pub async fn spawn_services(
         mut self,
         config: &Arc<Config>,
         mut shutdown: ShutdownHandler,
-    ) -> crate::Result<tokio::task::JoinHandle<(ShutdownHandler, crate::Result<()>)>> {
+    ) -> crate::Result<(
+        tokio::task::JoinHandle<(ShutdownHandler, crate::Result<()>)>,
+        ServicePorts,
+    )> {
+        let mut ports = ServicePorts {
+            mds: None,
+            phoenix: None,
+            qcmp: None,
+            udp: None,
+            xds: None,
+            corrosion: None,
+        };
+
         {
             let shutdown = &mut shutdown;
-            self.publish_mds(config, shutdown)?;
-            self.publish_phoenix(config, shutdown)?;
+            self.publish_mds(config, shutdown, &mut ports).await?;
+            self.publish_phoenix(config, shutdown, &mut ports)?;
             // We need to call this before qcmp since if we use XDP we handle QCMP
             // internally without a separate task
-            self.publish_udp(config, shutdown)?;
-            self.publish_qcmp(config, shutdown)?;
-            self.publish_xds(config, shutdown)?;
+            self.publish_udp(config, shutdown, &mut ports)?;
+            self.publish_qcmp(config, shutdown, &mut ports)?;
+            self.publish_xds(config, shutdown, &mut ports)?;
         }
 
-        Ok(tokio::spawn(async move {
-            let (tx, rx, results) = shutdown.await_any_then_shutdown().await;
+        Ok((
+            tokio::spawn(async move {
+                let (tx, rx, results) = shutdown.await_any_then_shutdown().await;
 
-            let mut errors = 0;
-            for (task, res) in &results {
-                if let Err(error) = res {
-                    tracing::error!(task, %error, "service task failed");
-                    errors += 1;
-                }
-            }
-
-            let res = match errors {
-                0 => Ok(()),
-                1 => Err(results.into_iter().find_map(|(_, res)| res.err()).unwrap()),
-                _ => {
-                    use std::fmt::Write as _;
-                    let mut err_str = String::new();
-                    writeln!(&mut err_str, "encountered {errors} errors:").unwrap();
-
-                    for (which, res) in results {
-                        if let Err(error) = res {
-                            writeln!(&mut err_str, "  {which}: {error:#}").unwrap();
+                let mut errors = 0;
+                for (task, res) in &results {
+                    match res {
+                        Ok(_o) => {
+                            tracing::info!(task, "service task finished");
+                        }
+                        Err(error) => {
+                            tracing::error!(task, %error, "service task failed");
+                            errors += 1;
                         }
                     }
-
-                    Err(eyre::Report::msg(err_str))
                 }
-            };
 
-            (ShutdownHandler::new(tx, rx), res)
-        }))
+                let res = match errors {
+                    0 => Ok(()),
+                    1 => Err(results.into_iter().find_map(|(_, res)| res.err()).unwrap()),
+                    _ => {
+                        use std::fmt::Write as _;
+                        let mut err_str = String::new();
+                        writeln!(&mut err_str, "encountered {errors} errors:").unwrap();
+
+                        for (which, res) in results {
+                            if let Err(error) = res {
+                                writeln!(&mut err_str, "  {which}: {error:#}").unwrap();
+                            }
+                        }
+
+                        Err(eyre::Report::msg(err_str))
+                    }
+                };
+
+                (ShutdownHandler::new(tx, rx), res)
+            }),
+            ports,
+        ))
     }
 
     /// Spawns an QCMP server if enabled, otherwise returns a future which never completes.
@@ -353,6 +471,7 @@ impl Service {
         &self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.phoenix_enabled {
             return Ok(());
@@ -375,12 +494,20 @@ impl Service {
             builder.build()
         };
 
+        let listener = quilkin_system::net::tcp::default_nonblocking_listener((
+            std::net::Ipv6Addr::UNSPECIFIED,
+            self.phoenix_port,
+        ))?;
+        let port = listener.local_addr()?.port();
+
         let finalizer = crate::net::phoenix::spawn(
-            (std::net::Ipv6Addr::UNSPECIFIED, self.phoenix_port),
+            listener,
             datacenters.clone(),
             phoenix,
             shutdown.shutdown_rx(),
         )?;
+
+        ports.phoenix = Some(port);
 
         let finished = shutdown.push("phoenix");
         let mut srx = shutdown.shutdown_rx();
@@ -396,37 +523,47 @@ impl Service {
     }
 
     /// Spawns an QCMP server if enabled, otherwise returns a future which never completes.
-    fn publish_qcmp(&self, config: &Config, shutdown: &mut ShutdownHandler) -> crate::Result<()> {
+    fn publish_qcmp(
+        &self,
+        config: &Config,
+        shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
+    ) -> crate::Result<()> {
         if !self.qcmp_enabled {
             return Ok(());
         }
+
+        let qcmp = crate::net::raw_socket_with_reuse(self.qcmp_port)?;
+        let port = crate::net::socket_port(&qcmp);
+        ports.qcmp = Some(port);
 
         let qcmp_port = config
             .dyn_cfg
             .qcmp_port()
             .context("QCMP was enabled, but QCMP port was not inserted into typemap")?;
 
-        qcmp_port.store(self.qcmp_port);
+        qcmp_port.store(port);
 
-        tracing::info!(port=%self.qcmp_port, "starting qcmp service");
-        let qcmp = crate::net::raw_socket_with_reuse(self.qcmp_port)?;
+        tracing::info!(port, "starting qcmp service");
 
         crate::codec::qcmp::spawn(qcmp, qcmp_port.subscribe(), shutdown)?;
 
         Ok(())
     }
 
-    /// Spawns an xDS server if enabled, otherwise returns a future which never completes.
+    /// Spawns an xDS server if enabled
     fn publish_xds(
         &self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.xds_enabled && !self.grpc_enabled {
             return Ok(());
         }
 
         let listener = crate::net::TcpListener::bind(Some(self.xds_port))?;
+        ports.xds = Some(listener.port());
 
         let finished = shutdown.push("xds");
         let srx = shutdown.shutdown_rx();
@@ -446,18 +583,29 @@ impl Service {
         Ok(())
     }
 
-    /// Spawns an xDS server if enabled, otherwise returns a future which never completes.
-    fn publish_mds(
-        &self,
+    /// Spawns an xDS server and/or corrosion server if enabled
+    async fn publish_mds(
+        &mut self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
     ) -> crate::Result<()> {
-        if !self.mds_enabled && !self.grpc_enabled {
+        if !self.mds_enabled {
             return Ok(());
         }
 
+        self.spawn_corrosion_server(config.clone(), shutdown, ports)
+            .await?;
+
+        // Transition compatibility, previously mds would be enable if _either_ mds_enabled or grpc_enabled
+        // were true
+        // if !self.grpc_enabled {
+        //     return Ok(());
+        // }
+
         tracing::info!(port=%self.mds_port, "starting mds service");
         let listener = crate::net::TcpListener::bind(Some(self.mds_port))?;
+        ports.mds = Some(listener.port());
 
         let finished = shutdown.push("mds");
         let srx = shutdown.shutdown_rx();
@@ -477,11 +625,11 @@ impl Service {
         Ok(())
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn publish_udp(
         &mut self,
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.udp_enabled && !self.qcmp_enabled {
             return Ok(());
@@ -497,6 +645,12 @@ impl Service {
                         // Disable this so that we don't create a separate user-space
                         // QCMP service since we are handling QCMP messsages in XDP
                         self.qcmp_enabled = false;
+
+                        assert!(self.qcmp_port != 0, "don't use ephemeral ports with XDP");
+                        assert!(self.udp_port != 0, "don't use ephemeral ports with XDP");
+
+                        ports.qcmp = Some(self.qcmp_port);
+                        ports.udp = Some(self.udp_port);
 
                         let finished = shutdown.push("xdp");
                         let mut srx = shutdown.shutdown_rx();
@@ -532,18 +686,21 @@ impl Service {
             return Ok(());
         }
 
-        self.spawn_user_space_router(config.clone(), shutdown)
+        self.spawn_user_space_router(config.clone(), shutdown, ports)
     }
 
     /// Launches the user space implementation of the packet router using
-    /// sockets. This implementation uses a pool of buffers and sockets to
-    /// manage UDP sessions and sockets. On Linux this will use io-uring, where
-    /// as it will use epoll interfaces on non-Linux platforms.
+    /// sockets.
+    ///
+    /// This implementation uses a pool of buffers and sockets to manage UDP
+    /// sessions and sockets. On Linux this will use `io-uring`, and `epoll`
+    /// interfaces on non-Linux platforms.
     #[allow(clippy::type_complexity)]
     pub fn spawn_user_space_router(
         &self,
         config: Arc<Config>,
         shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         // If we're on linux, we're using io-uring, but we're probably running in a container
         // and may not be allowed to call io-uring related syscalls due to seccomp
@@ -585,8 +742,8 @@ impl Service {
         }
 
         let socket = crate::net::raw_socket_with_reuse(self.udp_port)?;
+        ports.udp = Some(crate::net::socket_port(&socket));
         let workers = self.udp_workers.get();
-        let buffer_pool = Arc::new(crate::collections::BufferPool::new(workers, 2 * 1024));
 
         let mut worker_sends = Vec::with_capacity(workers);
         let mut session_sends = Vec::with_capacity(workers);
@@ -601,8 +758,8 @@ impl Service {
             .cached_filter_chain()
             .context("a cached FilterChain should have been configured")?;
 
-        let sessions = SessionPool::new(session_sends, buffer_pool.clone(), cached_filters);
-        crate::net::packet::spawn_receivers(config, socket, worker_sends, &sessions, buffer_pool)?;
+        let sessions = SessionPool::new(session_sends, cached_filters, self.udp_session_limit);
+        crate::net::packet::spawn_receivers(config, socket, worker_sends, &sessions)?;
 
         let finished = shutdown.push("udp");
         let mut srx = shutdown.shutdown_rx();
@@ -691,6 +848,332 @@ impl Service {
         Ok(Some(Box::new(move || {
             io_loop.shutdown(true);
         })))
+    }
+
+    /// Spawn corrosion server
+    ///
+    /// Creates/open the database and machinery that allows clients to send mutation
+    /// requests and/or subscription requests and be notified when a change has
+    /// been made that matches their query
+    async fn spawn_corrosion_server(
+        &mut self,
+        config: Arc<Config>,
+        shutdown: &mut ShutdownHandler,
+        ports: &mut ServicePorts,
+    ) -> eyre::Result<()> {
+        use corrosion::types;
+
+        tracing::info!(port=%self.corrosion_port, "starting corrosion service");
+
+        let db_root = if let Some(cdb) = self.corrosion_db_path.clone() {
+            std::fs::create_dir_all(&cdb)?;
+            cdb
+        } else {
+            let mut dr = if self.testing {
+                let mut dr = camino::Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap();
+                dr.push(format!("quilkin_{}", rand::random::<u32>()));
+                dr
+            } else {
+                match camino::Utf8PathBuf::from_path_buf(std::env::temp_dir()) {
+                    Ok(dr) => dr,
+                    Err(td) => {
+                        eyre::bail!("$TEMP_DIR {td:?} was not utf-8")
+                    }
+                }
+            };
+
+            dr.push("quilkin_db");
+
+            std::fs::create_dir_all(&dr)?;
+
+            dr
+        };
+
+        let sub_path = db_root.join("subs");
+        let db_path = db_root.join("db.db");
+
+        let db = corrosion::db::InitializedDb::setup(
+            &db_path,
+            corrosion::schema::SCHEMA,
+            Some(corrosion::db::DBMaintenance {
+                limits: corrosion::db::DBLimits {
+                    max_page_count: self.corrosion_max_page_count,
+                    journal_size_limit: self.corrosion_journal_size_limit.map(|v| v as i64),
+                },
+                ..Default::default()
+            }),
+        )
+        .await?;
+        let subs = types::pubsub::SubsManager::default();
+
+        let btx = corrosion::persistent::mutator::BroadcastingTransactor::new(
+            db.actor_id,
+            db.clock.clone(),
+            db.pool.clone(),
+            subs.clone(),
+            None,
+        )
+        .await?;
+
+        // Spawn a task to update the DB and broadcast changes when the filter changes
+        if let Some((mut filters, mut filters_sub)) = config
+            .dyn_cfg
+            .cached_filter_chain()
+            .zip(config.dyn_cfg.subscribe_filter_changes())
+        {
+            let finished = shutdown.push("corrosion_filter_mutator");
+            let mut srx = shutdown.shutdown_rx();
+
+            let btx = btx.clone();
+
+            async fn update_filters(btx: &BroadcastingTransactor, filters: &mut CachedFilterChain) {
+                let filters = filters.load();
+                let serialized =
+                    serde_json::to_string(&filters).expect("failed to serialize filter chain");
+                let mut statement = corrosion::SmallVec::<[_; 1]>::new();
+                {
+                    let mut fdb = corrosion::db::write::Filter(&mut statement);
+                    fdb.upsert(&serialized);
+                }
+
+                let res = btx
+                    .make_broadcastable_changes(None, |tx| {
+                        corrosion::db::write::exec_single_interruptible(
+                            tx,
+                            statement.pop().unwrap(),
+                        )
+                        .map_err(|source| {
+                            corrosion::types::agent::ChangeError::Rusqlite {
+                                source,
+                                actor_id: Some(btx.actor_id()),
+                                version: None,
+                            }
+                        })
+                    })
+                    .await;
+
+                match res {
+                    Ok((_, version, elapsed)) => {
+                        tracing::debug!(?version, ?elapsed, "updated filters");
+                    }
+                    Err(error) => {
+                        tracing::error!(%error, "failed to update filters");
+                    }
+                }
+            }
+
+            tokio::spawn(async move {
+                // Set the initial state, at this early stage we _probably_ won't
+                // have subscribers, but we do the full DB + publish just in case
+                update_filters(&btx, &mut filters).await;
+
+                loop {
+                    tokio::select! {
+                        _fc = filters_sub.recv() => {
+                            update_filters(&btx, &mut filters).await;
+                        }
+                        _ = srx.changed() => {
+                            break;
+                        }
+                    }
+                }
+
+                drop(finished.send(Ok(())));
+            });
+        }
+
+        // We explicitly set this up in init_config so it's a bug if that is not called
+        {
+            let mut rx = self
+                .xds_to_corrosion
+                .take()
+                .expect("init_config was not called");
+
+            let finished = shutdown.push("corrosion_mutator");
+            let mut srx = shutdown.shutdown_rx();
+
+            let btx = btx.clone();
+
+            async fn update_db(
+                btx: &BroadcastingTransactor,
+                statements: Vec<corrosion::api::Statement>,
+            ) {
+                let res = btx
+                    .make_broadcastable_changes(None, |tx| {
+                        let mut rows = 0;
+                        for statement in statements {
+                            rows += corrosion::db::write::exec_single_interruptible(tx, statement)
+                                .map_err(|source| {
+                                    corrosion::types::agent::ChangeError::Rusqlite {
+                                        source,
+                                        actor_id: Some(btx.actor_id()),
+                                        version: None,
+                                    }
+                                })?;
+                        }
+                        Ok(rows)
+                    })
+                    .await;
+
+                match res {
+                    Ok((count, version, elapsed)) => {
+                        tracing::debug!(count, ?version, ?elapsed, "broadcasted server update");
+                    }
+                    Err(error) => {
+                        tracing::error!(%error, "failed to update servers");
+                    }
+                }
+            }
+
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        change = rx.recv() => {
+                            let Some(statements) = change else {
+                                tracing::debug!("config shutdown");
+                                break;
+                            };
+
+                            update_db(&btx, statements).await;
+                        }
+                        _ = srx.changed() => {
+                            break;
+                        }
+                    }
+                }
+
+                drop(finished.send(Ok(())));
+            });
+        }
+
+        // Spawn a task to periodically reap old servers whose agents have disconnected abnormally but we want to give
+        // an agent from the same cluster time to renew them if the servers are still valid before removing them entirely
+        {
+            const TEN_MINUTES: u32 = 10 * 60;
+
+            let reap_time = self.corrosion_server_reap.unwrap_or(TEN_MINUTES) as _;
+            let check_interval = std::time::Duration::from_secs(reap_time / 2);
+            let reap_time = std::time::Duration::from_secs(reap_time);
+
+            let finished = shutdown.push("corrosion_reaper");
+            let mut srx = shutdown.shutdown_rx();
+
+            let btx = btx.clone();
+
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(check_interval);
+
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            let statement = corrosion::db::write::Server::<0>::reap_old(reap_time);
+
+                            let res = btx
+                                .make_broadcastable_changes(None, |tx| {
+                                    corrosion::db::write::exec_single_interruptible(tx, statement)
+                                    .map_err(|source| {
+                                        corrosion::types::agent::ChangeError::Rusqlite {
+                                            source,
+                                            actor_id: Some(btx.actor_id()),
+                                            version: None,
+                                        }
+                                    })
+                                })
+                                .await;
+
+                            match res {
+                                Ok((count, version, elapsed)) => {
+                                    tracing::debug!(count, ?version, ?elapsed, "reaped old servers");
+                                }
+                                Err(error) => {
+                                    tracing::error!(%error, "failed to reap old servers");
+                                }
+                            }
+                        }
+                        _ = srx.changed() => {
+                            break;
+                        }
+                    }
+                }
+
+                drop(finished.send(Ok(())));
+            });
+        }
+
+        // Spawn a task that regularly updates metrics wrt database sizes on disk
+        {
+            let finished = shutdown.push("corrosion_db_metrics");
+            let mut srx = shutdown.shutdown_rx();
+
+            let update_interval = std::time::Duration::from_secs(5 * 60);
+
+            let dbm = corrosion::metrics::DbMetrics::new(
+                crate::metrics::registry(),
+                db_path,
+                sub_path.clone(),
+            );
+
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(update_interval);
+
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            dbm.update();
+                        }
+                        _ = srx.changed() => {
+                            break;
+                        }
+                    }
+                }
+
+                drop(finished.send(Ok(())));
+            });
+        }
+
+        // Tripwire is how corrosion communicates a shutdown was requested
+        let trip = corrosion::pubsub::Trip::new();
+        let ps_ctx = corrosion::pubsub::PubsubContext::new(
+            subs,
+            sub_path,
+            db.pool,
+            db.schema,
+            trip.tripwire(),
+            types::pubsub::MatcherLoopConfig::default(),
+        )
+        .await?;
+
+        // Spin up a UDP socket to receive state mutations from agents and send
+        // events to proxy subscribers
+        let udp_server = corrosion::persistent::server::Server::new_unencrypted(
+            (std::net::Ipv6Addr::UNSPECIFIED, self.corrosion_port).into(),
+            btx,
+            ps_ctx,
+            corrosion::persistent::Metrics::new(crate::metrics::registry()),
+        )?;
+
+        let port = udp_server.local_addr().port();
+        ports.corrosion = Some(port);
+
+        // Mainly for testing when the requested port is 0 and we bind to an ephemeral
+        // port so the log message at the start is kind of useless
+        tracing::debug!(port, "corrosion service running");
+
+        let finished = shutdown.push("corrosion_server");
+        let mut srx = shutdown.shutdown_rx();
+
+        tokio::spawn(async move {
+            drop(srx.changed().await);
+
+            trip.shutdown().await;
+
+            tracing::info!("shutting down corrosion server");
+            udp_server.shutdown("graceful shutdown").await;
+
+            drop(finished.send(Ok(())));
+        });
+
+        Ok(())
     }
 }
 

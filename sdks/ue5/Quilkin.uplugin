@@ -15,10 +15,11 @@
 	"IsBetaVersion" : false,
 	"Installed" : false,
 	"Modules": [
-        {
-            "Name": "Quilkin",
-            "Type": "Runtime",
-            "LoadingPhase" : "Default"
-        }
-    ]
+		{
+			"Name": "Quilkin",
+			"Type": "Runtime",
+			"LoadingPhase" : "Default"
+		}
+	],
+	"Plugins": []
 }

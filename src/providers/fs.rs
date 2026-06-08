@@ -96,19 +96,19 @@ mod tests {
     #[tokio::test]
     async fn basic() {
         let providers = Default::default();
-        let service = Default::default();
+        let mut service = Default::default();
         let source = crate::Config::new_rc(
             Some("basic".into()),
             Default::default(),
             &providers,
-            &service,
+            &mut service,
             tokio_util::sync::CancellationToken::new(),
         );
         let dest = crate::Config::new_rc(
             Some("basic".into()),
             Default::default(),
             &providers,
-            &service,
+            &mut service,
             tokio_util::sync::CancellationToken::new(),
         );
         assert_eq!(source, dest);

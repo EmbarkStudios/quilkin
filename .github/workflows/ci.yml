@@ -87,6 +87,29 @@ jobs:
           fi
           exit 0
 
+  build-aarch64:
+    name: Build aarch64
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+    runs-on: ubuntu-24.04
+    env:
+      RUST_BACKTRACE: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cross
+        run: |
+          # Cross has not released a binary in over 2 years, so...we install from git, which is bad, but at least
+          # we pin it to a specific revision to avoid random breakage
+          cargo install --git https://github.com/cross-rs/cross --rev 19bc73f cross
+      - name: Build
+        run: cross build --target ${{ matrix.target }} -p qt -p quilkin -p quilkin-xds --tests
+      # We can't test, io_uring_setup is not implemented in qemu as of now
+      # - name: Build
+      #   run: cross test --target ${{ matrix.target }} -p qt -p quilkin -p quilkin-xds
+
   build:
     name: Build
     strategy:
@@ -112,6 +135,6 @@ jobs:
 
   test_success:
     runs-on: ubuntu-24.04
-    needs: [lint, test, build, deny-check, validate-proto-bufs]
+    needs: [lint, test, build, build-aarch64, deny-check, validate-proto-bufs]
     steps:
       - run: echo "All test jobs passed"

@@ -56,11 +56,12 @@ workspace = true
 
 [dependencies]
 # Local
-quilkin-macros = { version = "0.10.0", path = "./crates/macros" }
+quilkin-macros = { version = "0.10.1", path = "./crates/macros" }
 quilkin-proto.workspace = true
 quilkin-system.workspace = true
 quilkin-types.workspace = true
 quilkin-xds.workspace = true
+corrosion.workspace = true
 
 # Crates.io
 arc-swap.workspace = true
@@ -69,7 +70,7 @@ async-trait.workspace = true
 base64.workspace = true
 base64-serde = "0.8.0"
 bytes.workspace = true
-cfg-if = "1.0"
+camino.workspace = true
 chacha20 = { version = "0.10", default-features = false, features = ["cipher"] }
 crossbeam-utils = { version = "0.8", optional = true }
 clap = { version = "4.5.54", features = ["cargo", "derive", "env"] }
@@ -79,6 +80,10 @@ eyre.workspace = true
 fixedstr.workspace = true
 futures.workspace = true
 futures-util.workspace = true
+hickory-resolver = { version = "0.26", features = [
+    "https-ring",
+    "system-config",
+] }
 http-body-util = "0.1"
 hyper = { version = "1.8", features = ["http2", "http1", "server"] }
 hyper-rustls = { version = "0.27", default-features = false, features = [
@@ -87,11 +92,14 @@ hyper-rustls = { version = "0.27", default-features = false, features = [
     "ring",
 ] }
 ipnetwork = { version = "0.21.1", features = ["serde"] } # keep in sync with maxmind
+kube-lease-manager.workspace = true
 k8s-openapi.workspace = true
 maxminddb = "0.27.1"
 notify = "8.2"
 num_cpus = "1.17.0"
 mimalloc = { version = "0.1.48", optional = true }
+ndarray.workspace = true
+nnls.workspace = true
 once_cell.workspace = true
 parking_lot.workspace = true
 prometheus.workspace = true
@@ -124,17 +132,12 @@ uuid.workspace = true
 lasso = { version = "0.7.3", features = ["multi-threaded"] }
 kube.workspace = true
 kube-core.workspace = true
-hickory-resolver = { version = "0.25.2", features = [
-    "https-ring",
-    "system-config",
-] }
 strum = "0.27"
 strum_macros = "0.27"
 libflate = "2.2.1"
 form_urlencoded = "1.2.2"
 enum_dispatch = "0.3.13"
 gxhash = "3.5.0"
-kube-leader-election = "0.42.0"
 rustls = { version = "0.23", default-features = false }
 tracing-appender.workspace = true
 axum.workspace = true
@@ -161,6 +164,12 @@ regex.workspace = true
 tracing-test = "0.2.5"
 tempfile.workspace = true
 axum-test = "18.6.0"
+criterion = { version = "0.5", features = ["async_tokio"] }
+quilkin-xds.workspace = true
+
+[[bench]]
+name = "provider"
+harness = false
 
 # We want debug information when doing benchmarks for debugging purposes as well
 # as better (correct) callstacks in perf
@@ -187,7 +196,7 @@ members = [
 [workspace.package]
 license = "Apache-2.0"
 edition = "2024"
-version = "0.10.0"
+version = "0.10.1"
 
 [workspace.dependencies]
 arc-swap = { version = "1.8.0", features = ["serde"] }
@@ -197,23 +206,27 @@ axum = { version = "0.8.8", features = ["macros"] }
 base64 = "0.22.1"
 bytes = { version = "1.11.1", features = ["serde"] }
 compact_str = "0.7"
-corrosion = { path = "crates/corrosion" }
+corrosion = { path = "crates/corrosion", version = "0.1.0", package = "quilkin-corrosion" }
+data-encoding = "2.10"
 eyre = "0.6.12"
 fixedstr = { version = "0.5", features = ["flex-str"] }
 futures = "0.3.31"
 futures-util = "0.3.31"
 hyper-util = { version = "0.1", features = ["client", "client-legacy"] }
 jemalloc_pprof = { version = "0.8", features = ["symbolize"] }
-kube = { version = "2.0", features = [
+kube = { version = "3.0", features = [
     "runtime",
     "rustls-tls",
     "client",
 ], default-features = false }
-kube-core = { version = "2.0", default-features = false, features = [
+kube-core = { version = "3.0", default-features = false, features = [
     "schema",
 ] }
-k8s-openapi = { version = "=0.26.0", features = ["v1_33", "schemars"] }
+kube-lease-manager = "0.11.1"
+k8s-openapi = { version = "=0.27.0", features = ["v1_33", "schemars"] }
 libc = "0.2"
+ndarray = "0.16"
+nnls = "0.4"
 once_cell = "1.21.3"
 parking_lot = "0.12.5"
 prometheus = { version = "0.14", default-features = false }
@@ -221,10 +234,10 @@ prometheus-client = { version = "0.24" }
 prost = "0.14"
 prost-types = "0.14"
 quilkin = { path = "." }
-quilkin-proto = { version = "0.10.0", path = "crates/quilkin-proto" }
-quilkin-system = { version = "0.10.0", path = "crates/system" }
-quilkin-types = { version = "0.10.0", path = "crates/types" }
-quilkin-xds = { version = "0.10.0", path = "crates/xds" }
+quilkin-proto = { version = "0.10.1", path = "crates/quilkin-proto" }
+quilkin-system = { version = "0.10.1", path = "crates/system" }
+quilkin-types = { version = "0.10.1", path = "crates/types" }
+quilkin-xds = { version = "0.10.1", path = "crates/xds" }
 rand = "0.9"
 regex = "1.12.2"
 schemars = { version = "1.2", features = ["bytes1", "url2"] }
@@ -261,15 +274,21 @@ xdp = "0.7.1"
 # Corrosion libraries. The libraries that corrosion transitively depends on that
 # we also need to depend on should be kept in line with the versions used by corrosion
 camino = "1.2"
-corro-agent = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
+rusqlite = "=0.38"
+uhlc = "0.7"
+
 corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 corro-client = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 corro-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-rusqlite = "=0.33"
 spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 sqlite-pool = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-uhlc = "0.7"
+# corro-api-types = { path = "../corrosion/crates/corro-api-types" }
+# corro-client = { path = "../corrosion/crates/corro-client" }
+# corro-types = { path = "../corrosion/crates/corro-types" }
+# spawn = { path = "../corrosion/crates/spawn" }
+# sqlite-pool = { path = "../corrosion/crates/sqlite-pool" }
+# tripwire = { path = "../corrosion/crates/tripwire" }
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"

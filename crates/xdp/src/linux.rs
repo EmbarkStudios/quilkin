@@ -99,10 +99,10 @@ impl EbpfProgram {
     pub fn load(external_port: u16, qcmp_port: u16) -> Result<Self, LoadError> {
         let mut loader = aya::EbpfLoader::new();
         let external_port_no = external_port.to_be();
-        loader.set_global("EXTERNAL_PORT_NO", &external_port_no, true);
+        loader.override_global("EXTERNAL_PORT_NO", &external_port_no, true);
 
         let qcmp_port_no = qcmp_port.to_be();
-        loader.set_global("QCMP_PORT_NO", &qcmp_port_no, true);
+        loader.override_global("QCMP_PORT_NO", &qcmp_port_no, true);
 
         // We exploit the fact that Linux by default does not assign ephemeral
         // ports in the full range allowed by IANA, but we want to sanity check
@@ -185,7 +185,7 @@ impl EbpfProgram {
     pub fn attach(
         &mut self,
         nic: NicIndex,
-        flags: aya::programs::XdpFlags,
+        mode: aya::programs::xdp::XdpMode,
     ) -> Result<aya::programs::xdp::XdpLinkId, aya::programs::ProgramError> {
         if let Err(_error) = aya_log::EbpfLogger::init(&mut self.bpf) {
             // Would be good to enable this if we do end up adding log messages to
@@ -204,7 +204,7 @@ impl EbpfProgram {
             .expect("'all_queues' is not an xdp program");
         program.load()?;
 
-        program.attach_to_if_index(nic.into(), flags)
+        program.attach_to_if_index(nic.into(), mode)
     }
 
     pub fn detach(

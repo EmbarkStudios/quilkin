@@ -14,7 +14,9 @@
  *  limitations under the License.
  */
 
+pub mod corrosion;
 pub mod fs;
+pub mod http;
 pub mod k8s;
 
 use std::{
@@ -25,7 +27,12 @@ use std::{
     },
 };
 
-use crate::{config, metrics::provider_task_failures_total};
+use crate::{
+    config,
+    metrics::provider_task_failures_total,
+    net::EndpointAddress,
+    providers::{corrosion::CorrosionMode, k8s::EventProcessor},
+};
 use eyre::Context;
 use futures::TryStreamExt;
 
@@ -34,7 +41,6 @@ use futures::TryStreamExt;
 const RETRIES: u32 = u32::MAX;
 const BACKOFF_STEP: std::time::Duration = std::time::Duration::from_millis(250);
 const MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
-pub(crate) const NO_UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The available xDS source provider.
 #[derive(Clone, Debug, Default, clap::Args)]
@@ -160,7 +166,7 @@ pub struct Providers {
         env = "QUILKIN_PROVIDERS_STATIC_ENDPOINTS",
         value_delimiter = ','
     )]
-    endpoints: Vec<SocketAddr>,
+    endpoints: Vec<EndpointAddress>,
     /// Assigns dynamic tokens to each address in the `--to` argument
     ///
     /// Format is `<number of unique tokens>:<length of token suffix for each packet>`
@@ -178,6 +184,34 @@ pub struct Providers {
         hide = true
     )]
     xds_endpoints: Vec<tonic::transport::Endpoint>,
+    /// One or more `quilkin relay` endpoints to push or pull configuration changes to/from
+    #[clap(
+        long = "provider.corrosion.endpoints",
+        env = "QUILKIN_PROVIDERS_CORROSION_ENDPOINTS",
+        value_delimiter = ','
+    )]
+    corrosion_endpoints: Vec<EndpointAddress>,
+    /// What mode to run corrosion in
+    #[clap(
+        long = "provider.corrosion.mode",
+        env = "QUILKIN_PROVIDERS_CORROSION_MODE"
+    )]
+    corrosion_mode: Option<corrosion::CorrosionMode>,
+    /// Enable the HTTP provider, which exposes a REST API for managing endpoints
+    /// and the filter chain.
+    #[arg(
+        long = "provider.http",
+        env = "QUILKIN_PROVIDERS_HTTP",
+        default_value_t = false
+    )]
+    http_enabled: bool,
+    /// The socket address the HTTP provider listens on.
+    #[arg(
+        long = "provider.http.address",
+        env = "QUILKIN_PROVIDERS_HTTP_ADDRESS",
+        requires("http_enabled")
+    )]
+    http_address: Option<SocketAddr>,
 }
 
 #[derive(Clone)]
@@ -270,11 +304,32 @@ impl Providers {
         self
     }
 
+    pub fn corrosion_endpoints(mut self, endpoints: impl Into<Vec<EndpointAddress>>) -> Self {
+        self.corrosion_endpoints = endpoints.into();
+        self
+    }
+
+    pub fn corrosion_mode(mut self, mode: CorrosionMode) -> Self {
+        self.corrosion_mode = Some(mode);
+        self
+    }
+
+    pub fn http(mut self) -> Self {
+        self.http_enabled = true;
+        self
+    }
+
+    pub fn http_address(mut self, addr: SocketAddr) -> Self {
+        self.http_address = Some(addr);
+        self
+    }
+
     pub fn spawn_static_provider(
         &self,
         config: FiltersAndClusters,
         health_check: &AtomicBool,
         locality: Option<crate::net::endpoint::Locality>,
+        mutator: Option<crate::providers::corrosion::ServerMutator>,
     ) -> crate::Result<impl Future<Output = crate::Result<()>> + 'static> {
         let endpoint_tokens = self
             .endpoint_tokens
@@ -284,86 +339,106 @@ impl Providers {
                     eyre::bail!("--to-tokens `{tt}` is invalid, it must have a `:` separator")
                 };
 
-                let count = count.parse()?;
-                let length = length.parse()?;
+                let count: usize = count.parse()?;
+                let length: usize = length.parse()?;
 
-                Ok(crate::components::proxy::ToTokens { count, length })
+                Ok((count, length))
             })
             .transpose()?;
 
-        let endpoints = if let Some(tt) = endpoint_tokens {
-            let (unique, overflow) = 256u64.overflowing_pow(tt.length as _);
-            if overflow {
-                panic!(
-                    "can't generate {} tokens of length {} maximum is {}",
-                    self.endpoints.len() * tt.count,
-                    tt.length,
-                    u64::MAX,
-                );
-            }
+        let endpoints: std::collections::BTreeSet<crate::net::Endpoint> =
+            if let Some((count, length)) = endpoint_tokens {
+                let (unique, overflow) = 256u64.overflowing_pow(length as _);
+                if overflow {
+                    panic!(
+                        "can't generate {} tokens of length {length} maximum is {}",
+                        self.endpoints.len() * count,
+                        u64::MAX,
+                    );
+                }
 
-            if unique < (self.endpoints.len() * tt.count) as u64 {
-                panic!(
-                    "we require {} unique tokens but only {unique} can be generated",
-                    self.endpoints.len() * tt.count,
-                );
-            }
+                if unique < (self.endpoints.len() * count) as u64 {
+                    panic!(
+                        "we require {} unique tokens but only {unique} can be generated",
+                        self.endpoints.len() * count,
+                    );
+                }
 
-            {
-                use crate::filters::StaticFilter as _;
-                let filter_chain = crate::filters::FilterChain::try_create([
-                    crate::filters::Capture::as_filter_config(crate::filters::capture::Config {
-                        metadata_key: crate::filters::capture::CAPTURED_BYTES.into(),
-                        strategy: crate::filters::capture::Strategy::Suffix(
-                            crate::filters::capture::Suffix {
-                                size: tt.length as _,
-                                remove: true,
+                {
+                    use crate::filters::StaticFilter as _;
+                    let filter_chain = crate::filters::FilterChain::try_create([
+                        crate::filters::Capture::as_filter_config(
+                            crate::filters::capture::Config {
+                                metadata_key: crate::filters::capture::CAPTURED_BYTES.into(),
+                                strategy: crate::filters::capture::Strategy::Suffix(
+                                    crate::filters::capture::Suffix {
+                                        size: length as _,
+                                        remove: true,
+                                    },
+                                ),
                             },
-                        ),
-                    })?,
-                    crate::filters::TokenRouter::as_filter_config(None)?,
-                ])?;
-                config.filters.store(filter_chain);
-            }
+                        )?,
+                        crate::filters::TokenRouter::as_filter_config(None)?,
+                    ])?;
+                    config.filters.store(filter_chain);
+                }
 
-            let count = tt.count as u64;
+                let count = count as u64;
 
-            self.endpoints
-                .iter()
-                .enumerate()
-                .map(|(ind, sa)| {
-                    let start = ind as u64 * count;
+                self.endpoints
+                    .iter()
+                    .enumerate()
+                    .map(|(ind, addr)| {
+                        let start = ind as u64 * count;
 
-                    crate::net::endpoint::Endpoint::with_metadata(
-                        (*sa).into(),
-                        crate::net::endpoint::Metadata {
-                            tokens: (start..(start + count))
-                                .map(|i| i.to_le_bytes()[..tt.length].to_vec())
-                                .collect(),
-                        },
-                    )
-                })
-                .collect()
-        } else {
-            self.endpoints
-                .iter()
-                .cloned()
-                .map(crate::net::endpoint::Endpoint::from)
-                .collect()
-        };
+                        crate::net::endpoint::Endpoint::with_metadata(
+                            addr.clone(),
+                            crate::net::endpoint::Metadata {
+                                tokens: (start..(start + count))
+                                    .map(|i| i.to_le_bytes()[..length].to_vec())
+                                    .collect(),
+                            },
+                        )
+                    })
+                    .collect()
+            } else {
+                self.endpoints
+                    .iter()
+                    .cloned()
+                    .map(crate::net::endpoint::Endpoint::from)
+                    .collect()
+            };
 
         tracing::info!(
             provider = "static",
             endpoints = serde_json::to_string(&endpoints).unwrap(),
             "setting endpoints"
         );
-        config.clusters.modify(|clusters| {
-            clusters.insert(None, locality, endpoints);
-        });
+        if let Some(mutator) = mutator.as_ref() {
+            for endpoint in endpoints.iter() {
+                mutator.upsert_server(
+                    uuid::Uuid::new_v4(),
+                    quilkin_types::Endpoint::new(
+                        endpoint.address.host.clone(),
+                        endpoint.address.port,
+                    ),
+                    endpoint.metadata.known.tokens.clone(),
+                );
+            }
+        } else {
+            config.clusters.modify(|clusters| {
+                clusters.insert(None, locality, endpoints);
+            });
+        }
 
         health_check.store(true, Ordering::SeqCst);
 
-        Ok(std::future::pending())
+        Ok(async move {
+            // Take ownership of the mutator so we don't drop the Sender part of the channel
+            let _mutator = mutator;
+            std::future::pending::<()>().await;
+            Ok(())
+        })
     }
 
     pub fn spawn_k8s_provider(
@@ -371,6 +446,8 @@ impl Providers {
         health_check: Arc<AtomicBool>,
         locality: Option<crate::net::endpoint::Locality>,
         config: &super::Config,
+        mutator: Option<crate::providers::corrosion::ServerMutator>,
+        shutdown: tokio::sync::watch::Receiver<()>,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let agones_namespaces = if !self.agones_namespace.is_empty() {
             tracing::warn!(
@@ -403,6 +480,8 @@ impl Providers {
             let selector = selector.clone();
             let locality = locality.clone();
             let health_check = health_check.clone();
+            let mutator = mutator.clone();
+            let shutdown = shutdown;
 
             move || {
                 let config = config.clone();
@@ -414,6 +493,8 @@ impl Providers {
                 let selector = selector.clone();
                 let locality = locality.clone();
                 let health_check = health_check.clone();
+                let mutator = mutator.clone();
+                let shutdown = shutdown.clone();
 
                 async move {
                     let client = tokio::time::timeout(
@@ -444,6 +525,7 @@ impl Providers {
                             k8s_leader_lease_name,
                             k8s_leader_id,
                             ll,
+                            shutdown.clone(),
                         )))
                     } else {
                         either::Right(std::future::pending())
@@ -452,15 +534,29 @@ impl Providers {
                     let mut gs_streams = tokio::task::JoinSet::new();
                     if let Some(Some(clusters)) = agones_enabled.then(|| config.dyn_cfg.clusters())
                     {
+                        let token = crate::signal::cancellation_token(shutdown.clone());
                         for namespace in agones_namespaces {
+                            let cluster_update_batcher =
+                                crate::net::cluster::ClusterUpdateBatcher::spawn(
+                                    clusters.clone(),
+                                    locality.clone(),
+                                    std::time::Duration::from_millis(500),
+                                    token.child_token(),
+                                );
+                            let processor = EventProcessor {
+                                namespace: namespace.clone(),
+                                mutator: mutator.clone(),
+                                address_selector: selector.clone(),
+                                cluster_update_batcher: cluster_update_batcher.clone(),
+                                servers: Default::default(),
+                            };
+
                             gs_streams.spawn(Self::result_stream(
                                 health_check.clone(),
                                 k8s::update_endpoints_from_gameservers(
                                     client.clone(),
                                     namespace.clone(),
-                                    clusters.clone(),
-                                    locality.clone(),
-                                    selector.clone(),
+                                    processor,
                                 ),
                             ));
                         }
@@ -487,10 +583,10 @@ impl Providers {
     ) -> crate::Result<()> {
         tokio::pin!(stream);
         loop {
-            match stream.try_next().await {
-                Ok(Some(_)) => health_check.store(true, Ordering::SeqCst),
-                Ok(None) => break Err(eyre::eyre!("kubernetes watch stream terminated")),
-                Err(error) => break Err(error),
+            if stream.try_next().await?.is_some() {
+                health_check.store(true, Ordering::SeqCst);
+            } else {
+                eyre::bail!("kubernetes watch stream terminated");
             }
         }
     }
@@ -607,14 +703,25 @@ impl Providers {
         self.mmdb.is_some()
     }
 
+    pub fn corrosion_enabled(&self) -> bool {
+        self.corrosion_mode
+            .is_some_and(|_cm| !self.corrosion_endpoints.is_empty())
+    }
+
+    pub fn http_enabled(&self) -> bool {
+        self.http_enabled
+    }
+
     pub fn any_provider_enabled(&self) -> bool {
         self.agones_enabled()
             || self.fs_enabled()
             || self.grpc_pull_enabled()
             || self.grpc_push_enabled()
+            || self.http_enabled()
             || self.k8s_enabled()
             || self.mmdb_enabled()
             || self.static_enabled()
+            || self.corrosion_enabled()
     }
 
     /// Adds the required typemap entries to the config depending on what providers are enabled
@@ -649,21 +756,29 @@ impl Providers {
             self.fs_enabled().then_some("fs"),
             self.grpc_pull_enabled().then_some("mDS"),
             self.grpc_push_enabled().then_some("xDS"),
+            self.http_enabled().then_some("http"),
             self.k8s_enabled().then_some("k8s"),
             self.mmdb_enabled().then_some("mmdb"),
             self.static_enabled().then_some("static"),
+            self.corrosion_enabled().then_some("corrosion"),
         ].into_iter().flatten().collect::<Vec<&str>>(), "starting configuration providers");
 
         if self.mmdb_enabled() {
             providers.spawn(self.spawn_mmdb_provider());
         }
 
+        let mutator = self.maybe_spawn_corrosion(config, &health_check, &mut providers);
+
+        if mutator.is_some() && self.fs_enabled() {
+            tracing::error!("corrosion mutation does not work with file system data");
+        };
+
         if self.grpc_push_enabled() {
             providers.spawn(self.spawn_mds_provider(
                 config.clone(),
                 health_check.clone(),
                 locality.clone(),
-                shutdown,
+                shutdown.clone(),
             ));
         }
 
@@ -672,6 +787,8 @@ impl Providers {
                 health_check.clone(),
                 locality.clone(),
                 config,
+                mutator.clone(),
+                shutdown,
             ));
         }
 
@@ -706,6 +823,21 @@ impl Providers {
             ));
         }
 
+        if self.http_enabled()
+            && let Some(fc) = FiltersAndClusters::new(config)
+        {
+            let address = self
+                .http_address
+                .unwrap_or_else(|| (std::net::Ipv6Addr::UNSPECIFIED, http::DEFAULT_PORT).into());
+            let health_check = health_check.clone();
+
+            providers.spawn(Self::task(
+                "http_provider".into(),
+                health_check.clone(),
+                move || http::serve(fc.clone(), address, health_check.clone()),
+            ));
+        }
+
         if let Some(fc) = self
             .static_enabled()
             .then(|| FiltersAndClusters::new(config))
@@ -713,7 +845,7 @@ impl Providers {
         {
             health_check.store(true, Ordering::SeqCst);
             providers.spawn(
-                self.spawn_static_provider(fc, &health_check, locality.clone())
+                self.spawn_static_provider(fc, &health_check, locality.clone(), mutator)
                     .unwrap(),
             );
         }

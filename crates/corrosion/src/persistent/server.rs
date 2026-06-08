@@ -1,11 +1,15 @@
-use crate::{Peer, codec, persistent::proto, pubsub};
+use crate::{
+    Peer, codec,
+    persistent::proto,
+    pubsub::{self, PubsubContext},
+};
 use quilkin_types::IcaoCode;
 use quinn::{RecvStream, SendStream};
 use std::net::{IpAddr, SocketAddr};
 use tokio_stream::StreamExt;
 use tracing::Instrument as _;
 
-use super::error::ErrorCode;
+use super::{error::ErrorCode, update_metric};
 
 /// The current version of the server stream
 ///
@@ -17,7 +21,7 @@ pub const VERSION: u16 = 1;
 
 /// Trait used by a server implementation to perform database mutations
 #[async_trait::async_trait]
-pub trait Mutator: Sync + Send + Clone {
+pub trait DbMutator: Sync + Send + Clone {
     /// A new mutation client has connected
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16);
     /// A mutation client wants to perform 1 or more database mutations
@@ -30,19 +34,11 @@ pub trait Mutator: Sync + Send + Clone {
     async fn disconnected(&self, peer: Peer);
 }
 
-/// Trait used by a server implementation to perform database subscriptions
-#[async_trait::async_trait]
-pub trait SubManager: Sync + Send + Clone {
-    async fn subscribe(
-        &self,
-        subp: pubsub::SubParamsv1,
-    ) -> Result<pubsub::Subscription, pubsub::MatcherUpsertError>;
-}
-
 pub struct Server {
     endpoint: quinn::Endpoint,
     task: tokio::task::JoinHandle<()>,
     local_addr: SocketAddr,
+    pubsub_ctx: PubsubContext,
 }
 
 struct ValidRequest {
@@ -91,15 +87,28 @@ impl From<IoLoopError> for ErrorCode {
 }
 
 impl Server {
+    fn transport_config() -> quinn::TransportConfig {
+        let mut tc = quinn::TransportConfig::default();
+        // By default quinn uses an idle timeout of 30 seconds
+        tc.keep_alive_interval(Some(std::time::Duration::from_secs(20)));
+        tc
+    }
+
     pub fn new_unencrypted(
         addr: SocketAddr,
-        executor: impl Mutator + 'static,
-        subs: impl SubManager + 'static,
+        mutator: impl DbMutator + 'static,
+        subs: PubsubContext,
+        metrics: super::Metrics,
     ) -> std::io::Result<Self> {
-        let endpoint = quinn::Endpoint::server(quinn_plaintext::server_config(), addr)?;
+        let mut sc = quinn_plaintext::server_config();
+        sc.transport_config(std::sync::Arc::new(Self::transport_config()));
+
+        let endpoint = quinn::Endpoint::server(sc, addr)?;
 
         let local_addr = endpoint.local_addr()?;
         let ep = endpoint.clone();
+        let pubsub_ctx = subs.clone();
+
         let task = tokio::task::spawn(async move {
             while let Some(inc) = ep.accept().await {
                 if !inc.remote_address_validated() {
@@ -108,8 +117,9 @@ impl Server {
                 }
 
                 let peer_ip = inc.remote_address();
-                let exec = executor.clone();
+                let mutator = mutator.clone();
                 let usbs = subs.clone();
+                let metrics = metrics.clone();
 
                 tokio::spawn(async move {
                     let peer = match inc.remote_address().ip() {
@@ -128,15 +138,33 @@ impl Server {
                         }
                     };
 
+                    metrics.active.with_label_values::<&str>(&[]).inc();
+
+                    // Periodically update the tx/rx stats of this connection
+                    let mut metrics_update = tokio::time::interval(std::time::Duration::from_secs(10));
+
+                    let stats = connection.stats();
+
+                    let mut tx_count = 0;
+                    let mut tx_bytes = 0;
+                    let mut rx_count = 0;
+                    let mut rx_bytes = 0;
+
+                    update_metric(&metrics.tx_count, &mut tx_count, stats.udp_tx.datagrams);
+                    update_metric(&metrics.tx_bytes, &mut tx_bytes, stats.udp_tx.bytes);
+                    update_metric(&metrics.rx_count, &mut rx_count, stats.udp_rx.datagrams);
+                    update_metric(&metrics.rx_bytes, &mut rx_bytes, stats.udp_rx.bytes);
+
                     loop {
                         tokio::select! {
                             res = Self::read_request(peer, &connection) => {
                                 match res {
                                     Ok(vr) => {
-                                        let exec = exec.clone();
+                                        let mutator = mutator.clone();
                                         let usbs = usbs.clone();
+
                                         tokio::spawn(async move {
-                                            Self::handle_request(vr, exec, usbs).await;
+                                            Self::handle_request(vr, mutator, usbs).await;
                                         });
                                     }
                                     Err(error) => {
@@ -144,12 +172,21 @@ impl Server {
                                     }
                                 }
                             }
+                            _ = metrics_update.tick() => {
+                                let stats = connection.stats();
+                                update_metric(&metrics.tx_count, &mut tx_count, stats.udp_tx.datagrams);
+                                update_metric(&metrics.tx_bytes, &mut tx_bytes, stats.udp_tx.bytes);
+                                update_metric(&metrics.rx_count, &mut rx_count, stats.udp_rx.datagrams);
+                                update_metric(&metrics.rx_bytes, &mut rx_bytes, stats.udp_rx.bytes);
+                            }
                             reason = connection.closed() => {
                                 tracing::info!(%reason, "peer closed connection");
                                 break;
                             }
                         }
                     }
+
+                    metrics.active.with_label_values::<&str>(&[]).dec();
                 }.instrument(tracing::info_span!("remote connection", %peer_ip))
                 );
             }
@@ -159,6 +196,7 @@ impl Server {
             endpoint,
             task,
             local_addr,
+            pubsub_ctx,
         })
     }
 
@@ -195,8 +233,8 @@ impl Server {
     /// Handles a single request (really, stream)
     async fn handle_request(
         req: ValidRequest,
-        exec: impl Mutator + 'static,
-        subs: impl SubManager + 'static,
+        mutator: impl DbMutator + 'static,
+        subs: PubsubContext,
     ) {
         let ValidRequest {
             mut send,
@@ -207,7 +245,7 @@ impl Server {
 
         let result = match request {
             proto::Request::V1(inner) => {
-                v1_impl::handle_stream(inner, peer, &mut send, &mut recv, exec, subs).await
+                v1_impl::handle_stream(inner, peer, &mut send, &mut recv, mutator, subs).await
             }
         };
 
@@ -236,6 +274,9 @@ impl Server {
         self.endpoint
             .close(quinn::VarInt::from_u32(0), reason.as_bytes());
         drop(self.task.await);
+
+        // Cleans up all of the subscription databases
+        self.pubsub_ctx.shutdown().await;
     }
 
     #[inline]
@@ -262,9 +303,9 @@ mod v1_impl {
         peer: Peer,
         send: &mut SendStream,
         recv: &mut RecvStream,
-        exec: impl Mutator + 'static,
+        mutator: impl DbMutator + 'static,
     ) -> Result<(), IoLoopError> {
-        exec.connected(peer, req.icao, req.qcmp_port).await;
+        mutator.connected(peer, req.icao, req.qcmp_port).await;
 
         send_response(
             send,
@@ -277,14 +318,14 @@ mod v1_impl {
                 let to_exec =
                     codec::read_length_prefixed_jsonb::<Vec<v1::ServerChange>>(recv).await?;
 
-                let response = exec.execute(peer, &to_exec).await;
+                let response = mutator.execute(peer, &to_exec).await;
                 let response = codec::write_length_prefixed_jsonb(&response)?;
                 send.write_chunk(response.freeze()).await?;
             }
         };
 
         let res = io_loop().await;
-        exec.disconnected(peer).await;
+        mutator.disconnected(peer).await;
         res
     }
 
@@ -292,7 +333,7 @@ mod v1_impl {
         req: v1::SubscribeRequest,
         peer: Peer,
         send: &mut SendStream,
-        subs: impl SubManager + 'static,
+        subs: PubsubContext,
     ) -> Result<(), IoLoopError> {
         let max_buffer = req.0.max_buffer;
         let max_time = req.0.max_time;
@@ -341,6 +382,13 @@ mod v1_impl {
 
                 let res = io_loop().await;
                 tracing::debug!(result = ?res, "subscription stream ended");
+
+                // For now we don't care about restoring subscriptions and just always do state of the world on initial
+                // connection for simplicity
+                if !subs.remove(&sub_id).await {
+                    tracing::warn!(%peer, %sub_id, "failed to find subscription for termination stream");
+                }
+
                 res
             }
             Err(err) => {
@@ -381,12 +429,19 @@ mod v1_impl {
         peer: Peer,
         send: &mut SendStream,
         recv: &mut RecvStream,
-        exec: impl Mutator + 'static,
-        subs: impl SubManager + 'static,
+        mutator: impl DbMutator + 'static,
+        subs: PubsubContext,
     ) -> Result<(), IoLoopError> {
         match request {
-            v1::Request::Mutate(mreq) => handle_mutate(mreq, peer, send, recv, exec).await,
-            v1::Request::Subscribe(sreq) => handle_subscribe(sreq, peer, send, subs).await,
+            v1::Request::Mutate(mreq) => handle_mutate(mreq, peer, send, recv, mutator).await,
+            v1::Request::Subscribe(sreq) => {
+                let query = sreq.0.query.query().to_owned();
+                handle_subscribe(sreq, peer, send, subs)
+                    .instrument(
+                        tracing::debug_span!("subscribe", %peer, id = recv.id().index(), query),
+                    )
+                    .await
+            }
         }
     }
 }

@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-cfg_if::cfg_if! {
-    if #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))] {
+cfg_select! {
+    all(feature = "jemalloc", not(target_env = "msvc")) => {
         use tikv_jemalloc_ctl::stats;
 
         struct JemallocCollector {
@@ -160,7 +160,8 @@ cfg_if::cfg_if! {
                 Err(error) => tracing::error!(?error, "failed to create JemallocCollector"),
             }
         }
-    } else if #[cfg(feature = "heap-stats")] {
+    }
+    feature = "heap-stats" =>  {
         /// Spawns a task to periodically update the heap stat metrics from our tracking allocator
         pub fn spawn_heap_stats_updates(period: std::time::Duration, mut srx: crate::signal::ShutdownRx) {
             use crate::metrics::registry;
@@ -245,9 +246,8 @@ cfg_if::cfg_if! {
                 }
             });
         }
-    } else if #[cfg(feature = "mimalloc")] {
-        pub fn spawn_heap_stats_updates(_period: std::time::Duration, _srx: crate::signal::ShutdownRx) {}
-    } else {
+    }
+    _ => {
         pub fn spawn_heap_stats_updates(_period: std::time::Duration, _srx: crate::signal::ShutdownRx) {}
     }
 }

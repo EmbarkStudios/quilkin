@@ -1,13 +1,18 @@
 //! Deserialization of changes sent from a corrosion agent
 
 pub use corro_api_types::{QueryEvent, SqliteValue};
-use eyre::ContextCompat as _;
+use eyre::{ContextCompat as _, WrapErr as _};
 use quilkin_types::{AddressKind, Endpoint, IcaoCode, TokenSet};
 use serde::{
     Deserialize,
     de::{self, SeqAccess},
 };
-use std::{collections::BTreeSet, fmt, str::FromStr};
+use std::{
+    collections::BTreeSet,
+    fmt,
+    net::{IpAddr, Ipv6Addr},
+    str::FromStr,
+};
 
 pub trait FromSqlValue: Sized {
     fn from_sql(values: &[SqliteValue]) -> eyre::Result<Self>;
@@ -20,14 +25,15 @@ pub struct ServerRow {
     pub tokens: TokenSet,
 }
 
-pub fn deserialize_token_set(s: &str) -> eyre::Result<TokenSet> {
+pub fn deserialize_token_set(s: Option<&str>) -> eyre::Result<TokenSet> {
     let mut ts = BTreeSet::default();
 
-    let mut tokens = data_encoding::BASE64_NOPAD.decode(s.as_bytes())?;
-
-    if tokens.is_empty() {
+    let Some(mut tokens) = s.and_then(|s| {
+        let dec = data_encoding::BASE64_NOPAD.decode(s.as_bytes()).ok()?;
+        (!dec.is_empty()).then_some(dec)
+    }) else {
         return Ok(TokenSet(ts));
-    }
+    };
 
     if tokens[0] & 0x80u8 != 0 {
         let len = (tokens[0] & !0x80) as usize;
@@ -71,7 +77,15 @@ macro_rules! get_column {
         $v.get($index)
             .context(concat!("missing column '", $name, "'"))?
             .as_str()
-            .context(concat!("column '", $name, "' is not a string"))?
+    };
+    (req $index:expr, $name:literal, $v:expr) => {
+        get_column!($index, $name, $v).with_context(|| {
+            format!(
+                "{}: {}",
+                concat!("column '", $name, "(", $index, ")' is not a string"),
+                $v[$index]
+            )
+        })?
     };
 }
 
@@ -86,8 +100,9 @@ macro_rules! get_json {
 
 impl FromSqlValue for ServerRow {
     fn from_sql(values: &[SqliteValue]) -> eyre::Result<Self> {
-        let endpoint = parse_endpoint(get_column!(0, "endpoint", values))?;
-        let icao = get_column!(1, "icao", values).parse()?;
+        let endpoint = parse_endpoint(get_column!(req 0, "endpoint", values))?;
+        let icao =
+            get_column!(1, "icao", values).map_or(Ok(IcaoCode::default()), IcaoCode::from_str)?;
         let tokens = deserialize_token_set(get_column!(2, "tokens", values))?;
 
         Ok(Self {
@@ -133,6 +148,42 @@ impl<'de> Deserialize<'de> for ServerRow {
         }
 
         deserializer.deserialize_seq(Visitor)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct DatacenterRow {
+    pub ip: IpAddr,
+    pub icao: IcaoCode,
+    pub qcmp_port: u16,
+}
+
+impl FromSqlValue for DatacenterRow {
+    fn from_sql(values: &[SqliteValue]) -> eyre::Result<Self> {
+        let ip = get_column!(req 0, "ip", values).parse::<Ipv6Addr>()?;
+
+        // We always store in IPv6, but (currently) the datacenter map
+        // uses IpAddr, so convert here, but note that IpAddr::from does not
+        // handle if it is an ipv4 mapped address
+        let ip = ip.to_ipv4_mapped().map_or(IpAddr::V6(ip), IpAddr::V4);
+
+        let qcmp_port = values
+            .get(1)
+            .context("missing column 'port'")?
+            .as_integer()
+            .context("column 'port' is not an integer")?;
+
+        let qcmp_port = (*qcmp_port)
+            .try_into()
+            .context("qcmp port was not within expected range")?;
+
+        let icao = get_column!(req 2, "icao", values).parse()?;
+
+        Ok(Self {
+            ip,
+            icao,
+            qcmp_port,
+        })
     }
 }
 

@@ -16,23 +16,22 @@
 
 pub mod agones;
 
-use std::collections::BTreeSet;
-
+use eyre::ContextCompat;
 use futures::Stream;
 use k8s_openapi::api::core::v1::ConfigMap;
-use kube::{core::DeserializeGuard, runtime::watcher::Event};
-use kube_leader_election::{LeaseLock, LeaseLockParams};
+use kube::{
+    core::DeserializeGuard,
+    runtime::{WatchStreamExt as _, watcher::Event},
+};
 
 use agones::GameServer;
 
-use crate::{
-    config, metrics,
-    net::{ClusterMap, endpoint::Locality},
-};
+use crate::{config, metrics};
 
 const CONFIGMAP: &str = "v1/ConfigMap";
 const GAMESERVER: &str = "agones.dev/v1/GameServer";
 
+#[inline]
 fn track_event<T>(kind: &'static str, event: Event<T>) -> Event<T> {
     let ty = match &event {
         Event::Apply(_) => "apply",
@@ -46,32 +45,50 @@ fn track_event<T>(kind: &'static str, event: Event<T>) -> Event<T> {
     event
 }
 
+const LEADER_LEASE_DURATION: kube_lease_manager::DurationSeconds = 3;
+const LEADER_LEASE_RENEW_INTERVAL: kube_lease_manager::DurationSeconds = 1;
+
 pub(crate) async fn update_leader_lock(
     client: kube::Client,
     namespace: impl AsRef<str>,
     lease_name: impl Into<String>,
     holder_id: impl Into<String>,
     leader_lock: config::LeaderLock,
+    mut shutdown: tokio::sync::watch::Receiver<()>,
 ) -> crate::Result<()> {
-    let leadership = LeaseLock::new(
-        client,
-        namespace.as_ref(),
-        LeaseLockParams {
-            holder_id: holder_id.into(),
-            lease_name: lease_name.into(),
-            lease_ttl: std::time::Duration::from_secs(1),
-        },
-    );
+    let manager = kube_lease_manager::LeaseManagerBuilder::new(client, lease_name)
+        .with_namespace(namespace.as_ref())
+        .with_identity(holder_id)
+        .with_grace(LEADER_LEASE_RENEW_INTERVAL)
+        .with_duration(LEADER_LEASE_DURATION)
+        .build()
+        .await?;
 
     loop {
-        match leadership.try_acquire_or_renew().await {
-            Ok(ll) => leader_lock.store(ll.acquired_lease),
-            Err(error) => tracing::warn!(%error),
+        tokio::select! {
+            lock_state = manager.changed() => {
+                match lock_state {
+                    Ok(state) => {
+                        leader_lock.store(state);
+                    },
+                    Err(error) => {
+                        tracing::error!(%error, "lease manager error");
+                    },
+                }
+            }
+            _ = shutdown.changed() => {
+                // Release lock gracefully
+                leader_lock.store(false);
+                if let Err(error) = manager.release().await {
+                    tracing::error!(%error, "error releasing lock");
+                }
+                break
+            }
         }
-
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
+    Ok(())
 }
+
 pub fn update_filters_from_configmap(
     client: kube::Client,
     namespace: impl AsRef<str>,
@@ -85,7 +102,7 @@ pub fn update_filters_from_configmap(
             let event = match event {
                 Ok(event) => event,
                 Err(error) => {
-                    metrics::k8s::errors_total(CONFIGMAP, &error).inc();
+                    metrics::k8s::errors_total(CONFIGMAP, "watch_error").inc();
                     yield Err(error.into());
                     continue;
                 }
@@ -117,8 +134,8 @@ pub fn update_filters_from_configmap(
                 }
             };
 
-            let data = configmap.data.ok_or_else(|| eyre::eyre!("configmap data missing"))?;
-            let data = data.get("quilkin.yaml").ok_or_else(|| eyre::eyre!("quilkin.yaml property not found"))?;
+            let data = configmap.data.context("configmap data missing")?;
+            let data = data.get("quilkin.yaml").context("quilkin.yaml property not found")?;
             let data: serde_json::Map<String, serde_json::Value> = serde_yaml::from_str(data)?;
 
             if let Some(de_filters) = data
@@ -143,11 +160,12 @@ fn configmap_events(
     let config_namespace = namespace.as_ref();
     let configmap: kube::Api<ConfigMap> = kube::Api::namespaced(client, config_namespace);
     let config_writer = kube::runtime::reflector::store::Writer::<ConfigMap>::default();
-    let configmap_stream = kube::runtime::watcher(
+    kube::runtime::watcher(
         configmap,
         kube::runtime::watcher::Config::default().labels("quilkin.dev/configmap=true"),
-    );
-    kube::runtime::reflector(config_writer, configmap_stream)
+    )
+    .default_backoff()
+    .reflect(config_writer)
 }
 
 fn gameserver_events(
@@ -167,42 +185,207 @@ fn gameserver_events(
     // Retreive unbounded results.
     config.page_size = None;
 
-    let gameserver_stream = kube::runtime::watcher(gameservers, config);
-    kube::runtime::reflector(gs_writer, gameserver_stream)
+    kube::runtime::watcher(gameservers, config)
+        .default_backoff()
+        .reflect(gs_writer)
 }
 
-fn validate_gameserver(
-    result: DeserializeGuard<GameServer>,
-    ads: Option<&crate::config::AddressSelector>,
-) -> Option<crate::net::endpoint::Endpoint> {
-    match result.0 {
-        Ok(server) => {
-            if server.is_allocated() {
-                if let Some(ep) = server.endpoint(ads) {
-                    tracing::trace!(endpoint=%ep.address, metadata=serde_json::to_string(&ep.metadata).unwrap(), "applying server");
-                    metrics::k8s::gameservers_total_valid();
-                    Some(ep)
-                } else {
-                    tracing::warn!(
-                        server = serde_json::to_string(&server).unwrap(),
-                        "skipping invalid server"
-                    );
-                    metrics::k8s::gameservers_total_invalid();
-                    None
-                }
-            } else {
-                tracing::debug!(
-                    server = serde_json::to_string(&server).unwrap(),
-                    "skipping unallocated server"
-                );
-                metrics::k8s::gameservers_total_unallocated();
+#[inline]
+fn get_uid(res: &DeserializeGuard<GameServer>) -> Option<uuid::Uuid> {
+    res.0.as_ref().ok().and_then(|gs| {
+        let Some(uid) = gs.metadata.uid.as_ref() else {
+            tracing::warn!("gameserver does not have a uid field");
+            return None;
+        };
+
+        match uuid::Uuid::parse_str(uid) {
+            Ok(uid) => Some(uid),
+            Err(error) => {
+                tracing::warn!(uid, %error, "failed to parse uid field");
                 None
             }
         }
-        Err(error) => {
-            tracing::debug!(error=%error.error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
-            metrics::k8s::errors_total(GAMESERVER, &error);
-            None
+    })
+}
+
+#[inline]
+fn get_simple_endpoint_and_token_set(
+    endpoint: &crate::net::endpoint::Endpoint,
+) -> (quilkin_types::Endpoint, quilkin_types::TokenSet) {
+    (
+        quilkin_types::Endpoint::new(endpoint.address.host.clone(), endpoint.address.port),
+        endpoint.metadata.known.tokens.clone(),
+    )
+}
+
+pub struct EventProcessor {
+    pub namespace: String,
+    pub address_selector: Option<config::AddressSelector>,
+    pub mutator: Option<crate::providers::corrosion::ServerMutator>,
+    pub cluster_update_batcher: crate::net::cluster::ClusterUpdateBatcher,
+    /// Keeps track of servers added during `InitApply`
+    pub servers: std::collections::BTreeMap<crate::net::endpoint::Endpoint, Option<uuid::Uuid>>,
+}
+
+impl EventProcessor {
+    // Returns an Endpoint metadata filter that returns true if the endpoint was generated by this
+    // EventProcessor
+    fn metadata_source_filter(&self) -> impl Fn(&crate::net::endpoint::EndpointMetadata) -> bool {
+        let namespace: serde_json::Value = self.namespace.clone().into();
+        move |metadata| {
+            if let Some(md_namespace) = metadata.unknown.get("namespace") {
+                *md_namespace == namespace
+            } else {
+                false
+            }
+        }
+    }
+
+    /// Processes a kubernetes game server event, applying it to update our
+    /// state snapshot
+    pub fn process_event(&mut self, event: Event<DeserializeGuard<GameServer>>) {
+        use crate::net::cluster::EndpointSetUpdateAction::{
+            RemoveByEndpoint, RemoveByName, Upsert,
+        };
+        match event {
+            Event::Apply(result) => {
+                let span = tracing::trace_span!("k8s::gameservers::apply");
+                let _enter = span.enter();
+                let uid = get_uid(&result);
+                let Some(endpoint) = self.validate_gameserver(result) else {
+                    return;
+                };
+                tracing::debug!(namespace=%self.namespace, endpoint=%serde_json::to_value(&endpoint).unwrap(), "Adding endpoint");
+                metrics::k8s::gameservers_total_valid();
+
+                if let Some(mutator) = self.mutator.as_ref() {
+                    if let Some(uid) = uid {
+                        let (ep, ts) = get_simple_endpoint_and_token_set(&endpoint);
+                        mutator.upsert_server(uid, ep, ts);
+                    } else {
+                        tracing::warn!(namespace=%self.namespace, "apply event gameserverspec did not specify a valid UID");
+                    }
+                }
+
+                self.cluster_update_batcher.push(Upsert(endpoint));
+            }
+            Event::Init => {}
+            Event::InitApply(result) => {
+                let span = tracing::trace_span!("k8s::gameservers::init_apply");
+                let _enter = span.enter();
+                let uid = get_uid(&result);
+                let Some(endpoint) = self.validate_gameserver(result) else {
+                    return;
+                };
+
+                tracing::trace!(namespace=%self.namespace, %endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "applying server");
+                metrics::k8s::gameservers_total_valid();
+                self.servers.insert(endpoint, uid);
+            }
+            Event::InitDone => {
+                let span = tracing::trace_span!("k8s::gameservers::init_done");
+                let _enter = span.enter();
+                tracing::debug!(namespace=%self.namespace, "received restart event from k8s");
+
+                tracing::trace!(
+                    namespace=%self.namespace,
+                    num_endpoints = self.servers.len(),
+                    "Restarting with endpoints"
+                );
+
+                if let Some(mutator) = self.mutator.as_ref() {
+                    // If we already have servers, we need to remove them if
+                    // they weren't part of the set streamed during the init
+                    let new_set = self
+                        .servers
+                        .iter()
+                        .filter_map(|(ep, uid)| {
+                            let Some(uid) = uid else {
+                                return None;
+                            };
+                            let data = get_simple_endpoint_and_token_set(ep);
+                            Some((*uid, data))
+                        })
+                        .collect();
+
+                    mutator.replace(new_set);
+                }
+
+                let servers = std::mem::take(&mut self.servers).into_keys().collect();
+                self.cluster_update_batcher.partial_replace(
+                    crate::net::cluster::EndpointSet::new(servers),
+                    self.metadata_source_filter(),
+                );
+            }
+            Event::Delete(result) => {
+                let span = tracing::trace_span!("k8s::gameservers::delete");
+                let _enter = span.enter();
+                let uid = get_uid(&result);
+                let server = match result.0 {
+                    Ok(server) => server,
+                    Err(error) => {
+                        metrics::k8s::errors_total(GAMESERVER, "invalid_object").inc();
+                        tracing::debug!(namespace=%self.namespace, %error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
+                        return;
+                    }
+                };
+
+                if let Some((uid, mutator)) = uid.zip(self.mutator.as_ref()) {
+                    mutator.remove_server(uid);
+                }
+
+                let endpoint = server.endpoint(self.address_selector.as_ref());
+                if let Some(endpoint) = endpoint {
+                    self.cluster_update_batcher.push(RemoveByEndpoint(endpoint));
+                } else if let Some(name) = server.metadata.name {
+                    self.cluster_update_batcher.push(RemoveByName(name));
+                } else {
+                    tracing::warn!(
+                        namespace=%self.namespace,
+                        server.metadata =
+                            serde_json::to_string(&server.metadata).unwrap_or(String::new()),
+                        "couldn't delete gameserver without endpoint or name"
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn validate_gameserver(
+        &self,
+        result: DeserializeGuard<GameServer>,
+    ) -> Option<crate::net::endpoint::Endpoint> {
+        match result.0 {
+            Ok(server) => {
+                if server.is_allocated() {
+                    if let Some(ep) = server.endpoint(self.address_selector.as_ref()) {
+                        tracing::trace!(namespace=%self.namespace, endpoint=%ep.address, metadata=serde_json::to_string(&ep.metadata).unwrap(), "applying server");
+                        metrics::k8s::gameservers_total_valid();
+                        Some(ep)
+                    } else {
+                        tracing::warn!(
+                            namespace=%self.namespace,
+                            server = serde_json::to_string(&server).unwrap(),
+                            "skipping invalid server"
+                        );
+                        metrics::k8s::gameservers_total_invalid();
+                        None
+                    }
+                } else {
+                    tracing::debug!(
+                        namespace=%self.namespace,
+                        server = serde_json::to_string(&server).unwrap(),
+                        "skipping unallocated server"
+                    );
+                    metrics::k8s::gameservers_total_unallocated();
+                    None
+                }
+            }
+            Err(error) => {
+                tracing::debug!(namespace=%self.namespace, error=%error.error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
+                metrics::k8s::errors_total(GAMESERVER, "invalid_object").inc();
+                None
+            }
         }
     }
 }
@@ -210,99 +393,26 @@ fn validate_gameserver(
 pub fn update_endpoints_from_gameservers(
     client: kube::Client,
     namespace: impl AsRef<str>,
-    clusters: config::Watch<ClusterMap>,
-    locality: Option<Locality>,
-    address_selector: Option<crate::config::AddressSelector>,
+    mut processor: EventProcessor,
 ) -> impl Stream<Item = crate::Result<(), eyre::Error>> {
     async_stream::stream! {
-        let mut servers = BTreeSet::new();
+        metrics::k8s::active(true);
 
         for await event in gameserver_events(client, namespace) {
-            let ads = address_selector.as_ref();
             let event = match event {
                 Ok(event) => event,
                 Err(error) => {
-                    tracing::warn!(%error, "gameserver watch error");
+                    metrics::k8s::errors_total(GAMESERVER, "watch_error").inc();
+                    tracing::warn!(namespace=%processor.namespace, %error, "gameserver watch error");
                     continue;
                 }
             };
 
-            match track_event(GAMESERVER, event) {
-                Event::Apply(result) => {
-                    let span = tracing::trace_span!("k8s::gameservers::apply");
-                    let _enter = span.enter();
-                    let Some(endpoint) = validate_gameserver(result, ads) else {
-                        continue;
-                    };
-                    tracing::debug!(endpoint=%serde_json::to_value(&endpoint).unwrap(), "Adding endpoint");
-                    metrics::k8s::gameservers_total_valid();
-                    clusters.write().replace(None, locality.clone(), endpoint);
-                }
-                Event::Init => {},
-                Event::InitApply(result) => {
-                    let span = tracing::trace_span!("k8s::gameservers::init_apply");
-                    let _enter = span.enter();
-                    let Some(endpoint) = validate_gameserver(result, ads) else {
-                        continue;
-                    };
+            processor.process_event(track_event(GAMESERVER, event));
 
-                    tracing::trace!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "applying server");
-                    metrics::k8s::gameservers_total_valid();
-                    servers.insert(endpoint);
-                }
-                Event::InitDone => {
-                    let span = tracing::trace_span!("k8s::gameservers::init_done");
-                    let _enter = span.enter();
-                    tracing::debug!("received restart event from k8s");
-
-                    tracing::trace!(
-                        endpoints=%serde_json::to_value(servers.clone()).unwrap(),
-                        "Restarting with endpoints"
-                    );
-
-                    clusters.write().insert(None, locality.clone(), std::mem::take(&mut servers));
-                }
-                Event::Delete(result) => {
-                    let span = tracing::trace_span!("k8s::gameservers::delete");
-                    let _enter = span.enter();
-                    let server = match result.0 {
-                        Ok(server) => server,
-                        Err(error) => {
-                            metrics::k8s::errors_total(GAMESERVER, &error);
-                            tracing::debug!(%error, metadata=serde_json::to_string(&error.metadata).unwrap(), "couldn't decode gameserver event");
-                            continue;
-                        }
-                    };
-
-                    let found = if let Some(endpoint) = server.endpoint(ads) {
-                        tracing::debug!(%endpoint.address, endpoint.metadata=serde_json::to_string(&endpoint.metadata).unwrap(), "deleting by endpoint");
-                        clusters.write().remove_endpoint(&endpoint)
-                    } else {
-                        tracing::debug!(server.metadata.name=%server.metadata.name.clone().unwrap_or_default(), "deleting by server name");
-                        clusters.write().remove_endpoint_if(|endpoint| {
-                            endpoint.metadata.unknown.get("name") == server.metadata.name.clone().map(From::from).as_ref()
-                        })
-                    };
-
-                    metrics::k8s::gameservers_deletions_total(found);
-                    if !found {
-                        tracing::debug!(
-                            endpoint=%serde_json::to_value(server.endpoint(ads)).unwrap(),
-                            server.metadata.name=%serde_json::to_value(server.metadata.name).unwrap(),
-                            "received unknown gameserver to delete from k8s"
-                        );
-                    } else {
-                        tracing::debug!(
-                            endpoint=%serde_json::to_value(server.endpoint(ads)).unwrap(),
-                            server.metadata.name=%serde_json::to_value(server.metadata.name).unwrap(),
-                            "deleted gameserver"
-                        );
-                    }
-                }
-            };
-
-            crate::metrics::apply_clusters(&clusters);
             yield Ok(());
         }
+
+        metrics::k8s::active(false);
     }
 }

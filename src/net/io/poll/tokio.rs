@@ -55,7 +55,6 @@ impl crate::net::io::Listener {
             port,
             config,
             sessions,
-            buffer_pool,
         } = self;
 
         let thread_span =
@@ -85,9 +84,8 @@ impl crate::net::io::Listener {
                     sends_double_buffer = packet_queue.swap(sends_double_buffer);
 
                     for packet in sends_double_buffer.drain(..sends_double_buffer.len()) {
-                        let (result, _) = send_socket
-                            .send_to(packet.data, packet.destination.as_socket().unwrap())
-                            .await;
+                        let (result, _) =
+                            send_socket.send_to(packet.data, packet.destination).await;
                         let asn_info = packet.asn_info.as_ref().into();
                         match result {
                             Ok(size) => {
@@ -118,10 +116,11 @@ impl crate::net::io::Listener {
                 let _ = tx.send(());
             };
 
-            cfg_if::cfg_if! {
-                if #[cfg(debug_assertions)] {
+            cfg_select! {
+                debug_assertions => {
                     uring_inner_spawn!(inner_task.instrument(tracing::debug_span!("upstream").or_current()));
-                } else {
+                }
+                _ => {
                     uring_inner_spawn!(inner_task);
                 }
             }
@@ -129,9 +128,7 @@ impl crate::net::io::Listener {
             let mut destinations = Vec::with_capacity(1);
 
             loop {
-                // Initialize a buffer for the UDP packet. We use the maximum size of a UDP
-                // packet, which is the maximum value of 16 a bit integer.
-                let buffer = buffer_pool.clone().alloc();
+                let buffer = bytes::BytesMut::zeroed(2048);
 
                 tokio::select! {
                     received = socket.recv_from(buffer) => {
@@ -214,7 +211,7 @@ impl crate::net::sessions::SessionPool {
                         sends_double_buffer = pending_sends.swap(sends_double_buffer);
 
                         for packet in sends_double_buffer.drain(..sends_double_buffer.len()) {
-                            let destination = packet.destination.as_socket().unwrap();
+                            let destination = packet.destination;
                             tracing::trace!(
                                 %destination,
                                 length = packet.data.len(),
@@ -253,7 +250,7 @@ impl crate::net::sessions::SessionPool {
                 });
 
                 loop {
-                    let buf = pool.buffer_pool.clone().alloc();
+                    let buf = bytes::BytesMut::zeroed(2048);
                     tokio::select! {
                         received = socket.recv_from(buf) => {
                             let (result, buf) = received;

@@ -48,15 +48,15 @@ impl PacketQueueSender {
 
 pub struct SendPacket {
     /// The destination address of the packet
-    pub destination: socket2::SockAddr,
+    pub destination: std::net::SocketAddr,
     /// The packet data being sent
-    pub data: crate::collections::FrozenPoolBuffer,
+    pub data: bytes::Bytes,
     /// The asn info for the sender, used for metrics
     pub asn_info: Option<crate::net::maxmind_db::MetricsIpNetEntry>,
 }
 
-cfg_if::cfg_if! {
-    if #[cfg(target_os = "linux")] {
+cfg_select! {
+    target_os = "linux" => {
         pub type PacketQueueReceiver = crate::net::io::completion::io_uring::EventFd;
         type PacketQueueNotifier = crate::net::io::completion::io_uring::EventFdWriter;
 
@@ -69,7 +69,8 @@ cfg_if::cfg_if! {
         fn push(notify: &PacketQueueNotifier) {
             notify.write(1);
         }
-    } else {
+    }
+    _ => {
         pub type PacketQueueReceiver = tokio::sync::watch::Receiver<bool>;
         type PacketQueueNotifier = tokio::sync::watch::Sender<bool>;
 

@@ -14,7 +14,9 @@
 # limitations under the License.
 #
 
-.*
+# .*
+.claude
+.vscode
 !.gitignore
 !.gcloudignore
 !.dockerignore

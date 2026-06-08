@@ -48,8 +48,6 @@ impl filters::Packet for PacketWrapper {
 }
 
 impl filters::PacketMut for PacketWrapper {
-    type FrozenPacket = PacketWrapper;
-
     #[inline]
     fn extend_head(&mut self, bytes: &[u8]) {
         self.buffer
@@ -104,8 +102,8 @@ impl filters::PacketMut for PacketWrapper {
         }
     }
 
-    // Only used in the io-uring implementation
-    fn freeze(self) -> Self::FrozenPacket {
+    // Only used in the io-uring/reference implementations
+    fn freeze(self) -> bytes::Bytes {
         unreachable!();
     }
 }

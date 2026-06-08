@@ -20,9 +20,7 @@
 #include "CoreTypes.h"
 #include "Containers/StringConv.h"
 #include "Containers/UnrealString.h"
-#include "../Private/QuilkinLog.h"
-#include "../Private/QuilkinConcurrentMap.h"
-#include "../Private/QuilkinResult.h"
+#include "QuilkinResult.h"
 #include "IPAddress.h"
 
 #include "QuilkinEndpoint.generated.h"
@@ -33,40 +31,45 @@ struct ResolveError {};
 
 /* Represents a Quilkin proxy endpoint */
 USTRUCT()
-struct FQuilkinEndpoint {
-    GENERATED_BODY()
-    /* Same as `ToInternetAddr` but uses the `QcmpPort`. */
-    const TResult<TSharedRef<FInternetAddr>, ResolveError> ToInternetAddrBase(FQuilkinSocketSubsystem* SocketSubsystem, FString Host, uint16 Port) const;
-public:
-    UPROPERTY(config, EditAnywhere, Category = Quilkin)
-    FString Host;
-    UPROPERTY(config, EditAnywhere, Category = Quilkin)
-    uint16 QcmpPort = 7600;
-    UPROPERTY(config, EditAnywhere, Category = Quilkin)
-    uint16 TrafficPort = 7777;
-    UPROPERTY(config, EditAnywhere, Category = Quilkin)
-    FString Region;
+struct QUILKIN_API FQuilkinEndpoint
+{
+	GENERATED_BODY()
 
-    /* Resolves `Host` and `TrafficPort` into a `FInternetAddr`, providing a `ResolveError` if there was
-       problems resolving it.  */
-    const TResult<TSharedRef<FInternetAddr>, ResolveError> ToInternetAddr(FQuilkinSocketSubsystem* SocketSubsystem) const;
-    /* Same as `ToInternetAddr` but uses the `QcmpPort`. */
-    const TResult<TSharedRef<FInternetAddr>, ResolveError> ToQcmpInternetAddr(FQuilkinSocketSubsystem* SocketSubsystem) const;
+	UPROPERTY(config, EditAnywhere, Category = Quilkin)
+	FString Host;
 
-    const FString ToString() const
-    {
-        return FString::Printf(TEXT("%s:%d"), *Host, TrafficPort);
-    }
+	UPROPERTY(config, EditAnywhere, Category = Quilkin)
+	uint16 QcmpPort = 7600;
 
-    friend int32 GetTypeHash(const FQuilkinEndpoint& Endpoint)
-    {
-        return HashCombine(GetTypeHash(Endpoint.Host), GetTypeHash(Endpoint.TrafficPort));
-    }
+	UPROPERTY(config, EditAnywhere, Category = Quilkin)
+	uint16 TrafficPort = 7777;
 
-    friend bool operator==(const FQuilkinEndpoint& A, const FQuilkinEndpoint& B)
-    {
-        return A.Host == B.Host && A.TrafficPort == B.TrafficPort;
-    }
+	/* Resolves `Host` and `TrafficPort` into a `FInternetAddr`, providing a `ResolveError` if there was
+	   problems resolving it.  */
+	TResult<TSharedRef<FInternetAddr>, ResolveError> ToInternetAddr(FQuilkinSocketSubsystem* SocketSubsystem) const;
+	
+	/* Same as `ToInternetAddr` but uses the `QcmpPort`. */
+	TResult<TSharedRef<FInternetAddr>, ResolveError> ToQcmpInternetAddr(FQuilkinSocketSubsystem* SocketSubsystem) const;
+	
+	FString ToString() const
+	{
+		return FString::Printf(TEXT("%s:%d"), *Host, TrafficPort);
+	}
+
+	friend int32 GetTypeHash(const FQuilkinEndpoint& Endpoint)
+	{
+		return HashCombine(GetTypeHash(Endpoint.Host), GetTypeHash(Endpoint.TrafficPort));
+	}
+
+	friend bool operator==(const FQuilkinEndpoint& A, const FQuilkinEndpoint& B)
+	{
+		return A.Host == B.Host && A.TrafficPort == B.TrafficPort;
+	}
 };
 
-using EndpointPair = TTuple<FQuilkinEndpoint, int64>;
+/* Describe proxy's spacial attributes */
+struct FQuilkinTopology
+{
+	FString Region;
+	TMap</* Icao code */ FString, /* Distance nanos */ int64> DatacenterLatencies;
+};
