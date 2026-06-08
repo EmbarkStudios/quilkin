@@ -801,7 +801,7 @@ dependencies = [
 [[package]]
 name = "consul-client"
 version = "0.2.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#89dae0d0f04a9e010cbbb75ee43ebfb0ce61fe19"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ea94fc461b974702b621af9aa06f11317f8008c0"
 dependencies = [
  "camino",
  "http",
@@ -854,7 +854,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 [[package]]
 name = "corro-api-types"
 version = "0.2.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#89dae0d0f04a9e010cbbb75ee43ebfb0ce61fe19"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ea94fc461b974702b621af9aa06f11317f8008c0"
 dependencies = [
  "camino",
  "compact_str",
@@ -873,7 +873,7 @@ dependencies = [
 [[package]]
 name = "corro-base-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#89dae0d0f04a9e010cbbb75ee43ebfb0ce61fe19"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ea94fc461b974702b621af9aa06f11317f8008c0"
 dependencies = [
  "camino",
  "compact_str",
@@ -893,7 +893,7 @@ dependencies = [
 [[package]]
 name = "corro-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#89dae0d0f04a9e010cbbb75ee43ebfb0ce61fe19"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ea94fc461b974702b621af9aa06f11317f8008c0"
 dependencies = [
  "antithesis_sdk",
  "arc-swap",
@@ -908,7 +908,6 @@ dependencies = [
  "corro-base-types",
  "corro-utils",
  "deadpool",
- "enquote",
  "eyre",
  "fallible-iterator",
  "foca",
@@ -950,7 +949,7 @@ dependencies = [
 [[package]]
 name = "corro-utils"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#89dae0d0f04a9e010cbbb75ee43ebfb0ce61fe19"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ea94fc461b974702b621af9aa06f11317f8008c0"
 dependencies = [
  "eyre",
  "tokio",
@@ -1453,15 +1452,6 @@ name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
-
-[[package]]
-name = "enquote"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06c36cb11dbde389f4096111698d8b567c0720e3452fd5ac3e6b4e47e1939932"
-dependencies = [
- "thiserror 1.0.69",
-]
 
 [[package]]
 name = "enum-ordinalize"
@@ -3846,7 +3836,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn",
@@ -4995,7 +4985,7 @@ dependencies = [
 [[package]]
 name = "spawn"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#89dae0d0f04a9e010cbbb75ee43ebfb0ce61fe19"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ea94fc461b974702b621af9aa06f11317f8008c0"
 dependencies = [
  "futures",
  "parking_lot",
@@ -5039,7 +5029,7 @@ checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 [[package]]
 name = "sqlite-functions"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#89dae0d0f04a9e010cbbb75ee43ebfb0ce61fe19"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ea94fc461b974702b621af9aa06f11317f8008c0"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -5048,7 +5038,7 @@ dependencies = [
 [[package]]
 name = "sqlite-pool"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#89dae0d0f04a9e010cbbb75ee43ebfb0ce61fe19"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ea94fc461b974702b621af9aa06f11317f8008c0"
 dependencies = [
  "arc-swap",
  "deadpool",
@@ -5705,7 +5695,7 @@ dependencies = [
 [[package]]
 name = "tripwire"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#89dae0d0f04a9e010cbbb75ee43ebfb0ce61fe19"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ea94fc461b974702b621af9aa06f11317f8008c0"
 dependencies = [
  "futures",
  "futures-util",
