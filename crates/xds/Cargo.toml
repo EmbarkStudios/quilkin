@@ -16,7 +16,6 @@ quilkin-proto.workspace = true
 async-stream.workspace = true
 eyre.workspace = true
 fixedstr.workspace = true
-forwarded-header-value = "0.1.1"
 futures.workspace = true
 h2 = "0.4"
 once_cell.workspace = true

@@ -51,12 +51,27 @@ fn get_external_remote_addr<T>(request: &tonic::Request<T>) -> Option<std::net::
     let metadata = request.metadata();
     let forwarded_for = metadata
         .get(FORWARDED)
+        .and_then(|header| header.to_str().ok())
         .and_then(|header| {
-            header.to_str().ok().and_then(|value| {
-                forwarded_header_value::ForwardedHeaderValue::from_forwarded(value).ok()
-            })
-        })
-        .and_then(|header| header.remotest().forwarded_for_ip());
+            let s = header.trim();
+
+            // The old code used the forwarded-header-value crate to do this, we simplify it here since the use case was
+            // to use the remotest (left-most) forwarded-by value, if it was an IP
+
+            let left_most = s.split(';').find_map(|part| {
+                let part = part.trim();
+                (!part.is_empty()).then_some(part)
+            })?;
+
+            if let Some((key, value)) = left_most.split_once('=')
+                && key.eq_ignore_ascii_case("by")
+                && let Ok(ip) = value.parse::<std::net::IpAddr>()
+            {
+                Some(ip)
+            } else {
+                None
+            }
+        });
 
     forwarded_for
         .or_else(|| {
