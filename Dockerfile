@@ -33,21 +33,31 @@ COPY . /workspace
 WORKDIR /workspace
 RUN cargo chef prepare --recipe-path recipe.json
 
+# Cargo profile to build. Defaults to the optimised release profile; CI builds for the Agones
+# integration tests override this with `dev` for a much faster (unoptimised) build. Declared
+# per-stage (with the default repeated) because an ARG is scoped to the stage it is declared in.
+
 # --- Cook: build dependencies (cached when Cargo.lock unchanged) ---
 FROM chef AS cook
+ARG CARGO_PROFILE=lto
 COPY --from=planner /workspace/recipe.json /workspace/recipe.json
 WORKDIR /workspace
 RUN mkdir -p benches && echo 'fn main() {}' > benches/provider.rs && \
-    cargo chef cook --profile lto --recipe-path recipe.json
+    cargo chef cook --profile ${CARGO_PROFILE} --recipe-path recipe.json
 
 # --- Build quilkin ---
 FROM chef AS builder
+ARG CARGO_PROFILE=lto
 COPY --from=cook /workspace/target /workspace/target
 COPY . /workspace
 WORKDIR /workspace
 RUN cargo about generate license.html.hbs > license.html
 RUN cargo run -p proto-gen -- generate
-RUN cargo build --profile=lto
+# Build, then copy the binary to a profile-independent path. Cargo writes the `dev`
+# profile to target/debug and every other profile to target/<profile>.
+RUN cargo build --profile=${CARGO_PROFILE} && \
+    if [ "${CARGO_PROFILE}" = "dev" ]; then profile_dir="debug"; else profile_dir="${CARGO_PROFILE}"; fi && \
+    cp "target/${profile_dir}/quilkin" /workspace/quilkin-bin
 # Archive source of MPL/GPL/LGPL/CDDL licensed dependencies for inclusion in the image.
 # Review this list before each release.
 RUN set -eo pipefail && \
@@ -73,7 +83,7 @@ RUN groupadd --gid 65532 nonroot && \
 
 COPY --from=builder /workspace/license.html .
 COPY --from=builder /workspace/dependencies-src.zip .
-COPY --from=builder --chown=nonroot:nonroot /workspace/target/lto/quilkin .
+COPY --from=builder --chown=nonroot:nonroot /workspace/quilkin-bin /quilkin
 
 USER nonroot
 ENTRYPOINT ["/quilkin"]

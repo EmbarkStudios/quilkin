@@ -1,3 +1,12 @@
+# Run nested mise.toml tasks as `//path:task`, e.g. `mise run //crates/agones:test`.
+experimental_monorepo_root = true
+
+[monorepo]
+config_roots = ["crates/agones"]
+
+[settings]
+experimental = true
+
 [tools]
 cargo-insta = "latest"
 "cargo:mdbook-variables" = "latest"

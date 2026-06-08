@@ -1,3 +1,9 @@
+# The Agones integration tests each run in their own namespace, so they run in parallel. They
+# are slow (deploying to a cluster), so raise the slow-timeout warning threshold to avoid noise.
+[[profile.default.overrides]]
+filter = 'package(agones)'
+slow-timeout = { period = "60s" }
+
 [[profile.ci.overrides]]
 filter = 'test(multiple_subs)'
 retries = 2

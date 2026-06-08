@@ -1,0 +1,3 @@
+[tasks.test]
+description = "Run the Agones integration tests against a local kind cluster"
+run = "{{config_root}}/setup-kind.sh all"

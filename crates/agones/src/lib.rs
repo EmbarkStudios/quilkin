@@ -63,6 +63,8 @@ pub static CLIENT: OnceCell<Client> = OnceCell::const_new();
 pub const IMAGE_TAG: &str = "IMAGE_TAG";
 pub const PREV_IMAGE_TAG: &str = "PREV_IMAGE_TAG";
 const DELETE_DELAY_SECONDS: &str = "DELETE_DELAY_SECONDS";
+/// Overrides the host the data-path tests target; see [`data_path_host`].
+const HOST_OVERRIDE: &str = "AGONES_HOST_OVERRIDE";
 /// A simple udp server that returns packets that are sent to it.
 /// See: <https://github.com/googleforgames/agones/tree/main/examples/simple-game-server>
 /// for more details.
@@ -97,11 +99,15 @@ impl Client {
                     .await
                     .expect("Kubernetes client to be created");
 
+                let quilkin_image = env::var(IMAGE_TAG).expect(IMAGE_TAG);
+                // only the (disabled) cross-version upgrade tests need a distinct previous image.
+                let prev_quilkin_image =
+                    env::var(PREV_IMAGE_TAG).unwrap_or_else(|_| quilkin_image.clone());
                 Client {
                     kubernetes: client.clone(),
                     namespace: setup_namespace(client).await,
-                    quilkin_image: env::var(IMAGE_TAG).expect(IMAGE_TAG),
-                    prev_quilkin_image: env::var(PREV_IMAGE_TAG).expect(PREV_IMAGE_TAG),
+                    quilkin_image,
+                    prev_quilkin_image,
                 }
             })
             .await
@@ -153,11 +159,16 @@ async fn setup_namespace(client: kube::Client) -> String {
         }
     }
 
-    let name = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        .to_string();
+    // include the pid so tests running in parallel (each its own process under nextest) don't
+    // collide on a name derived purely from the current second.
+    let name = format!(
+        "{}-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        std::process::id(),
+    );
 
     let metadata = ObjectMeta {
         name: Some(name),
@@ -256,14 +267,6 @@ pub async fn create_agones_rbac_read_account(
         .await
         .unwrap();
 
-    // Delete the cluster role if it already exists, since it's cluster wide.
-    match cluster_roles
-        .delete(rbac_name, &DeleteParams::default())
-        .await
-    {
-        Ok(_) => {}
-        Err(err) => println!("Cluster role not found: {err}"),
-    };
     let cluster_role = ClusterRole {
         metadata: rbac_meta.clone(),
         rules: Some(vec![
@@ -282,7 +285,13 @@ pub async fn create_agones_rbac_read_account(
         ]),
         ..Default::default()
     };
-    cluster_roles.create(&pp, &cluster_role).await.unwrap();
+    // the cluster role is cluster-wide and identical for every test, so tolerate a
+    // concurrently-running test having created it first.
+    match cluster_roles.create(&pp, &cluster_role).await {
+        Ok(_) => {}
+        Err(kube::Error::Api(status)) if status.is_already_exists() => {}
+        Err(err) => panic!("failed to create cluster role {rbac_name}: {err}"),
+    }
 
     let binding = RoleBinding {
         metadata: rbac_meta,
@@ -375,36 +384,47 @@ pub async fn quilkin_proxy_deployment(
 
     // get the address to send data to
     let pods = client.namespaced_api::<Pod>();
-    let list = pods
-        .list(&ListParams {
-            label_selector: Some(format!("role={name}")),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    assert_eq!(1, list.items.len());
-
     let nodes: Api<Node> = Api::all(client.kubernetes.clone());
-    let name = list.items[0]
-        .spec
-        .as_ref()
-        .unwrap()
-        .node_name
-        .as_ref()
-        .unwrap();
-    let node = nodes.get(name.as_str()).await.unwrap();
-    let external_ip = node
-        .status
-        .unwrap()
-        .addresses
-        .unwrap()
+    // the pod may still be Pending right after creation, so wait until it's scheduled onto a node.
+    let mut node_name = None;
+    for _ in 0..30 {
+        let list = pods
+            .list(&ListParams {
+                label_selector: Some(format!("role={name}")),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        node_name = list
+            .items
+            .first()
+            .and_then(|pod| pod.spec.as_ref())
+            .and_then(|spec| spec.node_name.clone());
+        if node_name.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    let node_name = node_name.expect("proxy pod should be scheduled onto a node");
+    let node = nodes.get(node_name.as_str()).await.unwrap();
+    let addresses = node.status.unwrap().addresses.unwrap();
+    // prefer ExternalIP (e.g. GKE); fall back to InternalIP for local clusters like kind.
+    let address = addresses
         .iter()
         .find(|addr| addr.type_ == "ExternalIP")
-        .unwrap()
+        .or_else(|| addresses.iter().find(|addr| addr.type_ == "InternalIP"))
+        .expect("node should have an ExternalIP or InternalIP")
         .address
         .clone();
 
-    SocketAddr::new(external_ip.parse().unwrap(), host_port)
+    SocketAddr::new(data_path_host(address).parse().unwrap(), host_port)
+}
+
+/// The host the data-path tests should send to. Defaults to the node address, but [`HOST_OVERRIDE`]
+/// lets the kind setup route via published localhost ports (node IPs aren't routable under
+/// rootless Docker/Podman).
+fn data_path_host(node_address: String) -> String {
+    env::var(HOST_OVERRIDE).unwrap_or(node_address)
 }
 
 /// Create a Fleet, and pick on it's [`GameServer`]s and add the token to it.
@@ -675,12 +695,8 @@ filters:
 /// Convenience function to return the address with the first port of [`GameServer`]
 pub fn gameserver_address(gs: &GameServer) -> String {
     let status = gs.status.as_ref().unwrap();
-    let address = format!(
-        "{}:{}",
-        status.address,
-        status.ports.as_ref().unwrap()[0].port
-    );
-    address
+    let host = data_path_host(status.address.clone());
+    format!("{host}:{}", status.ports.as_ref().unwrap()[0].port)
 }
 
 // Output the events and logs for each pod that matches this label selector.
