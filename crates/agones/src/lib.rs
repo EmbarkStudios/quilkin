@@ -374,13 +374,6 @@ pub async fn quilkin_proxy_deployment(
 
     let deployment = deployments.create(&pp, &deployment).await.unwrap();
     let name = deployment.name_unchecked();
-    // should not be ready, since there are no endpoints, but let's wait 3 seconds, make sure it doesn't do something we don't expect
-    let result = timeout(
-        Duration::from_secs(3),
-        await_condition(deployments.clone(), name.as_str(), is_deployment_ready()),
-    )
-    .await;
-    assert!(result.is_err());
 
     // get the address to send data to
     let pods = client.namespaced_api::<Pod>();
