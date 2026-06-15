@@ -31,43 +31,59 @@ use io_uring::{squeue::Entry, types::Fd};
 use crate::{
     config::filter::CachedFilterChain,
     metrics,
-    net::{PacketQueue, error::PipelineError, packet::queue::SendPacket, sessions::SessionPool},
+    net::{error::PipelineError, packet::queue::SendPacket, sessions::SessionPool},
     time::UtcTimestamp,
 };
 
+/// The internal queue type used by the io-uring backend.
+///
+/// Unlike the general `PacketQueue`, this tuple always contains an `EventFd`
+/// as the receiver, which is what the io-uring loop requires.
+type IoUringQueue = (crate::net::PacketQueueSender, EventFd);
+
 static SESSION_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-impl crate::net::io::Listener {
-    pub fn spawn_io_loop(
-        self,
-        pending_sends: crate::net::PacketQueue,
-        filter_chain: CachedFilterChain,
-    ) -> eyre::Result<()> {
-        let Self {
-            worker_id,
-            port,
-            config,
-            sessions,
-        } = self;
+/// Spawn an io-uring listener worker for the given `Listener`.
+///
+/// `pending_sends` must be a `PacketQueueReceiver::EventFd` queue; if it is
+/// a Watch queue this returns an error.
+pub fn spawn_listener(
+    listener: crate::net::io::Listener,
+    pending_sends: crate::net::PacketQueue,
+    filter_chain: CachedFilterChain,
+) -> eyre::Result<()> {
+    let crate::net::io::Listener {
+        worker_id,
+        port,
+        config,
+        sessions,
+        ..
+    } = listener;
 
-        let socket =
-            crate::net::DualStackLocalSocket::new(port).context("failed to bind socket")?;
+    let (pqs, pqr) = pending_sends;
+    let event_fd = match pqr {
+        crate::net::PacketQueueReceiver::EventFd(efd) => efd,
+        crate::net::PacketQueueReceiver::Watch(_) => {
+            eyre::bail!("completion backend requires an EventFd packet queue receiver")
+        }
+    };
 
-        let io_loop = IoUringLoop::new(512, socket)?;
-        io_loop
-            .spawn_io_loop(
-                format!("packet-router-{worker_id}"),
-                PacketProcessorCtx::Router {
-                    config,
-                    sessions,
-                    worker_id,
-                    destinations: Vec::with_capacity(1),
-                },
-                pending_sends,
-                filter_chain,
-            )
-            .context("failed to spawn io-uring loop")
-    }
+    let socket = crate::net::DualStackLocalSocket::new(port).context("failed to bind socket")?;
+
+    let io_loop = IoUringLoop::new(512, socket)?;
+    io_loop
+        .spawn_io_loop(
+            format!("packet-router-{worker_id}"),
+            PacketProcessorCtx::Router {
+                config,
+                sessions,
+                worker_id,
+                destinations: Vec::with_capacity(1),
+            },
+            (pqs, event_fd),
+            filter_chain,
+        )
+        .context("failed to spawn io-uring loop")
 }
 
 /// A simple wrapper around [eventfd](https://man7.org/linux/man-pages/man2/eventfd.2.html)
@@ -81,7 +97,7 @@ pub struct EventFd {
 
 impl EventFd {
     #[inline]
-    pub(crate) fn new() -> std::io::Result<Self> {
+    pub fn new() -> std::io::Result<Self> {
         // SAFETY: We have no invariants to uphold, but we do need to check the
         // return value
         let fd = unsafe { libc::eventfd(0, 0) };
@@ -101,7 +117,7 @@ impl EventFd {
     }
 
     #[inline]
-    pub(crate) fn writer(&self) -> EventFdWriter {
+    pub fn writer(&self) -> EventFdWriter {
         EventFdWriter {
             fd: self.fd.as_raw_fd(),
         }
@@ -109,7 +125,7 @@ impl EventFd {
 
     /// Constructs an io-uring entry to read (ie wait) on this eventfd
     #[inline]
-    pub(crate) fn io_uring_entry(&mut self) -> Entry {
+    pub fn io_uring_entry(&mut self) -> Entry {
         io_uring::opcode::Read::new(
             Fd(self.fd.as_raw_fd()),
             (&mut self.val as *mut u64).cast(),
@@ -120,13 +136,13 @@ impl EventFd {
 }
 
 #[derive(Clone)]
-pub(crate) struct EventFdWriter {
+pub struct EventFdWriter {
     fd: i32,
 }
 
 impl EventFdWriter {
     #[inline]
-    pub(crate) fn write(&self, val: u64) {
+    pub fn write(&self, val: u64) {
         // SAFETY: we have a valid descriptor, and most of the errors that apply
         // to the general write call that eventfd_write wraps are not applicable
         //
@@ -456,7 +472,7 @@ impl IoUringLoop {
         self,
         thread_name: String,
         mut ctx: PacketProcessorCtx,
-        pending_sends: PacketQueue,
+        pending_sends: IoUringQueue,
         mut filter_chain: CachedFilterChain,
     ) -> Result<(), PipelineError> {
         let dispatcher = tracing::dispatcher::get_default(|d| d.clone());
@@ -642,27 +658,38 @@ impl IoUringLoop {
     }
 }
 
-impl SessionPool {
-    pub(crate) fn spawn_session(
-        self: Arc<Self>,
-        raw_socket: socket2::Socket,
-        port: u16,
-        pending_sends: crate::net::PacketQueue,
-        filter_chain: CachedFilterChain,
-    ) -> Result<(), PipelineError> {
-        let pool = self;
-        let id = SESSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let _thread_span = uring_span!(tracing::debug_span!("session", id).or_current());
+/// Spawn an io-uring session for the given socket.
+///
+/// `pending_sends` must contain a `PacketQueueReceiver::EventFd` variant; if
+/// it is a Watch queue this returns an error.
+pub fn spawn_session(
+    pool: Arc<SessionPool>,
+    raw_socket: socket2::Socket,
+    port: u16,
+    pending_sends: crate::net::PacketQueue,
+    filter_chain: CachedFilterChain,
+) -> Result<(), PipelineError> {
+    let id = SESSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let _thread_span = uring_span!(tracing::debug_span!("session", id).or_current());
 
-        let io_loop = IoUringLoop::new(64, crate::net::DualStackLocalSocket::from_raw(raw_socket))?;
+    let (pqs, pqr) = pending_sends;
+    let event_fd = match pqr {
+        crate::net::PacketQueueReceiver::EventFd(efd) => efd,
+        crate::net::PacketQueueReceiver::Watch(_) => {
+            return Err(PipelineError::Session(
+                crate::net::sessions::SessionError::SocketAddressUnavailable,
+            ));
+        }
+    };
 
-        io_loop.spawn_io_loop(
-            format!("session-{id}"),
-            PacketProcessorCtx::SessionPool { pool, port },
-            pending_sends,
-            filter_chain,
-        )
-    }
+    let io_loop = IoUringLoop::new(64, crate::net::DualStackLocalSocket::from_raw(raw_socket))?;
+
+    io_loop.spawn_io_loop(
+        format!("session-{id}"),
+        PacketProcessorCtx::SessionPool { pool, port },
+        (pqs, event_fd),
+        filter_chain,
+    )
 }
 
 #[cfg(test)]

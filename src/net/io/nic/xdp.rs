@@ -125,6 +125,27 @@ pub enum XdpSpawnError {
 /// based on user configuration, failing if requirements cannot be met
 ///
 /// This function currently only supports one mode of operation, which is that
+/// Returns `true` if a unique default NIC suitable for XDP is present.
+///
+/// This mirrors the `NicConfig::Default` selection in [`setup_xdp_io`] but
+/// stops before allocating sockets or loading the eBPF program.
+pub fn is_available() -> bool {
+    let Ok(iter) = xdp::nic::InterfaceIter::new() else {
+        return false;
+    };
+    let mut chosen = None;
+    for iface in iter {
+        if let Some(c) = chosen {
+            if iface != c {
+                return false;
+            }
+        } else {
+            chosen = Some(iface);
+        }
+    }
+    chosen.is_some()
+}
+
 /// a socket is bound to every available queue on the NIC, and when [`spawn`]
 /// is invoked, each socket is processed in its own thread
 ///

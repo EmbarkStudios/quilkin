@@ -86,6 +86,14 @@ pub struct Service {
         default_value_t = 5_000
     )]
     pub udp_session_limit: usize,
+    /// The UDP I/O backend to use.
+    /// auto selects the best available: kernel (XDP) -> completion (io-uring) -> poll (epoll).
+    #[clap(
+        long = "service.udp.backend",
+        env = "QUILKIN_SERVICE_UDP_BACKEND",
+        default_value = "auto"
+    )]
+    udp_backend: crate::net::io::UdpBackend,
     /// Whether to serve xDS requests.
     #[arg(
         long = "service.xds",
@@ -222,6 +230,7 @@ impl Default for Service {
             udp_port: 7777,
             udp_workers: std::num::NonZeroUsize::new(num_cpus::get()).unwrap(),
             udp_session_limit: 10_000,
+            udp_backend: crate::net::io::UdpBackend::Auto,
             xds_enabled: <_>::default(),
             xds_port: 7800,
             grpc_enabled: false,
@@ -333,6 +342,12 @@ impl Service {
 
     pub fn testing(mut self) -> Self {
         self.testing = true;
+        self
+    }
+
+    /// Sets the UDP I/O backend.
+    pub fn udp_backend(mut self, backend: crate::net::io::UdpBackend) -> Self {
+        self.udp_backend = backend;
         self
     }
 
@@ -639,11 +654,16 @@ impl Service {
 
         #[cfg(target_os = "linux")]
         {
-            match self.spawn_xdp(config.clone(), self.xdp.force_xdp) {
-                Ok(xdp) => {
-                    if let Some(xdp) = xdp {
-                        // Disable this so that we don't create a separate user-space
-                        // QCMP service since we are handling QCMP messsages in XDP
+            let explicit_kernel = matches!(self.udp_backend, crate::net::io::UdpBackend::Kernel);
+            if explicit_kernel
+                || matches!(
+                    self.udp_backend.resolve(),
+                    crate::net::io::UdpBackend::Kernel
+                )
+            {
+                match self.spawn_xdp(config.clone()) {
+                    Ok(xdp) => {
+                        // XDP handles QCMP in-kernel; disable the user-space QCMP service.
                         self.qcmp_enabled = false;
 
                         assert!(self.qcmp_port != 0, "don't use ephemeral ports with XDP");
@@ -665,19 +685,18 @@ impl Service {
                         });
 
                         return Ok(());
-                    } else if self.xdp.force_xdp {
-                        eyre::bail!("XDP was forced on, but failed to initialize");
                     }
-                }
-                Err(err) => {
-                    if self.xdp.force_xdp {
-                        return Err(err);
+                    Err(err) => {
+                        if explicit_kernel {
+                            return Err(err);
+                        }
+                        // Auto probed XDP as available but setup failed — fall back.
+                        tracing::debug!(
+                            ?err,
+                            "XDP setup failed, falling back to user-space backend"
+                        );
+                        self.udp_backend = crate::net::io::UdpBackend::probe_user_space();
                     }
-
-                    tracing::warn!(
-                        ?err,
-                        "failed to spawn XDP I/O loop, falling back to io-uring"
-                    );
                 }
             }
         }
@@ -693,8 +712,9 @@ impl Service {
     /// sockets.
     ///
     /// This implementation uses a pool of buffers and sockets to manage UDP
-    /// sessions and sockets. On Linux this will use `io-uring`, and `epoll`
-    /// interfaces on non-Linux platforms.
+    /// sessions and sockets. On Linux this will prefer `io-uring`, falling
+    /// back to `epoll` if io-uring is unavailable. The backend can also be
+    /// overridden via the `--service.udp.backend` CLI flag.
     #[allow(clippy::type_complexity)]
     pub fn spawn_user_space_router(
         &self,
@@ -702,44 +722,51 @@ impl Service {
         shutdown: &mut ShutdownHandler,
         ports: &mut ServicePorts,
     ) -> crate::Result<()> {
-        // If we're on linux, we're using io-uring, but we're probably running in a container
-        // and may not be allowed to call io-uring related syscalls due to seccomp
-        // profiles, so do a quick check here to validate that we can call io_uring_setup
-        // https://www.man7.org/linux/man-pages/man2/io_uring_setup.2.html
-        #[cfg(target_os = "linux")]
-        {
-            if let Err(err) = io_uring::IoUring::new(2) {
-                fn in_container() -> bool {
-                    let sched = match std::fs::read_to_string("/proc/1/sched") {
-                        Ok(s) => s,
-                        Err(error) => {
-                            tracing::warn!(
-                                %error,
-                                "unable to read /proc/1/sched to determine if quilkin is in a container"
-                            );
-                            return false;
-                        }
-                    };
-                    let Some(line) = sched.lines().next() else {
-                        tracing::warn!("/proc/1/sched was empty");
-                        return false;
-                    };
-                    let Some(proc) = line.split(' ').next() else {
-                        tracing::warn!("first line of /proc/1/sched was empty");
-                        return false;
-                    };
-                    proc != "init" && proc != "systemd"
-                }
-
-                if err.kind() == std::io::ErrorKind::PermissionDenied && in_container() {
-                    eyre::bail!(
-                        "failed to call `io_uring_setup` due to EPERM ({err}), quilkin seems to be running inside a container meaning this is likely due to the seccomp profile not allowing the syscall"
-                    );
-                } else {
-                    eyre::bail!("failed to call `io_uring_setup` due to {err}");
-                }
+        let backend = match self.udp_backend {
+            crate::net::io::UdpBackend::Auto => {
+                let resolved = crate::net::io::UdpBackend::Auto.resolve();
+                tracing::debug!(backend = resolved.name(), "selected UDP backend");
+                resolved
             }
-        }
+            explicit => {
+                // Validate explicit Completion selection on Linux
+                #[cfg(target_os = "linux")]
+                if matches!(explicit, crate::net::io::UdpBackend::Completion)
+                    && let Err(err) = io_uring::IoUring::new(2)
+                {
+                    fn in_container() -> bool {
+                        let sched = match std::fs::read_to_string("/proc/1/sched") {
+                            Ok(s) => s,
+                            Err(error) => {
+                                tracing::warn!(
+                                    %error,
+                                    "unable to read /proc/1/sched to determine if quilkin is in a container"
+                                );
+                                return false;
+                            }
+                        };
+                        let Some(line) = sched.lines().next() else {
+                            tracing::warn!("/proc/1/sched was empty");
+                            return false;
+                        };
+                        let Some(proc) = line.split(' ').next() else {
+                            tracing::warn!("first line of /proc/1/sched was empty");
+                            return false;
+                        };
+                        proc != "init" && proc != "systemd"
+                    }
+
+                    if err.kind() == std::io::ErrorKind::PermissionDenied && in_container() {
+                        eyre::bail!(
+                            "failed to call `io_uring_setup` due to EPERM ({err}), quilkin seems to be running inside a container meaning this is likely due to the seccomp profile not allowing the syscall"
+                        );
+                    } else {
+                        eyre::bail!("failed to call `io_uring_setup` due to {err}");
+                    }
+                }
+                explicit
+            }
+        };
 
         let socket = crate::net::raw_socket_with_reuse(self.udp_port)?;
         ports.udp = Some(crate::net::socket_port(&socket));
@@ -748,7 +775,7 @@ impl Service {
         let mut worker_sends = Vec::with_capacity(workers);
         let mut session_sends = Vec::with_capacity(workers);
         for _ in 0..workers {
-            let queue = crate::net::queue(15)?;
+            let queue = crate::net::queue(15, backend)?;
             session_sends.push(queue.0.clone());
             worker_sends.push(queue);
         }
@@ -758,8 +785,13 @@ impl Service {
             .cached_filter_chain()
             .context("a cached FilterChain should have been configured")?;
 
-        let sessions = SessionPool::new(session_sends, cached_filters, self.udp_session_limit);
-        crate::net::packet::spawn_receivers(config, socket, worker_sends, &sessions)?;
+        let sessions = SessionPool::new(
+            session_sends,
+            cached_filters,
+            self.udp_session_limit,
+            backend,
+        );
+        crate::net::packet::spawn_receivers(config, socket, worker_sends, &sessions, backend)?;
 
         let finished = shutdown.push("udp");
         let mut srx = shutdown.shutdown_rx();
@@ -805,14 +837,9 @@ impl Service {
     }
 
     #[cfg(target_os = "linux")]
-    fn spawn_xdp(&self, config: Arc<Config>, force_xdp: bool) -> eyre::Result<Option<Finalizer>> {
+    fn spawn_xdp(&self, config: Arc<Config>) -> eyre::Result<Finalizer> {
         use crate::net::io::nic::xdp;
         use eyre::{Context as _, ContextCompat as _};
-
-        // TODO: remove this once it's been more stabilized
-        if !force_xdp {
-            return Ok(None);
-        }
 
         let filters = config
             .dyn_cfg
@@ -845,9 +872,9 @@ impl Service {
         .context("failed to setup XDP")?;
 
         let io_loop = xdp::spawn(workers, config).context("failed to spawn XDP I/O loop")?;
-        Ok(Some(Box::new(move || {
+        Ok(Box::new(move || {
             io_loop.shutdown(true);
-        })))
+        }))
     }
 
     /// Spawn corrosion server
@@ -1190,12 +1217,6 @@ pub struct XdpOptions {
         env = "QUILKIN_SERVICE_UDP_XDP_NETWORK_INTERFACE"
     )]
     pub network_interface: Option<String>,
-    /// Forces the use of XDP.
-    ///
-    /// If XDP is not available on the chosen NIC, Quilkin exits with an error.
-    /// If false, io-uring will be used as the fallback implementation.
-    #[clap(long = "service.udp.xdp", env = "QUILKIN_SERVICE_UDP_XDP")]
-    pub force_xdp: bool,
     /// Forces the use of [`XDP_ZEROCOPY`](https://www.kernel.org/doc/html/latest/networking/af_xdp.html#xdp-copy-and-xdp-zerocopy-bind-flags)
     ///
     /// If zero copy is not available on the chosen NIC, Quilkin exits with an error
@@ -1227,7 +1248,6 @@ impl Default for XdpOptions {
     fn default() -> Self {
         Self {
             network_interface: None,
-            force_xdp: false,
             force_zerocopy: false,
             force_tx_checksum_offload: false,
             maximum_memory: None,

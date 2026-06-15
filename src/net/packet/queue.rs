@@ -2,16 +2,66 @@ use std::sync::Arc;
 
 pub type PacketQueue = (PacketQueueSender, PacketQueueReceiver);
 
-pub fn queue(capacity: usize) -> std::io::Result<PacketQueue> {
-    let (notify, rx) = packet_queue()?;
+pub fn queue(capacity: usize, backend: crate::net::io::UdpBackend) -> std::io::Result<PacketQueue> {
+    cfg_select! {
+        target_os = "linux" => {
+            if matches!(backend, crate::net::io::UdpBackend::Completion) {
+                let efd = crate::net::io::completion::io_uring::EventFd::new()?;
+                return Ok((
+                    PacketQueueSender {
+                        packets: Arc::new(parking_lot::Mutex::new(Vec::with_capacity(capacity))),
+                        notify: Notify::EventFd(efd.writer()),
+                    },
+                    PacketQueueReceiver::EventFd(efd),
+                ));
+            }
+            make_watch_queue(capacity)
+        }
+        _ => {
+            let _ = backend;
+            make_watch_queue(capacity)
+        }
+    }
+}
 
+fn make_watch_queue(capacity: usize) -> std::io::Result<PacketQueue> {
+    let (tx, rx) = tokio::sync::watch::channel(true);
     Ok((
         PacketQueueSender {
             packets: Arc::new(parking_lot::Mutex::new(Vec::with_capacity(capacity))),
-            notify,
+            notify: {
+                cfg_select! {
+                    target_os = "linux" => { Notify::Watch(tx) }
+                    _ => { tx }
+                }
+            },
         },
-        rx,
+        {
+            cfg_select! {
+                target_os = "linux" => { PacketQueueReceiver::Watch(rx) }
+                _ => { rx }
+            }
+        },
     ))
+}
+
+cfg_select! {
+    target_os = "linux" => {
+        enum Notify {
+            EventFd(crate::net::io::completion::io_uring::EventFdWriter),
+            Watch(tokio::sync::watch::Sender<bool>),
+        }
+
+        pub enum PacketQueueReceiver {
+            EventFd(crate::net::io::completion::io_uring::EventFd),
+            Watch(tokio::sync::watch::Receiver<bool>),
+        }
+    }
+    _ => {
+        type Notify = tokio::sync::watch::Sender<bool>;
+
+        pub type PacketQueueReceiver = tokio::sync::watch::Receiver<bool>;
+    }
 }
 
 /// A simple packet queue that signals when a packet is pushed
@@ -21,7 +71,7 @@ pub fn queue(capacity: usize) -> std::io::Result<PacketQueue> {
 #[derive(Clone)]
 pub struct PacketQueueSender {
     packets: Arc<parking_lot::Mutex<Vec<SendPacket>>>,
-    notify: PacketQueueNotifier,
+    notify: Notify,
 }
 
 impl PacketQueueSender {
@@ -35,7 +85,17 @@ impl PacketQueueSender {
     #[inline]
     pub fn push(&self, packet: SendPacket) {
         self.packets.lock().push(packet);
-        push(&self.notify);
+        cfg_select! {
+            target_os = "linux" => {
+                match &self.notify {
+                    Notify::EventFd(efd) => efd.write(1),
+                    Notify::Watch(tx) => { let _ = tx.send(true); }
+                }
+            }
+            _ => {
+                let _ = self.notify.send(true);
+            }
+        }
     }
 
     /// Swaps the current queue with an empty one so we only lock for a pointer swap
@@ -46,6 +106,20 @@ impl PacketQueueSender {
     }
 }
 
+cfg_select! {
+    target_os = "linux" => {
+        impl Clone for Notify {
+            fn clone(&self) -> Self {
+                match self {
+                    Self::EventFd(w) => Self::EventFd(w.clone()),
+                    Self::Watch(tx) => Self::Watch(tx.clone()),
+                }
+            }
+        }
+    }
+    _ => {}
+}
+
 pub struct SendPacket {
     /// The destination address of the packet
     pub destination: std::net::SocketAddr,
@@ -53,34 +127,4 @@ pub struct SendPacket {
     pub data: bytes::Bytes,
     /// The asn info for the sender, used for metrics
     pub asn_info: Option<crate::net::maxmind_db::MetricsIpNetEntry>,
-}
-
-cfg_select! {
-    target_os = "linux" => {
-        pub type PacketQueueReceiver = crate::net::io::completion::io_uring::EventFd;
-        type PacketQueueNotifier = crate::net::io::completion::io_uring::EventFdWriter;
-
-        fn packet_queue() -> std::io::Result<(PacketQueueNotifier, PacketQueueReceiver)> {
-            let rx = crate::net::io::completion::io_uring::EventFd::new()?;
-            Ok((rx.writer(), rx))
-        }
-
-        #[inline]
-        fn push(notify: &PacketQueueNotifier) {
-            notify.write(1);
-        }
-    }
-    _ => {
-        pub type PacketQueueReceiver = tokio::sync::watch::Receiver<bool>;
-        type PacketQueueNotifier = tokio::sync::watch::Sender<bool>;
-
-        fn packet_queue() -> std::io::Result<(PacketQueueNotifier, PacketQueueReceiver)> {
-            Ok(tokio::sync::watch::channel(true))
-        }
-
-        #[inline]
-        fn push(notify: &PacketQueueNotifier) {
-            let _ = notify.send(true);
-        }
-    }
 }

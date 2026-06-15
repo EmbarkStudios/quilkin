@@ -37,8 +37,71 @@ use crate::Config;
 #[cfg(target_os = "linux")]
 pub mod completion;
 pub mod nic;
-#[cfg(not(target_os = "linux"))]
 pub mod poll;
+
+/// Runtime-selected UDP I/O backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum UdpBackend {
+    /// Auto-select: kernel (XDP) -> completion (io-uring) -> poll (epoll).
+    #[default]
+    Auto,
+    /// Tokio epoll — available on all platforms.
+    Poll,
+    /// io-uring completion I/O (Linux only).
+    #[cfg(target_os = "linux")]
+    Completion,
+    /// XDP kernel-bypass (Linux only).
+    #[cfg(target_os = "linux")]
+    Kernel,
+}
+
+impl UdpBackend {
+    /// Resolve `Auto` to the best concrete backend. Never returns `Auto`.
+    pub fn resolve(self) -> Self {
+        match self {
+            Self::Auto => Self::probe(),
+            other => other,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn probe() -> Self {
+        if nic::xdp::is_available() {
+            Self::Kernel
+        } else {
+            Self::probe_user_space()
+        }
+    }
+
+    /// Probe for the best user-space backend (io-uring or epoll), skipping XDP.
+    ///
+    /// Use this when a socket-based listener is required regardless of XDP availability.
+    #[cfg(target_os = "linux")]
+    pub fn probe_user_space() -> Self {
+        if io_uring::IoUring::new(2).is_ok() {
+            Self::Completion
+        } else {
+            Self::Poll
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn probe() -> Self {
+        Self::Poll
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Poll => "poll",
+            #[cfg(target_os = "linux")]
+            Self::Completion => "completion",
+            #[cfg(target_os = "linux")]
+            Self::Kernel => "kernel",
+        }
+    }
+}
 
 /// Represents the required arguments to run a worker task that
 /// processes packets received downstream.
@@ -48,4 +111,24 @@ pub struct Listener {
     pub port: u16,
     pub config: Arc<Config>,
     pub sessions: Arc<crate::net::sessions::SessionPool>,
+    pub backend: UdpBackend,
+}
+
+impl Listener {
+    pub fn spawn_io_loop(
+        self,
+        queue: crate::net::PacketQueue,
+        fc: crate::config::filter::CachedFilterChain,
+    ) -> eyre::Result<()> {
+        match self.backend {
+            UdpBackend::Poll => poll::tokio::spawn_listener(self, queue, fc),
+            #[cfg(target_os = "linux")]
+            UdpBackend::Completion => completion::io_uring::spawn_listener(self, queue, fc),
+            #[cfg(target_os = "linux")]
+            UdpBackend::Kernel => {
+                unreachable!("XDP runs via spawn_xdp and never reaches the queue-based listener")
+            }
+            UdpBackend::Auto => unreachable!("UdpBackend must be resolved before spawning"),
+        }
+    }
 }

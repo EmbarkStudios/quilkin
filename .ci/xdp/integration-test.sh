@@ -34,7 +34,7 @@ spec:
     ports:
     - containerPort: 7777
       hostPort: 7777
-    args: ["--service.udp", "--provider.static.endpoints=${server_ip}:8078", "--service.udp.xdp"]
+    args: ["--service.udp", "--provider.static.endpoints=${server_ip}:8078", "--service.udp.backend", "kernel"]
     securityContext:
       capabilities:
         add:

@@ -109,7 +109,18 @@ trace_test!(uring_receiver, {
     let socket = sb.client();
     let (ws, addr) = sb.socket();
 
-    let pending_sends = net::queue(1).unwrap();
+    // XDP doesn't go through spawn_io_loop — use the best user-space backend.
+    let backend = {
+        #[cfg(target_os = "linux")]
+        {
+            quilkin::net::io::UdpBackend::probe_user_space()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            quilkin::net::io::UdpBackend::Poll
+        }
+    };
+    let pending_sends = net::queue(1, backend).unwrap();
 
     // we'll test a single DownstreamReceiveWorkerConfig
     quilkin::net::io::Listener {
@@ -120,7 +131,9 @@ trace_test!(uring_receiver, {
             vec![pending_sends.0.clone()],
             config.dyn_cfg.cached_filter_chain().unwrap(),
             usize::MAX,
+            backend,
         ),
+        backend,
     }
     .spawn_io_loop(pending_sends, config.dyn_cfg.cached_filter_chain().unwrap())
     .expect("failed to spawn task");
@@ -157,10 +170,20 @@ trace_test!(
             .unwrap()
             .modify(|clusters| clusters.insert_default([endpoint.into()].into()));
 
+        let backend = {
+            #[cfg(target_os = "linux")]
+            {
+                quilkin::net::io::UdpBackend::probe_user_space()
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                quilkin::net::io::UdpBackend::Poll
+            }
+        };
         let pending_sends: Vec<_> = [
-            net::queue(1).unwrap(),
-            net::queue(1).unwrap(),
-            net::queue(1).unwrap(),
+            net::queue(1, backend).unwrap(),
+            net::queue(1, backend).unwrap(),
+            net::queue(1, backend).unwrap(),
         ]
         .into_iter()
         .collect();
@@ -169,12 +192,13 @@ trace_test!(
             pending_sends.iter().map(|ps| ps.0.clone()).collect(),
             config.dyn_cfg.cached_filter_chain().unwrap(),
             usize::MAX,
+            backend,
         );
 
         const WORKER_COUNT: usize = 3;
 
         let (socket, addr) = sb.socket();
-        net::packet::spawn_receivers(config, socket, pending_sends, &sessions).unwrap();
+        net::packet::spawn_receivers(config, socket, pending_sends, &sessions, backend).unwrap();
 
         let socket = std::sync::Arc::new(sb.client());
         let msg = "recv-from";

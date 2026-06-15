@@ -95,6 +95,7 @@ pub struct SessionPool {
     downstream_index: atomic::AtomicUsize,
     cached_filter_chain: CachedFilterChain,
     max_sessions: usize,
+    backend: crate::net::io::UdpBackend,
 }
 
 /// The wrapper struct responsible for holding all of the socket related mappings.
@@ -114,6 +115,7 @@ impl SessionPool {
         downstream_sends: Vec<PacketQueueSender>,
         cached_filter_chain: CachedFilterChain,
         max_sessions: usize,
+        backend: crate::net::io::UdpBackend,
     ) -> Arc<Self> {
         const SESSION_TIMEOUT_SECONDS: Duration = Duration::from_secs(60);
         const SESSION_EXPIRY_POLL_INTERVAL: Duration = Duration::from_secs(60);
@@ -126,6 +128,7 @@ impl SessionPool {
             downstream_index: atomic::AtomicUsize::new(0),
             cached_filter_chain,
             max_sessions,
+            backend,
         })
     }
 
@@ -142,7 +145,7 @@ impl SessionPool {
             .ok_or(SessionError::SocketAddressUnavailable)?
             .port();
 
-        let (pending_sends, srecv) = crate::net::queue(15)?;
+        let (pending_sends, srecv) = crate::net::queue(15, self.backend)?;
         self.clone().spawn_session(
             raw_socket,
             port,
@@ -393,6 +396,35 @@ impl SessionPool {
         Ok(sender)
     }
 
+    /// Spawns a session I/O loop for the given socket, dispatching to the
+    /// correct backend based on the pool's configured backend.
+    pub(crate) fn spawn_session(
+        self: Arc<Self>,
+        raw_socket: socket2::Socket,
+        port: u16,
+        pending_sends: crate::net::PacketQueue,
+        filters: crate::config::filter::CachedFilterChain,
+    ) -> Result<(), super::PipelineError> {
+        use crate::net::io::UdpBackend;
+        match self.backend {
+            #[cfg(target_os = "linux")]
+            UdpBackend::Completion => crate::net::io::completion::io_uring::spawn_session(
+                self,
+                raw_socket,
+                port,
+                pending_sends,
+                filters,
+            ),
+            _ => crate::net::io::poll::tokio::spawn_session(
+                self,
+                raw_socket,
+                port,
+                pending_sends,
+                filters,
+            ),
+        }
+    }
+
     /// Returns whether the pool contains any sockets allocated to a destination.
     #[cfg(test)]
     fn has_no_allocated_sockets(&self) -> bool {
@@ -567,10 +599,16 @@ mod tests {
     use std::sync::Arc;
 
     async fn new_pool() -> (Arc<SessionPool>, PacketQueueSender) {
-        let (pending_sends, _srecv) = crate::net::queue(1).unwrap();
+        let backend = crate::net::io::UdpBackend::default();
+        let (pending_sends, _srecv) = crate::net::queue(1, backend).unwrap();
         let fake = crate::config::filter::FilterChainConfig::default();
         (
-            SessionPool::new(vec![pending_sends.clone()], fake.cached(), usize::MAX),
+            SessionPool::new(
+                vec![pending_sends.clone()],
+                fake.cached(),
+                usize::MAX,
+                backend,
+            ),
             pending_sends,
         )
     }
@@ -715,10 +753,11 @@ mod tests {
     }
 
     fn pool_with_limit(limit: usize) -> (Arc<SessionPool>, PacketQueueSender) {
-        let (pending_sends, _srecv) = crate::net::queue(1).unwrap();
+        let backend = crate::net::io::UdpBackend::default();
+        let (pending_sends, _srecv) = crate::net::queue(1, backend).unwrap();
         let fake = crate::config::filter::FilterChainConfig::default();
         (
-            SessionPool::new(vec![pending_sends.clone()], fake.cached(), limit),
+            SessionPool::new(vec![pending_sends.clone()], fake.cached(), limit, backend),
             pending_sends,
         )
     }

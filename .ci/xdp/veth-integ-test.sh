@@ -49,7 +49,7 @@ echo "Adding dummy program"
 ip -n cs link set veth-cs xdpgeneric obj "$ROOT/crates/xdp/bin/dummy.bin" sec xdp
 
 ip netns exec cs fortio udp-echo&
-ip netns exec proxy ./target/debug/quilkin --service.udp --service.qcmp --provider.static.endpoints=$OUTSIDE_IP:8078 --service.udp.xdp --service.udp.xdp.network-interface veth-proxy&
+ip netns exec proxy ./target/debug/quilkin --service.udp --service.qcmp --provider.static.endpoints=$OUTSIDE_IP:8078 --service.udp.backend kernel --service.udp.xdp.network-interface veth-proxy&
 
 echo "::notice file=$source,line=$LINENO::Launching client"
 ip netns exec cs fortio load -n 10 udp://$PROXY_IP:7777 2> ./target/logs.txt

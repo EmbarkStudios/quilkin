@@ -27,7 +27,7 @@ use crate::{
 };
 use std::{net::SocketAddr, sync::Arc};
 
-pub use self::queue::{PacketQueue, PacketQueueSender, queue};
+pub use self::queue::{PacketQueue, PacketQueueReceiver, PacketQueueSender, queue};
 
 /// Representation of an immutable set of bytes pulled from the network, this trait
 /// provides an abstraction over however the packet was received (epoll, io-uring, xdp)
@@ -220,6 +220,7 @@ pub fn spawn_receivers(
     socket: socket2::Socket,
     worker_sends: Vec<crate::net::PacketQueue>,
     sessions: &Arc<SessionPool>,
+    backend: crate::net::io::UdpBackend,
 ) -> crate::Result<()> {
     let port = crate::net::socket_port(&socket);
 
@@ -233,6 +234,7 @@ pub fn spawn_receivers(
             port,
             config: config.clone(),
             sessions: sessions.clone(),
+            backend,
         };
 
         worker.spawn_io_loop(ws, pfc.clone())?;
@@ -272,7 +274,12 @@ mod tests {
         let config = Arc::new(config);
 
         let cached_filter_chain = config.dyn_cfg.cached_filter_chain().unwrap();
-        let session_manager = SessionPool::new(vec![], cached_filter_chain, usize::MAX);
+        let session_manager = SessionPool::new(
+            vec![],
+            cached_filter_chain,
+            usize::MAX,
+            crate::net::io::UdpBackend::default(),
+        );
 
         let filter_chain = crate::filters::FilterChain::default();
         let packet_data: [u8; 4] = [1, 2, 3, 4];

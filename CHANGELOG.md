@@ -141,7 +141,7 @@ Configuration sources are controlled separately via `--provider.*` flags (e.g. `
 
 ## New features
 
-**XDP I/O path.** Quilkin can now use Linux eXpress Data Path (XDP) for packet processing, bypassing much of the kernel network stack. Enable with `--service.udp.xdp`. Additional flags allow pinning the NIC (`--service.udp.xdp.network-interface`), requiring zero-copy mode (`--service.udp.xdp.zerocopy`), and requiring TX checksum offload (`--service.udp.xdp.tco`). This provides a substantial throughput improvement on supported hardware.
+**XDP I/O path.** Quilkin can now use Linux eXpress Data Path (XDP) for packet processing, bypassing much of the kernel network stack. Select with `--service.udp.backend kernel`. Additional flags allow pinning the NIC (`--service.udp.xdp.network-interface`), requiring zero-copy mode (`--service.udp.xdp.zerocopy`), and requiring TX checksum offload (`--service.udp.xdp.tco`). This provides a substantial throughput improvement on supported hardware.
 
 **Corrosion backend.** A new distributed state backend powered by [Corrosion](https://github.com/superfly/corrosion) (SQLite-based) is available as an alternative to the relay/mDS topology. It can also run locally for development without any external dependencies.
 

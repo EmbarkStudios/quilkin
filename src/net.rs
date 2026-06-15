@@ -45,7 +45,7 @@ pub use {
         cluster::ClusterMap,
         endpoint::{Endpoint, EndpointAddress},
         error::PipelineError,
-        packet::{Packet, PacketMut, PacketQueue, PacketQueueSender, queue},
+        packet::{Packet, PacketMut, PacketQueue, PacketQueueReceiver, PacketQueueSender, queue},
         sessions::SessionPool,
     },
     quilkin_xds as xds,
@@ -215,6 +215,14 @@ impl DualStackEpollSocket {
     pub fn new(port: u16) -> IoResult<Self> {
         Ok(Self {
             socket: epoll_socket_with_reuse(port)?,
+        })
+    }
+
+    /// Construct from a raw `socket2::Socket` (converts via `std::net::UdpSocket`).
+    pub fn from_raw(socket: socket2::Socket) -> IoResult<Self> {
+        let std_sock: std::net::UdpSocket = socket.into();
+        Ok(Self {
+            socket: tokio::net::UdpSocket::from_std(std_sock)?,
         })
     }
 
