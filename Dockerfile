@@ -25,7 +25,7 @@ RUN --mount=type=secret,id=github_token \
     if [ -f /run/secrets/github_token ]; then \
       export GITHUB_API_TOKEN=$(cat /run/secrets/github_token); \
     fi && \
-    mise use -g github:LukeMathWalker/cargo-chef rust github:EmbarkStudios/cargo-about github:EmbarkStudios/proto-gen
+    mise use -g github:LukeMathWalker/cargo-chef rust github:EmbarkStudios/cargo-about
 
 # --- Plan: extract dependency recipe ---
 FROM chef AS planner
@@ -52,7 +52,6 @@ COPY --from=cook /workspace/target /workspace/target
 COPY . /workspace
 WORKDIR /workspace
 RUN cargo about generate license.html.hbs > license.html
-RUN cargo run -p proto-gen -- generate
 # Build, then copy the binary to a profile-independent path. Cargo writes the `dev`
 # profile to target/debug and every other profile to target/<profile>.
 RUN cargo build --profile=${CARGO_PROFILE} && \
