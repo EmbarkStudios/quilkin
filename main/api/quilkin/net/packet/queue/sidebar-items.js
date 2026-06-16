@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["queue"],"struct":["PacketQueueSender","SendPacket"],"type":["PacketQueue","PacketQueueReceiver"]};
+window.SIDEBAR_ITEMS = {"enum":["PacketQueueReceiver"],"fn":["queue"],"struct":["PacketQueueSender","SendPacket"],"type":["PacketQueue"]};

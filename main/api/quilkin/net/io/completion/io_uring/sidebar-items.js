@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["PacketProcessorCtx"],"struct":["EventFd","IoUringLoop"]};
+window.SIDEBAR_ITEMS = {"enum":["PacketProcessorCtx"],"fn":["spawn_listener","spawn_session"],"struct":["EventFd","EventFdWriter","IoUringLoop"]};
