@@ -24,7 +24,7 @@ trace_test!(server, {
 
     let client = sb.client();
 
-    client.send_to(msg.as_bytes(), &addr).await.unwrap();
+    client.send_to(msg.as_bytes(), addr).await.unwrap();
     assert_eq!(
         msg,
         sb.timeout(100, server1_rx.recv())
@@ -55,7 +55,7 @@ trace_test!(client, {
 
     let msg = "hello";
     tracing::debug!(%local_addr, "sending packet");
-    client.send_to(msg.as_bytes(), &local_addr).await.unwrap();
+    client.send_to(msg.as_bytes(), local_addr).await.unwrap();
     assert_eq!(msg, sb.timeout(100, dest_rx.recv()).await.0.unwrap(),);
 });
 
@@ -78,7 +78,7 @@ trace_test!(with_filter, {
     let client = sb.client();
 
     let msg = "hello";
-    client.send_to(msg.as_bytes(), &local_addr).await.unwrap();
+    client.send_to(msg.as_bytes(), local_addr).await.unwrap();
 
     // search for the filter strings.
     let result = sb.timeout(1000, rx.recv()).await.0.unwrap();
@@ -261,7 +261,6 @@ trace_test!(xds_bridge_to_corrosion, {
             endpoints: vec![("server", &[])],
             icao_code: quilkin::config::IcaoCode::new_testing([b'A', b'B', b'C', b'D']),
             corrosion: false,
-            ..Default::default()
         },
         &["server", "relay"],
     );

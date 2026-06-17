@@ -23,14 +23,22 @@ publish = false
 [lints]
 workspace = true
 
+[[bin]]
+name = "loadtest"
+path = "src/bin/loadtest/main.rs"
+
 [dependencies]
 # Packet creation/parsing to validate the packet processing for XDP
 etherparse = "0.19"
 bytes.workspace = true
+clap = { version = "4.5.54", features = ["derive"] }
+comfy-table = "7.2.2"
+eyre.workspace = true
 once_cell.workspace = true
 quilkin.workspace = true
 quilkin-xds.workspace = true
 rand.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 socket2.workspace = true
 tempfile.workspace = true

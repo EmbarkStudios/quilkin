@@ -31,7 +31,7 @@ trace_test!(fan_out, {
 
     for i in 0..100 {
         let msg = format!("hello_{i}");
-        client.send_to(msg.as_bytes(), &addr).await.unwrap();
+        client.send_to(msg.as_bytes(), addr).await.unwrap();
         assert_eq!(
             msg,
             sb.timeout(100, server1_rx.recv())
@@ -78,7 +78,7 @@ trace_test!(refreshes_recv_ring, {
     let mut buf = [0u8; 4];
 
     for i in 0..10000u32 {
-        client.send_to(&i.to_ne_bytes(), &addr).await.unwrap();
+        client.send_to(&i.to_ne_bytes(), addr).await.unwrap();
 
         let (len, _addr) = sb
             .timeout(100, client.recv_from(&mut buf))

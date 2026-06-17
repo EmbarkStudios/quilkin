@@ -528,7 +528,7 @@ mod tests {
         let msg = "hello";
         endpoint
             .socket
-            .send_to(msg.as_bytes(), &echo_addr.to_socket_addr().unwrap())
+            .send_to(msg.as_bytes(), echo_addr.to_socket_addr().unwrap())
             .await
             .unwrap();
         assert_eq!(

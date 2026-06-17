@@ -210,6 +210,33 @@ impl<P: PacketMut> DownstreamPacket<'_, P> {
     }
 }
 
+/// Runs a packet through the filter chain with a no-op session manager.
+/// Used by benchmarks to measure pipeline overhead without any IO.
+pub fn bench_process_packet(
+    payload: bytes::BytesMut,
+    source: std::net::SocketAddr,
+    config: &Arc<Config>,
+    filter_chain: &crate::filters::FilterChain,
+    destinations: &mut Vec<crate::net::EndpointAddress>,
+) {
+    struct Noop;
+    impl crate::net::sessions::SessionManager for Noop {
+        fn send(
+            &self,
+            _key: crate::net::sessions::SessionKey,
+            _contents: bytes::Bytes,
+        ) -> Result<(), crate::net::PipelineError> {
+            Ok(())
+        }
+    }
+    DownstreamPacket {
+        contents: payload,
+        source,
+        filters: filter_chain,
+    }
+    .process(0, config, &Noop, destinations);
+}
+
 /// Spawns a background task that sits in a loop, receiving packets from the passed in socket.
 /// Each received packet is placed on a queue to be processed by a worker task.
 /// This function also spawns the set of worker tasks responsible for consuming packets
@@ -263,8 +290,8 @@ mod tests {
         let endpoint = Endpoint::new((Ipv4Addr::LOCALHOST, 7777).into());
 
         let providers = crate::Providers::default();
-        let service = crate::Service::default();
-        let mut config = Config::new(None, Default::default(), &providers, &service);
+        let mut service = crate::Service::default();
+        let mut config = Config::new(None, Default::default(), &providers, &mut service);
         // FilterChain is not inserted by Service::default() unless a network
         // service is enabled; insert it manually for this test.
         crate::config::insert_default::<crate::filters::FilterChain>(&mut config.dyn_cfg.typemap);

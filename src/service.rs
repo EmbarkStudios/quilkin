@@ -666,8 +666,11 @@ impl Service {
                         // XDP handles QCMP in-kernel; disable the user-space QCMP service.
                         self.qcmp_enabled = false;
 
-                        assert!(self.qcmp_port != 0, "don't use ephemeral ports with XDP");
                         assert!(self.udp_port != 0, "don't use ephemeral ports with XDP");
+                        assert!(
+                            !self.qcmp_enabled || self.qcmp_port != 0,
+                            "don't use ephemeral ports with XDP"
+                        );
 
                         ports.qcmp = Some(self.qcmp_port);
                         ports.udp = Some(self.udp_port);

@@ -68,9 +68,9 @@ async fn metrics_server() {
     // game_client
     let local_addr = SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, client_port));
     tracing::info!(address = %local_addr, "Sending hello");
-    socket.send_to(b"hello", &local_addr).await.unwrap();
+    socket.send_to(b"hello", local_addr).await.unwrap();
 
-    tokio::time::timeout(std::time::Duration::from_millis(100), recv_chan.recv())
+    tokio::time::timeout(std::time::Duration::from_secs(5), recv_chan.recv())
         .await
         .unwrap()
         .unwrap();

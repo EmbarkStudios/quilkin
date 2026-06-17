@@ -1,4 +1,4 @@
-//! Tests for SQLITE_FULL detection and recovery via [`BroadcastingTransactor::with_full_recovery`].
+//! Tests for `SQLITE_FULL` detection and recovery via [`BroadcastingTransactor::with_full_recovery`].
 
 use corro_types::agent::ChangeError;
 use corrosion::{
@@ -357,11 +357,11 @@ async fn end_to_end_recovery_from_real_sqlite_full() {
             })
             .await;
 
-        if let Err(ChangeError::Rusqlite { ref source, .. }) = result {
-            if db::is_disk_full(source) {
-                triggered_full = true;
-                break;
-            }
+        if let Err(ChangeError::Rusqlite { ref source, .. }) = result
+            && db::is_disk_full(source)
+        {
+            triggered_full = true;
+            break;
         }
         result.unwrap();
     }

@@ -956,7 +956,7 @@ impl Sandbox {
         let start = tokio::time::Instant::now();
         loop {
             tracing::debug!(len = msg.len(), "sending packet");
-            client.send_to(msg, &proxy_address).await.unwrap();
+            client.send_to(msg, *proxy_address).await.unwrap();
 
             if let Some(rmsg) = self
                 .maybe_timeout(PACKET_TIMEOUT.as_millis() as u64, server_rx.recv())

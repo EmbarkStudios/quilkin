@@ -216,8 +216,9 @@ fn spawn_poll_listener_impl(
                     let (result, buffer) = received;
 
                     match result {
-                        Ok((_size, mut source)) => {
-                            source.set_ip(source.ip().to_canonical());
+                        Ok((size, source)) => {
+                            let mut buffer = buffer;
+                            buffer.truncate(size);
                             let filters = fc.load();
                             let packet = crate::net::packet::DownstreamPacket { contents: buffer, source, filters };
 
@@ -347,7 +348,9 @@ pub fn spawn_session(
                                 tracing::trace!(%error, "error receiving packet");
                                 crate::metrics::errors_total(crate::metrics::WRITE, &error.to_string(), &crate::metrics::EMPTY).inc();
                             },
-                            Ok((_size, recv_addr)) => {
+                            Ok((size, recv_addr)) => {
+                                let mut buf = buf;
+                                buf.truncate(size);
                                 let filters = filters.load();
                                 pool.process_received_upstream_packet(buf, recv_addr, port, &mut last_received_at, filters);
                             },

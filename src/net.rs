@@ -266,11 +266,21 @@ impl DualStackEpollSocket {
         }
     }
 
-    pub async fn send_to<A: tokio::net::ToSocketAddrs>(
-        &self,
-        buf: &[u8],
-        target: A,
-    ) -> IoResult<usize> {
+    pub async fn send_to(&self, buf: &[u8], target: SocketAddr) -> IoResult<usize> {
+        // AF_INET6 sockets reject sendto(sockaddr_in) with EINVAL on Linux.
+        // Convert IPv4 destinations to IPv4-mapped IPv6 so the kernel sends an IPv4 packet.
+        // But only do this when the socket itself is IPv6 — an IPv4 socket can use the
+        // V4 address directly.
+        let is_v6 = self.socket.local_addr().map_or(true, |a| a.is_ipv6());
+        let target = match (is_v6, target) {
+            (true, SocketAddr::V4(v4)) => SocketAddr::V6(std::net::SocketAddrV6::new(
+                v4.ip().to_ipv6_mapped(),
+                v4.port(),
+                0,
+                0,
+            )),
+            _ => target,
+        };
         self.socket.send_to(buf, target).await
     }
 }
@@ -281,6 +291,112 @@ mod tests {
         net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
         time::Duration,
     };
+
+    /// Verify that an IPv6 dual-stack session socket can reach an IPv4 echo server
+    /// via IPv4-mapped address, and receive the reply back.
+    #[tokio::test]
+    async fn dual_stack_ipv4_echo_roundtrip() {
+        // IPv4 echo server (same as loadtest spawn_echo_server)
+        let echo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let echo_port = echo.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65535];
+            if let Ok((len, addr)) = echo.recv_from(&mut buf).await {
+                drop(echo.send_to(&buf[..len], addr).await);
+            }
+        });
+
+        // IPv6 dual-stack session socket (same as session socket in proxy)
+        let session = super::DualStackEpollSocket::new(0).unwrap();
+
+        // Send to IPv4-mapped address — tests that a pre-mapped V6 address passes through unchanged
+        let target = SocketAddr::V6(std::net::SocketAddrV6::new(
+            Ipv4Addr::new(127, 0, 0, 1).to_ipv6_mapped(),
+            echo_port,
+            0,
+            0,
+        ));
+        session.send_to(b"ping", target).await.unwrap();
+
+        let mut buf = vec![0u8; 64];
+        let result = timeout(Duration::from_secs(2), session.recv_from(&mut buf)).await;
+        result
+            .expect("timed out waiting for reply from echo server")
+            .expect("recv error");
+    }
+
+    /// Same test using `from_raw` (proxy's exact socket creation path)
+    #[tokio::test]
+    async fn dual_stack_from_raw_ipv4_echo() {
+        let echo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let echo_port = echo.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65535];
+            if let Ok((len, addr)) = echo.recv_from(&mut buf).await {
+                drop(echo.send_to(&buf[..len], addr).await);
+            }
+        });
+
+        // Use from_raw like the proxy does
+        let raw = super::raw_socket_with_reuse(0).unwrap();
+        let session = super::DualStackEpollSocket::from_raw(raw).unwrap();
+        let echo_port_addr = SocketAddr::from((Ipv4Addr::LOCALHOST, echo_port));
+        session
+            .send_to(b"from_raw_test", echo_port_addr)
+            .await
+            .unwrap();
+
+        let mut buf = vec![0u8; 64];
+        let result = timeout(Duration::from_secs(2), session.recv_from(&mut buf)).await;
+        assert!(result.is_ok(), "from_raw: TIMEOUT");
+        assert!(result.unwrap().is_ok(), "from_raw: recv error");
+    }
+
+    /// Same test but simulating the two-task split used by `spawn_session`:
+    /// recv waits in one task, send happens in another, both sharing Arc<socket>.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn dual_stack_ipv4_echo_two_tasks() {
+        use std::sync::Arc;
+        // IPv4 echo server
+        let echo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let echo_port = echo.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65535];
+            if let Ok((len, addr)) = echo.recv_from(&mut buf).await {
+                drop(echo.send_to(&buf[..len], addr).await);
+            }
+        });
+
+        // Dual-stack session socket, shared via Arc
+        let session = Arc::new(super::DualStackEpollSocket::new(0).unwrap());
+        let session_send = session.clone();
+
+        let target = SocketAddr::V6(std::net::SocketAddrV6::new(
+            Ipv4Addr::new(127, 0, 0, 1).to_ipv6_mapped(),
+            echo_port,
+            0,
+            0,
+        ));
+
+        // Spawn a separate task that receives (mirrors the outer task in spawn_session)
+        let recv_task = tokio::spawn(async move {
+            let mut buf = vec![0u8; 2048];
+            timeout(Duration::from_secs(2), session.recv_from(&mut buf)).await
+        });
+
+        // Yield so recv_task can poll at least once
+        tokio::task::yield_now().await;
+
+        // Send from another task (mirrors the inner task in spawn_session)
+        session_send.send_to(b"ping", target).await.unwrap();
+
+        recv_task
+            .await
+            .unwrap()
+            .expect("two-task timed out")
+            .expect("two-task recv error");
+    }
 
     use tokio::time::timeout;
 
@@ -324,7 +440,7 @@ mod tests {
         let msg = "hello";
         let addr = echo_addr.to_socket_addr().unwrap();
 
-        socket.send_to(msg.as_bytes(), &addr).await.unwrap();
+        socket.send_to(msg.as_bytes(), addr).await.unwrap();
         assert_eq!(
             msg,
             timeout(Duration::from_secs(5), rx.recv())
@@ -345,7 +461,7 @@ mod tests {
             AddressKind::Name(_) => unreachable!(),
         };
 
-        socket.send_to(msg.as_bytes(), &opp_addr).await.unwrap();
+        socket.send_to(msg.as_bytes(), opp_addr).await.unwrap();
         assert_eq!(
             msg,
             timeout(Duration::from_secs(5), rx.recv())
@@ -358,7 +474,7 @@ mod tests {
         // stack socket.
         let (mut rx, socket) = t.open_ipv4_socket_and_recv_multiple_packets().await;
         socket
-            .send_to(msg.as_bytes(), &ipv4_echo_addr)
+            .send_to(msg.as_bytes(), ipv4_echo_addr)
             .await
             .unwrap();
         assert_eq!(

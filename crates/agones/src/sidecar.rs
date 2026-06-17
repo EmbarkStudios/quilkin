@@ -47,7 +47,10 @@ mod tests {
         let t = TestHelper::default();
         let recv = t.open_socket_and_recv_single_packet().await;
         let address = crate::gameserver_address(&gs);
-        recv.socket.send_to(b"hello", address).await.unwrap();
+        recv.socket
+            .send_to(b"hello", address.parse::<std::net::SocketAddr>().unwrap())
+            .await
+            .unwrap();
 
         let response = timeout(Duration::from_secs(30), recv.packet_rx)
             .await
@@ -123,7 +126,10 @@ clusters:
         let t = TestHelper::default();
         let recv = t.open_socket_and_recv_single_packet().await;
         let address = crate::gameserver_address(&gs);
-        recv.socket.send_to(b"hello", address).await.unwrap();
+        recv.socket
+            .send_to(b"hello", address.parse::<std::net::SocketAddr>().unwrap())
+            .await
+            .unwrap();
 
         let response = timeout(Duration::from_secs(30), recv.packet_rx)
             .await

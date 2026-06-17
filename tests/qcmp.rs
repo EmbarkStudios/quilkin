@@ -55,7 +55,7 @@ async fn ping(port: u16) {
 
     let mut ping_packet = quilkin::codec::qcmp::QcmpPacket::default();
     socket
-        .send_to(ping.encode(&mut ping_packet), &local_addr)
+        .send_to(ping.encode(&mut ping_packet), local_addr)
         .await
         .unwrap();
     let mut buf = [0; quilkin::codec::qcmp::MAX_QCMP_PACKET_LEN];

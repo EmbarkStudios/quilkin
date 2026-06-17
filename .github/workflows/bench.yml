@@ -1,0 +1,75 @@
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    name: Benchmark
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.1
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Download main baseline
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          name: criterion-baseline-main
+          path: target/criterion
+        continue-on-error: true
+
+      - name: Run benchmarks (PR)
+        if: github.event_name == 'pull_request'
+        run: cargo bench --benches -- --save-baseline pr
+
+      - name: Run benchmarks (main)
+        if: github.event_name == 'push'
+        run: cargo bench --benches -- --save-baseline main
+
+      - name: Cache critcmp
+        if: github.event_name == 'pull_request'
+        id: cache-critcmp
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/critcmp
+          key: ${{ runner.os }}-critcmp
+
+      - name: Install critcmp
+        if: github.event_name == 'pull_request' && steps.cache-critcmp.outputs.cache-hit != 'true'
+        run: cargo install critcmp --locked
+
+      - name: Compare against main baseline
+        if: github.event_name == 'pull_request'
+        run: |
+          set +e
+          critcmp main pr 2>&1 | tee critcmp-output.txt
+          CRITCMP_EXIT=$?
+          set -e
+          {
+            echo "## Benchmark comparison (main -> PR)"
+            echo ""
+            echo '```'
+            cat critcmp-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $CRITCMP_EXIT
+        continue-on-error: true  # advisory; regressions surface in summary but don't block merges
+
+      - name: Upload main baseline
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-baseline-main
+          path: target/criterion
+          retention-days: 90
+          overwrite: true

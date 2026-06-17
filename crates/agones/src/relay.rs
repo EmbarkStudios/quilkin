@@ -97,7 +97,13 @@ mod tests {
 
         let mut t = TestHelper::default();
         let (mut rx, socket) = t.open_socket_and_recv_multiple_packets().await;
-        socket.send_to(b"ALLOCATE", gs_address).await.unwrap();
+        socket
+            .send_to(
+                b"ALLOCATE",
+                gs_address.parse::<std::net::SocketAddr>().unwrap(),
+            )
+            .await
+            .unwrap();
 
         let response = timeout(Duration::from_secs(30), rx.recv())
             .await
