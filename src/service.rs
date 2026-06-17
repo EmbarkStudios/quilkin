@@ -885,6 +885,8 @@ impl Service {
     /// Creates/open the database and machinery that allows clients to send mutation
     /// requests and/or subscription requests and be notified when a change has
     /// been made that matches their query
+    ///
+    /// Additionally, can also spawn services to gossip changes with remote nodes
     async fn spawn_corrosion_server(
         &mut self,
         config: Arc<Config>,
@@ -1207,6 +1209,19 @@ impl Service {
 
             drop(finished.send(Ok(())));
         });
+
+        // TODO: Spawn the client and server to gossip changes with other nodes if we are so configured
+
+        // let cluster_id = {
+        //     let conn = pool.read().await?;
+        //     conn.query_row(
+        //         "SELECT value FROM __corro_state WHERE key = 'cluster_id'",
+        //         [],
+        //         |row| row.get(0),
+        //     )
+        //     .optional()?
+        //     .unwrap_or_default()
+        // };
 
         Ok(())
     }
