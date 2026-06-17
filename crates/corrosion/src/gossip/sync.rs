@@ -123,7 +123,7 @@ async fn read_sync_msg(
     match read.next().await {
         Some(buf_res) => match buf_res {
             Ok(mut buf) => {
-                stream_metrics.incoming(&buf);
+                stream_metrics.incoming(&buf, crate::gossip::transport::TrafficClass::Sync);
 
                 match SyncMessage::from_buf(&mut buf) {
                     Ok(SyncMessage::V1(sm)) => Ok(Some(sm)),
@@ -181,7 +181,8 @@ impl<'m> Writer<'m> {
         let len = self.send.len();
         send.write_chunk(self.send.split().freeze()).await?;
 
-        self.metrics.outgoing(len as _);
+        self.metrics
+            .outgoing(len as _, super::transport::TrafficClass::Sync);
 
         Ok(())
     }

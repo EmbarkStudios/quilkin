@@ -1,4 +1,4 @@
-use super::GossipMetrics;
+use super::{GossipMetrics, transport::Transport};
 use bytes::{Bytes, BytesMut};
 use corro_types::{
     actor::{self, Actor},
@@ -8,7 +8,7 @@ use corro_types::{
 };
 use foca::{Identity, Timer};
 use parking_lot::RwLock;
-use rand::{SeedableRng, rngs::StdRng};
+use rand::{SeedableRng, rngs::StdRng, seq::IteratorRandom};
 use std::{
     collections::VecDeque,
     net::SocketAddr,
@@ -16,7 +16,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
-use transport::Transport;
 use tripwire::PreemptibleFutureExt;
 
 type Foca = foca::Foca<
@@ -88,6 +87,7 @@ pub struct SwimCtx {
 }
 
 /// Entry point for the SWIM-based gossip
+#[allow(clippy::too_many_arguments)]
 pub fn swim_loop(
     ctx: SwimCtx,
     actor: Actor,
@@ -97,7 +97,7 @@ pub fn swim_loop(
     to_send: mpsc::Sender<(Actor, Bytes)>,
     notifications_tx: mpsc::Sender<foca::OwnedNotification<Actor>>,
     tripwire: tripwire::Tripwire,
-    mut member_states: Vec<(std::net::SocketAddr, foca::Member<Actor>)>,
+    member_states: Vec<(std::net::SocketAddr, foca::Member<Actor>)>,
 ) {
     let rng = StdRng::from_os_rng();
 
@@ -144,8 +144,8 @@ pub fn swim_loop(
     // NOTE: every turn of that loop should be fast or else we risk being a down suspect
     spawn::spawn_counted({
         let config = config.clone();
-        let agent = agent.clone();
         let cluster_size = cluster_size.clone();
+        let ctx = ctx.clone();
         let mut tripwire = tripwire.clone();
 
         async move {
@@ -332,10 +332,10 @@ pub fn swim_loop(
                     },
                     input = foca_rx.recv(), if !foca_done => match input {
                         Some(FocaInput::Data(data)) => {
-                            _ = foca.handle_data(&data, &mut runtime);
+                            drop(foca.handle_data(&data, &mut runtime));
                         },
                         None => {
-                            foca_done = true
+                            foca_done = true;
                         }
                         _ => {
 
@@ -412,7 +412,8 @@ impl TimerSpawner {
                     // spawned tasks have returned.
                     rt.block_on(local);
                 }
-            });
+            })
+            .expect("failed to spawn foca runtime timer thread");
 
         Self { send }
     }
@@ -440,7 +441,7 @@ fn handle_timer(
     }
 
     // sort by instant these were scheduled
-    v.sort_by(|a, b| a.1.cmp(&b.1));
+    v.sort_by_key(|a| a.1);
 
     for (timer, _) in v {
         let Err(error) = foca.handle_timer(timer, &mut *runtime) else {
@@ -641,6 +642,8 @@ fn diff_member_states(
 struct PendingBroadcast {
     payload: Bytes,
     is_local: bool,
+    /// Corrosion was using a `HashSet` for this, I don't really see this being more than several relays ever at a time so
+    /// a Vec will be cheaper in all cases
     sent_to: Vec<SocketAddr>,
     send_count: u8,
 }
@@ -661,6 +664,18 @@ impl PendingBroadcast {
             is_local: true,
             sent_to: Default::default(),
             send_count: 0,
+        }
+    }
+
+    #[inline]
+    pub fn contains(&self, addr: &SocketAddr) -> bool {
+        self.sent_to.iter().any(|s| s == addr)
+    }
+
+    #[inline]
+    pub fn insert(&mut self, addr: SocketAddr) {
+        if !self.contains(&addr) {
+            self.sent_to.push(addr);
         }
     }
 }
@@ -717,14 +732,12 @@ async fn handle_broadcasts(
     let mut tripped = false;
     let mut ser_buf = BytesMut::new();
 
-    let mut join_set = tokio::task::JoinSet::new();
-    let max_queue_len = agent.config().perf.processing_queue_len;
     const MAX_INFLIGHT_BROADCAST: usize = 500;
+    const MAX_QUEUE_LEN: usize = 20_000;
+
+    let mut join_set = tokio::task::JoinSet::new();
     let mut to_broadcast = VecDeque::new();
     let mut to_local_broadcast = VecDeque::new();
-    let mut log_count = 0;
-
-    let mut limited_log_count = 0;
 
     let bytes_per_sec = governor::RateLimiter::direct(governor::Quota::per_second(
         std::num::NonZeroU32::new(10 * 1024 * 1024).unwrap(),
@@ -846,7 +859,7 @@ async fn handle_broadcasts(
         let prev_rate_limited = std::mem::take(&mut rate_limited);
 
         // start with local broadcasts, they're higher priority
-        let mut ring0 = HashSet::new();
+        let mut ring0 = std::collections::HashSet::new();
         while !to_local_broadcast.is_empty() && join_set.len() < MAX_INFLIGHT_BROADCAST {
             // UNWRAP: we just checked that it wasn't empty
             let payload = to_local_broadcast.pop_front().unwrap();
@@ -870,18 +883,18 @@ async fn handle_broadcasts(
                     payload.clone(),
                     transport.clone(),
                     addr,
+                    ctx.metrics,
                 ) {
-                    Err(e) => {
-                        match e {
+                    Err(error) => {
+                        match error {
                             TransmitError::TooBig(_) | TransmitError::InsufficientCapacity(_) => {
                                 // not sure this would ever happen
-                                error!("could not spawn broadcast transmission: {e}");
-                                continue;
+                                tracing::error!(%error, "could not spawn broadcast transmission");
                             }
                             TransmitError::QuotaExceeded(_) => {
                                 // exceeded our quota, stop trying to send this through
                                 rate_limited = true;
-                                counter!("corro.broadcast.rate_limited").increment(1);
+                                ctx.metrics.broadcast_rate_limited_inc();
                                 break;
                             }
                         }
@@ -901,14 +914,14 @@ async fn handle_broadcasts(
                 break;
             }
 
-            counter!("corro.broadcast.spawn", "type" => "local").increment(spawn_count);
+            ctx.metrics.broadcast_spawned_inc("local", spawn_count);
         }
 
         if !rate_limited && !to_broadcast.is_empty() && join_set.len() < MAX_INFLIGHT_BROADCAST {
             let (members_count, ring0_count) = {
-                let members = agent.members().read();
+                let members = ctx.members.read();
                 let members_count = members.states.len();
-                let ring0_count = members.ring0(agent.cluster_id()).count();
+                let ring0_count = members.ring0(ctx.cluster_id).count();
                 (members_count, ring0_count)
             };
 
@@ -917,11 +930,11 @@ async fn handle_broadcasts(
                 let max_transmissions = config.max_transmissions.get();
                 let dynamic_count =
                     (members_count - ring0_count) / (max_transmissions as usize * 10);
-                let count = cmp::max(config.num_indirect_probes.get(), dynamic_count);
+                let count = config.num_indirect_probes.get().max(dynamic_count);
 
                 if prev_rate_limited {
                     // we've been rate limited on the last loop, try sending to less nodes...
-                    (cmp::min(count, dynamic_count / 2), max_transmissions / 2)
+                    (count.min(dynamic_count / 2), max_transmissions / 2)
                 } else {
                     (count, max_transmissions)
                 }
@@ -931,8 +944,7 @@ async fn handle_broadcasts(
                 let mut pending = to_broadcast.pop_front().unwrap();
 
                 let broadcast_to = {
-                    agent
-                        .members()
+                    ctx.members
                         .read()
                         .states
                         .iter()
@@ -941,10 +953,10 @@ async fn handle_broadcasts(
                             // (ring0 could have changed since the time we sent the local broadcast
                             // so we check the ring0 variable that's created at start of local_broacast
                             // instead of state.is_ring0())
-                            if *member_id == actor_id
-                                || state.cluster_id != agent.cluster_id()
+                            if *member_id == ctx.actor_id
+                                || state.cluster_id != ctx.cluster_id
                                 || (pending.is_local && ring0.contains(&state.addr))
-                                || pending.sent_to.contains(&state.addr)
+                                || pending.contains(&state.addr)
                             // don't broadcast to this peer
                             {
                                 None
@@ -955,74 +967,67 @@ async fn handle_broadcasts(
                         .choose_multiple(
                             &mut rng,
                             // prevent going over max count
-                            cmp::min(
-                                choose_count,
-                                MAX_INFLIGHT_BROADCAST.saturating_sub(join_set.len()),
-                            ),
+                            choose_count.min(MAX_INFLIGHT_BROADCAST.saturating_sub(join_set.len())),
                         )
                 };
 
                 let mut spawn_count = 0;
-                trace!("broadcasting to: {:?}", broadcast_to);
+
                 for addr in broadcast_to {
                     match try_transmit_broadcast(
                         &bytes_per_sec,
                         pending.payload.clone(),
                         transport.clone(),
                         addr,
+                        ctx.metrics,
                     ) {
-                        Err(e) => {
-                            warn!("could not spawn broadcast transmission: {e}");
-                            match e {
+                        Err(error) => {
+                            tracing::warn!(%error, "could not spawn broadcast transmission");
+
+                            match error {
                                 TransmitError::TooBig(_)
                                 | TransmitError::InsufficientCapacity(_) => {
                                     // not sure this would ever happen
-                                    continue;
                                 }
                                 TransmitError::QuotaExceeded(_) => {
                                     // exceeded our quota, stop trying to send this through
-                                    counter!("corro.broadcast.rate_limited").increment(1);
-                                    log_at_pow_10(
-                                        "broadcasts rate limited",
-                                        &mut limited_log_count,
-                                    );
+                                    ctx.metrics.broadcast_rate_limited_inc();
                                     break;
                                 }
                             }
                         }
                         Ok(fut) => {
-                            debug!(actor = %actor_id, "broadcasting {} bytes to: {addr}", pending.payload.len());
                             join_set.spawn(fut);
-                            pending.sent_to.insert(addr);
+                            pending.insert(addr);
                             spawn_count += 1;
                         }
                     }
                 }
 
-                counter!("corro.broadcast.spawn", "type" => "global").increment(spawn_count);
+                ctx.metrics.broadcast_spawned_inc("global", spawn_count);
 
-                if let Some(send_count) = pending.send_count.checked_add(1) {
-                    trace!("send_count: {send_count}, max_transmissions: {max_transmissions}");
-                    pending.send_count = send_count;
+                let Some(send_count) = pending.send_count.checked_add(1) else {
+                    continue;
+                };
 
-                    if send_count < max_transmissions {
-                        debug!("queueing for re-send");
-                        idle_pendings.push(Box::pin(async move {
-                            // slow our send pace if we've been previously rate limited
-                            let sleep_ms_base = if prev_rate_limited { 500 } else { 100 };
-                            // send with increasing latency as we've already sent the updates out
-                            tokio::time::sleep(Duration::from_millis(
-                                sleep_ms_base * send_count as u64,
-                            ))
-                            .await;
-                            pending
-                        }));
-                    }
+                pending.send_count = send_count;
+
+                if send_count >= max_transmissions {
+                    continue;
                 }
+
+                idle_pendings.push(Box::pin(async move {
+                    // slow our send pace if we've been previously rate limited
+                    let sleep_ms_base = if prev_rate_limited { 500 } else { 100 };
+                    // send with increasing latency as we've already sent the updates out
+                    tokio::time::sleep(Duration::from_millis(sleep_ms_base * send_count as u64))
+                        .await;
+                    pending
+                }));
             }
         }
 
-        if drop_oldest_broadcast(&mut to_broadcast, &mut to_local_broadcast, max_queue_len)
+        if drop_oldest_broadcast(&mut to_broadcast, &mut to_local_broadcast, MAX_QUEUE_LEN)
             .is_some()
         {
             ctx.metrics.broadcast_dropped_inc();
@@ -1082,7 +1087,7 @@ fn try_transmit_broadcast(
                     len as _,
                     quinn::Dir::Uni,
                     super::metrics::Direction::Out,
-                    "broadcast",
+                    super::transport::TrafficClass::Broadcast,
                 );
             }
         }

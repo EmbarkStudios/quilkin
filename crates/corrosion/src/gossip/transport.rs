@@ -4,16 +4,14 @@ use quinn::{self as q, Connection};
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    sync::{Arc, Mutex as StdMutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::sync::{Mutex, RwLock, mpsc};
-use tracing::Instrument;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Transport(Arc<TransportInner>);
 
-#[derive(Debug)]
 struct TransportInner {
     endpoint: q::Endpoint,
     conns: RwLock<HashMap<SocketAddr, Arc<Mutex<Option<Connection>>>>>,
@@ -22,7 +20,7 @@ struct TransportInner {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum TrafficClass {
+pub enum TrafficClass {
     Sync,
     Broadcast,
     Foca,
@@ -95,52 +93,37 @@ impl Transport {
             }
         }
 
-        self.0.metrics.client_datagrams_sent_inc(data.len());
+        self.0
+            .metrics
+            .client_chunks_sent_inc(data.len(), TrafficClass::Foca);
 
         Ok(())
     }
 
     pub async fn send_uni(&self, addr: SocketAddr, data: Bytes) -> Result<(), TransportError> {
-        let len = data.len();
         let conn = self.connect(addr, TrafficClass::Broadcast).await?;
 
-        let mut stream = match conn
-            .open_uni()
-            .instrument(debug_span!("quic_open_uni"))
-            .await
-        {
+        let mut stream = match conn.open_uni().await {
             Ok(stream) => stream,
-            Err(e @ ConnectionError::VersionMismatch) => {
+            Err(e @ q::ConnectionError::VersionMismatch) => {
                 return Err(e.into());
             }
-            Err(e) => {
-                debug!("retryable error attempting to open unidirectional stream: {e}");
+            Err(_e) => {
                 let conn = self.connect(addr, TrafficClass::Broadcast).await?;
-                conn.open_uni()
-                    .instrument(debug_span!("quic_open_uni"))
-                    .await?
+                conn.open_uni().await?
             }
         };
 
-        stream
-            .write_chunk(data)
-            .instrument(debug_span!("quic_write_chunk"))
-            .await?;
+        let len = data.len();
+        stream.write_chunk(data).await?;
 
-        stream
-            .finish()
-            .expect("unreachable, the stream does not leave this method");
+        let _dont_care = stream.finish();
 
-        stream
-            .stopped()
-            .instrument(debug_span!("quic_stopped"))
-            .await?;
+        stream.stopped().await?;
 
-        counter!(
-            "corro.transport.tx.bytes.v2.total",
-            "traffic" => TrafficClass::Broadcast.as_str()
-        )
-        .increment(len as u64);
+        self.0
+            .metrics
+            .client_chunks_sent_inc(len, TrafficClass::Broadcast);
 
         Ok(())
     }
@@ -181,30 +164,27 @@ impl Transport {
         .await
         {
             Ok(Ok(conn)) => {
-                histogram!(
-                    "corro.transport.connect.time.v2.seconds",
-                    "traffic" => traffic.as_str()
-                )
-                .record(start.elapsed().as_secs_f64());
-                tracing::Span::current().record("rtt", conn.rtt().as_secs_f64());
+                self.0.metrics.client_connect_time(start.elapsed(), traffic);
                 Ok(conn)
             }
             Ok(Err(e)) => {
-                counter!(
-                    "corro.transport.connect.errors.v2",
-                    "traffic" => traffic.as_str(),
-                    "kind" => "connect_error"
-                )
-                .increment(1);
+                let err_str = match &e {
+                    q::ConnectionError::VersionMismatch => "version_mismatch",
+                    q::ConnectionError::ApplicationClosed(_) => "application_closed",
+                    q::ConnectionError::ConnectionClosed(_) => "connection_closed",
+                    q::ConnectionError::TransportError(_) => "transport",
+                    q::ConnectionError::LocallyClosed => "locally_closed",
+                    q::ConnectionError::Reset => "reset",
+                    q::ConnectionError::TimedOut => "quic_timed_out",
+                    q::ConnectionError::CidsExhausted => "cids_exhausted",
+                };
+
+                self.0.metrics.client_connect_error(traffic, err_str);
+
                 Err(e.into())
             }
             Err(e) => {
-                counter!(
-                    "corro.transport.connect.errors.v2",
-                    "traffic" => traffic.as_str(),
-                    "kind" => "timed_out"
-                )
-                .increment(1);
+                self.0.metrics.client_connect_error(traffic, "timed_out");
                 Err(e.into())
             }
         }

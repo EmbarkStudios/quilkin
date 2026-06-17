@@ -1,5 +1,9 @@
-use prometheus::{IntCounter, IntCounterVec, IntGauge, IntGaugeVec, opts};
+use prometheus::{
+    self as p, Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, opts,
+};
 use std::time::Duration;
+
+use crate::gossip::transport::TrafficClass;
 
 #[derive(Copy, Clone)]
 pub enum Direction {
@@ -41,29 +45,33 @@ pub struct GossipMetrics {
     change_bx_duplicate: IntCounterVec,
     change_clock: IntCounterVec,
     change_bx_received: IntCounterVec,
-    change_recv_lag: prometheus::HistogramVec,
+    change_recv_lag: HistogramVec,
     changes_in_queue: IntGauge,
     changesets_in_queue: IntGauge,
     changes_committed: IntCounterVec,
-    changes_processed_time: prometheus::HistogramVec,
-    changes_processed_chunk_size: prometheus::Histogram,
-    changes_queued_time: prometheus::Histogram,
+    changes_processed_time: HistogramVec,
+    changes_processed_chunk_size: Histogram,
+    changes_queued_time: Histogram,
     channel_errors: IntCounterVec,
 
     broadcast_dropped: IntCounter,
     broadcast_remaining_burst: IntGauge,
+    broadcast_rate_limited: IntCounter,
+    broadcast_spawned: IntCounterVec,
 
     client_datagram_errors: IntCounterVec,
-    client_datagrams: IntCounter,
-    client_datagram_bytes: IntCounter,
+    client_chunks_sent: IntCounterVec,
+    client_bytes_sent: IntCounterVec,
+    client_connect_time: HistogramVec,
+    client_connect_errors: IntCounterVec,
 }
 
 impl GossipMetrics {
-    pub fn new(registry: &'static prometheus::Registry) -> &'static Self {
+    pub fn new(registry: &'static p::Registry) -> &'static Self {
         static THIS: std::sync::OnceLock<GossipMetrics> = std::sync::OnceLock::new();
 
         THIS.get_or_init(|| {
-            let active_conns = prometheus::register_int_gauge_with_registry! {
+            let active_conns = p::register_int_gauge_with_registry! {
                 opts! {
                     "corrosion_gossip_server_active_connections",
                     "Number of active server gossip connections",
@@ -71,7 +79,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let total_conns = prometheus::register_int_counter_with_registry! {
+            let total_conns = p::register_int_counter_with_registry! {
                 opts! {
                     "corrosion_gossip_server_total_connections",
                     "Number of total server gossip connections",
@@ -79,7 +87,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let failed_handshakes = prometheus::register_int_counter_vec_with_registry! {
+            let failed_handshakes = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_server_failed_handshakes",
                     "Number of total failed server gossip handshakes",
@@ -88,7 +96,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let total_datagrams = prometheus::register_int_counter_with_registry! {
+            let total_datagrams = p::register_int_counter_with_registry! {
                 opts! {
                     "corrosion_gossip_server_total_datagrams",
                     "Number of total incoming server gossip foca datagrams",
@@ -104,7 +112,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let failed_datagrams = prometheus::register_int_counter_vec_with_registry! {
+            let failed_datagrams = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_failed_datagrams",
                     "Number of total failed gossip foca datagrams",
@@ -122,7 +130,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let active_streams = prometheus::register_int_gauge_vec_with_registry! {
+            let active_streams = p::register_int_gauge_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_server_active_streams",
                     "Number of total active server gossip streams",
@@ -131,7 +139,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let total_stream_bytes = prometheus::register_int_counter_vec_with_registry! {
+            let total_stream_bytes = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_server_total_stream_bytes",
                     "Number of total incoming server gossip foca datagram bytes",
@@ -140,7 +148,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let failed_streams = prometheus::register_int_counter_vec_with_registry! {
+            let failed_streams = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_server_failed_streams",
                     "Number of total failed server gossip streams",
@@ -149,7 +157,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let sync_changes = prometheus::register_int_counter_vec_with_registry! {
+            let sync_changes = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_sync_changes",
                     "Number of total gossip sync changes",
@@ -158,7 +166,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let sync_requests = prometheus::register_int_counter_vec_with_registry! {
+            let sync_requests = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_sync_requests",
                     "Number of total gossip sync requests",
@@ -167,7 +175,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let change_batches = prometheus::register_int_counter_vec_with_registry! {
+            let change_batches = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_change_batches",
                     "Number of total gossip change batches applied",
@@ -176,7 +184,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let change_batch_size = prometheus::register_int_gauge_with_registry! {
+            let change_batch_size = p::register_int_gauge_with_registry! {
                 opts! {
                     "corrosion_gossip_change_batch_size",
                     "Size of the change batch currently being processed",
@@ -184,7 +192,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let change_dropped = prometheus::register_int_counter_with_registry! {
+            let change_dropped = p::register_int_counter_with_registry! {
                 opts! {
                     "corrosion_gossip_change_dropped",
                     "Total number of changes that have been dropped due to overflowing the maximum change queue",
@@ -192,7 +200,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let change_received = prometheus::register_int_counter_with_registry! {
+            let change_received = p::register_int_counter_with_registry! {
                 opts! {
                     "corrosion_gossip_change_received",
                     "Total number of changes that have been received by the chang processor",
@@ -200,7 +208,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let change_bx_duplicate = prometheus::register_int_counter_vec_with_registry! {
+            let change_bx_duplicate = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_change_broadcast_duplicates",
                     "Number of total duplicate gossip changes broadcast",
@@ -209,7 +217,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let change_clock = prometheus::register_int_counter_vec_with_registry! {
+            let change_clock = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_change_clock",
                     "Number of total gossip changes clock updates",
@@ -218,7 +226,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let change_bx_received = prometheus::register_int_counter_vec_with_registry! {
+            let change_bx_received = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_change_broadcast_received",
                     "Number of total gossip broadcast changes received",
@@ -227,15 +235,15 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let change_recv_lag = prometheus::register_histogram_vec_with_registry! {
-                prometheus::histogram_opts! {
+            let change_recv_lag = p::register_histogram_vec_with_registry! {
+                p::histogram_opts! {
                     "corrosion_gossip_change_recv_lag",
                     "Receive lag in seconds",
                 },
                 &["source"],
                 registry,
             }.unwrap();
-            let changes_in_queue = prometheus::register_int_gauge_with_registry! {
+            let changes_in_queue = p::register_int_gauge_with_registry! {
                 opts! {
                     "corrosion_gossip_change_in_queue",
                     "Number of changes in the queue",
@@ -243,7 +251,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let changesets_in_queue = prometheus::register_int_gauge_with_registry! {
+            let changesets_in_queue = p::register_int_gauge_with_registry! {
                 opts! {
                     "corrosion_gossip_changesets_in_queue",
                     "Number of change sets in the queue",
@@ -251,7 +259,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let changes_committed = prometheus::register_int_counter_vec_with_registry! {
+            let changes_committed = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_change_committed",
                     "Number of total gossip changes committed",
@@ -260,29 +268,29 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let changes_processed_time = prometheus::register_histogram_vec_with_registry! {
-                prometheus::histogram_opts! {
+            let changes_processed_time = p::register_histogram_vec_with_registry! {
+                p::histogram_opts! {
                     "corrosion_gossip_changes_processed_time",
                     "Gossip changes processing time in seconds",
                 },
                 &["source"],
                 registry,
             }.unwrap();
-            let changes_processed_chunk_size = prometheus::register_histogram_with_registry! {
-                prometheus::histogram_opts! {
+            let changes_processed_chunk_size = p::register_histogram_with_registry! {
+                p::histogram_opts! {
                     "corrosion_gossip_changes_processed_chunk_size",
                     "Gossip changes processing chunk sizes",
                 },
                 registry,
             }.unwrap();
-            let changes_queued_time = prometheus::register_histogram_with_registry! {
-                prometheus::histogram_opts! {
+            let changes_queued_time = p::register_histogram_with_registry! {
+                p::histogram_opts! {
                     "corrosion_gossip_changes_queued",
                     "Gossip changes queued time",
                 },
                 registry,
             }.unwrap();
-            let channel_errors = prometheus::register_int_counter_vec_with_registry! {
+            let channel_errors = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_channel_errors",
                     "Number of total gossip channel errors",
@@ -291,7 +299,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let broadcast_dropped = prometheus::register_int_counter_with_registry! {
+            let broadcast_dropped = p::register_int_counter_with_registry! {
                 opts! {
                     "corrosion_gossip_broadcast_dropped",
                     "Total number of broadcasts that have been dropped due to overflowing the maximum broadcast queue",
@@ -299,7 +307,7 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let broadcast_remaining_burst = prometheus::register_int_gauge_with_registry! {
+            let broadcast_remaining_burst = p::register_int_gauge_with_registry! {
                 opts! {
                     "corrosion_gossip_broadcast_limiter_remaining_burst",
                     "Remaining burst capacity of the broadcast limiter",
@@ -307,7 +315,24 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let client_datagram_errors = prometheus::register_int_counter_vec_with_registry! {
+            let broadcast_rate_limited = p::register_int_counter_with_registry! {
+                opts! {
+                    "corrosion_gossip_broadcast_rate_limited",
+                    "Total number of times that broadcasting has been rate limited",
+                },
+                registry,
+            }
+            .unwrap();
+            let broadcast_spawned = p::register_int_counter_vec_with_registry! {
+                opts! {
+                    "corrosion_gossip_broadcast_spawned",
+                    "Total number of broadcast tasks that have been spawned",
+                },
+                &["kind"],
+                registry,
+            }
+            .unwrap();
+            let client_datagram_errors = p::register_int_counter_vec_with_registry! {
                 opts! {
                     "corrosion_gossip_client_datagram_errors",
                     "Number of total client datagram errors that have occurred",
@@ -316,19 +341,38 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
-            let client_datagrams = prometheus::register_int_counter_with_registry! {
+            let client_chunks_sent = p::register_int_counter_vec_with_registry! {
                 opts! {
-                    "corrosion_gossip_client_total_datagrams",
-                    "Number of total outgoing client gossip foca datagrams",
+                    "corrosion_gossip_client_total_chunks",
+                    "Number of total outgoing client gossip data chunks",
                 },
+                &["traffic"],
                 registry,
             }
             .unwrap();
-            let client_datagram_bytes = prometheus::register_int_counter_with_registry! {
+            let client_bytes_sent = p::register_int_counter_vec_with_registry! {
                 opts! {
-                    "corrosion_gossip_client_total_datagram_bytes",
-                    "Number of total outgoing client datagram bytes",
+                    "corrosion_gossip_client_total_bytes_sent",
+                    "Number of total outgoing client bytes",
                 },
+                &["traffic"],
+                registry,
+            }
+            .unwrap();
+            let client_connect_time = p::register_histogram_vec_with_registry! {
+                prometheus::histogram_opts! {
+                    "corrosion_gossip_client_connect_time",
+                    "Gossip client connection time in seconds",
+                },
+                &["traffic"],
+                registry,
+            }.unwrap();
+            let client_connect_errors = p::register_int_counter_vec_with_registry! {
+                opts! {
+                    "corrosion_gossip_client_connect_errors",
+                    "Number of total gossip client connection errors",
+                },
+                &["traffic", "error"],
                 registry,
             }
             .unwrap();
@@ -363,9 +407,13 @@ impl GossipMetrics {
                 channel_errors,
                 broadcast_dropped,
                 broadcast_remaining_burst,
+                broadcast_rate_limited,
+                broadcast_spawned,
                 client_datagram_errors,
-client_datagrams,
-client_datagram_bytes,
+                client_chunks_sent,
+                client_bytes_sent,
+                client_connect_time,
+                client_connect_errors,
             }
         })
     }
@@ -416,22 +464,22 @@ client_datagram_bytes,
     }
 
     #[inline]
-    pub fn sever_streams_dec(&self, dir: quinn::Dir) {
+    pub fn server_streams_dec(&self, dir: quinn::Dir) {
         self.active_streams
             .with_label_values(&[dir_to_string(dir)])
             .dec();
     }
 
     #[inline]
-    pub fn server_stream_bytes_inc(
+    pub fn stream_bytes_inc(
         &self,
         len: u64,
         stream_kind: quinn::Dir,
         dir: Direction,
-        traffic: &'static str,
+        traffic: TrafficClass,
     ) {
         self.total_stream_bytes
-            .with_label_values(&[dir_to_string(stream_kind), dir.to_str(), traffic])
+            .with_label_values(&[dir_to_string(stream_kind), dir.to_str(), traffic.as_str()])
             .inc_by(len);
     }
 
@@ -533,6 +581,32 @@ client_datagram_bytes,
     }
 
     #[inline]
+    pub fn broadcast_rate_limited_inc(&self) {
+        self.broadcast_rate_limited.inc();
+    }
+
+    #[inline]
+    pub fn broadcast_spawned_inc(&self, kind: &'static str, count: u32) {
+        self.broadcast_spawned
+            .with_label_values(&[kind])
+            .inc_by(count as _);
+    }
+
+    #[inline]
+    pub fn client_connect_time(&self, elapsed: Duration, traffic: TrafficClass) {
+        self.client_connect_time
+            .with_label_values(&[traffic.as_str()])
+            .observe(elapsed.as_secs_f64());
+    }
+
+    #[inline]
+    pub fn client_connect_error(&self, traffic: TrafficClass, error: &'static str) {
+        self.client_connect_errors
+            .with_label_values(&[traffic.as_str(), error])
+            .inc();
+    }
+
+    #[inline]
     pub fn client_datagram_errors_inc(&self, error: &'static str) {
         self.client_datagram_errors
             .with_label_values(&[error])
@@ -540,9 +614,13 @@ client_datagram_bytes,
     }
 
     #[inline]
-    pub fn client_datagrams_sent_inc(&self, len: usize) {
-        self.client_datagrams.inc();
-        self.client_datagram_bytes.inc_by(len as _);
+    pub fn client_chunks_sent_inc(&self, len: usize, traffic: TrafficClass) {
+        let ts = traffic.as_str();
+
+        self.client_chunks_sent.with_label_values(&[ts]).inc();
+        self.client_bytes_sent
+            .with_label_values(&[ts])
+            .inc_by(len as _);
     }
 }
 
