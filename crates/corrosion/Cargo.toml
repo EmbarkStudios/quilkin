@@ -15,7 +15,7 @@ compact_str.workspace = true
 data-encoding.workspace = true
 eyre.workspace = true
 futures.workspace = true
-indexmap = "2.13"
+futures-util.workspace = true
 parking_lot.workspace = true
 prometheus.workspace = true
 quilkin-types.workspace = true
@@ -35,8 +35,20 @@ uhlc.workspace = true
 uuid.workspace = true
 prettytable = "0.10"
 
+# Packages from the corrosion repo, most of which are not published
 corro-api-types.workspace = true
 corro-types.workspace = true
 spawn.workspace = true
 sqlite-pool.workspace = true
 tripwire.workspace = true
+
+# Ensure these versions match the versions from corro-types, they are transitive
+# dependencies that are not re-exported
+bincode = "2.0"
+foca = "0.19"
+governor = { version = "0.10", features = ["std"] }
+indexmap = "2.13"
+itertools = "0.14"
+rand.workspace = true
+rangemap = "1.7"
+speedy = "0.8"
