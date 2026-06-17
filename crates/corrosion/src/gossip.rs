@@ -10,6 +10,8 @@ use metrics::GossipMetrics;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 
+use crate::gossip::transport::TrafficClass;
+
 pub type ChangeAndSource = (bx::ChangeV1, bx::ChangeSource);
 
 pub enum Change {
@@ -76,7 +78,7 @@ impl StreamMetrics {
     #[inline]
     fn uni(m: &'static GossipMetrics) -> Self {
         tracing::trace!("accepted unidirectional gossip stream");
-        m.streams_inc(quinn::Dir::Uni);
+        m.server_streams_inc(quinn::Dir::Uni);
 
         Self {
             m,
@@ -87,7 +89,7 @@ impl StreamMetrics {
     #[inline]
     fn bi(m: &'static GossipMetrics) -> Self {
         tracing::trace!("accepted bidirectional gossip stream");
-        m.streams_inc(quinn::Dir::Bi);
+        m.server_streams_inc(quinn::Dir::Bi);
 
         Self {
             m,
@@ -96,22 +98,22 @@ impl StreamMetrics {
     }
 
     #[inline]
-    fn incoming(&self, bytes: &bytes::BytesMut) {
+    fn incoming(&self, bytes: &bytes::BytesMut, traffic: TrafficClass) {
         self.m
-            .stream_bytes_inc(bytes.len() as _, self.dir, metrics::Direction::In);
+            .stream_bytes_inc(bytes.len() as _, self.dir, metrics::Direction::In, traffic);
     }
 
     #[inline]
-    fn outgoing(&self, chunk_len: u64) {
+    fn outgoing(&self, chunk_len: u64, traffic: TrafficClass) {
         self.m
-            .stream_bytes_inc(chunk_len, self.dir, metrics::Direction::Out);
+            .stream_bytes_inc(chunk_len, self.dir, metrics::Direction::Out, traffic);
     }
 }
 
 impl Drop for StreamMetrics {
     #[inline]
     fn drop(&mut self) {
-        self.m.streams_dec(self.dir);
+        self.m.server_streams_dec(self.dir);
     }
 }
 

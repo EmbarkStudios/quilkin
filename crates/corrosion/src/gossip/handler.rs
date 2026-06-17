@@ -158,7 +158,7 @@ fn process_broadcast_stream(
                 }
             };
 
-            stream_metrics.incoming(&next);
+            stream_metrics.incoming(&next, super::transport::TrafficClass::Broadcast);
 
             match broadcast::UniPayload::read_from_buffer(&next) {
                 Ok(broadcast::UniPayload::V1 {
@@ -227,7 +227,7 @@ fn process_sync_stream(
                     }
                 };
 
-                stream_metrics.incoming(&frame);
+                stream_metrics.incoming(&frame, super::transport::TrafficClass::Sync);
 
                 match broadcast::BiPayload::read_from_buffer(&frame) {
                     Ok(broadcast::BiPayload::V1 {
