@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Cmd"],"fn":["cmd_compare","cmd_run","compare_scenario","default_backends","delta_pct","delta_pp","main","print_multi_table"],"mod":["runner"],"struct":["Args"]};

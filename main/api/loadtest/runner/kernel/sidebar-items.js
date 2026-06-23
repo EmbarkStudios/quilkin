@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EXT_IFACE","EXT_IP","INT_IFACE","INT_IP","NETNS","PROXY_PORT"],"fn":["dummy_bin","ip","quilkin_bin","run"],"struct":["VethSetup"]};

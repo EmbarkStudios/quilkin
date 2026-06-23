@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["spawn_receivers"],"mod":["queue"],"trait":["Packet","PacketMut"]};
+window.SIDEBAR_ITEMS = {"fn":["bench_process_packet","spawn_receivers"],"mod":["queue"],"trait":["Packet","PacketMut"]};

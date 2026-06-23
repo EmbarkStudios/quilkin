@@ -956,7 +956,7 @@
 <a href=#956 id=956 data-nosnippet>956</a>        <span class="kw">let </span>start = tokio::time::Instant::now();
 <a href=#957 id=957 data-nosnippet>957</a>        <span class="kw">loop </span>{
 <a href=#958 id=958 data-nosnippet>958</a>            <span class="macro">tracing::debug!</span>(len = msg.len(), <span class="string">"sending packet"</span>);
-<a href=#959 id=959 data-nosnippet>959</a>            client.send_to(msg, <span class="kw-2">&amp;</span>proxy_address).<span class="kw">await</span>.unwrap();
+<a href=#959 id=959 data-nosnippet>959</a>            client.send_to(msg, <span class="kw-2">*</span>proxy_address).<span class="kw">await</span>.unwrap();
 <a href=#960 id=960 data-nosnippet>960</a>
 <a href=#961 id=961 data-nosnippet>961</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(rmsg) = <span class="self">self
 <a href=#962 id=962 data-nosnippet>962</a>                </span>.maybe_timeout(PACKET_TIMEOUT.as_millis() <span class="kw">as </span>u64, server_rx.recv())
