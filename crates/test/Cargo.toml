@@ -31,11 +31,16 @@ path = "src/bin/loadtest/main.rs"
 # Packet creation/parsing to validate the packet processing for XDP
 etherparse = "0.19"
 bytes.workspace = true
+camino.workspace = true
 clap = { version = "4.5.54", features = ["derive"] }
 comfy-table = "7.2.2"
+corrosion.workspace = true
+corro-types.workspace = true
 eyre.workspace = true
 once_cell.workspace = true
+prometheus.workspace = true
 quilkin.workspace = true
+quilkin-types.workspace = true
 quilkin-xds.workspace = true
 rand.workspace = true
 serde.workspace = true

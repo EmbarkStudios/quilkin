@@ -3870,13 +3870,18 @@ name = "qt"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "camino",
  "clap",
  "comfy-table",
+ "corro-types",
  "etherparse",
  "eyre",
  "insta",
  "once_cell",
+ "prometheus",
  "quilkin",
+ "quilkin-corrosion",
+ "quilkin-types",
  "quilkin-xds",
  "rand 0.9.4",
  "serde",
