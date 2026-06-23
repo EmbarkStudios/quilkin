@@ -166,7 +166,7 @@ impl<'s, const N: usize> Server<'s, N> {
             _ => unreachable!(),
         }
 
-        let server = endpoint.address.to_string();
+        let server = to_compact_str(endpoint);
 
         self.statements.push(Statement::WithParams(
             format!(
@@ -191,7 +191,7 @@ impl<'s, const N: usize> Server<'s, N> {
             vec![endpoint.to_sql()],
         ));
 
-        let server = endpoint.address.to_string();
+        let server = to_compact_str(endpoint);
 
         self.statements.push(Statement::WithParams(
             format!("UPDATE dc SET servers = jsonb_patch(servers, '{{\"{server}\":null}}') WHERE rowid = (SELECT MIN(rowid) FROM dc WHERE ip = ?)"),
@@ -322,12 +322,11 @@ impl<const N: usize> Datacenter<'_, N> {
         let time = update_time.unwrap_or(time::UtcDateTime::now());
 
         self.0.push(Statement::Simple(format!(
-            "WITH sj AS (SELECT server.key FROM dc JOIN json_each(dc.servers) AS server WHERE ip = '{0}' LIMIT 1)
+            "WITH sj AS (SELECT server.key FROM dc JOIN json_each(dc.servers) AS server WHERE ip = '{0}')
             UPDATE servers SET
-                contributors = jsonb_patch(s.contributors,'{{\"{0}\":null}}'),
+                contributors = jsonb_patch(contributors,'{{\"{0}\":null}}'),
                 cont_update = {1}
-            FROM servers s
-            LEFT JOIN sj ON s.endpoint = sj.key", peer.ip(), time.unix_timestamp()
+            WHERE endpoint IN (SELECT key FROM sj)", peer.ip(), time.unix_timestamp()
         )));
 
         self.0.push(Statement::WithParams(
