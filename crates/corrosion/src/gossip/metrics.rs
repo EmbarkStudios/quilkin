@@ -64,6 +64,10 @@ pub struct GossipMetrics {
     client_bytes_sent: IntCounterVec,
     client_connect_time: HistogramVec,
     client_connect_errors: IntCounterVec,
+
+    member_removed: IntCounterVec,
+    member_added: IntCounter,
+    swim_notifications: IntCounterVec,
 }
 
 impl GossipMetrics {
@@ -376,6 +380,32 @@ impl GossipMetrics {
                 registry,
             }
             .unwrap();
+            let member_removed = p::register_int_counter_vec_with_registry! {
+                opts! {
+                    "corrosion_gossip_member_removed",
+                    "Number of total cluster membership removals",
+                },
+                &["reason"],
+                registry,
+            }
+            .unwrap();
+            let member_added = p::register_int_counter_with_registry! {
+                opts! {
+                    "corrosion_gossip_member_added",
+                    "Number of total cluster membership additions",
+                },
+                registry,
+            }
+            .unwrap();
+            let swim_notifications = p::register_int_counter_vec_with_registry! {
+                opts! {
+                    "corrosion_gossip_swim_notifications",
+                    "Number of total SWIM notifications",
+                },
+                &["kind"],
+                registry,
+            }
+            .unwrap();
 
             Self {
                 active_conns,
@@ -414,6 +444,9 @@ impl GossipMetrics {
                 client_bytes_sent,
                 client_connect_time,
                 client_connect_errors,
+                member_removed,
+                member_added,
+                swim_notifications,
             }
         })
     }
@@ -621,6 +654,21 @@ impl GossipMetrics {
         self.client_bytes_sent
             .with_label_values(&[ts])
             .inc_by(len as _);
+    }
+
+    #[inline]
+    pub fn member_removed_inc(&self, reason: &str) {
+        self.member_removed.with_label_values(&[reason]).inc();
+    }
+
+    #[inline]
+    pub fn member_added_inc(&self) {
+        self.member_added.inc();
+    }
+
+    #[inline]
+    pub fn swim_notification_inc(&self, kind: &str) {
+        self.swim_notifications.with_label_values(&[kind]).inc();
     }
 }
 

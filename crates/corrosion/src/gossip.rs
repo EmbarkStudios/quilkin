@@ -6,7 +6,7 @@ pub mod sync;
 pub mod transport;
 
 use corro_types::broadcast as bx;
-use metrics::GossipMetrics;
+pub use metrics::GossipMetrics;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 
@@ -122,3 +122,6 @@ fn fatal_db_issue(issue: &'static str, stx: &tokio::sync::watch::Sender<()>) {
     tracing::error!(issue, "fatal DB issue encountered, attempting shutdown");
     let _dont_care = stx.send(());
 }
+
+#[derive(Clone)]
+pub struct Members(pub std::sync::Arc<parking_lot::RwLock<corro_types::members::Members>>);
