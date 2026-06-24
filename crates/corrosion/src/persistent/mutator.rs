@@ -2,7 +2,7 @@
 //! and send events to subscribers whose queries match the applied mutations
 
 use crate::{
-    Peer, db,
+    Clock, Peer, db,
     db::SplitPoolReadExt,
     persistent::proto::{ExecResponse, ExecResult, v1 as p},
 };
@@ -12,16 +12,12 @@ use corro_types::{
     base::{CrsqlDbVersion, CrsqlSeq},
     broadcast, change,
     pubsub::SubsManager,
-    updates::match_changes,
+    updates::{UpdatesManager, match_changes},
 };
-use eyre::WrapErr;
 use quilkin_types::IcaoCode;
 use rusqlite::Transaction;
 use sqlite_pool::InterruptibleTransaction;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 
 pub type BroadcastTx = tokio::sync::mpsc::Sender<broadcast::BroadcastInput>;
@@ -57,34 +53,25 @@ pub struct BroadcastingTransactor {
     bookie: Bookie,
     booked: Booked,
     subs: SubsManager,
+    updates: Option<UpdatesManager>,
     tx: Option<BroadcastTx>,
-    clock: Arc<uhlc::HLC>,
+    clock: Clock,
     id: ActorId,
     full_purge_count: usize,
     write_tx: tokio::sync::mpsc::Sender<PendingWrite>,
 }
 
 impl BroadcastingTransactor {
-    pub async fn new(
+    pub fn new(
         id: ActorId,
-        clock: Arc<uhlc::HLC>,
+        clock: Clock,
         pool: SplitPool,
         subs: SubsManager,
+        updates: Option<UpdatesManager>,
+        bookie: Bookie,
+        booked: Booked,
         tx: Option<BroadcastTx>,
-    ) -> eyre::Result<Self> {
-        let start = Instant::now();
-        let all_booked = {
-            let conn = pool
-                .read_readonly()
-                .await
-                .context("failed to acquire read")?;
-            BookedVersions::load_all_from_conn(&conn).context("failed to load booked versions")?
-        };
-        tracing::info!("Loaded booked versions in {:?}", start.elapsed());
-
-        let bookie = Bookie::new(all_booked);
-        let booked = bookie.ensure(id);
-
+    ) -> Self {
         let (write_tx, write_rx) = tokio::sync::mpsc::channel(256);
 
         let btx = Self {
@@ -93,6 +80,7 @@ impl BroadcastingTransactor {
             booked,
             clock,
             subs,
+            updates,
             id,
             tx,
             full_purge_count: DEFAULT_FULL_PURGE_COUNT,
@@ -102,7 +90,7 @@ impl BroadcastingTransactor {
         let btx_for_loop = btx.clone();
         spawn::spawn_counted(async move { write_loop(btx_for_loop, write_rx).await });
 
-        Ok(btx)
+        btx
     }
 
     /// Sets the number of oldest `servers` rows purged on the second recovery attempt.
@@ -189,7 +177,7 @@ impl BroadcastingTransactor {
 
             let ret = f(&tx)?;
 
-            let insert_info = insert_local_changes(actor_id, &clock, &tx, &mut book_writer)?;
+            let insert_info = insert_local_changes(actor_id, &clock.0, &tx, &mut book_writer)?;
             tx.commit().map_err(|source| ChangeError::Rusqlite {
                 source,
                 actor_id: Some(actor_id),
@@ -211,12 +199,21 @@ impl BroadcastingTransactor {
 
                     let pool = self.pool.clone();
                     let subs = self.subs.clone();
+                    let updates = self.updates.clone();
                     let tx = self.tx.clone();
 
                     spawn::spawn_counted(async move {
-                        if let Err(error) =
-                            broadcast_changes(&pool, actor_id, &subs, tx, db_version, last_seq, ts)
-                                .await
+                        if let Err(error) = broadcast_changes(
+                            &pool,
+                            actor_id,
+                            &subs,
+                            updates.as_ref(),
+                            tx,
+                            db_version,
+                            last_seq,
+                            ts,
+                        )
+                        .await
                         {
                             tracing::error!(%error, "failed to broadcast changes");
                         }
@@ -517,6 +514,7 @@ pub async fn broadcast_changes(
     pool: &SplitPool,
     actor_id: ActorId,
     subs: &SubsManager,
+    updates: Option<&UpdatesManager>,
     tx: Option<BroadcastTx>,
     db_version: CrsqlDbVersion,
     last_seq: CrsqlSeq,
@@ -552,6 +550,9 @@ pub async fn broadcast_changes(
                         ts,
                     };
                     match_changes(subs, &changeset, db_version);
+                    if let Some(updates) = updates {
+                        match_changes(updates, &changeset, db_version);
+                    }
 
                     if let Some(tx) = tx.clone() {
                         tokio::spawn(async move {

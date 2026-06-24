@@ -1,6 +1,6 @@
 use corro_types::{
-    actor::ActorId,
-    agent::{SplitPool, WriteConn},
+    actor::{ActorId, ClusterId},
+    agent::{Booked, Bookie, SplitPool, WriteConn},
     schema::Schema,
     sqlite::{CrConn, SqlitePoolError},
 };
@@ -131,13 +131,22 @@ impl Default for DBMaintenance {
 pub struct InitializedDb {
     /// Pool used to interact with the DB
     pub pool: SplitPool,
+    /// Bookie
+    pub bookie: Bookie,
+    /// All booked versions
+    pub booked: Booked,
     /// The CRSQL clock
-    pub clock: Arc<uhlc::HLC>,
+    pub clock: crate::Clock,
     /// The parsed and verified schema
     pub schema: Arc<Schema>,
     /// The unique actor ID for this database connection, distinguishing it from
     /// other actors that gossip DB changes
     pub actor_id: ActorId,
+    /// The cluster identifier
+    ///
+    /// This essentially determines the "version" of a database so that nodes only gossip changes with other nodes with
+    /// the same cluster id
+    pub cluster_id: ClusterId,
 }
 
 impl InitializedDb {
@@ -170,18 +179,32 @@ impl InitializedDb {
         let write_sema = Arc::new(tokio::sync::Semaphore::new(1));
         let pool = SplitPool::create(&db_path, write_sema.clone(), ONE_GIB).await?;
 
-        let clock = Arc::new(
+        let clock = crate::Clock(Arc::new(
             uhlc::HLCBuilder::default()
                 .with_id(actor_id.try_into().unwrap())
                 .with_max_delta(std::time::Duration::from_millis(300))
                 .build(),
-        );
+        ));
+
+        let cluster_id = {
+            let conn = pool.read().await?;
+
+            match conn.query_row(
+                "SELECT value FROM __corro_state WHERE key = 'cluster_id'",
+                [],
+                |row| row.get(0),
+            ) {
+                Ok(value) => value,
+                Err(rusqlite::Error::QueryReturnedNoRows) => Default::default(),
+                Err(e) => return Err(e.into()),
+            }
+        };
 
         let schema = {
             let mut conn = pool.write_priority().await?;
 
             let old_schema = {
-                corro_types::agent::migrate(clock.clone(), &mut conn)?;
+                corro_types::agent::migrate(clock.0.clone(), &mut conn)?;
                 let mut schema = corro_types::schema::init_schema(&conn)?;
                 schema.constrain()?;
 
@@ -202,11 +225,33 @@ impl InitializedDb {
             spawn_db_maintenance(db_path, pool.clone(), dbm);
         }
 
+        use eyre::WrapErr;
+        let start = std::time::Instant::now();
+        let conn = pool
+            .read_readonly()
+            .await
+            .context("failed to acquire read")?;
+
+        let (bookie, booked) =
+            tokio::task::block_in_place(|| -> eyre::Result<(Bookie, Booked)> {
+                let all_booked = corro_types::agent::BookedVersions::load_all_from_conn(&conn)
+                    .context("failed to load booked versions")?;
+
+                let bookie = Bookie::new(all_booked);
+                let booked = bookie.ensure(actor_id);
+                Ok((bookie, booked))
+            })?;
+
+        tracing::info!(elapsed = ?start.elapsed(), "Loaded booked versions");
+
         Ok(Self {
             pool,
+            bookie,
+            booked,
             clock,
             schema: Arc::new(schema),
             actor_id,
+            cluster_id,
         })
     }
 }

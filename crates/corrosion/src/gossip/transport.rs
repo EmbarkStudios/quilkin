@@ -61,9 +61,22 @@ impl Transport {
     ) -> eyre::Result<Self> {
         let mut endpoint = q::Endpoint::client((std::net::Ipv6Addr::UNSPECIFIED, 0).into())?;
 
-        // The original corrosion code puts timeouts on the client side, but IMO it makes more sense to put timeouts
-        // on the server side even though the effect is the same
-        endpoint.set_default_client_config(quinn_plaintext::client_config());
+        let mut cfg = quinn_plaintext::client_config();
+
+        static TRANSPORT_CONFIG: std::sync::OnceLock<Arc<quinn::TransportConfig>> =
+            std::sync::OnceLock::new();
+
+        cfg.transport_config(
+            TRANSPORT_CONFIG
+                .get_or_init(|| {
+                    let mut tcfg = quinn::TransportConfig::default();
+                    // Send keep alive packets at half the time of the idle timeout set on the server
+                    tcfg.keep_alive_interval(Some(std::time::Duration::from_secs(15)));
+                    Arc::new(tcfg)
+                })
+                .clone(),
+        );
+        endpoint.set_default_client_config(cfg);
 
         Ok(Self(Arc::new(TransportInner {
             endpoint,

@@ -1,3 +1,5 @@
+mod throttle;
+
 use super::{ChangeAndSource, GossipMetrics};
 use crate::Clock;
 use corro_types::{
@@ -8,12 +10,14 @@ use corro_types::{
     broadcast::{self as bx, ChangeV1, Changeset, ChangesetParts},
     sqlite::unnest_param,
 };
+use futures::StreamExt;
 use rangemap::RangeInclusiveSet;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
+use tracing::Instrument;
 
 /// State for dynamic batch processing
 struct HandleChangesState {
@@ -268,6 +272,7 @@ impl HandleChangesState {
     }
 }
 
+#[derive(Clone)]
 pub struct ChangeOptions {
     /// How many unapplied changesets corrosion will buffer before starting to drop them
     pub processing_queue_len: usize,
@@ -303,11 +308,6 @@ impl Default for ChangeOptions {
     }
 }
 
-pub enum ClearVersionRange {
-    Single(CrsqlDbVersionRange),
-    Set(RangeInclusiveSet<CrsqlDbVersion>),
-}
-
 #[derive(Clone)]
 pub struct ChangeCtx {
     pub pool: agent::SplitPool,
@@ -317,10 +317,22 @@ pub struct ChangeCtx {
     pub actor_id: ActorId,
     pub clock: Clock,
     pub bcast_tx: mpsc::Sender<bx::BroadcastInput>,
-    pub apply_tx: mpsc::Sender<(ActorId, Vec<CrsqlDbVersion>)>,
-    pub clear_buf_tx: mpsc::Sender<(ActorId, ClearVersionRange)>,
+    pub apply_tx: mpsc::Sender<ChangeApply>,
+    pub clear_buf_tx: mpsc::Sender<(ActorId, RangeInclusiveSet<CrsqlDbVersion>)>,
     pub shutdown: tokio::sync::watch::Sender<()>,
     pub metrics: &'static super::GossipMetrics,
+}
+
+/// Spawns a task for [`handle_changes`]
+pub fn spawn_changes_handler(
+    ctx: ChangeCtx,
+    opts: ChangeOptions,
+    changes_rx: mpsc::Receiver<super::Change>,
+    tripwire: tripwire::Tripwire,
+) {
+    spawn::spawn_counted(async move {
+        handle_changes(ctx, opts, changes_rx, tripwire).await;
+    });
 }
 
 /// Bundle incoming changes to optimise transaction sizes with `SQLite`
@@ -332,7 +344,7 @@ pub struct ChangeCtx {
 pub async fn handle_changes(
     ctx: ChangeCtx,
     opts: ChangeOptions,
-    mut rx_changes: mpsc::Receiver<super::Change>,
+    mut changes_rx: mpsc::Receiver<super::Change>,
     mut tripwire: tripwire::Tripwire,
 ) {
     // Initialize batch processor state
@@ -369,7 +381,7 @@ pub async fn handle_changes(
             },
 
             // New changes arrive
-            maybe_change_src = rx_changes.recv() => match maybe_change_src {
+            maybe_change_src = changes_rx.recv() => match maybe_change_src {
                 Some(change) => change,
                 None => break,
             },
@@ -779,10 +791,10 @@ async fn process_multiple_changes(
                 }
             }
 
-            // the corrosion code doesn't seem to think this one isn't critical, or that it won't usually ever be full?
+            // the corrosion code seems to think this one isn't critical, or that it won't usually ever be full?
             if ctx
                 .clear_buf_tx
-                .try_send((actor_id, ClearVersionRange::Set(clear_versions)))
+                .try_send((actor_id, clear_versions))
                 .is_err()
             {
                 tracing::warn!("could not schedule buffered meta clear");
@@ -851,7 +863,7 @@ fn process_single_version(
     Ok((known, changeset))
 }
 
-pub fn process_complete_version(
+fn process_complete_version(
     clock: &Clock,
     sp: &sqlite_pool::InterruptibleTransaction<rusqlite::Savepoint<'_>>,
     actor_id: ActorId,
@@ -960,7 +972,7 @@ pub fn process_complete_version(
     Ok((known_version, new_changeset))
 }
 
-pub fn process_incomplete_version(
+fn process_incomplete_version(
     sp: &sqlite_pool::InterruptibleTransaction<rusqlite::Savepoint<'_>>,
     parts: &ChangesetParts,
     changes_per_table: &mut BTreeMap<String, u64>,
@@ -1015,4 +1027,580 @@ pub fn process_incomplete_version(
         last_seq: *last_seq,
         ts: *ts,
     }))
+}
+
+pub type ChangeApply = (ActorId, Vec<CrsqlDbVersion>);
+
+fn match_changes_from_db_version<H>(
+    manager: &impl corro_types::updates::Manager<H>,
+    conn: &rusqlite::Connection,
+    db_version: CrsqlDbVersion,
+    actor_id: ActorId,
+) -> rusqlite::Result<()>
+where
+    H: corro_types::updates::Handle + Send + 'static,
+{
+    let handles = manager.get_handles();
+    if handles.is_empty() {
+        return Ok(());
+    }
+
+    let mut candidates = handles
+        .iter()
+        .map(|(id, handle)| (id, (corro_types::pubsub::MatchCandidates::new(), handle)))
+        .collect::<BTreeMap<_, _>>();
+
+    {
+        let mut prepped = conn.prepare_cached(
+            r#"
+        SELECT "table", pk, cid, cl
+            FROM crsql_changes
+            WHERE db_version = ?
+              AND site_id = ?
+            ORDER BY seq ASC
+        "#,
+        )?;
+
+        let rows = prepped.query_map((db_version, actor_id), |row| {
+            Ok((
+                row.get::<_, corro_api_types::TableName>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, corro_api_types::ColumnName>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+
+        for change_res in rows {
+            let (table, pk, column, cl) = change_res?;
+
+            for (_id, (candidates, handle)) in candidates.iter_mut() {
+                let change = corro_types::pubsub::MatchableChange {
+                    table: &table,
+                    pk: &pk,
+                    column: &column,
+                    cl,
+                };
+                handle.filter_matchable_change(candidates, change);
+            }
+        }
+    }
+
+    // The original corrosion code spawns individual tasks for each case of the channel being full or closed, we just spawn
+    // a single task for each category
+    let mut full = Vec::new();
+    let mut closed = Vec::new();
+
+    for (id, (candidates, handle)) in candidates {
+        let mut match_count = 0;
+        for (table, pks) in candidates.iter() {
+            let count = pks.len();
+            match_count += count;
+            handle
+                .get_counter(table)
+                .matched_count
+                .increment(pks.len() as u64);
+        }
+
+        tracing::trace!(sub_id = %id, %db_version, match_count, "found candidates");
+
+        let Err(err) = handle.changes_tx().try_send(candidates) else {
+            continue;
+        };
+
+        match err {
+            mpsc::error::TrySendError::Full(item) => {
+                full.push((handle.changes_tx(), item));
+            }
+            mpsc::error::TrySendError::Closed(_) => {
+                let Some(handle) = manager.remove(id) else {
+                    continue;
+                };
+
+                closed.push(handle);
+            }
+        }
+    }
+
+    if !full.is_empty() {
+        tokio::spawn(async move {
+            let total = full.len();
+
+            let start = Instant::now();
+
+            let mut sends = futures::stream::iter(
+                full.into_iter()
+                    .map(|(tx, item)| async move { tx.send(item).await }),
+            )
+            .buffer_unordered(10);
+
+            let mut errors = 0;
+
+            while let Some(res) = sends.next().await {
+                if res.is_err() {
+                    errors += 1;
+                }
+            }
+
+            tracing::debug!(total, errors, elapsed = ?start.elapsed(), "asynchronously sent changes to channels which were full");
+        });
+    }
+
+    if !closed.is_empty() {
+        tokio::spawn(async move {
+            for handle in closed {
+                handle.cleanup().await;
+            }
+        });
+    }
+
+    Ok(())
+}
+
+async fn process_fully_buffered_changes(
+    ctx: &ChangeCtx,
+    bookie: &Bookie,
+    actor_id: ActorId,
+    version: CrsqlDbVersion,
+    tx_timeout: Duration,
+) -> Result<bool, ChangeError> {
+    let rows_impacted = {
+        let booked = bookie.ensure(actor_id);
+        let mut conn = ctx.pool.write_normal().await?;
+        tracing::trace!(%actor_id, %version, "acquired write (normal) connection to process fully buffered changes");
+
+        tokio::task::block_in_place(move || {
+            let bookie_write = bookie.write_lock_blocking();
+            let bookedw = bookie_write.write_tx(&booked);
+            tracing::trace!(%actor_id, %version, "acquired Booked write lock to process fully buffered changes");
+
+            let mut bookedw = bookedw;
+            let last_seq = {
+                match bookedw.partials.get(&version) {
+                    Some(PartialVersion { seqs, last_seq, .. }) => {
+                        if seqs.gaps(&(CrsqlSeq(0)..=*last_seq)).count() != 0 {
+                            let gaps = seqs
+                                .gaps(&(CrsqlSeq(0)..=*last_seq))
+                                .collect::<RangeInclusiveSet<CrsqlSeq>>();
+                            tracing::error!(%actor_id, %version, ?gaps, "found sequence gaps, aborting!", );
+                            // TODO: return an error here
+                            return Ok(false);
+                        }
+                        *last_seq
+                    }
+                    None => {
+                        tracing::warn!(%actor_id, %version, "version not found in cache, returning");
+                        return Ok(false);
+                    }
+                }
+            };
+
+            let base_tx = conn
+                .immediate_transaction()
+                .map_err(|source| ChangeError::Rusqlite {
+                    source,
+                    actor_id: Some(actor_id),
+                    version: Some(version),
+                })?;
+
+            let tx = sqlite_pool::InterruptibleTransaction::new(
+                base_tx,
+                Some(tx_timeout),
+                "process_buffered_changes",
+            );
+
+            tracing::trace!(%actor_id, %version, %last_seq, "Processing buffered changes to crsql_changes");
+
+            let rows_present: bool = tx.prepare_cached("SELECT EXISTS (SELECT 1 FROM __corro_buffered_changes WHERE site_id = ? AND db_version = ?)")
+                                    .map_err(|source| ChangeError::Rusqlite{source, actor_id: Some(actor_id), version: Some(version)})?
+                                    .query_row(rusqlite::params![actor_id, version], |row| row.get(0))
+                                    .map_err(|source| ChangeError::Rusqlite{source, actor_id: Some(actor_id), version: Some(version)})?;
+
+            let start = Instant::now();
+
+            if rows_present {
+                // insert all buffered changes into crsql_changes directly from the buffered changes table
+                let count = tx
+                    .prepare_cached(
+                        r#"
+                        INSERT INTO crsql_changes ("table", pk, cid, val, col_version, db_version, site_id, cl, seq, ts)
+                            SELECT                 "table", pk, cid, val, col_version, db_version, site_id, cl, seq, ts
+                                FROM __corro_buffered_changes
+                                    WHERE site_id = ?
+                                    AND db_version = ?
+                                    ORDER BY db_version ASC, seq ASC
+                                    "#,
+                    ).map_err(|source| ChangeError::Rusqlite{source, actor_id: Some(actor_id), version: Some(version)})?
+                    .execute(rusqlite::params![actor_id.as_bytes(), version]).map_err(|source| ChangeError::Rusqlite{source, actor_id: Some(actor_id), version: Some(version)})?;
+                tracing::trace!(%actor_id, %version, count, elapsed = ?start.elapsed(), "Inserted rows from buffered into crsql_changes");
+            } else {
+                tracing::trace!(%actor_id, %version, "No buffered rows, skipped insertion into crsql_changes");
+            }
+
+            let rows_impacted: i64 = tx
+                .prepare_cached("SELECT crsql_rows_impacted()")
+                .map_err(|source| ChangeError::Rusqlite {
+                    source,
+                    actor_id: Some(actor_id),
+                    version: Some(version),
+                })?
+                .query_row((), |row| row.get(0))
+                .map_err(|source| ChangeError::Rusqlite {
+                    source,
+                    actor_id: Some(actor_id),
+                    version: Some(version),
+                })?;
+
+            tracing::trace!(%actor_id, %version, rows_impacted, "rows impacted by buffered changes insertion");
+
+            bookedw
+                .insert_db(&tx, [version..=version].into())
+                .map_err(|source| ChangeError::Rusqlite {
+                    source,
+                    actor_id: Some(actor_id),
+                    version: Some(version),
+                })?;
+
+            // the version transitions from partial → fully applied, clean up its seq bookkeeping
+            bookedw
+                .clear_partials(&tx, RangeInclusiveSet::from([version..=version]))
+                .map_err(|source| ChangeError::Rusqlite {
+                    source,
+                    actor_id: Some(actor_id),
+                    version: Some(version),
+                })?;
+
+            tx.commit().map_err(|source| ChangeError::Rusqlite {
+                source,
+                actor_id: Some(actor_id),
+                version: Some(version),
+            })?;
+
+            bookedw.commit();
+
+            if let Err(error) = ctx
+                .clear_buf_tx
+                .try_send((actor_id, rangemap::range_inclusive_set![version..=version]))
+            {
+                tracing::error!(%error, "could not schedule buffered data clear");
+            }
+
+            Ok::<_, ChangeError>(rows_impacted > 0)
+        })
+    }?;
+
+    if rows_impacted {
+        let conn = ctx.pool.read().await?;
+        tokio::task::block_in_place(|| {
+            if let Err(error) =
+                match_changes_from_db_version(&ctx.sub_manager, &conn, version, actor_id)
+            {
+                tracing::error!(%error, %version, "could not match changes for subs from db version");
+            }
+        });
+
+        tokio::task::block_in_place(|| {
+            if let Err(error) =
+                match_changes_from_db_version(&ctx.update_manager, &conn, version, actor_id)
+            {
+                tracing::error!(%error, %version, "could not match changes for updates from db version");
+            }
+        });
+    }
+
+    Ok(rows_impacted)
+}
+
+pub fn spawn_buffered_apply(
+    ctx: ChangeCtx,
+    opts: ChangeOptions,
+    bookie: Bookie,
+    mut apply_rx: mpsc::Receiver<ChangeApply>,
+    mut tripwire: tripwire::Tripwire,
+) {
+    async fn find_fully_buffered_partial(
+        pool: &corro_types::agent::SplitPool,
+    ) -> Result<Option<(ActorId, CrsqlDbVersion)>, ChangeError> {
+        let conn = pool.read().await.map_err(ChangeError::SqlitePool)?;
+
+        tokio::task::block_in_place(|| {
+            conn.prepare_cached(
+                "SELECT site_id, db_version FROM __corro_seq_bookkeeping
+                 WHERE start_seq = 0 AND end_seq = last_seq
+                 LIMIT 1",
+            )
+            .and_then(
+                |mut stmt| match stmt.query_row([], |row| Ok((row.get(0)?, row.get(1)?))) {
+                    Ok(v) => Ok(Some(v)),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(e),
+                },
+            )
+            .map_err(|source| ChangeError::Rusqlite {
+                source,
+                actor_id: None,
+                version: None,
+            })
+        })
+    }
+
+    spawn::spawn_counted(async move {
+        // we can burst timeout up to an additional 2 min
+        let max_timeout_increase: u64 = 6;
+        let step_timeout_secs: u64 = 20;
+
+        let throttle_min = Duration::from_secs(5 * 60);
+        let throttle_max = Duration::from_secs(60 * 60);
+
+        let mut retry_interval = tokio::time::interval(Duration::from_secs(5 * 60));
+
+        // map to throttle retries for failed versions that took too long to apply
+        let mut limit_retries = throttle::ThrottleMap::new(throttle_min, throttle_max);
+
+        let do_process =
+            async |partial_version: (ActorId, CrsqlDbVersion),
+                   limit_retries: &mut throttle::ThrottleMap| {
+                async {
+                if let Some(blocked_until) = limit_retries.is_throttled(&partial_version) {
+                    let next_retry = blocked_until.duration_since(Instant::now());
+                    tracing::debug!(
+                        ?next_retry,
+                        "previous attempt to apply buffered changes took too long, will retry"
+                    );
+                    return;
+                }
+
+                let throttle_count = limit_retries
+                    .throttle_count(&partial_version)
+                    .min(max_timeout_increase);
+                let tx_timeout =
+                    opts.sql_tx_timeout + Duration::from_secs(step_timeout_secs * throttle_count);
+
+                tracing::debug!(?tx_timeout, "picked up buffered changes");
+
+                let start = Instant::now();
+                let res =
+                    process_fully_buffered_changes(&ctx, &bookie, partial_version.0, partial_version.1, tx_timeout)
+                        .await;
+                let elapsed = start.elapsed();
+                match res {
+                    Ok(false) => {
+                        tracing::debug!("did not apply buffered changes");
+                        limit_retries.remove(&partial_version);
+                    }
+                    Ok(true) => {
+                        tracing::debug!("succesfully applied buffered changes");
+                        ctx.metrics.changes_processed(elapsed, "buffered", None);
+                        limit_retries.remove(&partial_version);
+                    }
+                    Err(error) => {
+                        let is_interrupt_error = error.is_interrupt_error();
+                        tracing::debug!(elapsed = ?tx_timeout, %error, "could not apply fully buffered changes");
+                        if let Some(issue) = error.fatal_db_issue() {
+                            super::fatal_db_issue(issue, &ctx.shutdown);
+                        }
+
+                        // processing time came close to timeout, limit retry with exponential backoff
+                        if is_interrupt_error {
+                            limit_retries.throttle(partial_version);
+                        }
+                    }
+                }
+            }.instrument(tracing::debug_span!("background apply", actor_id = %partial_version.0, version = %partial_version.1)).await;
+            };
+
+        retry_interval.tick().await;
+
+        loop {
+            // TODO: The original corrosion code was sending one change at a time but I changed it so it was n changes per
+            // actor instead which would be beneficial in this write code by consolidating DB access
+            tokio::select! {
+                biased;
+                _ = &mut tripwire => break,
+                maybe_version = apply_rx.recv() => {
+                    let Some((actor, versions)) = maybe_version else {
+                        break;
+                    };
+
+                    for version in versions {
+                        do_process((actor, version), &mut limit_retries).await;
+                    }
+                },
+                _ = retry_interval.tick() => {
+                    match find_fully_buffered_partial(&ctx.pool).await {
+                        Ok(Some(pair)) => {
+                            do_process(pair, &mut limit_retries).await;
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            tracing::debug!(%error, "could not query for fully buffered partials");
+                        },
+                    }
+                },
+            }
+        }
+    });
+}
+
+/// Clean up `__corro_buffered_changes` rows for versions that have been fully applied.
+/// `__corro_seq_bookkeeping` is managed through the bookie via `insert_partials_db`/`insert_db`.
+pub fn spawn_buffered_cleanup(
+    ctx: ChangeCtx,
+    opts: ChangeOptions,
+    mut clear_buf_rx: mpsc::Receiver<(ActorId, RangeInclusiveSet<CrsqlDbVersion>)>,
+    mut tripwire: tripwire::Tripwire,
+) {
+    async fn find_orphaned_buffered_changes(
+        pool: &corro_types::agent::SplitPool,
+    ) -> Result<Option<(ActorId, CrsqlDbVersion)>, ChangeError> {
+        let conn = pool.read().await.map_err(ChangeError::SqlitePool)?;
+        tokio::task::block_in_place(|| {
+            conn.prepare_cached(
+                "SELECT DISTINCT bc.site_id, bc.db_version
+                 FROM __corro_buffered_changes bc
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM __corro_seq_bookkeeping bk
+                     WHERE bk.site_id = bc.site_id AND bk.db_version = bc.db_version
+                 )
+                 LIMIT 1",
+            )
+            .and_then(
+                |mut stmt| match stmt.query_row([], |row| Ok((row.get(0)?, row.get(1)?))) {
+                    Ok(v) => Ok(Some(v)),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(e),
+                },
+            )
+            .map_err(|source| ChangeError::Rusqlite {
+                source,
+                actor_id: None,
+                version: None,
+            })
+        })
+    }
+
+    spawn::spawn_counted(async move {
+        // check for orphaned buffered changes every 5 minutes
+        let mut retry_interval = tokio::time::interval(Duration::from_secs(5 * 60));
+        retry_interval.tick().await;
+
+        loop {
+            let (actor_id, versions) = tokio::select! {
+                biased;
+                _ = &mut tripwire => break,
+                maybe_partials = clear_buf_rx.recv() => {
+                    let Some(partials) = maybe_partials else {
+                        break;
+                    };
+
+                    partials
+                }
+                _ = retry_interval.tick() => {
+                    match find_orphaned_buffered_changes(&ctx.pool).await {
+                        Ok(Some((actor_id, version))) => (actor_id, rangemap::range_inclusive_set![version..=version]),
+                        Ok(None) => continue,
+                        Err(error) => {
+                            tracing::debug!(%error, "could not query for orphaned buffered changes");
+                            continue;
+                        }
+                    }
+                }
+            };
+
+            let to_clear = if let Some(booked) = ctx.bookie.get(&actor_id) {
+                let booked_read = booked.read();
+                // The original corrosion code seems to have a bug where a continue is done on the inner loop instead of the
+                // outer loop
+                // for version in versions {
+                //     if booked_read.get_partial(&version).is_some() {
+                //         warn!(%actor_id, %version, "clear_buffered_meta: received partial version that's still in bookie, skipping");
+                //         continue;
+                //     }
+                // }
+
+                let before = versions.len();
+                let to_clear: rangemap::RangeInclusiveSet<_> = versions
+                    .into_iter()
+                    .filter(|v| {
+                        for v in v.start().0..=v.end().0 {
+                            if booked_read.get_partial(&CrsqlDbVersion(v)).is_some() {
+                                return false;
+                            }
+                        }
+
+                        true
+                    })
+                    .collect();
+
+                if to_clear.is_empty() {
+                    tracing::debug!(%actor_id, "received set of partial versions that were all still in the bookie, skipping");
+                    continue;
+                } else if before > to_clear.len() {
+                    tracing::debug!(%actor_id, still_booked = before - to_clear.len(), "received set of partial versions, some of which were still booked");
+                }
+
+                to_clear
+            } else {
+                versions
+            };
+
+            let pool = ctx.pool.clone();
+            let tx_timeout = opts.sql_tx_timeout;
+            let self_actor_id = ctx.actor_id;
+            let mut task_tripwire = tripwire.clone();
+
+            const TO_CLEAR_COUNT: usize = 1000;
+
+            spawn::spawn_counted(async move {
+                loop {
+                    let res = {
+                        let mut conn = pool.write_low().await?;
+
+                        tokio::task::block_in_place(|| {
+                            let tx = sqlite_pool::InterruptibleTransaction::new(
+                                conn.immediate_transaction()?,
+                                Some(tx_timeout),
+                                "clear_buffered_meta",
+                            );
+
+                            let mut buf_count = 0;
+
+                            for range in to_clear {
+                                buf_count += tx
+                                .prepare_cached("DELETE FROM __corro_buffered_changes WHERE (site_id, db_version, seq) IN (SELECT site_id, db_version, seq FROM __corro_buffered_changes WHERE site_id = ? AND db_version >= ? AND db_version <= ? LIMIT ?)")?
+                                .execute(rusqlite::params![actor_id, range.start().0, range.end().0, TO_CLEAR_COUNT])?;
+                            }
+
+                            tx.commit()?;
+
+                            Ok::<_, rusqlite::Error>(buf_count)
+                        })
+                    };
+
+                    match res {
+                        Ok(buf_count) => {
+                            if buf_count > 0 {
+                                tracing::debug!(buf_count, "cleared buffered change rows");
+                            }
+                            if buf_count < TO_CLEAR_COUNT {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            tracing::debug!(%error, "could not clear buffered meta for versions");
+                        }
+                    }
+
+                    // TODO: Why do we sleep here?
+                    tokio::select! {
+                        _ = &mut task_tripwire => {
+                            break;
+                        }
+                        _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                    }
+                }
+
+                Ok::<_, eyre::Report>(())
+            }.instrument(tracing::debug_span!("clear buffered version", %actor_id, %self_actor_id)));
+        }
+    });
 }
