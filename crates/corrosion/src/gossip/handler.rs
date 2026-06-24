@@ -1,24 +1,32 @@
 use super::GossipContext;
 use corro_types::broadcast;
 use speedy::Readable as _;
-use std::time::Duration;
+use std::{net::SocketAddr, time::Duration};
 use tokio_util::codec;
 use tracing::Instrument as _;
 use tripwire::{Outcome, PreemptibleFutureExt as _, TimeoutFutureExt as _, Tripwire};
 
 /// Spawn a tree of tasks that handles incoming gossip server connections, streams, and their respective payloads.
-pub fn spawn_gossipserver_handler(
+pub fn spawn_gossipserver_unencrypted(
     ctx: GossipContext,
     mut tripwire: Tripwire,
-    gossip_server_endpoint: quinn::Endpoint,
-) {
+    gossip_server_endpoint: SocketAddr,
+) -> std::io::Result<()> {
+    let mut cfg = quinn_plaintext::server_config();
+    let mut tcfg = quinn::TransportConfig::default();
+
+    // Note this is the same as the current default quinn idle timeout, but we specify it here again in case the default
+    // changes
+    tcfg.max_idle_timeout(Some(
+        Duration::from_secs(30).try_into().expect("unreachable"),
+    ));
+    cfg.transport_config(std::sync::Arc::new(tcfg));
+
+    let endpoint = quinn::Endpoint::server(cfg, gossip_server_endpoint)?;
+
     spawn::spawn_counted(async move {
         loop {
-            let incoming = match gossip_server_endpoint
-                .accept()
-                .preemptible(&mut tripwire)
-                .await
-            {
+            let incoming = match endpoint.accept().preemptible(&mut tripwire).await {
                 Outcome::Completed(Some(incoming)) => incoming,
                 Outcome::Completed(None) => return,
                 Outcome::Preempted(_) => break,
@@ -28,9 +36,7 @@ pub fn spawn_gossipserver_handler(
         }
 
         // graceful shutdown
-        let idle = gossip_server_endpoint
-            .wait_idle()
-            .with_timeout(Duration::from_secs(5));
+        let idle = endpoint.wait_idle().with_timeout(Duration::from_secs(5));
         tokio::pin!(idle);
 
         loop {
@@ -38,7 +44,7 @@ pub fn spawn_gossipserver_handler(
                 _ = &mut idle => {
                     break;
                 }
-                incoming = gossip_server_endpoint.accept() => {
+                incoming = endpoint.accept() => {
                     // Refuse any new connections while we are gracefully shutting down
                     if let Some(inc) = incoming {
                         inc.refuse();
@@ -47,15 +53,17 @@ pub fn spawn_gossipserver_handler(
             }
         }
 
-        gossip_server_endpoint.close(0u32.into(), b"shutting down");
+        endpoint.close(0u32.into(), b"shutting down");
     });
+
+    Ok(())
 }
 
 /// Spawn a task which handles all state and interactions for a given
 /// incoming connection.
 ///
 /// This function spawns many futures!
-pub fn spawn_incoming_connection_handlers(
+fn spawn_incoming_connection_handlers(
     ctx: GossipContext,
     mut tripwire: Tripwire,
     connecting: quinn::Incoming,
@@ -253,4 +261,40 @@ fn process_sync_stream(
         }
         .instrument(tracing::trace_span!("gossip sync stream", %remote_addr)),
     );
+}
+
+/// Spawn a single task that accepts chunks from a receiver and updates cluster member round-trip-times in the agent state.
+pub fn spawn_rtt_handler(
+    members: super::Members,
+    rtt_rx: tokio::sync::mpsc::Receiver<(SocketAddr, Duration)>,
+    mut tripwire: Tripwire,
+) {
+    use tokio_stream::StreamExt;
+
+    spawn::spawn_counted(async move {
+        let stream = tokio_stream::wrappers::ReceiverStream::new(rtt_rx);
+        // we can handle a lot of them I think...
+        let chunker = stream.chunks_timeout(1024, Duration::from_secs(1));
+        tokio::pin!(chunker);
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = &mut tripwire => {
+                    break;
+                }
+                chunks = chunker.next() => {
+                    if let Some(chunks) = chunks {
+                        let mut members = members.0.write();
+                        for (addr, rtt) in chunks {
+                            members.add_rtt(addr, rtt);
+                            //histogram!("corro.transport.rtt.v2.seconds").record(rtt.as_secs_f64());
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    });
 }

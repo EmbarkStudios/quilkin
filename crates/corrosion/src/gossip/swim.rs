@@ -3,7 +3,6 @@ use bytes::{Bytes, BytesMut};
 use corro_types::{
     actor::{self, Actor},
     broadcast::{self as bx, FocaCmd, FocaInput},
-    members,
     sqlite::unnest_param,
 };
 use foca::{Identity, Timer};
@@ -79,7 +78,7 @@ impl foca::Runtime<Actor> for DispatchRuntime {
 #[derive(Clone)]
 pub struct SwimCtx {
     pub pool: corro_types::agent::SplitPool,
-    pub members: Arc<parking_lot::RwLock<members::Members>>,
+    pub members: super::Members,
     pub actor_id: actor::ActorId,
     pub member_id: Option<actor::MemberId>,
     pub cluster_id: actor::ClusterId,
@@ -474,7 +473,7 @@ fn diff_member_states(
     }
 
     let (to_delete, to_update, foca_notifications) = {
-        let members = ctx.members.read();
+        let members = ctx.members.0.read();
 
         let to_update = foca_states
             .iter()
@@ -864,7 +863,7 @@ async fn handle_broadcasts(
             // UNWRAP: we just checked that it wasn't empty
             let payload = to_local_broadcast.pop_front().unwrap();
 
-            let members = ctx.members.read();
+            let members = ctx.members.0.read();
             let mut spawn_count = 0;
             let mut ring0_count = 0;
             for addr in members.ring0(ctx.cluster_id) {
@@ -919,7 +918,7 @@ async fn handle_broadcasts(
 
         if !rate_limited && !to_broadcast.is_empty() && join_set.len() < MAX_INFLIGHT_BROADCAST {
             let (members_count, ring0_count) = {
-                let members = ctx.members.read();
+                let members = ctx.members.0.read();
                 let members_count = members.states.len();
                 let ring0_count = members.ring0(ctx.cluster_id).count();
                 (members_count, ring0_count)
@@ -945,6 +944,7 @@ async fn handle_broadcasts(
 
                 let broadcast_to = {
                     ctx.members
+                        .0
                         .read()
                         .states
                         .iter()
@@ -1114,6 +1114,143 @@ fn drop_oldest_broadcast(
     } else {
         local_queue.pop_back().map(PendingBroadcast::new_local)
     }
+}
+
+/// A central dispatcher for SWIM cluster management messages
+///
+/// TODO: This is just a copy of what corrosion does, but IMO should probably just be in the main loop
+pub fn spawn_sender(
+    transport: Transport,
+    mut to_send_rx: mpsc::Receiver<(Actor, Bytes)>,
+    mut tripwire: tripwire::Tripwire,
+) {
+    spawn::spawn_counted(async move {
+        while let tripwire::Outcome::Completed(Some((actor, data))) =
+            to_send_rx.recv().preemptible(&mut tripwire).await
+        {
+            let Err(error) = transport.send_datagram(actor.addr(), data).await else {
+                continue;
+            };
+
+            tracing::error!(%error, address = %actor.addr(), "could not write datagram");
+        }
+
+        if tripwire.is_shutting_down() {
+            // Drain the queue
+            let mut total = 0;
+            let mut errors = 0;
+
+            let start = Instant::now();
+
+            while let Ok((actor, data)) = to_send_rx.try_recv() {
+                let res = transport.send_datagram(actor.addr(), data).await;
+
+                total += 1;
+                errors += if res.is_err() { 1 } else { 0 };
+            }
+
+            tracing::debug!(elapsed = ?start.elapsed(), total, errors, "drained SWIM datagrams before shutting down");
+        }
+    });
+}
+
+/// Poll for updates from the cluster membership system (`foca`/ SWIM) and apply any incoming changes to the local
+/// actor/agent state.
+pub fn spawn_notification_handler(
+    metrics: &'static GossipMetrics,
+    members: super::Members,
+    mut notification_rx: mpsc::Receiver<foca::OwnedNotification<Actor>>,
+    foca_tx: mpsc::Sender<FocaInput>,
+    mut tripwire: tripwire::Tripwire,
+) {
+    use corro_types::members::MemberAddedResult;
+    use foca::OwnedNotification as ON;
+
+    spawn::spawn_counted(async move {
+        while let tripwire::Outcome::Completed(Some(notification)) =
+            notification_rx.recv().preemptible(&mut tripwire).await
+        {
+            let kind = match notification {
+                ON::MemberUp(actor) => {
+                    let res = members.0.write().add_member(&actor);
+                    tracing::info!(?actor, member_added_result = ?res, "Member Up");
+
+                    match res {
+                        MemberAddedResult::NewMember | MemberAddedResult::Removed => {
+                            if matches!(res, MemberAddedResult::Removed) {
+                                metrics.member_removed_inc("member_id_mismatch");
+                            } else {
+                                metrics.member_added_inc();
+                            }
+
+                            let members_len = { members.0.read().states.len() as u32 };
+
+                            // actually added a member
+                            // notify of new cluster size
+                            if let Ok(size) = members_len.try_into()
+                                && let Err(error) = foca_tx.send(FocaInput::ClusterSize(size)).await
+                            {
+                                tracing::error!(%error, "could not send new foca cluster size");
+                            }
+                        }
+                        MemberAddedResult::Updated => {
+                            // anything else to do here?
+                        }
+                        MemberAddedResult::Ignored => {}
+                    }
+
+                    "memberup"
+                }
+                ON::MemberDown(actor) => {
+                    let removed = { members.0.write().remove_member(&actor) };
+                    tracing::info!(?actor, removed, "Member Down");
+
+                    if removed {
+                        metrics.member_removed_inc("member_down");
+
+                        // actually removed a member
+                        // notify of new cluster size
+                        let member_len = { members.0.read().states.len() as u32 };
+                        if let Ok(size) = member_len.try_into()
+                            && let Err(error) = foca_tx.send(FocaInput::ClusterSize(size)).await
+                        {
+                            tracing::error!(%error, "could not send new foca cluster size");
+                        }
+                    }
+
+                    "memberdown"
+                }
+                ON::Rename(a, b) => {
+                    let mut lock = members.0.write();
+                    lock.remove_member(&a);
+                    lock.add_member(&b);
+
+                    tracing::info!(old = ?a, new = ?b, "Member Rename");
+
+                    "rename"
+                }
+                ON::Active => {
+                    tracing::info!("Current node is considered ACTIVE");
+                    "active"
+                }
+                ON::Idle => {
+                    tracing::warn!("Current node is considered IDLE");
+                    "idle"
+                }
+                // this happens when we leave the cluster
+                ON::Defunct => {
+                    tracing::debug!("Current node is considered DEFUNCT");
+                    "defunct"
+                }
+                ON::Rejoin(id) => {
+                    tracing::info!(?id, "Rejoined the cluster");
+                    "rejoin"
+                }
+            };
+
+            metrics.swim_notification_inc(kind);
+        }
+    });
 }
 
 /// Load the existing known member state and addresses
