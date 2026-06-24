@@ -16,7 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{CAPTURED_BYTES, Prefix, Regex, Suffix, proto};
+use super::{CAPTURED_BYTES, Prefix, QuicDcid, Regex, Suffix, proto};
 use crate::filters::ConvertProtoConfigError;
 
 /// Strategy to apply for acquiring a set of bytes in the UDP packet
@@ -32,6 +32,9 @@ pub enum Strategy {
     /// Look for the set of bytes at the end of the packet
     #[serde(rename = "REGEX")]
     Regex(Regex),
+    /// Look for the the DCID in QUIC packet
+    #[serde(rename = "QUICDCID")]
+    QuicDcid(QuicDcid),
 }
 
 impl Strategy {
@@ -40,6 +43,7 @@ impl Strategy {
             Self::Prefix(value) => Box::from(value),
             Self::Suffix(value) => Box::from(value),
             Self::Regex(value) => Box::from(value),
+            Self::QuicDcid(value) => Box::from(value),
         }
     }
 }
@@ -59,6 +63,12 @@ impl From<Suffix> for Strategy {
 impl From<Regex> for Strategy {
     fn from(regex: Regex) -> Self {
         Self::Regex(regex)
+    }
+}
+
+impl From<QuicDcid> for Strategy {
+    fn from(quic_dcid: QuicDcid) -> Self {
+        Self::QuicDcid(quic_dcid)
     }
 }
 
@@ -94,6 +104,7 @@ impl Serialize for Config {
             Strategy::Prefix(value) => s.serialize_field("prefix", value)?,
             Strategy::Suffix(value) => s.serialize_field("suffix", value)?,
             Strategy::Regex(value) => s.serialize_field("regex", value)?,
+            Strategy::QuicDcid(value) => s.serialize_field("quicDcid", value)?,
         }
 
         s.end()
@@ -113,6 +124,8 @@ impl<'de> serde::Deserialize<'de> for Config {
             Prefix,
             Suffix,
             Regex,
+            #[serde(rename = "quicDcid")]
+            QuicDcid,
         }
 
         struct ConfigVisitor;
@@ -169,6 +182,14 @@ impl<'de> serde::Deserialize<'de> for Config {
 
                             strategy = Some(Strategy::Regex(map.next_value()?));
                         }
+
+                        Field::QuicDcid => {
+                            if strategy.is_some() {
+                                return (strategy_exists_err)();
+                            }
+
+                            strategy = Some(Strategy::QuicDcid(map.next_value()?));
+                        }
                     }
                 }
 
@@ -177,7 +198,7 @@ impl<'de> serde::Deserialize<'de> for Config {
                 });
                 let strategy = strategy.ok_or_else(|| {
                     serde::de::Error::custom(
-                        "Capture strategy of `regex`, `suffix`, or `prefix` is required",
+                        "Capture strategy of `regex`, `suffix`, `prefix` or `quicDcid` is required",
                     )
                 })?;
 
@@ -235,6 +256,9 @@ impl From<Strategy> for proto::capture::Strategy {
             Strategy::Regex(regex) => Self::Regex(proto::capture::Regex {
                 regex: Some(regex.pattern.as_str().into()),
             }),
+            Strategy::QuicDcid(quic_dcid) => Self::QuicDcid(proto::capture::QuicDcid {
+                size: quic_dcid.size,
+            }),
         }
     }
 }
@@ -264,6 +288,9 @@ impl TryFrom<proto::capture::Strategy> for Strategy {
                     })?,
                 })
             }
+            capture::Strategy::QuicDcid(quic_dcid) => Self::QuicDcid(QuicDcid {
+                size: quic_dcid.size,
+            }),
         })
     }
 }

@@ -16,6 +16,7 @@
 
 mod affix;
 mod config;
+mod quic;
 mod regex;
 
 use crate::generated::quilkin::filters::capture::v1alpha1 as proto;
@@ -30,6 +31,7 @@ pub const CAPTURED_BYTES: &str = "quilkin.dev/capture";
 pub use self::{
     affix::{Prefix, Suffix},
     config::{Config, Strategy},
+    quic::QuicDcid,
     regex::Regex,
 };
 
@@ -208,6 +210,46 @@ mod tests {
         let result = end.capture(&contents).unwrap().0;
         assert_eq!(Value::Bytes(b"abc".to_vec().into()), result);
         assert_eq!(b"helloabc", &*contents);
+    }
+
+    #[test]
+    fn quic_capture() {
+        let strategy = QuicDcid { size: 3 };
+
+        {
+            let undersized_contents = alloc_buffer(b"\0");
+            let result = strategy.capture(&undersized_contents);
+            assert_eq!(result, None);
+        }
+
+        {
+            let undersized_long_contents = alloc_buffer([0xF0, 0xF0]);
+            let result = strategy.capture(&undersized_long_contents);
+            assert_eq!(result, None);
+        }
+
+        {
+            let undersized_short_contents = alloc_buffer([0x70, 0xF0]);
+            let result = strategy.capture(&undersized_short_contents);
+            assert_eq!(result, None);
+        }
+
+        {
+            let long_contents = alloc_buffer([
+                0xF0, /* QUIC version */ 0x00, 0x00, 0x00, 0x01, /* DCID size */ 0x04,
+                /* DCID*/ 0x01, 0x02, 0x03, 0x04,
+            ]);
+            let (result, remove) = strategy.capture(&long_contents).unwrap();
+            assert_eq!(Value::Bytes([0x01, 0x02, 0x03].to_vec().into()), result);
+            assert_eq!(remove, 0);
+        }
+
+        {
+            let short_contents = alloc_buffer([0x70, /* DCID*/ 0x01, 0x02, 0x03]);
+            let (result, remove) = strategy.capture(&short_contents).unwrap();
+            assert_eq!(Value::Bytes([0x01, 0x02, 0x03].to_vec().into()), result);
+            assert_eq!(remove, 0);
+        }
     }
 
     #[test]

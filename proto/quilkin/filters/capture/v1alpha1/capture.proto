@@ -35,11 +35,16 @@ message Capture {
       google.protobuf.StringValue regex = 1;
   }
 
+  message QuicDcid {
+      uint32 size = 1;
+  }
+
   google.protobuf.StringValue metadata_key = 1;
   oneof strategy {
       Prefix prefix = 2;
       Suffix suffix = 3;
       Regex regex = 4;
+      QuicDcid quic_dcid = 5;
   }
 }
 
