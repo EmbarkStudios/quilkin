@@ -1174,24 +1174,21 @@ async fn process_fully_buffered_changes(
             tracing::trace!(%actor_id, %version, "acquired Booked write lock to process fully buffered changes");
 
             let mut bookedw = bookedw;
-            let last_seq = {
-                match bookedw.partials.get(&version) {
-                    Some(PartialVersion { seqs, last_seq, .. }) => {
-                        if seqs.gaps(&(CrsqlSeq(0)..=*last_seq)).count() != 0 {
-                            let gaps = seqs
-                                .gaps(&(CrsqlSeq(0)..=*last_seq))
-                                .collect::<RangeInclusiveSet<CrsqlSeq>>();
-                            tracing::error!(%actor_id, %version, ?gaps, "found sequence gaps, aborting!", );
-                            // TODO: return an error here
-                            return Ok(false);
-                        }
-                        *last_seq
-                    }
-                    None => {
-                        tracing::warn!(%actor_id, %version, "version not found in cache, returning");
-                        return Ok(false);
-                    }
+            let last_seq = if let Some(PartialVersion { seqs, last_seq, .. }) =
+                bookedw.partials.get(&version)
+            {
+                if seqs.gaps(&(CrsqlSeq(0)..=*last_seq)).count() != 0 {
+                    let gaps = seqs
+                        .gaps(&(CrsqlSeq(0)..=*last_seq))
+                        .collect::<RangeInclusiveSet<CrsqlSeq>>();
+                    tracing::error!(%actor_id, %version, ?gaps, "found sequence gaps, aborting!", );
+                    // TODO: return an error here
+                    return Ok(false);
                 }
+                *last_seq
+            } else {
+                tracing::warn!(%actor_id, %version, "version not found in cache, returning");
+                return Ok(false);
             };
 
             let base_tx = conn
@@ -1518,6 +1515,8 @@ pub fn spawn_buffered_cleanup(
                 // }
 
                 let before = versions.len();
+
+                // This is a poor version of retain since rangemap does not have that functionality
                 let to_clear: rangemap::RangeInclusiveSet<_> = versions
                     .into_iter()
                     .filter(|v| {
@@ -1564,7 +1563,7 @@ pub fn spawn_buffered_cleanup(
 
                             let mut buf_count = 0;
 
-                            for range in to_clear {
+                            for range in to_clear.iter() {
                                 buf_count += tx
                                 .prepare_cached("DELETE FROM __corro_buffered_changes WHERE (site_id, db_version, seq) IN (SELECT site_id, db_version, seq FROM __corro_buffered_changes WHERE site_id = ? AND db_version >= ? AND db_version <= ? LIMIT ?)")?
                                 .execute(rusqlite::params![actor_id, range.start().0, range.end().0, TO_CLEAR_COUNT])?;
@@ -1590,7 +1589,6 @@ pub fn spawn_buffered_cleanup(
                         }
                     }
 
-                    // TODO: Why do we sleep here?
                     tokio::select! {
                         _ = &mut task_tripwire => {
                             break;

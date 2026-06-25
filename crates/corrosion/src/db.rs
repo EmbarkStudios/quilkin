@@ -186,20 +186,6 @@ impl InitializedDb {
                 .build(),
         ));
 
-        let cluster_id = {
-            let conn = pool.read().await?;
-
-            match conn.query_row(
-                "SELECT value FROM __corro_state WHERE key = 'cluster_id'",
-                [],
-                |row| row.get(0),
-            ) {
-                Ok(value) => value,
-                Err(rusqlite::Error::QueryReturnedNoRows) => Default::default(),
-                Err(e) => return Err(e.into()),
-            }
-        };
-
         let schema = {
             let mut conn = pool.write_priority().await?;
 
@@ -219,6 +205,20 @@ impl InitializedDb {
             tokio::task::block_in_place(|| run_startup_checks(&conn, limits))?;
 
             schema
+        };
+
+        let cluster_id = {
+            let conn = pool.read().await?;
+
+            match conn.query_row(
+                "SELECT value FROM __corro_state WHERE key = 'cluster_id'",
+                [],
+                |row| row.get(0),
+            ) {
+                Ok(value) => value,
+                Err(rusqlite::Error::QueryReturnedNoRows) => Default::default(),
+                Err(e) => return Err(e.into()),
+            }
         };
 
         if let Some(dbm) = maintenance {

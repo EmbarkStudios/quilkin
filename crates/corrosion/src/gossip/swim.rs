@@ -1193,10 +1193,9 @@ pub fn spawn_notification_handler(
                                 tracing::error!(%error, "could not send new foca cluster size");
                             }
                         }
-                        MemberAddedResult::Updated => {
+                        MemberAddedResult::Updated | MemberAddedResult::Ignored => {
                             // anything else to do here?
                         }
-                        MemberAddedResult::Ignored => {}
                     }
 
                     "memberup"

@@ -69,6 +69,7 @@ pub struct BroadcastingTransactor {
 }
 
 impl BroadcastingTransactor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: ActorId,
         clock: Clock,
@@ -199,7 +200,7 @@ impl Transactor {
         let actor_id = self.id;
         let start = Instant::now();
         let clock = self.clock.clone();
-        let ts = broadcast::Timestamp::from(clock.new_timestamp());
+        let ts = clock.new_timestamp();
 
         tokio::task::block_in_place(move || {
             let bookie_write = self.bookie.write_lock_blocking();
@@ -513,6 +514,7 @@ async fn write_loop(txr: Transactor, mut rx: tokio::sync::mpsc::Receiver<Pending
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn broadcast_changes(
     pool: &SplitPool,
     actor_id: ActorId,

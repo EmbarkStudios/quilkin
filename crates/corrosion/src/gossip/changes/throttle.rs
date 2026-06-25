@@ -64,10 +64,7 @@ impl ThrottleMap {
 
     #[inline]
     pub fn throttle_count(&self, key: &Change) -> u64 {
-        self.inner
-            .get(key)
-            .map(|e| e.throttle_count as u64)
-            .unwrap_or(0)
+        self.inner.get(key).map_or(0, |e| e.throttle_count as u64)
     }
 
     #[inline]
