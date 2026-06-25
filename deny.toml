@@ -26,6 +26,7 @@ all-features = true
 unmaintained = 'workspace'
 yanked = 'deny'
 ignore = [
+    { id = "RUSTSEC-2025-0141", reason = "bincode is unmaintained but it's currently not an issue, there are alternatives if we need to change" },
 ]
 
 [bans]
@@ -49,10 +50,7 @@ deny = [
 multiple-versions = "deny"
 skip = [
     { crate = "object@0.32.2", reason = "transitive dependency due to backtrace, backtrace is updated, but stable-eyre is using a feature that doesn't exist any longer, and can't update" },
-    { crate = "object@0.37.3", reason = "extremely deep transitive build dependency" },
-    { crate = "const-oid@0.9.6", reason = "pgwire -> x509-certificate uses this old version" },
     { crate = "miniz_oxide@0.7.4", reason = "pprof_util carries two different versions transitively" },
-    { crate = "fallible-iterator@0.2.0", reason = "several users of old version in corrosion crates" },
     { crate = "bitflags@1.3.2", reason = "corrosion again" },
     { crate = "itertools:<0.14", reason = "sigh" },
 ]
@@ -89,10 +87,7 @@ exceptions = [
     # This license should not really be used for code, but here we are
     { crate = "notify", allow = ["CC0-1.0"] },
     { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
-    { crate = "ar_archive_writer", allow = ["Apache-2.0 WITH LLVM-exception"] },
     { crate = "foca", allow = ["MPL-2.0"] },
-    { crate = "enquote", allow = ["Unlicense"] },
-    { crate = "x509-certificate", allow = ["MPL-2.0"] }
 ]
 
 [[licenses.clarify]]
