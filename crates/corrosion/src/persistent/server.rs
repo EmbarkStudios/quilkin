@@ -66,6 +66,18 @@ impl From<quinn::ReadError> for InitialConnectionError {
     }
 }
 
+impl InitialConnectionError {
+    fn is_clean_disconnect(&self) -> bool {
+        matches!(
+            self,
+            Self::Connection(
+                quinn::ConnectionError::ApplicationClosed(_)
+                    | quinn::ConnectionError::LocallyClosed
+            )
+        )
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 enum IoLoopError {
     #[error(transparent)]
@@ -74,6 +86,21 @@ enum IoLoopError {
     Serialization(#[from] std::io::Error),
     #[error(transparent)]
     Write(#[from] quinn::WriteError),
+}
+
+impl IoLoopError {
+    fn is_clean_peer_reset(&self) -> bool {
+        let ok = ErrorCode::Ok as u64;
+        match self {
+            Self::Read(
+                codec::LengthReadError::Read(quinn::ReadError::Reset(code))
+                | codec::LengthReadError::ReadExact(quinn::ReadExactError::ReadError(
+                    quinn::ReadError::Reset(code),
+                )),
+            ) => code.into_inner() == ok,
+            _ => false,
+        }
+    }
 }
 
 impl From<IoLoopError> for ErrorCode {
@@ -168,7 +195,9 @@ impl Server {
                                         });
                                     }
                                     Err(error) => {
-                                        tracing::warn!(%peer_ip, %error, "error handling peer handshake");
+                                        if !error.is_clean_disconnect() {
+                                            tracing::warn!(%peer_ip, %error, "error handling peer handshake");
+                                        }
                                     }
                                 }
                             }
@@ -250,7 +279,9 @@ impl Server {
         };
 
         let code = if let Err(error) = result {
-            tracing::warn!(%peer, %error, "error handling peer connection");
+            if !error.is_clean_peer_reset() {
+                tracing::warn!(%peer, %error, "error handling peer connection");
+            }
             error.into()
         } else {
             ErrorCode::Ok
