@@ -23,7 +23,7 @@ jobs:
     #   REGISTRY_PORT: "5001"
     #   REGISTRY_NAME: registry
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       # - name: Create cluster
       #   id: kind
       #   uses: helm/kind-action@v1
