@@ -5,8 +5,8 @@ set -e
 # - 6.12 is the current version supported on Debian Trixie
 # - 6.18 is the latest LTS release
 # - 6.19 is the latest 6.x release (kind of)
-# - 7.0 is the latest
-KERNEL_VERSIONS=('6.12' '6.13' '6.14' '6.16' '6.18' '7.0')
+# - 7.0 is the latest, but isn't available on the ubuntu repo as of yet
+KERNEL_VERSIONS=('6.12' '6.13' '6.14' '6.16' '6.18' '6.19')
 
 for vers in "${KERNEL_VERSIONS[@]}"
 do
