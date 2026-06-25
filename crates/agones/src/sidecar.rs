@@ -131,10 +131,15 @@ clusters:
             .await
             .unwrap();
 
-        let response = timeout(Duration::from_secs(30), recv.packet_rx)
-            .await
-            .expect("should receive packet")
-            .unwrap();
+        let response = match timeout(Duration::from_secs(30), recv.packet_rx).await {
+            Ok(packet) => packet.unwrap(),
+            Err(_elapsed) => {
+                crate::debug_pods(&client, "role=gameserver".into()).await;
+                panic!(
+                    "timed out waiting for packet response from sidecar proxy at {address} (GameServer: {name})"
+                );
+            }
+        };
         assert_eq!("ACK: hellosidecar\n", response);
     }
 }
