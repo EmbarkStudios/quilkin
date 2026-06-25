@@ -131,11 +131,16 @@
 <a href=#131 id=131 data-nosnippet>131</a>            .<span class="kw">await
 <a href=#132 id=132 data-nosnippet>132</a>            </span>.unwrap();
 <a href=#133 id=133 data-nosnippet>133</a>
-<a href=#134 id=134 data-nosnippet>134</a>        <span class="kw">let </span>response = timeout(Duration::from_secs(<span class="number">30</span>), recv.packet_rx)
-<a href=#135 id=135 data-nosnippet>135</a>            .<span class="kw">await
-<a href=#136 id=136 data-nosnippet>136</a>            </span>.expect(<span class="string">"should receive packet"</span>)
-<a href=#137 id=137 data-nosnippet>137</a>            .unwrap();
-<a href=#138 id=138 data-nosnippet>138</a>        <span class="macro">assert_eq!</span>(<span class="string">"ACK: hellosidecar\n"</span>, response);
-<a href=#139 id=139 data-nosnippet>139</a>    }
-<a href=#140 id=140 data-nosnippet>140</a>}
+<a href=#134 id=134 data-nosnippet>134</a>        <span class="kw">let </span>response = <span class="kw">match </span>timeout(Duration::from_secs(<span class="number">30</span>), recv.packet_rx).<span class="kw">await </span>{
+<a href=#135 id=135 data-nosnippet>135</a>            <span class="prelude-val">Ok</span>(packet) =&gt; packet.unwrap(),
+<a href=#136 id=136 data-nosnippet>136</a>            <span class="prelude-val">Err</span>(_elapsed) =&gt; {
+<a href=#137 id=137 data-nosnippet>137</a>                <span class="kw">crate</span>::debug_pods(<span class="kw-2">&amp;</span>client, <span class="string">"role=gameserver"</span>.into()).<span class="kw">await</span>;
+<a href=#138 id=138 data-nosnippet>138</a>                <span class="macro">panic!</span>(
+<a href=#139 id=139 data-nosnippet>139</a>                    <span class="string">"timed out waiting for packet response from sidecar proxy at {address} (GameServer: {name})"
+<a href=#140 id=140 data-nosnippet>140</a>                </span>);
+<a href=#141 id=141 data-nosnippet>141</a>            }
+<a href=#142 id=142 data-nosnippet>142</a>        };
+<a href=#143 id=143 data-nosnippet>143</a>        <span class="macro">assert_eq!</span>(<span class="string">"ACK: hellosidecar\n"</span>, response);
+<a href=#144 id=144 data-nosnippet>144</a>    }
+<a href=#145 id=145 data-nosnippet>145</a>}
 </code></pre></div></section></main></body></html>
