@@ -997,7 +997,7 @@ impl Service {
         let subs = types::pubsub::SubsManager::default();
         let updates = self
             .corrosion_gossip_enable
-            .then(|| types::updates::UpdatesManager::default());
+            .then(types::updates::UpdatesManager::default);
 
         let btx = corrosion::persistent::mutator::BroadcastingTransactor::new(
             db.actor_id,

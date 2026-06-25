@@ -570,9 +570,10 @@ async fn applies_changes() {
         db.pool.clone(),
         subs.clone(),
         None,
-    )
-    .await
-    .expect("failed to create broadcaster");
+        db.bookie,
+        db.booked,
+        None,
+    );
 
     let mut pusher = Pusher {
         state,
