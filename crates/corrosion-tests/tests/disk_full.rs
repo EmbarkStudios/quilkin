@@ -313,6 +313,7 @@ async fn end_to_end_recovery_from_real_sqlite_full() {
             limits: DBLimits {
                 max_page_count: Some(150),
                 journal_size_limit: None,
+                ..Default::default()
             },
             ..Default::default()
         }),
