@@ -25,6 +25,15 @@ use std::{
 
 pub type BroadcastTx = tokio::sync::mpsc::Sender<broadcast::BroadcastInput>;
 
+/// Per-transaction timing breakdown returned by [`BroadcastingTransactor::make_broadcastable_changes`].
+#[derive(Clone, Copy, Debug)]
+pub struct TxTiming {
+    /// Time waiting for the WAL write permit before entering the transaction.
+    pub permit_wait: Duration,
+    /// Time inside the transaction (SQL execution + commit).
+    pub in_lock: Duration,
+}
+
 /// Default for [`BroadcastingTransactor::with_full_purge_count`].
 pub const DEFAULT_FULL_PURGE_COUNT: usize = 100;
 
@@ -104,7 +113,7 @@ impl BroadcastingTransactor {
         &self,
         timeout: Option<Duration>,
         f: F,
-    ) -> Result<(T, Option<CrsqlDbVersion>, Duration), ChangeError>
+    ) -> Result<(T, Option<CrsqlDbVersion>, TxTiming), ChangeError>
     where
         F: Fn(&InterruptibleTransaction<Transaction<'_>>) -> Result<T, ChangeError>,
     {
@@ -143,11 +152,13 @@ impl BroadcastingTransactor {
         &self,
         timeout: Option<Duration>,
         f: F,
-    ) -> Result<(T, Option<CrsqlDbVersion>, Duration), ChangeError>
+    ) -> Result<(T, Option<CrsqlDbVersion>, TxTiming), ChangeError>
     where
         F: FnOnce(&InterruptibleTransaction<Transaction<'_>>) -> Result<T, ChangeError>,
     {
+        let t_permit = Instant::now();
         let mut conn = self.pool.write_priority().await?;
+        let permit_wait = t_permit.elapsed();
 
         let actor_id = self.id;
         let start = Instant::now();
@@ -181,7 +192,14 @@ impl BroadcastingTransactor {
             let elapsed = start.elapsed();
 
             match insert_info {
-                None => Ok((ret, None, elapsed)),
+                None => Ok((
+                    ret,
+                    None,
+                    TxTiming {
+                        permit_wait,
+                        in_lock: elapsed,
+                    },
+                )),
                 Some(change::InsertChangesInfo {
                     db_version,
                     last_seq,
@@ -204,7 +222,14 @@ impl BroadcastingTransactor {
                         }
                     });
 
-                    Ok::<_, ChangeError>((ret, Some(db_version), elapsed))
+                    Ok::<_, ChangeError>((
+                        ret,
+                        Some(db_version),
+                        TxTiming {
+                            permit_wait,
+                            in_lock: elapsed,
+                        },
+                    ))
                 }
             }
         })
@@ -253,7 +278,9 @@ impl BroadcastingTransactor {
             })
             .await;
         match res {
-            Ok((_, _, elapsed)) => tracing::debug!(%peer, ?elapsed, "{ok_msg}"),
+            Ok((_, _, timing)) => {
+                tracing::debug!(%peer, in_lock_ms = timing.in_lock.as_secs_f64() * 1000.0, "{ok_msg}");
+            }
             Err(error) => tracing::error!(%peer, %error, "{err_msg}"),
         }
     }
@@ -328,8 +355,14 @@ impl super::server::DbMutator for BroadcastingTransactor {
             .await;
 
         let version = match res {
-            Ok((rows_affected, version, elapsed)) => {
-                tracing::debug!(%peer, ?elapsed, rows_affected, "updated servers");
+            Ok((rows_affected, version, timing)) => {
+                tracing::debug!(
+                    %peer,
+                    permit_wait_ms = timing.permit_wait.as_secs_f64() * 1000.0,
+                    in_lock_ms = timing.in_lock.as_secs_f64() * 1000.0,
+                    rows_affected,
+                    "updated servers"
+                );
                 version.map(u64::from)
             }
             Err(error) => {
