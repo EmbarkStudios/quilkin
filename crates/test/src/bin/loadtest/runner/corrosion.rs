@@ -82,7 +82,7 @@ impl CorrosionHandle {
         let maintenance = params.max_pages.map(|max_page_count| DBMaintenance {
             limits: DBLimits {
                 max_page_count: Some(max_page_count),
-                journal_size_limit: None,
+                ..Default::default()
             },
             ..DBMaintenance::default()
         });
