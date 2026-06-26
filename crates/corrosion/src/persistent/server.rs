@@ -97,7 +97,8 @@ impl IoLoopError {
                 | codec::LengthReadError::ReadExact(quinn::ReadExactError::ReadError(
                     quinn::ReadError::Reset(code),
                 )),
-            ) => code.into_inner() == ok,
+            )
+            | Self::Write(quinn::WriteError::Stopped(code)) => code.into_inner() == ok,
             _ => false,
         }
     }
@@ -417,7 +418,7 @@ mod v1_impl {
                 // For now we don't care about restoring subscriptions and just always do state of the world on initial
                 // connection for simplicity
                 if !subs.remove(&sub_id).await {
-                    tracing::warn!(%peer, %sub_id, "failed to find subscription for termination stream");
+                    tracing::debug!(%peer, %sub_id, "subscription already removed on termination");
                 }
 
                 res

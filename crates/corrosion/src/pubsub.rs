@@ -339,7 +339,7 @@ async fn forward_sub_to_sender(
             continue;
         }
         if let Err(e) = tx.send(eve).await {
-            warn!(sub_id = %handle.id(), "could not send subscription event to channel: {e}");
+            tracing::debug!(sub_id = %handle.id(), "could not send subscription event to channel: {e}");
             return;
         }
     }
