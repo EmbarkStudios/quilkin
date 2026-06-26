@@ -3,7 +3,7 @@
 pub struct Capture {
     #[prost(message, optional, tag = "1")]
     pub metadata_key: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(oneof = "capture::Strategy", tags = "2, 3, 4")]
+    #[prost(oneof = "capture::Strategy", tags = "2, 3, 4, 5")]
     pub strategy: ::core::option::Option<capture::Strategy>,
 }
 /// Nested message and enum types in `Capture`.
@@ -27,6 +27,11 @@ pub mod capture {
         #[prost(message, optional, tag = "1")]
         pub regex: ::core::option::Option<::prost::alloc::string::String>,
     }
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+    pub struct QuicDcid {
+        #[prost(uint32, tag = "1")]
+        pub size: u32,
+    }
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Strategy {
         #[prost(message, tag = "2")]
@@ -35,5 +40,7 @@ pub mod capture {
         Suffix(Suffix),
         #[prost(message, tag = "4")]
         Regex(Regex),
+        #[prost(message, tag = "5")]
+        QuicDcid(QuicDcid),
     }
 }

@@ -23,6 +23,9 @@ Captures bytes using a regular expression. Unlike other capture strategies,
 the regular expression can return one or many values if there are
 multiple matches.
 
+### QUIC Destination Connection ID
+Captures DCID from [QUIC][quic-protocol] conforming packets.
+
 
 ## Filter name
 ```text
@@ -55,3 +58,4 @@ clusters:
 ```
 
 [filter-dynamic-metadata]: ../filters.md#filter-dynamic-metadata
+[quic-protocol]: https://datatracker.ietf.org/doc/html/rfc9000
