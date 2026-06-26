@@ -29,6 +29,31 @@ impl SplitPoolReadExt for SplitPool {
     }
 }
 
+/// WAL synchronous mode. Affects whether `fsync` is called after each commit.
+///
+/// In WAL mode [`Normal`][WalSynchronous::Normal] is safe from database corruption (data can only
+/// be lost on a simultaneous OS crash + hardware failure) and avoids the per-commit `fsync`.
+/// For corrosion nodes that replicate state across peers, [`Normal`][WalSynchronous::Normal] is
+/// the recommended setting.
+#[derive(Clone, Copy, Default, Debug)]
+pub enum WalSynchronous {
+    /// Default `SQLite` WAL behaviour: `fsync` after every commit. No data loss on power failure.
+    #[default]
+    Full,
+    /// Skip per-commit `fsync`; only sync during WAL checkpoints. Eliminates commit stalls on
+    /// slow fsync paths (e.g. WSL2, network filesystems). Safe when data is replicated.
+    Normal,
+}
+
+impl WalSynchronous {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "FULL",
+            Self::Normal => "NORMAL",
+        }
+    }
+}
+
 /// Hard size limits. Volume allocation must exceed `(max_page_count × page_size) + journal_size_limit`.
 #[derive(Default)]
 pub struct DBLimits {
@@ -36,6 +61,12 @@ pub struct DBLimits {
     pub max_page_count: Option<u64>,
     /// Max WAL size in bytes after a checkpoint. `None` leaves the `SQLite` default (unlimited).
     pub journal_size_limit: Option<i64>,
+    /// WAL synchronous mode. `None` leaves the `SQLite` default ([`WalSynchronous::Full`]).
+    pub synchronous: Option<WalSynchronous>,
+    /// Auto-checkpoint threshold in WAL pages. `Some(0)` disables automatic checkpointing entirely,
+    /// deferring all WAL cleanup to the manual [`wal_checkpoint_over_threshold`] path.
+    /// `None` leaves the `SQLite` default (1000 pages ≈ 4 MiB).
+    pub wal_autocheckpoint: Option<u32>,
 }
 
 /// Returns `true` if `err` is `SQLITE_FULL`.
@@ -259,6 +290,14 @@ fn run_startup_checks(conn: &rusqlite::Connection, limits: Option<&DBLimits>) ->
         if let Some(journal_size_limit) = limits.journal_size_limit {
             conn.pragma_update(None, "journal_size_limit", journal_size_limit)?;
             tracing::info!(journal_size_limit, "journal_size_limit applied");
+        }
+        if let Some(sync) = limits.synchronous {
+            conn.pragma_update(None, "synchronous", sync.as_str())?;
+            tracing::info!(?sync, "WAL synchronous mode set");
+        }
+        if let Some(n) = limits.wal_autocheckpoint {
+            conn.pragma_update(None, "wal_autocheckpoint", n)?;
+            tracing::info!(n, "wal_autocheckpoint set");
         }
     }
 
