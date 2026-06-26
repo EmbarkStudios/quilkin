@@ -96,12 +96,17 @@ pub struct Client {
 }
 
 impl Client {
-    /// Connects using a non-encrypted session
-    pub async fn connect_insecure(
+    /// Connects using a non-encrypted session, binding the local socket to `local`.
+    ///
+    /// Use this when the caller needs a specific source address — for example when
+    /// multiple clients run on the same host and must appear as distinct peers to the
+    /// server (which derives peer identity from the remote TCP/QUIC source address).
+    pub async fn connect_insecure_from(
         addr: SocketAddr,
+        local: SocketAddr,
         metrics: super::Metrics,
     ) -> Result<Self, ConnectError> {
-        let ep = quinn::Endpoint::client((std::net::Ipv6Addr::UNSPECIFIED, 0).into())?;
+        let ep = quinn::Endpoint::client(local)?;
 
         let conn = ep
             .connect_with(
@@ -111,49 +116,37 @@ impl Client {
             )?
             .await?;
 
-        // This is really infallible
         let local_addr = ep.local_addr()?;
 
-        // Spawn a task to periodically update the connection metrics
         let mconn = conn.clone();
         let (tx, mut rx) = mpsc::channel(1);
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
-
-            // TODO: might be more interesting to use active for streams instead
-            // of connections as there will (at the moment) only ever be 1
             metrics.active.with_label_values::<&str>(&[]).inc();
-
             let mut tx_count = 0;
             let mut tx_bytes = 0;
             let mut rx_count = 0;
             let mut rx_bytes = 0;
-
             use super::update_metric as um;
-
             let stats = mconn.stats();
             um(&metrics.tx_count, &mut tx_count, stats.udp_tx.datagrams);
             um(&metrics.tx_bytes, &mut tx_bytes, stats.udp_tx.bytes);
             um(&metrics.rx_count, &mut rx_count, stats.udp_rx.datagrams);
             um(&metrics.rx_bytes, &mut rx_bytes, stats.udp_rx.bytes);
-
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
                         let stats = mconn.stats();
                         um(&metrics.tx_count, &mut tx_count, stats.udp_tx.datagrams);
-                        um(&metrics.tx_bytes, &mut tx_bytes,stats.udp_tx.bytes);
+                        um(&metrics.tx_bytes, &mut tx_bytes, stats.udp_tx.bytes);
                         um(&metrics.rx_count, &mut rx_count, stats.udp_rx.datagrams);
-                        um(&metrics.rx_bytes, &mut rx_bytes,stats.udp_rx.bytes);
+                        um(&metrics.rx_bytes, &mut rx_bytes, stats.udp_rx.bytes);
                     }
                     over = rx.recv() => {
-                        if over.is_none() {
-                            break;
-                        }
+                        if over.is_none() { break; }
                     }
                 }
             }
-
             metrics.active.with_label_values::<&str>(&[]).dec();
         });
 
@@ -162,6 +155,15 @@ impl Client {
             local_addr,
             tx,
         })
+    }
+
+    /// Connects using a non-encrypted session
+    pub async fn connect_insecure(
+        addr: SocketAddr,
+        metrics: super::Metrics,
+    ) -> Result<Self, ConnectError> {
+        Self::connect_insecure_from(addr, (std::net::Ipv6Addr::UNSPECIFIED, 0).into(), metrics)
+            .await
     }
 
     #[inline]

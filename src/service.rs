@@ -929,6 +929,11 @@ impl Service {
                 limits: corrosion::db::DBLimits {
                     max_page_count: self.corrosion_max_page_count,
                     journal_size_limit: self.corrosion_journal_size_limit.map(|v| v as i64),
+                    // Normal is safe for replicated corrosion nodes: the WAL guarantees
+                    // crash recovery without per-commit fsync. Full fsync is only needed
+                    // for standalone, non-replicated instances.
+                    synchronous: Some(corrosion::db::WalSynchronous::Normal),
+                    ..Default::default()
                 },
                 ..Default::default()
             }),
