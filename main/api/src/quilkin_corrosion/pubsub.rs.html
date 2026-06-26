@@ -339,7 +339,7 @@
 <a href=#339 id=339 data-nosnippet>339</a>            <span class="kw">continue</span>;
 <a href=#340 id=340 data-nosnippet>340</a>        }
 <a href=#341 id=341 data-nosnippet>341</a>        <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = tx.send(eve).<span class="kw">await </span>{
-<a href=#342 id=342 data-nosnippet>342</a>            <span class="macro">warn!</span>(sub_id = %handle.id(), <span class="string">"could not send subscription event to channel: {e}"</span>);
+<a href=#342 id=342 data-nosnippet>342</a>            <span class="macro">tracing::debug!</span>(sub_id = %handle.id(), <span class="string">"could not send subscription event to channel: {e}"</span>);
 <a href=#343 id=343 data-nosnippet>343</a>            <span class="kw">return</span>;
 <a href=#344 id=344 data-nosnippet>344</a>        }
 <a href=#345 id=345 data-nosnippet>345</a>    }
