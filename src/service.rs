@@ -196,6 +196,34 @@ pub struct Service {
     )]
     corrosion_journal_size_limit: Option<u64>,
 
+    /// The port the corrosion gossip service listens on
+    #[clap(
+        long = "service.corrosion.gossip-port",
+        env = "QUILKIN_SERVICE_CORROSION_GOSSIP_PORT",
+        default_value_t = 7902
+    )]
+    corrosion_gossip_port: u16,
+
+    /// Whether the corrosion gossip service is enabled, required if setting gossip endpoints
+    ///
+    /// Note that this will only spawn a service if `service.mds` and thus the corrosion service itself is also enabled
+    #[clap(
+        long = "service.corrosion.gossip-enable",
+        env = "QUILKIN_SERVICE_CORROSION_GOSSIP_ENABLE"
+    )]
+    corrosion_gossip_enable: bool,
+
+    /// Address of other Quilkin nodes to exchange corrosion database state with
+    ///
+    /// Note that an error will occur if endpoints are provided but `service.corrosion.gossip-enable` is not true, but
+    /// it is possible to enable gossip without providing endpoints, allowing other services to connect to this instance
+    /// and connect to the mesh that way
+    #[clap(
+        long = "service.corrosion.gossip-endpoints",
+        env = "QUILKIN_SERVICE_CORROSION_GOSSIP_ENDPOINTS"
+    )]
+    corrosion_gossip_endpoints: Vec<crate::net::EndpointAddress>,
+
     // END CORROSION
     #[clap(long = "termination-timeout")]
     termination_timeout: Option<crate::cli::Duration>,
@@ -244,6 +272,9 @@ impl Default for Service {
             corrosion_server_reap: None,
             corrosion_max_page_count: None,
             corrosion_journal_size_limit: None,
+            corrosion_gossip_enable: false,
+            corrosion_gossip_port: 7902,
+            corrosion_gossip_endpoints: Vec::new(),
             termination_timeout: None,
             testing: false,
             xds_to_corrosion: None,
@@ -301,6 +332,27 @@ impl Service {
     /// Set the port used for the corrosion service
     pub fn corrosion_port(mut self, port: u16) -> Self {
         self.corrosion_port = port;
+        self
+    }
+
+    /// Enable the corrosion gossip service
+    pub fn corrosion_gossip(mut self) -> Self {
+        self.corrosion_gossip_enable = true;
+        self
+    }
+
+    /// Sets the port used by the corrosion gossip service
+    pub fn corrosion_gossip_port(mut self, port: u16) -> Self {
+        self.corrosion_gossip_port = port;
+        self
+    }
+
+    /// The endpoints of other
+    pub fn corrosion_gossip_endpoints(
+        mut self,
+        endpoints: Vec<crate::net::EndpointAddress>,
+    ) -> Self {
+        self.corrosion_gossip_endpoints = endpoints;
         self
     }
 
@@ -885,6 +937,8 @@ impl Service {
     /// Creates/open the database and machinery that allows clients to send mutation
     /// requests and/or subscription requests and be notified when a change has
     /// been made that matches their query
+    ///
+    /// Additionally, can also spawn services to gossip changes with remote nodes
     async fn spawn_corrosion_server(
         &mut self,
         config: Arc<Config>,
@@ -893,7 +947,12 @@ impl Service {
     ) -> eyre::Result<()> {
         use corrosion::types;
 
-        tracing::info!(port=%self.corrosion_port, "starting corrosion service");
+        tracing::info!(port = %self.corrosion_port, "starting corrosion service");
+
+        eyre::ensure!(
+            self.corrosion_gossip_endpoints.is_empty() || !self.corrosion_gossip_enable,
+            "corrosion gossip endpoints were specified without enabling the corrosion gossip service"
+        );
 
         let db_root = if let Some(cdb) = self.corrosion_db_path.clone() {
             std::fs::create_dir_all(&cdb)?;
@@ -939,16 +998,22 @@ impl Service {
             }),
         )
         .await?;
+
         let subs = types::pubsub::SubsManager::default();
+        let updates = self
+            .corrosion_gossip_enable
+            .then(types::updates::UpdatesManager::default);
 
         let btx = corrosion::persistent::mutator::BroadcastingTransactor::new(
             db.actor_id,
             db.clock.clone(),
             db.pool.clone(),
             subs.clone(),
+            updates.clone(),
+            db.bookie.clone(),
+            db.booked.clone(),
             None,
-        )
-        .await?;
+        );
 
         // Spawn a task to update the DB and broadcast changes when the filter changes
         if let Some((mut filters, mut filters_sub)) = config
@@ -1168,6 +1233,21 @@ impl Service {
 
         // Tripwire is how corrosion communicates a shutdown was requested
         let trip = corrosion::pubsub::Trip::new();
+
+        if self.corrosion_gossip_enable {
+            use eyre::WrapErr;
+
+            self.spawn_gossip_service(
+                &db,
+                subs.clone(),
+                updates.unwrap(),
+                trip.tripwire(),
+                shutdown,
+            )
+            .await
+            .context("failed to spawn gossip service")?;
+        }
+
         let ps_ctx = corrosion::pubsub::PubsubContext::new(
             subs,
             sub_path,
@@ -1207,6 +1287,145 @@ impl Service {
 
             drop(finished.send(Ok(())));
         });
+
+        Ok(())
+    }
+
+    async fn spawn_gossip_service(
+        &self,
+        db: &corrosion::db::InitializedDb,
+        subs: corrosion::types::pubsub::SubsManager,
+        updates: corrosion::types::updates::UpdatesManager,
+        tripwire: corrosion::Tripwire,
+        shutdown: &mut ShutdownHandler,
+    ) -> eyre::Result<()> {
+        use corrosion::gossip;
+        use eyre::WrapErr;
+        use tokio::sync::mpsc::channel;
+
+        let metrics = gossip::GossipMetrics::new(crate::metrics::registry());
+
+        // Note that all of the various hardcoded numbers here are taken from the corrosion defaults, we should
+        // make them configurable and/or tune the numbers based on our usage in the future
+
+        // Foca is the library corrosion uses to manage the cluster's SWIM state, the state is transmitted via QUIC
+        // datagrams
+        let (foca_tx, foca_rx) = channel(256);
+        let (changes_tx, changes_rx) = channel(1024);
+        let (rtt_tx, rtt_rx) = channel(128);
+        let (broadcast_tx, broadcast_rx) = channel(512);
+        let (to_send_tx, to_send_rx) = channel(512);
+        let (notifications_tx, notifications_rx) = channel(512);
+        let (apply_tx, apply_rx) = channel(2048);
+        let (clear_buf_tx, clear_buf_rx) = channel(512);
+
+        let member_states = gossip::swim::load_member_states(&db.pool).await;
+
+        let members = gossip::Members(Default::default());
+
+        let swim_ctx = gossip::swim::SwimCtx {
+            metrics,
+            pool: db.pool.clone(),
+            actor_id: db.actor_id,
+            cluster_id: db.cluster_id,
+            // AFAICT this is literally only set by corrosion in tests...
+            member_id: None,
+            members: members.clone(),
+        };
+
+        let transport = gossip::transport::Transport::new_insecure(metrics, rtt_tx)
+            .context("failed to spawn client transport")?;
+
+        // Spawn the actual SWIM handler before we start accepting remote connections or making our own
+        gossip::swim::swim_loop(
+            swim_ctx,
+            corrosion::types::actor::Actor::new(
+                db.actor_id,
+                (std::net::Ipv6Addr::UNSPECIFIED, self.corrosion_gossip_port).into(),
+                db.clock.new_timestamp(),
+                db.cluster_id,
+                None,
+            ),
+            transport.clone(),
+            foca_rx,
+            broadcast_rx,
+            to_send_tx,
+            notifications_tx,
+            tripwire.clone(),
+            member_states,
+        );
+
+        gossip::swim::spawn_sender(transport, to_send_rx, tripwire.clone());
+        gossip::swim::spawn_notification_handler(
+            metrics,
+            members.clone(),
+            notifications_rx,
+            foca_tx.clone(),
+            tripwire.clone(),
+        );
+
+        let change_ctx = gossip::changes::ChangeCtx {
+            metrics,
+            pool: db.pool.clone(),
+            sub_manager: subs,
+            update_manager: updates,
+            bookie: db.bookie.clone(),
+            actor_id: db.actor_id,
+            clock: db.clock.clone(),
+            bcast_tx: broadcast_tx,
+            apply_tx,
+            clear_buf_tx,
+            // TODO: maybe make this configurable/optional, but currently the change handler will signal shutdown if it
+            // encounters a fatal DB issue
+            shutdown: shutdown.shutdown_tx(),
+        };
+
+        // TODO: make this configurable or tune the defaults once we actually see numbers in real usage
+        let change_opts = gossip::changes::ChangeOptions::default();
+
+        gossip::changes::spawn_changes_handler(
+            change_ctx.clone(),
+            change_opts.clone(),
+            changes_rx,
+            tripwire.clone(),
+        );
+
+        gossip::changes::spawn_buffered_apply(
+            change_ctx.clone(),
+            change_opts.clone(),
+            db.bookie.clone(),
+            apply_rx,
+            tripwire.clone(),
+        );
+
+        gossip::changes::spawn_buffered_cleanup(
+            change_ctx,
+            change_opts,
+            clear_buf_rx,
+            tripwire.clone(),
+        );
+
+        // Spawn a task to update the RTT state of the cluster members
+        gossip::handler::spawn_rtt_handler(members.clone(), rtt_rx, tripwire.clone());
+
+        let srv_ctx = gossip::GossipContext {
+            metrics,
+            foca_tx,
+            changes_tx,
+            sync_permits: std::sync::Arc::new(tokio::sync::Semaphore::new(3)),
+            pool: db.pool.clone(),
+            bookie: db.bookie.clone(),
+            actor_id: db.actor_id,
+            clock: db.clock.clone(),
+            cluster_id: db.cluster_id,
+        };
+
+        corrosion::gossip::handler::spawn_gossipserver_unencrypted(
+            srv_ctx,
+            tripwire,
+            (std::net::Ipv6Addr::UNSPECIFIED, self.corrosion_gossip_port).into(),
+        )
+        .context("failed to spawn gossip server")?;
 
         Ok(())
     }
