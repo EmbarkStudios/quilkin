@@ -182,8 +182,8 @@ impl<'s, const N: usize> Server<'s, N> {
         let server = to_compact_str(endpoint);
 
         self.statements.push(Statement::WithParams(
-            format!("UPDATE dc SET servers = jsonb_patch(servers, '{{\"{server}\":null}}') WHERE rowid = (SELECT MIN(rowid) FROM dc WHERE ip = ?)"),
-            vec![self.peer.ip().to_string().into()]
+            "UPDATE dc SET servers = jsonb_patch(servers,json_object(?,NULL)) WHERE rowid = (SELECT MIN(rowid) FROM dc WHERE ip = ?)".into(),
+            vec![SqliteParam::Text(server), self.peer.ip().to_string().into()],
         ));
     }
 
@@ -195,23 +195,20 @@ impl<'s, const N: usize> Server<'s, N> {
     /// time period.
     #[inline]
     pub fn remove_deferred(&mut self, endpoint: &Endpoint) {
-        let peer_ip = self.peer.ip().to_string();
-
-        self.statements.push(Statement::WithParams(
-            format!(
-                "UPDATE servers SET
-                contributors = jsonb_patch(contributors,'{{\"{peer_ip}\":null}}'),
-                cont_update = unixepoch('now')
-            WHERE rowid = (SELECT MIN(rowid) FROM servers WHERE endpoint = ?)"
-            ),
-            vec![endpoint.to_sql()],
-        ));
-
         let server = to_compact_str(endpoint);
 
         self.statements.push(Statement::WithParams(
-            format!("UPDATE dc SET servers = jsonb_patch(servers, '{{\"{server}\":null}}') WHERE rowid = (SELECT MIN(rowid) FROM dc WHERE ip = ?)"),
-            vec![peer_ip.into()]
+            "UPDATE servers SET
+                contributors = jsonb_patch(contributors,json_object(?,NULL)),
+                cont_update = unixepoch('now')
+            WHERE rowid = (SELECT MIN(rowid) FROM servers WHERE endpoint = ?)"
+                .into(),
+            vec![self.peer.to_sql(), endpoint.to_sql()],
+        ));
+
+        self.statements.push(Statement::WithParams(
+            "UPDATE dc SET servers = jsonb_patch(servers,json_object(?,NULL)) WHERE rowid = (SELECT MIN(rowid) FROM dc WHERE ip = ?)".into(),
+            vec![SqliteParam::Text(server), self.peer.to_sql()],
         ));
     }
 
@@ -260,10 +257,10 @@ impl<'s, const N: usize> Server<'s, N> {
     /// from the current point in time
     #[inline]
     pub fn reap_old(max_age: std::time::Duration) -> Statement {
-        Statement::Simple(format!(
-            "DELETE FROM servers WHERE length(contributors) <= 1 AND unixepoch('now') - cont_update > {}",
-            max_age.as_secs()
-        ))
+        Statement::WithParams(
+            "DELETE FROM servers WHERE length(contributors) <= 1 AND unixepoch('now') - cont_update > ?".into(),
+            vec![SqliteParam::Integer(max_age.as_secs() as i64)],
+        )
     }
 }
 
@@ -288,12 +285,11 @@ impl<const N: usize> Datacenter<'_, N> {
         ];
 
         self.0.push(Statement::WithParams(
-            format!(
-                "INSERT INTO dc (ip,port,icao,servers) VALUES (?,?,?,jsonb('{{}}'))
+            "INSERT INTO dc (ip,port,icao,servers) VALUES (?,?,?,jsonb('{}'))
             ON CONFLICT(ip) DO UPDATE SET
-                port = {qcmp},
-                icao = '{icao}'",
-            ),
+                port = excluded.port,
+                icao = excluded.icao"
+                .into(),
             params,
         ));
     }
@@ -309,13 +305,14 @@ impl<const N: usize> Datacenter<'_, N> {
     pub fn remove(&mut self, peer: Peer, update_time: Option<time::UtcDateTime>) {
         let time = update_time.unwrap_or(time::UtcDateTime::now());
 
-        self.0.push(Statement::Simple(format!(
-            "WITH sj AS (SELECT server.key FROM dc JOIN json_each(dc.servers) AS server WHERE ip = '{0}')
+        self.0.push(Statement::WithParams(
+            "WITH sj AS (SELECT server.key FROM dc JOIN json_each(dc.servers) AS server WHERE ip = ?)
             UPDATE servers SET
-                contributors = jsonb_patch(contributors,'{{\"{0}\":null}}'),
-                cont_update = {1}
-            WHERE endpoint IN (SELECT key FROM sj)", peer.ip(), time.unix_timestamp()
-        )));
+                contributors = jsonb_patch(contributors,json_object(?,NULL)),
+                cont_update = ?
+            WHERE endpoint IN (SELECT key FROM sj)".into(),
+            vec![peer.to_sql(), peer.to_sql(), SqliteParam::Integer(time.unix_timestamp())],
+        ));
 
         self.0.push(Statement::WithParams(
             "DELETE FROM dc WHERE rowid = (SELECT MIN(rowid) FROM dc WHERE ip = ?)".into(),

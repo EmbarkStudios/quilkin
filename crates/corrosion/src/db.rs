@@ -282,6 +282,11 @@ fn run_startup_checks(conn: &rusqlite::Connection, limits: Option<&DBLimits>) ->
     // if it fills up
     conn.pragma_update(None, "temp_store", "MEMORY")?;
 
+    // WAL mode is required; NORMAL skips the per-commit fsync that WAL FULL would add.
+    // Data can only be lost on a simultaneous OS crash + hardware failure, which is acceptable
+    // because corrosion nodes replicate state across peers.
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+
     if let Some(limits) = limits {
         if let Some(max_page_count) = limits.max_page_count {
             conn.pragma_update(None, "max_page_count", max_page_count)?;
@@ -293,7 +298,7 @@ fn run_startup_checks(conn: &rusqlite::Connection, limits: Option<&DBLimits>) ->
         }
         if let Some(sync) = limits.synchronous {
             conn.pragma_update(None, "synchronous", sync.as_str())?;
-            tracing::info!(?sync, "WAL synchronous mode set");
+            tracing::info!(?sync, "WAL synchronous override applied");
         }
         if let Some(n) = limits.wal_autocheckpoint {
             conn.pragma_update(None, "wal_autocheckpoint", n)?;
