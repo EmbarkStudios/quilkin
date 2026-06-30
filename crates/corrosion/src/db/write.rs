@@ -131,51 +131,39 @@ impl<'s, const N: usize> Server<'s, N> {
     /// Create a statement to insert a new server
     #[inline]
     pub fn upsert(&mut self, endpoint: &Endpoint, icao: IcaoCode, tokens: &TokenSet) {
-        let mut params = Vec::with_capacity(4);
-
-        params.push(endpoint.to_sql());
-        params.push(icao.to_sql());
-
         let peer_ip = self.peer.ip().to_string();
-
-        match tokens.to_sql() {
-            SqliteParam::Text(token_str) => {
-                self.statements.push(Statement::WithParams(
-                    format!("INSERT INTO servers (endpoint,icao,tokens,contributors,cont_update) VALUES (?,?,'{token_str}',jsonb('{{\"{peer_ip}\":{{}}}}'),unixepoch('now'))
-                    ON CONFLICT(endpoint) DO UPDATE SET
-                        contributors = jsonb_patch(contributors,'{{\"{peer_ip}\":{{}}}}'),
-                        cont_update = unixepoch('now'),
-                        icao = '{icao}',
-                        tokens = '{token_str}'"
-                    ),
-                    params,
-                ));
-            }
-            SqliteParam::Null => {
-                self.statements.push(Statement::WithParams(
-                    format!("INSERT INTO servers (endpoint,icao,tokens,contributors,cont_update) VALUES (?,?,NULL,jsonb('{{\"{peer_ip}\":{{}}}}'),unixepoch('now'))
-                    ON CONFLICT(endpoint) DO UPDATE SET
-                        contributors = jsonb_patch(contributors,'{{\"{peer_ip}\":{{}}}}'),
-                        cont_update = unixepoch('now'),
-                        icao = '{icao}',
-                        tokens = NULL"
-                    ),
-                    params,
-                ));
-            }
-            _ => unreachable!(),
-        }
-
         let server = to_compact_str(endpoint);
 
         self.statements.push(Statement::WithParams(
-            format!(
-                "INSERT INTO dc (ip,port,icao,servers) VALUES (?,?,?,jsonb('{{\"{server}\":{{}}}}'))
+            "INSERT INTO servers (endpoint,icao,tokens,contributors,cont_update) VALUES (?,?,?,jsonb(json_object(?,json_object())),unixepoch('now'))
+            ON CONFLICT(endpoint) DO UPDATE SET
+                contributors = jsonb_patch(contributors,json_object(?,json_object())),
+                cont_update = unixepoch('now'),
+                icao = ?,
+                tokens = ?".into(),
+            vec![
+                endpoint.to_sql(),
+                icao.to_sql(),
+                tokens.to_sql(),
+                peer_ip.clone().into(),
+                peer_ip.clone().into(),
+                icao.to_sql(),
+                tokens.to_sql(),
+            ],
+        ));
+
+        self.statements.push(Statement::WithParams(
+            "INSERT INTO dc (ip,port,icao,servers) VALUES (?,?,?,jsonb(json_object(?,json_object())))
             ON CONFLICT(ip) DO UPDATE SET
-                servers = jsonb_patch(servers,'{{\"{server}\":{{}}}}')
-            WHERE excluded.icao = dc.icao"
-            ),
-            vec![peer_ip.into(), self.peer.port().into(), icao.to_sql()],
+                servers = jsonb_patch(servers,json_object(?,json_object()))
+            WHERE excluded.icao = dc.icao".into(),
+            vec![
+                peer_ip.into(),
+                self.peer.port().into(),
+                icao.to_sql(),
+                SqliteParam::Text(server.clone()),
+                SqliteParam::Text(server),
+            ],
         ));
     }
 
@@ -393,7 +381,7 @@ pub fn exec_single_interruptible(
     tx: &InterruptibleTransaction<Transaction<'_>>,
     statement: Statement,
 ) -> Result<usize, rusqlite::Error> {
-    let mut prepped = tx.prepare(statement.query())?;
+    let mut prepped = tx.prepare_cached(statement.query())?;
     match statement {
         Statement::Simple(_)
         | Statement::Verbose {
