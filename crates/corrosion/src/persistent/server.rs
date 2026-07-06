@@ -24,12 +24,16 @@ pub const VERSION: u16 = 1;
 pub trait DbMutator: Sync + Send + Clone {
     /// A new mutation client has connected
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16);
-    /// A mutation client wants to perform 1 or more database mutations
-    async fn execute(
+    /// Queues 1 or more database mutations, returning a channel that receives
+    /// the result once committed
+    ///
+    /// Mutations are applied in submission order, so pipelined requests can be
+    /// submitted before earlier results have been received
+    async fn submit(
         &self,
         peer: Peer,
         statements: &[proto::v1::ServerChange],
-    ) -> corro_types::api::ExecResponse;
+    ) -> tokio::sync::oneshot::Receiver<corro_types::api::ExecResponse>;
     /// A mutation client has disconnected
     async fn disconnected(&self, peer: Peer);
 }
@@ -267,15 +271,15 @@ impl Server {
         subs: PubsubContext,
     ) {
         let ValidRequest {
-            mut send,
-            mut recv,
+            send,
+            recv,
             peer,
             request,
         } = req;
 
-        let result = match request {
+        let (send, recv, result) = match request {
             proto::Request::V1(inner) => {
-                v1_impl::handle_stream(inner, peer, &mut send, &mut recv, mutator, subs).await
+                v1_impl::handle_stream(inner, peer, send, recv, mutator, subs).await
             }
         };
 
@@ -330,38 +334,107 @@ mod v1_impl {
     use super::*;
     use proto::v1;
 
+    /// The maximum number of requests that can be executing before the server
+    /// stops reading new ones from the stream
+    const MAX_INFLIGHT: usize = 64;
+
     async fn handle_mutate(
         req: v1::MutateRequest,
         peer: Peer,
-        send: &mut SendStream,
-        recv: &mut RecvStream,
+        mut send: SendStream,
+        mut recv: RecvStream,
         mutator: impl DbMutator + 'static,
-    ) -> Result<(), IoLoopError> {
+    ) -> (SendStream, RecvStream, Result<(), IoLoopError>) {
         mutator.connected(peer, req.icao, req.qcmp_port).await;
 
-        send_response(
-            send,
+        if let Err(error) = send_response(
+            &mut send,
             v1::Response::Ok(v1::OkResponse::Mutate(v1::MutateResponse)),
         )
-        .await?;
+        .await
+        {
+            mutator.disconnected(peer).await;
+            return (send, recv, Err(error));
+        }
 
-        let mut io_loop = async || -> Result<(), IoLoopError> {
-            loop {
-                let to_exec =
-                    codec::read_length_prefixed_json::<Vec<v1::ServerChange>>(recv).await?;
+        // Responses must be sent in request order, so the reader queues each
+        // request's result channel and the writer drains them in FIFO order,
+        // allowing requests to execute while earlier results are being written
+        let (resp_tx, mut resp_rx) = tokio::sync::mpsc::channel::<
+            tokio::sync::oneshot::Receiver<corro_types::api::ExecResponse>,
+        >(MAX_INFLIGHT);
 
-                let response = mutator.execute(peer, &to_exec).await;
-                let response = codec::write_length_prefixed_json(&response)?;
-                send.write_chunk(response.freeze()).await?;
+        let writer = tokio::spawn(async move {
+            let mut result = Ok(());
+            while let Some(rx) = resp_rx.recv().await {
+                let response = rx.await.unwrap_or_else(|_| corro_types::api::ExecResponse {
+                    results: vec![corro_types::api::ExecResult::Error {
+                        error: "mutation was dropped before being committed".into(),
+                    }],
+                    time: 0.0,
+                    version: None,
+                    actor_id: None,
+                });
+
+                let response = match codec::write_length_prefixed_json(&response) {
+                    Ok(r) => r,
+                    Err(error) => {
+                        result = Err(IoLoopError::Serialization(error));
+                        break;
+                    }
+                };
+                if let Err(error) = send.write_chunk(response.freeze()).await {
+                    result = Err(IoLoopError::Write(error));
+                    break;
+                }
+            }
+
+            (send, result)
+        });
+
+        let read_result = loop {
+            let to_exec =
+                match codec::read_length_prefixed_json::<Vec<v1::ServerChange>>(&mut recv).await {
+                    Ok(to_exec) => to_exec,
+                    Err(error) => break Err(IoLoopError::Read(error)),
+                };
+
+            let rx = mutator.submit(peer, &to_exec).await;
+            if resp_tx.send(rx).await.is_err() {
+                // the writer only ends early on error, which it will report
+                break Ok(());
             }
         };
 
-        let res = io_loop().await;
+        // let the writer drain the responses for requests already submitted
+        drop(resp_tx);
+        let (send, write_result) = match writer.await {
+            Ok(sr) => sr,
+            Err(error) => {
+                mutator.disconnected(peer).await;
+                std::panic::resume_unwind(error.into_panic());
+            }
+        };
+
         mutator.disconnected(peer).await;
-        res
+
+        // a read error is either the client closing the stream or a bad frame,
+        // both of which take precedence over any downstream write error
+        let res = read_result.and(write_result);
+        (send, recv, res)
     }
 
     async fn handle_subscribe(
+        req: v1::SubscribeRequest,
+        peer: Peer,
+        mut send: SendStream,
+        subs: PubsubContext,
+    ) -> (SendStream, Result<(), IoLoopError>) {
+        let res = handle_subscribe_inner(req, peer, &mut send, subs).await;
+        (send, res)
+    }
+
+    async fn handle_subscribe_inner(
         req: v1::SubscribeRequest,
         peer: Peer,
         send: &mut SendStream,
@@ -459,20 +532,21 @@ mod v1_impl {
     pub(super) async fn handle_stream(
         request: proto::v1::Request,
         peer: Peer,
-        send: &mut SendStream,
-        recv: &mut RecvStream,
+        send: SendStream,
+        recv: RecvStream,
         mutator: impl DbMutator + 'static,
         subs: PubsubContext,
-    ) -> Result<(), IoLoopError> {
+    ) -> (SendStream, RecvStream, Result<(), IoLoopError>) {
         match request {
             v1::Request::Mutate(mreq) => handle_mutate(mreq, peer, send, recv, mutator).await,
             v1::Request::Subscribe(sreq) => {
                 let query = sreq.0.query.query().to_owned();
-                handle_subscribe(sreq, peer, send, subs)
+                let (send, res) = handle_subscribe(sreq, peer, send, subs)
                     .instrument(
                         tracing::debug_span!("subscribe", %peer, id = recv.id().index(), query),
                     )
-                    .await
+                    .await;
+                (send, recv, res)
             }
         }
     }

@@ -183,10 +183,15 @@ impl Client {
     }
 }
 
+/// The maximum number of requests that can be awaiting a response before
+/// sending new ones is blocked
+const MAX_INFLIGHT: usize = 64;
+
 pub struct MutationClient {
     inner: Client,
-    tx: mpsc::UnboundedSender<(Bytes, ResponseTx)>,
-    task: tokio::task::JoinHandle<Result<Option<quinn::VarInt>, StreamError>>,
+    tx: mpsc::Sender<(Bytes, ResponseTx)>,
+    write_task: tokio::task::JoinHandle<Result<(), StreamError>>,
+    read_task: tokio::task::JoinHandle<Result<Option<quinn::VarInt>, StreamError>>,
 }
 
 impl MutationClient {
@@ -232,61 +237,72 @@ impl MutationClient {
             }
         }
 
-        let (tx, mut reqrx) = mpsc::unbounded_channel();
+        let (tx, mut reqrx) = mpsc::channel::<(Bytes, ResponseTx)>(MAX_INFLIGHT);
 
-        let task = tokio::task::spawn(async move {
-            let mut func = async || -> Result<Option<quinn::VarInt>, StreamError> {
-                match peer_version {
-                    1 => loop {
-                        let (msg, comp): (_, ResponseTx) = tokio::select! {
-                            res = recv.received_reset() => {
-                                return res.map_err(StreamError::Reset);
-                            }
-                            req = reqrx.recv() => {
-                                let Some(req) = req else {
-                                    // Initiate a shutdown, the server will see we've reset its receiver
-                                    // and it will exit the loop when it has finished all messages, closing
-                                    // its sender, which we will know when we receive a reset (or it times out)
-                                    let _ = send.reset(ErrorCode::Ok.into());
-                                    let _ = send.finish();
+        // Responses arrive in request order, so the writer queues each written
+        // request's completion and the reader drains them in FIFO order,
+        // allowing requests to be sent while responses are still pending
+        let (inflight_tx, mut inflight_rx) = mpsc::channel::<ResponseTx>(MAX_INFLIGHT);
 
-                                    tracing::debug!("waiting for server to shutdown this stream...");
-                                    drop(recv.received_reset().await);
-                                    tracing::debug!("client finished");
-                                    break;
-                                };
+        let write_task = tokio::task::spawn(async move {
+            while let Some((msg, comp)) = reqrx.recv().await {
+                // reserve the in-flight slot first so the reader has a
+                // completion for every request written to the stream
+                let Ok(permit) = inflight_tx.reserve().await else {
+                    break;
+                };
 
-                                req
-                            }
-                        };
-
-                        send.write_chunk(msg).await?;
-                        let res = codec::read_length_prefixed_json::<ExecResponse>(&mut recv)
-                            .await
-                            .map_err(StreamError::from);
-
-                        if let Err(error) = &res {
-                            tracing::error!(%error, "error occurred reading response to transaction");
-                        }
-
-                        if comp.send(res).is_err() {
-                            tracing::warn!("transaction response could not be sent to queuer");
-                        }
-                    },
-                    _invalid => {
-                        return Err(StreamError::Connect(
-                            quinn::ConnectionError::VersionMismatch,
-                        ));
-                    }
+                if let Err(error) = send.write_chunk(msg).await {
+                    drop(comp.send(Err(error.clone().into())));
+                    return Err(StreamError::Write(error));
                 }
 
-                Ok(None)
-            };
+                permit.send(comp);
+            }
 
-            func().await
+            // Initiate a shutdown, the server will see we've reset its receiver
+            // and it will exit the loop when it has finished all messages, closing
+            // its sender, which we will know when we receive a reset (or it times out)
+            let _ = send.reset(ErrorCode::Ok.into());
+            let _ = send.finish();
+
+            Ok(())
         });
 
-        Ok(Self { inner, tx, task })
+        let read_task = tokio::task::spawn(async move {
+            while let Some(comp) = inflight_rx.recv().await {
+                let res = codec::read_length_prefixed_json::<ExecResponse>(&mut recv)
+                    .await
+                    .map_err(StreamError::from);
+
+                let failed = res.is_err();
+                if let Err(error) = &res {
+                    tracing::error!(%error, "error occurred reading response to transaction");
+                }
+
+                if comp.send(res).is_err() {
+                    tracing::warn!("transaction response could not be sent to queuer");
+                }
+
+                if failed {
+                    // the stream is broken, pending requests can no longer be answered
+                    inflight_rx.close();
+                    break;
+                }
+            }
+
+            tracing::debug!("waiting for server to shutdown this stream...");
+            let code = recv.received_reset().await.map_err(StreamError::Reset);
+            tracing::debug!("client finished");
+            code
+        });
+
+        Ok(Self {
+            inner,
+            tx,
+            write_task,
+            read_task,
+        })
     }
 
     #[inline]
@@ -326,14 +342,44 @@ impl MutationClient {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send((buf.freeze(), tx))
+            .await
             .map_err(|_e| TransactionError::TaskShutdown)?;
         Ok(rx.await.map_err(|_e| TransactionError::TaskShutdown)??)
     }
 
+    /// Sends the buffers as pipelined requests, so later requests are sent
+    /// while responses to earlier ones are still pending
+    ///
+    /// The buffers are sent, and their responses received, in order
+    pub async fn send_batch(
+        &self,
+        bufs: impl IntoIterator<Item = bytes::BytesMut>,
+    ) -> Result<Vec<ExecResponse>, TransactionError> {
+        let mut pending = Vec::new();
+        for buf in bufs {
+            let (tx, rx) = oneshot::channel();
+            self.tx
+                .send((buf.freeze(), tx))
+                .await
+                .map_err(|_e| TransactionError::TaskShutdown)?;
+            pending.push(rx);
+        }
+
+        let mut responses = Vec::with_capacity(pending.len());
+        for rx in pending {
+            responses.push(rx.await.map_err(|_e| TransactionError::TaskShutdown)??);
+        }
+
+        Ok(responses)
+    }
+
     pub async fn shutdown(self) {
         drop(self.tx);
-        if let Ok(Err(error)) = self.task.await {
-            tracing::warn!(%error, "stream exited with error");
+        if let Ok(Err(error)) = self.write_task.await {
+            tracing::warn!(%error, "write stream exited with error");
+        }
+        if let Ok(Err(error)) = self.read_task.await {
+            tracing::warn!(%error, "read stream exited with error");
         }
         self.inner.shutdown().await;
     }

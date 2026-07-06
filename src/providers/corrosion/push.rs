@@ -355,11 +355,9 @@ impl Pusher {
             unreachable!()
         };
 
-        for buf in iter {
-            if let Err(error) = client.send_raw(buf).await {
-                tracing::warn!(%error, "failed to upsert initial server set");
-                return;
-            }
+        if let Err(error) = client.send_batch(iter).await {
+            tracing::warn!(%error, "failed to upsert initial server set");
+            return;
         }
 
         let mut accumulator = Accumulator::new(icao);
@@ -380,9 +378,7 @@ impl Pusher {
                 while let Some(change) = rx.recv().await {
                     match v1::ServerIter::new(change) {
                         Ok(iter) => {
-                            for buf in iter {
-                                client.send_raw(buf).await?;
-                            }
+                            client.send_batch(iter).await?;
                         }
                         Err(mutate) => {
                             client.transactions(&[mutate]).await?;

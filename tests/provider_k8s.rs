@@ -637,15 +637,15 @@ async fn applies_changes() {
         let (upserts, updates, removes) = pusher.acc.take();
 
         if let Some(up) = upserts {
-            db.execute(PEER, &[v1::ServerChange::Upsert(up)]).await;
+            drop(db.submit(PEER, &[v1::ServerChange::Upsert(up)]).await.await);
         }
 
         if let Some(up) = updates {
-            db.execute(PEER, &[v1::ServerChange::Update(up)]).await;
+            drop(db.submit(PEER, &[v1::ServerChange::Update(up)]).await.await);
         }
 
         if let Some(rm) = removes {
-            db.execute(PEER, &[v1::ServerChange::Remove(rm)]).await;
+            drop(db.submit(PEER, &[v1::ServerChange::Remove(rm)]).await.await);
         }
     }
 

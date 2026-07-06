@@ -327,7 +327,7 @@ impl super::server::DbMutator for BroadcastingTransactor {
             .await;
     }
 
-    async fn execute(&self, peer: Peer, statements: &[p::ServerChange]) -> ExecResponse {
+    async fn submit(&self, peer: Peer, statements: &[p::ServerChange]) -> oneshot::Receiver<ExecResponse> {
         let start = Instant::now();
 
         let mut v = smallvec::SmallVec::<[_; 32]>::new();
@@ -359,7 +359,7 @@ impl super::server::DbMutator for BroadcastingTransactor {
         }
 
         let (response_tx, response_rx) = oneshot::channel();
-        if self
+        if let Err(tokio::sync::mpsc::error::SendError(pw)) = self
             .write_tx
             .send(PendingWrite {
                 statements: v,
@@ -367,30 +367,19 @@ impl super::server::DbMutator for BroadcastingTransactor {
                 response_tx,
             })
             .await
-            .is_err()
         {
             tracing::error!(%peer, "write coalescer channel closed");
-            return ExecResponse {
+            drop(pw.response_tx.send(ExecResponse {
                 results: vec![ExecResult::Error {
                     error: "write coalescer unavailable".into(),
                 }],
                 time: start.elapsed().as_secs_f64(),
                 version: None,
                 actor_id: Some(self.actor_id().to_string()),
-            };
+            }));
         }
 
-        match response_rx.await {
-            Ok(resp) => resp,
-            Err(_) => ExecResponse {
-                results: vec![ExecResult::Error {
-                    error: "write coalescer dropped response".into(),
-                }],
-                time: start.elapsed().as_secs_f64(),
-                version: None,
-                actor_id: Some(self.actor_id().to_string()),
-            },
-        }
+        response_rx
     }
 
     async fn disconnected(&self, peer: Peer) {
