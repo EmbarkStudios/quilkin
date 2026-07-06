@@ -528,7 +528,7 @@ pub async fn catch_up_sub(
             continue;
         }
 
-        info!(?change_id, "buffered change");
+        debug!(?change_id, "buffered change");
         if let Err(_e) = evt_tx
             .send(SubscriptionEvent {
                 buff: event_buf,
