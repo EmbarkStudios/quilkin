@@ -33,7 +33,6 @@ tokio-util.workspace = true
 tracing.workspace = true
 uhlc.workspace = true
 uuid.workspace = true
-prettytable = "0.10"
 
 corro-api-types.workspace = true
 corro-types.workspace = true

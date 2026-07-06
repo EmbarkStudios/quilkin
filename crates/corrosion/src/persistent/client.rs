@@ -385,8 +385,6 @@ impl MutationClient {
     }
 }
 
-pub enum SubscriptionStop {}
-
 pub struct SubscriptionClient {
     inner: Client,
     tx: oneshot::Sender<ErrorCode>,

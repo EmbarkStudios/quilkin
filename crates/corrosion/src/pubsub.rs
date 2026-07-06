@@ -4,11 +4,11 @@
 
 use crate::{codec::PrefixedBuf, db::SplitPoolReadExt};
 use bytes::Bytes;
-use camino::{Utf8Path as Path, Utf8PathBuf as PathBuf};
+use camino::Utf8PathBuf as PathBuf;
 use corro_api_types::{QueryEventMeta, Statement};
 use corro_types::{
     agent::SplitPool,
-    pubsub::{Matcher, MatcherCreated, MatcherLoopConfig},
+    pubsub::{MatcherCreated, MatcherLoopConfig},
     schema::Schema,
     updates::Handle,
 };
@@ -23,7 +23,7 @@ use tokio::{
     task::block_in_place,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, debug, error, info, warn};
+use tracing::{Instrument, debug, info, warn};
 use tripwire::Tripwire;
 use uuid::Uuid;
 
@@ -773,7 +773,10 @@ pub struct PubsubContext {
 }
 
 impl PubsubContext {
-    /// Creates a new [`Self`], attempting to restore subscriptions
+    /// Creates a new [`Self`]
+    ///
+    /// Subscriptions are never restored, state of the world is required for
+    /// both mutators and subscribers
     pub async fn new(
         subs: SubsManager,
         path: PathBuf,
@@ -782,10 +785,6 @@ impl PubsubContext {
         tripwire: Tripwire,
         _loop_config: MatcherLoopConfig,
     ) -> eyre::Result<Self> {
-        // For now we never restore subscriptions and require state of the world for both
-        // mutators and subscribers
-        // let cache =
-        //     restore_subscriptions(&subs, &path, &pool, &schema, &tripwire, loop_config).await?;
         let cache = Arc::new(tokio::sync::RwLock::new(MatcherCache(
             MatcherCacheInner::default(),
         )));
@@ -1024,92 +1023,4 @@ impl Iterator for SubscriptionStream {
         let b = read_length_prefixed_bytes(&mut self.buf)?;
         Some(serde_json::from_slice(&b))
     }
-}
-
-/// Initialize subscription state and tasks
-///
-/// 1. Get subscriptions state directory from config
-/// 2. Load existing subscriptions and restore them in [`SubsManager`]
-/// 3. Spawn subscription processor task
-pub async fn restore_subscriptions(
-    subs_manager: &SubsManager,
-    subs_path: &Path,
-    pool: &SplitPool,
-    schema: &Schema,
-    tripwire: &Tripwire,
-    loop_cfg: MatcherLoopConfig,
-) -> eyre::Result<SharedMatcherCache> {
-    let mut subs_bcast_cache = MatcherCacheInner::default();
-
-    // If we error trying to restore a subscription, delete it
-    let mut to_cleanup = Vec::new();
-
-    let mut restored = 0;
-    let mut failed = 0;
-    let mut cleaned = 0;
-
-    if let Ok(mut dir) = tokio::fs::read_dir(&subs_path).await {
-        loop {
-            let entry = match dir.next_entry().await {
-                Ok(Some(e)) => e,
-                Ok(None) => break,
-                Err(error) => {
-                    error!(%error, %subs_path, "failed to read entry in subscription path");
-                    continue;
-                }
-            };
-
-            let Some(sub_id) = entry
-                .file_name()
-                .to_str()
-                .and_then(|fname| fname.parse().ok())
-            else {
-                warn!(%subs_path, filename=?entry.file_name(), "invalid file found in subscription path");
-                continue;
-            };
-
-            let res = subs_manager.restore(
-                sub_id,
-                subs_path,
-                schema,
-                pool,
-                tripwire.clone(),
-                loop_cfg.clone(),
-            );
-
-            match res {
-                Ok((_, created)) => {
-                    restored += 1;
-
-                    let (sub_tx, _) = tokio::sync::broadcast::channel(MAX_EVENTS_BUFFER_SIZE);
-
-                    tokio::spawn(process_sub_channel(
-                        subs_manager.clone(),
-                        sub_id,
-                        sub_tx.clone(),
-                        created.evt_rx,
-                    ));
-
-                    subs_bcast_cache.insert(sub_id, sub_tx);
-                }
-                Err(_error) => {
-                    failed += 1;
-                    to_cleanup.push(sub_id);
-                }
-            }
-        }
-    }
-
-    for sub_id in to_cleanup {
-        debug!(%sub_id, "Cleaning up unclean subscription");
-        if Matcher::cleanup(sub_id, &Matcher::sub_path(subs_path, sub_id)).is_ok() {
-            cleaned += 1;
-        }
-    }
-
-    tracing::info!(restored, failed, cleaned, "restored subscriptions");
-
-    Ok(Arc::new(tokio::sync::RwLock::new(MatcherCache(
-        subs_bcast_cache,
-    ))))
 }

@@ -264,18 +264,3 @@ pub async fn read_length_prefixed_json<T: serde::de::DeserializeOwned>(
     let bytes = read_length_prefixed(recv).await?;
     Ok(serde_json::from_slice(&bytes)?)
 }
-
-// #[inline]
-// pub fn explicit_size<const N: usize>(buf: &[u8]) -> Result<[u8; N], Error> {
-//     if buf.len() < N {
-//         return Err(Error::InsufficientLength {
-//             length: buf.len(),
-//             expected: N,
-//         });
-//     }
-
-//     // For now we won't care about the length being larger than what we want
-//     let mut es = [0u8; N];
-//     es.copy_from_slice(&buf[..N]);
-//     Ok(es)
-// }

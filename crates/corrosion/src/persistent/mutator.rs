@@ -270,33 +270,6 @@ impl Transactor {
     }
 }
 
-use prettytable as pt;
-
-pub fn query_to_string(
-    mut statement: rusqlite::Statement<'_>,
-    conv: impl Fn(&rusqlite::Row<'_>, &mut pt::Row),
-) -> String {
-    let mut tab = pt::Table::new();
-    tab.set_titles(pt::Row::new(
-        statement
-            .column_names()
-            .into_iter()
-            .map(pt::Cell::new)
-            .collect(),
-    ));
-
-    let mut rows = statement.query([]).unwrap();
-    while let Some(row) = rows.next().unwrap() {
-        let mut ptrow = pt::Row::empty();
-        conv(row, &mut ptrow);
-        tab.add_row(ptrow);
-    }
-
-    let mut out = Vec::new();
-    tab.print(&mut out).unwrap();
-    String::from_utf8(out).unwrap()
-}
-
 impl BroadcastingTransactor {
     async fn commit_datacenter<const N: usize>(
         &self,
