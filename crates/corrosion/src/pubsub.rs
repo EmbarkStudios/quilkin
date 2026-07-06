@@ -131,9 +131,12 @@ impl SubParamsv1 {
 }
 
 /// The default [`SubParamsv1::process_interval`]
+///
+/// A committed change can sit in the matcher for up to this long before
+/// subscribers are notified
 #[inline]
 pub const fn process_interval() -> Duration {
-    Duration::from_millis(600)
+    Duration::from_millis(100)
 }
 
 /// The default [`SubParamsv1::change_threshold`]
