@@ -387,38 +387,42 @@ async fn vacuum_db(pool: &SplitPool, lim: u64) -> eyre::Result<()> {
         conn.pragma_query_value(None, "freelist_count", |row| row.get(0))?
     };
 
-    let (busy_timeout, cache_size) = {
+    let cache_size: i64 = {
         // update settings in write conn
         let conn = pool.write_low().await?;
-        let orig: u64 = conn.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
-        let cache_size: i64 = conn.pragma_query_value(None, "cache_size", |row| row.get(0))?;
+        let cache_size = conn.pragma_query_value(None, "cache_size", |row| row.get(0))?;
         conn.pragma_update(None, "cache_size", 100000)?;
-        (orig, cache_size)
+        cache_size
     };
 
-    while freelist >= lim {
-        let conn = pool.write_low().await?;
+    let result = async {
+        while freelist >= lim {
+            let conn = pool.write_low().await?;
 
-        tokio::task::block_in_place(|| {
-            let mut prepped = conn.prepare("pragma incremental_vacuum(1000)")?;
-            let mut rows = prepped.query([])?;
+            tokio::task::block_in_place(|| {
+                let mut prepped = conn.prepare("pragma incremental_vacuum(1000)")?;
+                let mut rows = prepped.query([])?;
 
-            while let Ok(Some(_)) = rows.next() {}
+                while let Ok(Some(_)) = rows.next() {}
 
-            freelist = conn.pragma_query_value(None, "freelist_count", |row| row.get(0))?;
+                freelist = conn.pragma_query_value(None, "freelist_count", |row| row.get(0))?;
 
-            Ok::<(), eyre::Error>(())
-        })?;
+                Ok::<(), eyre::Error>(())
+            })?;
 
-        drop(conn);
-        tokio::time::sleep(Duration::from_secs(1)).await;
+            drop(conn);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+
+        Ok(())
     }
+    .await;
 
+    // restore the cache size even if vacuuming failed
     let conn = pool.write_low().await?;
-    conn.pragma_update(None, "busy_timeout", busy_timeout)?;
     conn.pragma_update(None, "cache_size", cache_size)?;
 
-    Ok(())
+    result
 }
 
 fn spawn_db_maintenance(path: &crate::Path, pool: SplitPool, dbm: DBMaintenance) {
