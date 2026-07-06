@@ -364,16 +364,18 @@ impl Pusher {
 
         let mut accumulator = Accumulator::new(icao);
 
-        // Try to batch updates
-        let mut update_interval = tokio::time::interval(std::time::Duration::from_millis(100));
+        // How long mutations are batched before being flushed, starting from
+        // the first accumulated mutation
+        const BATCH_WINDOW: std::time::Duration = std::time::Duration::from_millis(50);
+        let mut flush_deadline: Option<tokio::time::Instant> = None;
 
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(64);
 
         // Spawn a separate task to do the actual serialization and transmission to the remote server
         tokio::task::spawn(async move {
             async fn publish_changes(
                 client: &client::MutationClient,
-                mut rx: mpsc::UnboundedReceiver<v1::ServerChange>,
+                mut rx: mpsc::Receiver<v1::ServerChange>,
             ) -> Result<(), client::TransactionError> {
                 while let Some(change) = rx.recv().await {
                     match v1::ServerIter::new(change) {
@@ -400,9 +402,28 @@ impl Pusher {
 
         macro_rules! send {
             ($item:expr) => {
-                if tx.send($item).is_err() {
+                if tx.send($item).await.is_err() {
                     tracing::warn!("lost connection to remote server");
                     return;
+                }
+            };
+        }
+
+        macro_rules! flush {
+            () => {
+                flush_deadline = None;
+                let (up, u, r) = accumulator.take();
+
+                if let Some(upserts) = up {
+                    send!(v1::ServerChange::Upsert(upserts));
+                }
+
+                if let Some(removes) = r {
+                    send!(v1::ServerChange::Remove(removes));
+                }
+
+                if let Some(updates) = u {
+                    send!(v1::ServerChange::Update(updates));
                 }
             };
         }
@@ -410,6 +431,13 @@ impl Pusher {
         // Transmit mutations. If we received mutations in the time between
         // the connection was made we might send duplicate data.
         loop {
+            let flush_elapsed = async {
+                match flush_deadline {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending().await,
+                }
+            };
+
             tokio::select! {
                 biased;
 
@@ -420,21 +448,21 @@ impl Pusher {
                     };
 
                     accumulator.accumulate(&self.state, change);
+
+                    // `biased` polls this branch first, so flush inline if the
+                    // window elapsed while mutations kept arriving
+                    match flush_deadline {
+                        Some(deadline) if deadline <= tokio::time::Instant::now() => {
+                            flush!();
+                        }
+                        Some(_) => {}
+                        None => {
+                            flush_deadline = Some(tokio::time::Instant::now() + BATCH_WINDOW);
+                        }
+                    }
                 }
-                _ = update_interval.tick() => {
-                    let (up, u, r) = accumulator.take();
-
-                    if let Some(upserts) = up {
-                        send!(v1::ServerChange::Upsert(upserts));
-                    }
-
-                    if let Some(removes) = r {
-                        send!(v1::ServerChange::Remove(removes));
-                    }
-
-                    if let Some(updates) = u {
-                        send!(v1::ServerChange::Update(updates));
-                    }
+                _ = flush_elapsed => {
+                    flush!();
                 }
                 qcmp = self.qcmp.recv() => {
                     let Ok(qcmp) = qcmp else {
