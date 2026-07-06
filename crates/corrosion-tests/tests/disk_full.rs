@@ -327,9 +327,10 @@ async fn end_to_end_recovery_from_real_sqlite_full() {
         db.pool.clone(),
         corro_types::pubsub::SubsManager::default(),
         None,
+        db.bookie,
+        db.booked,
+        None,
     )
-    .await
-    .expect("setup failed")
     .with_full_purge_count(50);
 
     let peer = SocketAddrV6::new(std::net::Ipv6Addr::LOCALHOST, 9001, 0, 0);
@@ -357,8 +358,7 @@ async fn end_to_end_recovery_from_real_sqlite_full() {
                 })
             })
             .await;
-
-        if let Err(ChangeError::Rusqlite { ref source, .. }) = result
+        if let Err(ChangeError::Rusqlite { source, .. }) = &result
             && db::is_disk_full(source)
         {
             triggered_full = true;
