@@ -1,7 +1,6 @@
 use super::*;
 
 use corrosion::persistent;
-use rand::Rng;
 
 struct Sub {
     #[allow(unused)]
@@ -27,95 +26,20 @@ pub(super) async fn corrosion_subscribe(
     endpoints: CorrosionAddrs,
     hc: HealthCheck,
 ) -> crate::Result<()> {
-    let mut backoff = ExponentialBackoff::new(BACKOFF_INITIAL_DELAY);
-
     // Each query keeps track of the latest change id it has received, if we
     // disconnect from a remote server, we can send this when subscribing to
     // (hopefully) be able to catch up to the state of that server more quickly
     let mut change_ids = QuerySet::new();
 
     loop {
-        let retry_config =
-            tryhard::RetryFutureConfig::new(u32::MAX).custom_backoff(|attempt, error: &_| {
-                tracing::info!(attempt, "Retrying to connect");
-                // reset after success
-                if attempt <= 1 {
-                    backoff = ExponentialBackoff::new(BACKOFF_INITIAL_DELAY);
-                }
-
-                let mut delay = backoff.delay(attempt, &error).min(BACKOFF_MAX_DELAY);
-                delay += Duration::from_millis(
-                    rand::rng().random_range(0..BACKOFF_MAX_JITTER.as_millis() as _),
-                );
-
-                tracing::warn!(?error, "Unable to connect to the corrosion server");
-                tryhard::RetryPolicy::Delay(delay)
-            });
-
-        let connect_to_corrosion = tryhard::retry_fn(|| {
-            tracing::info!(
-                server_count = endpoints.len(),
-                "attempting to connect to corrosion server"
-            );
-
-            // Attempt to connect to multiple servers in parallel, otherwise
-            // down/slow servers in the list can unnecessarily delay connections
-            // to healthy servers.
-            //
-            // Currently we just go with the first server that we can successfully
-            // connect and subscribe to, but in the future we could subscribe
-            // to multiple servers simultaneously 
-            let mut js = tokio::task::JoinSet::new();
-
-            for addr in endpoints.iter().cloned() {
-                let cids = change_ids.clone();
-                js.spawn(async move {
-                    let res = connect_and_sub(&addr, &cids)
-                        .instrument(tracing::debug_span!("connect_and_sub", address = %addr))
-                        .await;
-
-                    (res, addr)
-                });
-            }
-
-            let num_endpoints = endpoints.len();
-
+        let connect_to_corrosion = connect_first(&endpoints, |addr| {
+            let cids = change_ids.clone();
             async move {
-                match tokio::time::timeout(CONNECTION_TIMEOUT, async {
-                    while let Some(join_result) = js.join_next().await {
-                        match join_result {
-                            Ok((result, addr)) => {
-                                match result {
-                                    Ok(sub_state) => {
-                                        return Ok((sub_state, addr));
-                                    }
-                                    Err(error) => {
-                                        tracing::warn!(address = %addr, %error, "failed to connect");
-                                    }
-                                }
-                            }
-                            Err(join_error) => {
-                                if join_error.is_panic() {
-                                    tracing::error!(
-                                        ?join_error,
-                                        "panic occurred in task attempting to connect to corrosion endpoint"
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    eyre::bail!("no successful connections could be made to {num_endpoints} possible corrosion servers");
-                })
-                .await
-                {
-                    Ok(Ok(cae)) => Ok(cae),
-                    Ok(Err(err)) => Err(err),
-                    Err(_) => eyre::bail!("timed out after {CONNECTION_TIMEOUT:?} attempting to connect to one of {num_endpoints} possible corrosion servers"),
-                }
+                connect_and_sub(&addr, &cids)
+                    .instrument(tracing::debug_span!("connect_and_sub", address = %addr))
+                    .await
             }
-        })
-        .with_config(retry_config);
+        });
 
         let (sstate, address) = match connect_to_corrosion
             .instrument(tracing::trace_span!("corrosion_subscribe"))

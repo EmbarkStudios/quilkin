@@ -1,7 +1,6 @@
 use super::*;
 use corrosion::persistent::{self, client, proto::v1};
 use quilkin_types::{Endpoint, IcaoCode, TokenSet};
-use rand::Rng;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{broadcast, mpsc};
 
@@ -231,84 +230,11 @@ pub struct Pusher {
 
 impl Pusher {
     pub async fn push_changes(mut self) -> crate::Result<()> {
-        let mut backoff = ExponentialBackoff::new(BACKOFF_INITIAL_DELAY);
-
         loop {
-            let retry_config =
-                tryhard::RetryFutureConfig::new(u32::MAX).custom_backoff(|attempt, error: &_| {
-                    tracing::info!(attempt, "Retrying to connect");
-                    // reset after success
-                    if attempt <= 1 {
-                        backoff = ExponentialBackoff::new(BACKOFF_INITIAL_DELAY);
-                    }
-
-                    let mut delay = backoff.delay(attempt, &error).min(BACKOFF_MAX_DELAY);
-                    delay += Duration::from_millis(
-                        rand::rng().random_range(0..BACKOFF_MAX_JITTER.as_millis() as _),
-                    );
-
-                    tracing::warn!(?error, "Unable to connect to the corrosion server");
-                    tryhard::RetryPolicy::Delay(delay)
-                });
-
-            let connect_to_corrosion = tryhard::retry_fn(|| {
-                // Attempt to connect to multiple servers in parallel, otherwise
-                // down/slow servers in the list can unnecessarily delay connections
-                // to healthy servers.
-                //
-                // Currently we just go with the first server that we can successfully
-                // connect to, but in the future we could connect to multiple servers simultaneously 
-                let mut js = tokio::task::JoinSet::new();
-
-                for addr in self.endpoints.iter().cloned() {
-                    let info = self.agent_info;
-                    js.spawn(async move {
-                        tracing::debug!(address = %addr, "attempting to connect to corrosion server");
-                        let res = connect(&addr, info)
-                            .await;
-
-                        (res, addr)
-                    });
-                }
-
-                let num_endpoints = self.endpoints.len();
-
-                async move {
-                    match tokio::time::timeout(CONNECTION_TIMEOUT, async {
-                        while let Some(join_result) = js.join_next().await {
-                            match join_result {
-                                Ok((result, addr)) => {
-                                    match result {
-                                        Ok(client) => {
-                                            return Ok((client, addr));
-                                        }
-                                        Err(error) => {
-                                            tracing::warn!(address = %addr, %error, "failed to connect");
-                                        }
-                                    }
-                                }
-                                Err(join_error) => {
-                                    if join_error.is_panic() {
-                                        tracing::error!(
-                                            ?join_error,
-                                            "panic occurred in task attempting to connect to corrosion endpoint"
-                                        );
-                                    }
-                                }
-                            }
-                        }
-
-                        eyre::bail!("no successful connections could be made to {num_endpoints} possible corrosion servers");
-                    })
-                    .await
-                    {
-                        Ok(Ok(cae)) => Ok(cae),
-                        Ok(Err(err)) => Err(err),
-                        Err(_) => eyre::bail!("timed out after {CONNECTION_TIMEOUT:?} attempting to connect to one of {num_endpoints} possible corrosion servers"),
-                    }
-                }
-            })
-            .with_config(retry_config);
+            let connect_to_corrosion = connect_first(&self.endpoints, |addr| {
+                let info = self.agent_info;
+                async move { connect(&addr, info).await }
+            });
 
             let (client, address) = match connect_to_corrosion
                 .instrument(tracing::trace_span!("corrosion_connect"))
