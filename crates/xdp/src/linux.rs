@@ -14,10 +14,7 @@
  * limitations under the License.
  */
 
-use std::os::fd::AsFd;
-
 pub use aya;
-use aya::maps::IterableMap;
 pub use xdp::{self, nic::NicIndex};
 
 // object unfortunately has alignment requirements, so we need to make sure
@@ -262,10 +259,8 @@ impl EbpfProgram {
     pub fn attach(
         &mut self,
         nic: NicIndex,
-==== BASE ====
-        flags: aya::programs::XdpFlags,
+        mode: aya::programs::xdp::XdpMode,
     ) -> Result<aya::programs::xdp::XdpLinkId, aya::programs::ProgramError> {
-==== BASE ====
         // We use this entrypoint for now, but in the future we could also use
         // a round robin mode when the xdp lib supports shared Umem
         let program: &mut aya::programs::Xdp = self
@@ -276,9 +271,7 @@ impl EbpfProgram {
             .expect("'all_queues' is not an xdp program");
         program.load()?;
 
-==== BASE ====
-        program.attach_to_if_index(nic.into(), flags)
-==== BASE ====
+        program.attach_to_if_index(nic.into(), mode)
     }
 
     pub fn detach(
@@ -319,10 +312,10 @@ mod tests {
 
 impl Drop for EbpfProgram {
     fn drop(&mut self) {
-        if self.link_id.is_some() {
-            if let Err(error) = self.detach() {
-                tracing::error!(%error, "failed to detach eBPF program");
-            }
+        if self.link_id.is_some()
+            && let Err(error) = self.detach()
+        {
+            tracing::error!(%error, "failed to detach eBPF program");
         }
     }
 }

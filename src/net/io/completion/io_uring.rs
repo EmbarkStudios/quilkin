@@ -36,7 +36,7 @@ use crate::{
 ///
 /// Unlike the general `PacketQueue`, this tuple always contains an `EventFd`
 /// as the receiver, which is what the io-uring loop requires.
-type IoUringQueue = (crate::net::PacketQueueSender, EventFd);
+type IoUringQueue = (crate::net::PacketQueueSender, super::eventfd::EventFd);
 
 static SESSION_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -66,21 +66,22 @@ pub fn spawn_listener(
         }
     };
 
-        let io_loop = IoUringLoop::new(512, socket)?;
-        io_loop
-            .spawn_io_loop(
-                format!("packet-router-{worker_id}"),
-                PacketProcessorCtx::Router {
-                    config,
-                    sessions,
-                    worker_id,
-                    destinations: Vec::with_capacity(1),
-                },
-                pending_sends,
-                filter_chain,
-            )
-            .context("failed to spawn io-uring loop")
-    }
+    let socket = crate::net::DualStackLocalSocket::new(port).context("failed to bind socket")?;
+
+    let io_loop = IoUringLoop::new(512, socket)?;
+    io_loop
+        .spawn_io_loop(
+            format!("packet-router-{worker_id}"),
+            PacketProcessorCtx::Router {
+                config,
+                sessions,
+                worker_id,
+                destinations: Vec::with_capacity(1),
+            },
+            (pqs, event_fd),
+            filter_chain,
+        )
+        .context("failed to spawn io-uring loop")
 }
 
 struct RecvPacket<'rb> {

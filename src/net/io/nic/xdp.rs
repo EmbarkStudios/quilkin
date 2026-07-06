@@ -504,7 +504,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
         let jh = std::thread::Builder::new()
             .name(format!("xdp-io-{i}"))
             .spawn(move || {
-                // Enqueue buffers to the fill ring to ensure that we don't miss any packets
+                // Enqueue buffers to the fill ring to ensure that we don't miss any packets directly after we've attached
                 // SAFETY: we keep the umem alive for as long as the socket is alive
                 unsafe {
                     if let Err(error) = worker.fill.enqueue(&mut worker.umem, BATCH_SIZE * 2, true)
