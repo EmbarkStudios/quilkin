@@ -61,7 +61,7 @@ pub struct DBLimits {
     pub max_page_count: Option<u64>,
     /// Max WAL size in bytes after a checkpoint. `None` leaves the `SQLite` default (unlimited).
     pub journal_size_limit: Option<i64>,
-    /// WAL synchronous mode. `None` leaves the `SQLite` default ([`WalSynchronous::Full`]).
+    /// WAL synchronous mode. `None` leaves the startup setting ([`WalSynchronous::Normal`]).
     pub synchronous: Option<WalSynchronous>,
     /// Auto-checkpoint threshold in WAL pages. `Some(0)` disables automatic checkpointing entirely,
     /// deferring all WAL cleanup to the manual [`wal_checkpoint_over_threshold`] path.
