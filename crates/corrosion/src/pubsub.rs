@@ -929,26 +929,31 @@ impl futures::Stream for BufferingSubStream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        // First try to pull any buffers from the receiver
-        match self.rx.poll_recv(cx) {
-            Poll::Ready(Some(eve)) => {
-                let span = tracing::info_span!("sub event", sub_id = %self.id);
+        // Drain all queued events; `poll_recv` only registers a waker when it
+        // returns `Pending`, so we must poll it until then
+        loop {
+            match self.rx.poll_recv(cx) {
+                Poll::Ready(Some(eve)) => {
+                    let span = tracing::info_span!("sub event", sub_id = %self.id);
 
-                // We can't borrow multiple mutable fields from a pin, thus this weird copy
-                let mut cid = self.change_id;
-                let maybe_buf = span
-                    .in_scope(|| handle_sub_event(self.max_size, &mut self.buffer, eve, &mut cid));
-                self.change_id = cid;
+                    // We can't borrow multiple mutable fields from a pin, thus this weird copy
+                    let mut cid = self.change_id;
+                    let maybe_buf = span.in_scope(|| {
+                        handle_sub_event(self.max_size, &mut self.buffer, eve, &mut cid)
+                    });
+                    self.change_id = cid;
 
-                // This will be Some if the buffer was over the configured maximum
-                if let Some(buf) = maybe_buf {
-                    let new_time = tokio::time::Instant::now() + self.max_time;
-                    self.sleep.as_mut().reset(new_time);
-                    return Poll::Ready(Some(buf));
+                    // This will be Some if the buffer was over the configured maximum
+                    if let Some(buf) = maybe_buf {
+                        let new_time = tokio::time::Instant::now() + self.max_time;
+                        self.sleep.as_mut().reset(new_time);
+                        return Poll::Ready(Some(buf));
+                    }
                 }
+                // Flush any still buffered events before ending the stream
+                Poll::Ready(None) => return Poll::Ready(self.buffer.freeze()),
+                Poll::Pending => break,
             }
-            Poll::Ready(None) => return Poll::Ready(None),
-            Poll::Pending => {}
         }
 
         // If we didn't receive a new buffer, check if we have buffered events
