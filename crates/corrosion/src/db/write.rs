@@ -361,9 +361,9 @@ impl<const N: usize> Filter<'_, N> {
     }
 }
 
-pub fn exec_interruptible<const N: usize>(
+pub fn exec_interruptible(
     tx: &InterruptibleTransaction<Transaction<'_>>,
-    statements: smallvec::SmallVec<[Statement; N]>,
+    statements: &[Statement],
 ) -> Result<usize, rusqlite::Error> {
     let mut rows = 0;
     for stmt in statements {
@@ -376,7 +376,7 @@ pub fn exec_interruptible<const N: usize>(
 #[inline]
 pub fn exec_single_interruptible(
     tx: &InterruptibleTransaction<Transaction<'_>>,
-    statement: Statement,
+    statement: &Statement,
 ) -> Result<usize, rusqlite::Error> {
     let mut prepped = tx.prepare_cached(statement.query())?;
     match statement {

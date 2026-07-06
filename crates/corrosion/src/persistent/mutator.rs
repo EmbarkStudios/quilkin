@@ -49,10 +49,10 @@ fn rusqlite_err(source: rusqlite::Error, actor_id: ActorId) -> ChangeError {
     }
 }
 
-/// A DB mutator that will broadcast changes to any subscribers when a mutation
-/// occurs that matches a subscriber's query
+/// Executes transactions against the DB, broadcasting committed changes to any
+/// subscribers whose query matches the mutation
 #[derive(Clone)]
-pub struct BroadcastingTransactor {
+pub struct Transactor {
     pool: SplitPool,
     bookie: Bookie,
     booked: Booked,
@@ -61,6 +61,13 @@ pub struct BroadcastingTransactor {
     clock: Arc<uhlc::HLC>,
     id: ActorId,
     full_purge_count: usize,
+}
+
+/// A [`Transactor`] that coalesces concurrently queued writes into a single
+/// transaction
+#[derive(Clone)]
+pub struct BroadcastingTransactor {
+    inner: Transactor,
     write_tx: tokio::sync::mpsc::Sender<PendingWrite>,
 }
 
@@ -87,7 +94,7 @@ impl BroadcastingTransactor {
 
         let (write_tx, write_rx) = tokio::sync::mpsc::channel(256);
 
-        let btx = Self {
+        let inner = Transactor {
             pool,
             bookie,
             booked,
@@ -96,21 +103,55 @@ impl BroadcastingTransactor {
             id,
             tx,
             full_purge_count: DEFAULT_FULL_PURGE_COUNT,
-            write_tx,
         };
 
-        let btx_for_loop = btx.clone();
-        spawn::spawn_counted(async move { write_loop(btx_for_loop, write_rx).await });
+        // The write loop is given a `Transactor` rather than `Self` so that
+        // `write_rx` closes, ending the loop, once every `Self` is dropped
+        let txr = inner.clone();
+        tokio::spawn(async move { write_loop(txr, write_rx).await });
 
-        Ok(btx)
+        Ok(Self { inner, write_tx })
     }
 
     /// Sets the number of oldest `servers` rows purged on the second recovery attempt.
     pub fn with_full_purge_count(mut self, count: usize) -> Self {
-        self.full_purge_count = count;
+        self.inner.full_purge_count = count;
         self
     }
 
+    #[inline]
+    pub fn actor_id(&self) -> ActorId {
+        self.inner.actor_id()
+    }
+
+    /// See [`Transactor::with_full_recovery`]
+    #[inline]
+    pub async fn with_full_recovery<F, T>(
+        &self,
+        timeout: Option<Duration>,
+        f: F,
+    ) -> Result<(T, Option<CrsqlDbVersion>, Duration), ChangeError>
+    where
+        F: Fn(&InterruptibleTransaction<Transaction<'_>>) -> Result<T, ChangeError>,
+    {
+        self.inner.with_full_recovery(timeout, f).await
+    }
+
+    /// See [`Transactor::make_broadcastable_changes`]
+    #[inline]
+    pub async fn make_broadcastable_changes<F, T>(
+        &self,
+        timeout: Option<Duration>,
+        f: F,
+    ) -> Result<(T, Option<CrsqlDbVersion>, Duration), ChangeError>
+    where
+        F: FnOnce(&InterruptibleTransaction<Transaction<'_>>) -> Result<T, ChangeError>,
+    {
+        self.inner.make_broadcastable_changes(timeout, f).await
+    }
+}
+
+impl Transactor {
     /// Executes `f` as a broadcastable write, retrying up to twice on `SQLITE_FULL`:
     ///
     /// 1. First failure: checkpoint WAL + incremental vacuum, then retry.
@@ -264,10 +305,10 @@ impl BroadcastingTransactor {
         ok_msg: &'static str,
         err_msg: &'static str,
     ) {
-        let id = self.id;
+        let id = self.actor_id();
         let res = self
             .with_full_recovery(None, move |tx| {
-                db::write::exec_interruptible(tx, dc.clone()).map_err(|e| rusqlite_err(e, id))
+                db::write::exec_interruptible(tx, &dc).map_err(|e| rusqlite_err(e, id))
             })
             .await;
         match res {
@@ -335,7 +376,7 @@ impl super::server::DbMutator for BroadcastingTransactor {
                 }],
                 time: start.elapsed().as_secs_f64(),
                 version: None,
-                actor_id: Some(self.id.to_string()),
+                actor_id: Some(self.actor_id().to_string()),
             };
         }
 
@@ -347,7 +388,7 @@ impl super::server::DbMutator for BroadcastingTransactor {
                 }],
                 time: start.elapsed().as_secs_f64(),
                 version: None,
-                actor_id: Some(self.id.to_string()),
+                actor_id: Some(self.actor_id().to_string()),
             },
         }
     }
@@ -411,16 +452,50 @@ pub fn insert_local_changes(
     }
 }
 
-async fn write_loop(
-    btx: BroadcastingTransactor,
-    mut rx: tokio::sync::mpsc::Receiver<PendingWrite>,
-) {
-    loop {
-        let first = match rx.recv().await {
-            Some(r) => r,
-            None => break,
-        };
+/// Executes a request's statements inside a savepoint so that a failed request
+/// rolls back atomically without aborting the rest of the batch
+///
+/// `SQLITE_FULL` aborts the whole batch so that [`Transactor::with_full_recovery`]
+/// can free space and retry it
+fn exec_request(
+    tx: &InterruptibleTransaction<Transaction<'_>>,
+    req: &PendingWrite,
+    actor_id: ActorId,
+) -> Result<Vec<ExecResult>, ChangeError> {
+    let mut results = Vec::with_capacity(req.statements.len());
 
+    tx.execute_batch("SAVEPOINT request")
+        .map_err(|e| rusqlite_err(e, actor_id))?;
+
+    for stmt in &req.statements {
+        match db::write::exec_single_interruptible(tx, stmt) {
+            Ok(rows_affected) => {
+                results.push(ExecResult::Execute {
+                    rows_affected,
+                    time: req.start.elapsed().as_secs_f64(),
+                });
+            }
+            Err(e) if db::is_disk_full(&e) => return Err(rusqlite_err(e, actor_id)),
+            Err(e) => {
+                tx.execute_batch("ROLLBACK TO request; RELEASE request")
+                    .map_err(|e| rusqlite_err(e, actor_id))?;
+                results.clear();
+                results.push(ExecResult::Error {
+                    error: e.to_string(),
+                });
+                return Ok(results);
+            }
+        }
+    }
+
+    tx.execute_batch("RELEASE request")
+        .map_err(|e| rusqlite_err(e, actor_id))?;
+
+    Ok(results)
+}
+
+async fn write_loop(txr: Transactor, mut rx: tokio::sync::mpsc::Receiver<PendingWrite>) {
+    while let Some(first) = rx.recv().await {
         // coalesce: drain any concurrently queued writes into the same transaction
         let mut batch = vec![first];
         while batch.len() < MAX_WRITE_BATCH {
@@ -430,57 +505,19 @@ async fn write_loop(
             }
         }
 
-        let stmt_counts: Vec<usize> = batch.iter().map(|r| r.statements.len()).collect();
-        let starts: Vec<Instant> = batch.iter().map(|r| r.start).collect();
-        let total: usize = stmt_counts.iter().sum();
+        let id = txr.actor_id();
 
-        let mut flat: smallvec::SmallVec<[crate::api::Statement; 32]> =
-            smallvec::SmallVec::with_capacity(total);
-        for req in &mut batch {
-            flat.extend(std::mem::replace(
-                &mut req.statements,
-                smallvec::SmallVec::new(),
-            ));
-        }
-
-        let id = btx.id;
-
-        let result = btx
-            .make_broadcastable_changes(None, move |tx| {
-                let mut rows = 0usize;
-                let mut all_results: Vec<Vec<ExecResult>> =
-                    stmt_counts.iter().map(|&c| Vec::with_capacity(c)).collect();
-                let mut flat_iter = flat.into_iter();
-
-                for (req_idx, (&count, &start)) in stmt_counts.iter().zip(starts.iter()).enumerate()
-                {
-                    for _ in 0..count {
-                        let stmt = flat_iter
-                            .next()
-                            .expect("flat has exactly sum(counts) elements");
-                        match db::write::exec_single_interruptible(tx, stmt) {
-                            Ok(n) => {
-                                rows += n;
-                                all_results[req_idx].push(ExecResult::Execute {
-                                    rows_affected: n,
-                                    time: start.elapsed().as_secs_f64(),
-                                });
-                            }
-                            Err(e) => {
-                                all_results[req_idx].push(ExecResult::Error {
-                                    error: e.to_string(),
-                                });
-                            }
-                        }
-                    }
-                }
-
-                Ok((rows, all_results))
+        let result = txr
+            .with_full_recovery(None, |tx| {
+                batch
+                    .iter()
+                    .map(|req| exec_request(tx, req, id))
+                    .collect::<Result<Vec<_>, _>>()
             })
             .await;
 
         match result {
-            Ok(((_, all_results), db_version, elapsed)) => {
+            Ok((all_results, db_version, elapsed)) => {
                 let version = db_version.map(u64::from);
                 tracing::debug!(
                     batch_size = batch.len(),
