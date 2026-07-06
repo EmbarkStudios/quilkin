@@ -61,7 +61,9 @@ pub fn init_logging(level: Level, test_pkg: &'static str) {
         )));
     let sub = tracing_subscriber::Registry::default().with(layer);
     let disp = tracing::dispatcher::Dispatch::new(sub);
-    tracing::dispatcher::set_global_default(disp).unwrap();
+    // tests in the same binary share the process-wide dispatcher, so only the
+    // first one gets to install it
+    drop(tracing::dispatcher::set_global_default(disp));
 }
 
 #[macro_export]
