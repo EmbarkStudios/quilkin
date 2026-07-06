@@ -185,8 +185,8 @@ async fn process_subscription_events(
         use crate::config::Datacenter;
 
         process_events(events, cid, subm, |ct, row| {
-            let dc = db::DatacenterRow::from_sql(row)
-                .context("failed to deserialize datacenter row")?;
+            let dc =
+                db::DatacenterRow::from_sql(row).context("failed to deserialize datacenter row")?;
 
             match ct {
                 ChangeType::Insert | ChangeType::Update => {

@@ -300,7 +300,11 @@ impl super::server::DbMutator for BroadcastingTransactor {
             .await;
     }
 
-    async fn submit(&self, peer: Peer, statements: &[p::ServerChange]) -> oneshot::Receiver<ExecResponse> {
+    async fn submit(
+        &self,
+        peer: Peer,
+        statements: &[p::ServerChange],
+    ) -> oneshot::Receiver<ExecResponse> {
         let start = Instant::now();
 
         let mut v = smallvec::SmallVec::<[_; 32]>::new();
