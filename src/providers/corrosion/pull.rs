@@ -157,7 +157,7 @@ async fn process_subscription_events(
     change_ids: &mut ChangeIds,
 ) -> crate::Result<()> {
     use corrosion::{db::read as db, persistent::SubMetrics, pubsub::SubscriptionStream};
-    use pubsub::{ChangeType, QueryEvent};
+    use pubsub::ChangeType;
 
     let process_server_events = |events: Option<SubscriptionStream>,
                                  cid: &mut Option<ChangeId>,
@@ -184,61 +184,12 @@ async fn process_subscription_events(
 
         use crate::config::Datacenter;
 
-        let mut successful = 0;
+        process_events(events, cid, subm, |ct, row| {
+            let dc = db::DatacenterRow::from_sql(row)
+                .context("failed to deserialize datacenter row")?;
 
-        for event in events {
-            subm.total_events += 1;
-
-            let event = match event {
-                Ok(e) => e,
-                Err(error) => {
-                    tracing::error!(%error, "failed to deserialize event");
-                    continue;
-                }
-            };
-
-            match event {
-                // The state of row that matches our query changed
-                QueryEvent::Change(ct, _rid, row, id) => {
-                    let dc = match db::DatacenterRow::from_sql(&row) {
-                        Ok(dc) => dc,
-                        Err(error) => {
-                            tracing::error!(%error, "failed to deserialize datacenter row");
-                            continue;
-                        }
-                    };
-
-                    match ct {
-                        ChangeType::Insert | ChangeType::Update => {
-                            dcs.modify(|dcs| {
-                                dcs.insert(
-                                    dc.ip,
-                                    Datacenter {
-                                        qcmp_port: dc.qcmp_port,
-                                        icao_code: dc.icao,
-                                    },
-                                );
-                            });
-                        }
-                        ChangeType::Delete => {
-                            dcs.modify(|dcs| {
-                                dcs.remove(dc.ip);
-                            });
-                        }
-                    }
-
-                    *cid = Some(id);
-                }
-                // The state of a row in the initial query
-                QueryEvent::Row(_rid, row) => {
-                    let dc = match db::DatacenterRow::from_sql(&row) {
-                        Ok(dc) => dc,
-                        Err(error) => {
-                            tracing::error!(%error, "failed to deserialize datacenter row");
-                            continue;
-                        }
-                    };
-
+            match ct {
+                ChangeType::Insert | ChangeType::Update => {
                     dcs.modify(|dcs| {
                         dcs.insert(
                             dc.ip,
@@ -249,24 +200,15 @@ async fn process_subscription_events(
                         );
                     });
                 }
-                QueryEvent::Error(error) => {
-                    tracing::error!(%error, "error from 'clusters' subscription");
-                    continue;
-                }
-                // Marks the end of the initial query to catch us up to the current state of the server
-                QueryEvent::EndOfQuery { time, change_id } => {
-                    tracing::debug!(elapsed = ?Duration::from_secs_f64(time), ?change_id, "received initial state of 'clusters'");
-                    *cid = change_id;
-                }
-                QueryEvent::Columns(_) => {
-                    // irrelevant
+                ChangeType::Delete => {
+                    dcs.modify(|dcs| {
+                        dcs.remove(dc.ip);
+                    });
                 }
             }
 
-            successful += 1;
-        }
-
-        subm.failures = subm.total_events - successful;
+            Ok(())
+        });
 
         Ok(())
     };
@@ -281,70 +223,30 @@ async fn process_subscription_events(
             return Ok(());
         };
 
-        let update_filter = |row: &[SqliteValue]| -> crate::Result<()> {
-            let column = row.first().context("missing 'filter' column")?;
+        process_events(events, cid, subm, |ct, row| {
+            match ct {
+                ChangeType::Insert | ChangeType::Update => {
+                    let column = row.first().context("missing 'filter' column")?;
 
-            let filter = column.as_str().with_context(|| {
-                format!(
-                    "'filter' column is {:?}, not a string",
-                    column.column_type()
-                )
-            })?;
+                    let filter = column.as_str().with_context(|| {
+                        format!(
+                            "'filter' column is {:?}, not a string",
+                            column.column_type()
+                        )
+                    })?;
 
-            fcf.store(serde_json::from_str(filter).context("failed to deserialize filter")?);
-            Ok(())
-        };
-
-        let mut successful = 0;
-
-        for event in events {
-            subm.total_events += 1;
-
-            let event = match event {
-                Ok(e) => e,
-                Err(error) => {
-                    tracing::error!(%error, "failed to deserialize event");
-                    continue;
+                    fcf.store(
+                        serde_json::from_str(filter).context("failed to deserialize filter")?,
+                    );
                 }
-            };
-
-            match event {
-                // The state of row that matches our query changed
-                QueryEvent::Change(ct, _rid, row, id) => {
-                    match ct {
-                        ChangeType::Insert | ChangeType::Update => {
-                            update_filter(&row)?;
-                        }
-                        ChangeType::Delete => {
-                            // TODO: what do we actually want to do here?
-                            tracing::warn!("ignoring `filter` deletion event");
-                        }
-                    }
-
-                    *cid = Some(id);
-                }
-                // The state of a row in the initial query
-                QueryEvent::Row(_rid, row) => {
-                    update_filter(&row)?;
-                }
-                QueryEvent::Error(error) => {
-                    tracing::error!(%error, "error from 'filter' subscription");
-                    continue;
-                }
-                // Marks the end of the initial query to catch us up to the current state of the server
-                QueryEvent::EndOfQuery { time, change_id } => {
-                    tracing::debug!(elapsed = ?Duration::from_secs_f64(time), ?change_id, "received initial state of 'filter'");
-                    *cid = change_id;
-                }
-                QueryEvent::Columns(_) => {
-                    // irrelevant
+                ChangeType::Delete => {
+                    // TODO: what do we actually want to do here?
+                    tracing::warn!("ignoring `filter` deletion event");
                 }
             }
 
-            successful += 1;
-        }
-
-        subm.failures = subm.total_events - successful;
+            Ok(())
+        });
 
         Ok(())
     };
@@ -390,4 +292,67 @@ async fn process_subscription_events(
             }
         }
     }
+}
+
+/// Applies a block of subscription events, tracking the latest change id seen
+///
+/// `apply` is called with each row that changed, receiving [`ChangeType::Insert`]
+/// for rows in the initial query state. Application failures are logged and
+/// counted, but don't stop processing of the remaining events.
+fn process_events(
+    events: corrosion::pubsub::SubscriptionStream,
+    cid: &mut Option<ChangeId>,
+    subm: &mut corrosion::persistent::SubMetrics,
+    mut apply: impl FnMut(pubsub::ChangeType, &[SqliteValue]) -> crate::Result<()>,
+) {
+    use pubsub::{ChangeType, QueryEvent};
+
+    let mut successful = 0;
+
+    for event in events {
+        subm.total_events += 1;
+
+        let event = match event {
+            Ok(e) => e,
+            Err(error) => {
+                tracing::error!(%error, "failed to deserialize event");
+                continue;
+            }
+        };
+
+        match event {
+            // The state of a row that matches our query changed
+            QueryEvent::Change(ct, _rid, row, id) => {
+                if let Err(error) = apply(ct, &row) {
+                    tracing::error!(%error, "failed to apply change");
+                    continue;
+                }
+
+                *cid = Some(id);
+            }
+            // The state of a row in the initial query
+            QueryEvent::Row(_rid, row) => {
+                if let Err(error) = apply(ChangeType::Insert, &row) {
+                    tracing::error!(%error, "failed to apply row");
+                    continue;
+                }
+            }
+            QueryEvent::Error(error) => {
+                tracing::error!(%error, "error event from subscription");
+                continue;
+            }
+            // Marks the end of the initial query to catch us up to the current state of the server
+            QueryEvent::EndOfQuery { time, change_id } => {
+                tracing::debug!(elapsed = ?Duration::from_secs_f64(time), ?change_id, "received initial state");
+                *cid = change_id;
+            }
+            QueryEvent::Columns(_) => {
+                // irrelevant
+            }
+        }
+
+        successful += 1;
+    }
+
+    subm.failures = subm.total_events - successful;
 }
