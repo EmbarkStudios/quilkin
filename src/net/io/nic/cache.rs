@@ -189,49 +189,68 @@ impl L2Cache {
     }
 }
 
-/// Retrieves the MAC address of the default gateway
-pub fn determine_gateway_mac(nic: &str) -> Result<types::MacAddr, CacheSpawnError> {
-    use eyre::WrapErr;
-
-    // This is extremely ugly, but netlink is even uglier, this issues an arp command, to get the default gateway address's
-    // link layer address. This uses the special `_gateway` identifier which is systemd specific, so this would need to be
-    // modified if people want to run it on non-systemd systems
-
-    fn get(nic: &str) -> eyre::Result<types::MacAddr> {
-        let output = std::process::Command::new("arp")
-            .args(["-i", nic, "-n", "_gateway"])
-            .output()
-            .context("failed to resolve link layer address of default gateway")?;
-
-        eyre::ensure!(
-            output.status.success(),
-            "arp returned failure status {}",
-            output.status
-        );
-
-        let out = String::from_utf8(output.stdout).context("arp output was not utf-8")?;
-        let l = out
-            .lines()
-            .nth(1)
-            .ok_or("arp output didn't have 2 or more lines of output")?;
-        let lladdr = l
-            .split_whitespace()
-            .nth(2)
-            .ok_or("arp output didn't have a standard line")?;
-
-        let mut la = [0u8; 6];
-        let mut i = 0;
-        for c in lladdr.split(':') {
-            eyre::ensure!(i < la.len(), "mac address contained too many components");
-
-            la[i] = u8::from_str_radix(c, 16).with_context(|| format!("failed to parse {c}"))?;
-
-            i += 1;
-        }
-
-        eyre::ensure!(i == 6, "mac address did not contain enough components");
-        Ok(types::MacAddr(la))
+enum GatewayMac {
+    /// The gateway MAC is the same for IPv4 and IPv6
+    Same(types::MacAddr),
+    Different {
+        ipv4: Option<types::MacAddr>,
+        ipv6: Option<types::MacAddr>,
     }
+}
+
+impl GatewayMac {
+    pub fn request(nic: &str) -> Result<Self, CacheSpawnError> {
+        use eyre::{ContextCompat, WrapErr};
+
+        // This is extremely ugly, but netlink is even uglier, this issues an arp command, to get the default gateway address's
+        // link layer address. This uses the special `_gateway` identifier which is systemd specific, so this would need to be
+        // modified if people want to run it on non-systemd systems
+        fn get(nic: &str) -> eyre::Result<Option<types::MacAddr>> {
+            let output = std::process::Command::new("arp")
+                .args(["-i", nic, "-n", "_gateway"])
+                .output()
+                .context("failed to resolve link layer address of default gateway")?;
+
+            eyre::ensure!(
+                output.status.success(),
+                "arp returned failure status {}",
+                output.status
+            );
+
+            let out = String::from_utf8(output.stdout).context("arp output was not utf-8")?;
+            let Some(l) = out
+                .lines()
+                .nth(1) else {
+                    return Ok(None);
+                };
+            let lladdr = l
+                .split_whitespace()
+                .nth(2)
+                .context("arp output didn't have a standard line")?;
+
+            let mut la = [0u8; 6];
+            let mut i = 0;
+            for c in lladdr.split(':') {
+                eyre::ensure!(i < la.len(), "mac address contained too many components");
+
+                la[i] = u8::from_str_radix(c, 16).with_context(|| format!("failed to parse {c}"))?;
+
+                i += 1;
+            }
+
+            eyre::ensure!(i == 6, "mac address did not contain enough components");
+            Ok(Some(types::MacAddr(la)))
+        }
+    }
+}
+
+/// Retrieves the MAC address of the default gateway
+pub fn determine_gateway_mac(nic: &str) ->  {
+
+
+
+
+
 
     get(nic).map_err(CacheSpawnError::Gateway)
 }

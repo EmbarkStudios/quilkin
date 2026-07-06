@@ -1,3 +1,4 @@
+use crate::net::io::completion::eventfd;
 use std::sync::Arc;
 
 pub type PacketQueue = (PacketQueueSender, PacketQueueReceiver);
@@ -6,7 +7,7 @@ pub fn queue(capacity: usize, backend: crate::net::io::UdpBackend) -> std::io::R
     cfg_select! {
         target_os = "linux" => {
             if matches!(backend, crate::net::io::UdpBackend::Completion) {
-                let efd = crate::net::io::completion::io_uring::EventFd::new()?;
+                let efd = eventfd::EventFd::new()?;
                 return Ok((
                     PacketQueueSender {
                         packets: Arc::new(parking_lot::Mutex::new(Vec::with_capacity(capacity))),
@@ -48,12 +49,12 @@ fn make_watch_queue(capacity: usize) -> std::io::Result<PacketQueue> {
 cfg_select! {
     target_os = "linux" => {
         enum Notify {
-            EventFd(crate::net::io::completion::io_uring::EventFdWriter),
+            EventFd(eventfd::EventFdWriter),
             Watch(tokio::sync::watch::Sender<bool>),
         }
 
         pub enum PacketQueueReceiver {
-            EventFd(crate::net::io::completion::io_uring::EventFd),
+            EventFd(eventfd::EventFd),
             Watch(tokio::sync::watch::Receiver<bool>),
         }
     }
