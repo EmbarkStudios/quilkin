@@ -343,7 +343,7 @@ pub mod v1 {
             let mut ic = IterChange::new(&self.changes, self.index)?;
 
             let buf = loop {
-                if let Ok(b) = codec::write_length_prefixed_jsonb(&[ic]) {
+                if let Ok(b) = codec::write_length_prefixed_json(&[ic]) {
                     break b;
                 } else {
                     ic.halve();

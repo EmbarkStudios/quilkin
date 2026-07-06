@@ -261,7 +261,7 @@ impl MutationClient {
                         };
 
                         send.write_chunk(msg).await?;
-                        let res = codec::read_length_prefixed_jsonb::<ExecResponse>(&mut recv)
+                        let res = codec::read_length_prefixed_json::<ExecResponse>(&mut recv)
                             .await
                             .map_err(StreamError::from);
 
@@ -317,7 +317,7 @@ impl MutationClient {
         &self,
         change: &[proto::v1::ServerChange],
     ) -> Result<ExecResponse, TransactionError> {
-        let buf = codec::write_length_prefixed_jsonb(&change)?;
+        let buf = codec::write_length_prefixed_json(&change)?;
         self.send_raw(buf).await
     }
 

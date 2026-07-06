@@ -168,7 +168,7 @@ pub fn update_length_prefix(buf: &mut BytesMut) -> Result<(), LengthPrefixError>
 }
 
 #[inline]
-pub fn write_length_prefixed_jsonb<T: serde::Serialize>(item: &T) -> std::io::Result<BytesMut> {
+pub fn write_length_prefixed_json<T: serde::Serialize>(item: &T) -> std::io::Result<BytesMut> {
     let mut buf = bytes::BytesMut::new();
 
     reserve_length_prefix(&mut buf);
@@ -260,7 +260,7 @@ pub async fn read_length_prefixed(
 }
 
 #[inline]
-pub async fn read_length_prefixed_jsonb<T: serde::de::DeserializeOwned>(
+pub async fn read_length_prefixed_json<T: serde::de::DeserializeOwned>(
     recv: &mut quinn::RecvStream,
 ) -> Result<T, LengthReadError> {
     let bytes = read_length_prefixed(recv).await?;

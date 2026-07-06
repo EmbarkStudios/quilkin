@@ -348,10 +348,10 @@ mod v1_impl {
         let mut io_loop = async || -> Result<(), IoLoopError> {
             loop {
                 let to_exec =
-                    codec::read_length_prefixed_jsonb::<Vec<v1::ServerChange>>(recv).await?;
+                    codec::read_length_prefixed_json::<Vec<v1::ServerChange>>(recv).await?;
 
                 let response = mutator.execute(peer, &to_exec).await;
-                let response = codec::write_length_prefixed_jsonb(&response)?;
+                let response = codec::write_length_prefixed_json(&response)?;
                 send.write_chunk(response.freeze()).await?;
             }
         };
