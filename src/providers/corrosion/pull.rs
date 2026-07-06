@@ -159,8 +159,7 @@ async fn connect_and_sub(
         persistent::Metrics::new(crate::metrics::registry()),
     )
     .await
-    .unwrap();
-    //.context("failed to connect")?;
+    .context("failed to connect")?;
 
     tracing::debug!("connected to corrosion server");
 
