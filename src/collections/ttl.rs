@@ -20,10 +20,9 @@ use dashmap::mapref::one::{Ref, RefMut};
 use tracing::warn;
 
 use std::hash::Hash;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
-use tokio::sync::oneshot::{Receiver, Sender, channel};
 
 pub use dashmap::try_result::TryResult;
 
@@ -97,7 +96,6 @@ struct Map<K, V> {
     inner: DashMap<K, Value<V>>,
     ttl: Duration,
     clock: Clock,
-    shutdown_tx: Option<Sender<()>>,
 }
 
 impl<K: std::fmt::Debug + std::hash::Hash + std::cmp::Eq, V: std::fmt::Debug> std::fmt::Debug
@@ -107,16 +105,7 @@ impl<K: std::fmt::Debug + std::hash::Hash + std::cmp::Eq, V: std::fmt::Debug> st
         f.debug_struct("Map")
             .field("inner", &self.inner)
             .field("ttl", &self.ttl)
-            .field("shutdown_tx", &self.shutdown_tx)
             .finish()
-    }
-}
-
-impl<K, V> Drop for Map<K, V> {
-    fn drop(&mut self) {
-        if let Some(shutdown_tx) = self.shutdown_tx.take() {
-            shutdown_tx.send(()).ok();
-        }
     }
 }
 
@@ -146,19 +135,12 @@ where
     }
 
     fn initialize(inner: DashMap<K, Value<V>>, ttl: Duration, poll_interval: Duration) -> Self {
-        let (shutdown_tx, shutdown_rx) = channel();
         let map = TtlMap(Arc::new(Map {
             inner,
-            shutdown_tx: Some(shutdown_tx),
             ttl,
             clock: Clock::new(),
         }));
-        spawn_cleanup_task(
-            map.0.clone(),
-            poll_interval,
-            map.0.clock.clone(),
-            shutdown_rx,
-        );
+        spawn_cleanup_task(Arc::downgrade(&map.0), poll_interval, map.0.clock.clone());
         map
     }
 
@@ -386,27 +368,22 @@ where
     }
 }
 
-fn spawn_cleanup_task<K, V>(
-    map: Arc<Map<K, V>>,
-    poll_interval: Duration,
-    clock: Clock,
-    mut shutdown_rx: Receiver<()>,
-) where
+fn spawn_cleanup_task<K, V>(map: Weak<Map<K, V>>, poll_interval: Duration, clock: Clock)
+where
     K: Send + Sync + Hash + Eq + 'static,
     V: Send + Sync + 'static,
 {
     let mut interval = tokio::time::interval(poll_interval);
 
+    // The task holds a weak reference so it doesn't keep the map alive,
+    // exiting once all `TtlMap` handles have been dropped.
     tokio::spawn(async move {
         loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    prune_entries( &map, &clock).await;
-                }
-                _ = &mut shutdown_rx => {
-                    return;
-                }
-            }
+            interval.tick().await;
+            let Some(map) = map.upgrade() else {
+                return;
+            };
+            prune_entries(&map, &clock).await;
         }
     });
 }
@@ -772,6 +749,24 @@ mod tests {
 
         // Check that it expires at our configured TTL.
         assert_eq!(12, exp);
+    }
+
+    #[tokio::test]
+    async fn dropped_map_is_freed() {
+        // The cleanup task must not keep the map alive after the last
+        // `TtlMap` handle is dropped.
+        time::pause();
+
+        let map =
+            TtlMap::<EndpointAddress, usize>::new(Duration::from_secs(5), Duration::from_secs(1));
+        map.insert(address_pair().0, 1);
+        let weak = Arc::downgrade(&map.0);
+
+        drop(map);
+        assert!(weak.upgrade().is_none());
+
+        // The task's next tick observes the dead weak reference and exits.
+        time::advance(Duration::from_secs(2)).await;
     }
 
     #[tokio::test]
