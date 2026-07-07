@@ -22,6 +22,8 @@ impl std::fmt::Debug for LengthPrefixError {
 /// Helper that length prefixes the buffer when it is frozen
 pub struct PrefixedBuf {
     inner: BytesMut,
+    /// Reusable serialization buffer for [`Self::write_json`]
+    scratch: Vec<u8>,
 }
 
 impl PrefixedBuf {
@@ -35,7 +37,10 @@ impl PrefixedBuf {
     pub fn with_capacity(capacity: usize) -> Self {
         let mut inner = BytesMut::with_capacity(capacity + 2);
         reserve_length_prefix(&mut inner);
-        Self { inner }
+        Self {
+            inner,
+            scratch: Vec::new(),
+        }
     }
 
     /// Gets the length of the buffer, minus the length prefix
@@ -98,28 +103,21 @@ impl PrefixedBuf {
     /// that then may be coalesced with other items
     #[inline]
     pub fn write_json<T: serde::Serialize>(&mut self, obj: &T) -> std::io::Result<Bytes> {
-        {
-            // Write into a stack buffer, we should never have single objects that exceed this (generous)
-            // capacity
-            const CAPACITY: usize = 8 * 1024;
-            let mut cursor = std::io::Cursor::new([0u8; CAPACITY]);
-            serde_json::to_writer(&mut cursor, &obj)?;
-            let len = cursor.position() as usize;
+        self.scratch.clear();
+        serde_json::to_writer(&mut self.scratch, obj)?;
 
-            if cursor.position() as usize > self.max_remainder() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::OutOfMemory,
-                    format!(
-                        "serialized object of {len} was too large to fit in the remaining capacity of {}",
-                        self.max_remainder()
-                    ),
-                ));
-            }
-
-            let buf = cursor.into_inner();
-            let res = self.extend_from_slice(&buf[..len]);
-            debug_assert!(res.is_none());
+        if self.scratch.len() > self.max_remainder() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::OutOfMemory,
+                format!(
+                    "serialized object of {} was too large to fit in the remaining capacity of {}",
+                    self.scratch.len(),
+                    self.max_remainder()
+                ),
+            ));
         }
+
+        self.inner.extend_from_slice(&self.scratch);
 
         Ok(self
             .freeze()
@@ -168,7 +166,7 @@ pub fn update_length_prefix(buf: &mut BytesMut) -> Result<(), LengthPrefixError>
 }
 
 #[inline]
-pub fn write_length_prefixed_jsonb<T: serde::Serialize>(item: &T) -> std::io::Result<BytesMut> {
+pub fn write_length_prefixed_json<T: serde::Serialize>(item: &T) -> std::io::Result<BytesMut> {
     let mut buf = bytes::BytesMut::new();
 
     reserve_length_prefix(&mut buf);
@@ -260,24 +258,9 @@ pub async fn read_length_prefixed(
 }
 
 #[inline]
-pub async fn read_length_prefixed_jsonb<T: serde::de::DeserializeOwned>(
+pub async fn read_length_prefixed_json<T: serde::de::DeserializeOwned>(
     recv: &mut quinn::RecvStream,
 ) -> Result<T, LengthReadError> {
     let bytes = read_length_prefixed(recv).await?;
     Ok(serde_json::from_slice(&bytes)?)
 }
-
-// #[inline]
-// pub fn explicit_size<const N: usize>(buf: &[u8]) -> Result<[u8; N], Error> {
-//     if buf.len() < N {
-//         return Err(Error::InsufficientLength {
-//             length: buf.len(),
-//             expected: N,
-//         });
-//     }
-
-//     // For now we won't care about the length being larger than what we want
-//     let mut es = [0u8; N];
-//     es.copy_from_slice(&buf[..N]);
-//     Ok(es)
-// }

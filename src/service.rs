@@ -975,7 +975,7 @@ impl Service {
                     .make_broadcastable_changes(None, |tx| {
                         corrosion::db::write::exec_single_interruptible(
                             tx,
-                            statement.pop().unwrap(),
+                            &statement.pop().unwrap(),
                         )
                         .map_err(|source| {
                             corrosion::types::agent::ChangeError::Rusqlite {
@@ -1036,7 +1036,7 @@ impl Service {
                 let res = btx
                     .make_broadcastable_changes(None, |tx| {
                         let mut rows = 0;
-                        for statement in statements {
+                        for statement in &statements {
                             rows += corrosion::db::write::exec_single_interruptible(tx, statement)
                                 .map_err(|source| {
                                     corrosion::types::agent::ChangeError::Rusqlite {
@@ -1105,7 +1105,7 @@ impl Service {
 
                             let res = btx
                                 .make_broadcastable_changes(None, |tx| {
-                                    corrosion::db::write::exec_single_interruptible(tx, statement)
+                                    corrosion::db::write::exec_single_interruptible(tx, &statement)
                                     .map_err(|source| {
                                         corrosion::types::agent::ChangeError::Rusqlite {
                                             source,

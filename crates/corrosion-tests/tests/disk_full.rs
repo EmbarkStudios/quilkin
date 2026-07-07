@@ -350,7 +350,7 @@ async fn end_to_end_recovery_from_real_sqlite_full() {
                     quilkin_types::IcaoCode::new_testing(*b"TEST"),
                     &[[0u8; 4]; 1].into(),
                 );
-                write::exec_interruptible(tx, v).map_err(|source| ChangeError::Rusqlite {
+                write::exec_interruptible(tx, &v).map_err(|source| ChangeError::Rusqlite {
                     source,
                     actor_id: None,
                     version: None,
@@ -387,7 +387,7 @@ async fn end_to_end_recovery_from_real_sqlite_full() {
                 quilkin_types::IcaoCode::new_testing(*b"RECV"),
                 &[[1u8; 4]; 1].into(),
             );
-            write::exec_interruptible(tx, v).map_err(|source| ChangeError::Rusqlite {
+            write::exec_interruptible(tx, &v).map_err(|source| ChangeError::Rusqlite {
                 source,
                 actor_id: None,
                 version: None,

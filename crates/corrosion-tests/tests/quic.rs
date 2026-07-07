@@ -78,7 +78,11 @@ impl server::DbMutator for InstaPrinter {
         self.do_mutate(&dc).await;
     }
 
-    async fn execute(&self, peer: Peer, statements: &[p::ServerChange]) -> ExecResponse {
+    async fn submit(
+        &self,
+        peer: Peer,
+        statements: &[p::ServerChange],
+    ) -> tokio::sync::oneshot::Receiver<ExecResponse> {
         let mut v = smallvec::SmallVec::<[_; 20]>::new();
         {
             for s in statements {
@@ -111,7 +115,8 @@ impl server::DbMutator for InstaPrinter {
 
         let (rows_affected, version, dur) = self.do_mutate(&v).await;
 
-        ExecResponse {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        drop(tx.send(ExecResponse {
             results: vec![ExecResult::Execute {
                 rows_affected,
                 time: 0.,
@@ -119,7 +124,8 @@ impl server::DbMutator for InstaPrinter {
             time: dur.as_secs_f64(),
             version: version.map(|v| v.0),
             actor_id: None,
-        }
+        }));
+        rx
     }
 
     async fn disconnected(&self, peer: Peer) {

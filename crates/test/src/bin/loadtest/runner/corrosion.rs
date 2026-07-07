@@ -266,3 +266,76 @@ async fn run_writer(
     mc.shutdown().await;
     Ok(stats)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params(writers: u32, transactions: u64) -> CorrosionParams {
+        CorrosionParams {
+            writers,
+            transactions,
+            rate: 0,
+            batch: 1,
+            max_pages: None,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn smoke() {
+        let r = run(params(1, 10)).await.expect("corrosion loadtest failed");
+        assert_eq!(
+            r.succeeded, 10,
+            "all transactions succeeded (transport={}, exec={})",
+            r.errors_transport, r.errors_exec
+        );
+    }
+
+    /// Single-writer p50 must stay under 20 ms.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn latency_single_writer() {
+        let r = run(params(1, 50)).await.expect("corrosion loadtest failed");
+        assert_eq!(
+            r.succeeded, 50,
+            "all transactions succeeded (transport={}, exec={})",
+            r.errors_transport, r.errors_exec
+        );
+        eprintln!(
+            "[single writer]  p50={:.2}ms p95={:.2}ms p99={:.2}ms stalls={}",
+            r.p50_ms, r.p95_ms, r.p99_ms, r.stalls
+        );
+        assert!(r.p50_ms < 20.0, "p50 {:.1}ms exceeds 20ms", r.p50_ms);
+    }
+
+    /// 4-writer p50 must stay within 4× the single-writer baseline.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn latency_concurrent_writers() {
+        let single = run(params(1, 30)).await.expect("single writer failed");
+        let multi = run(params(4, 30)).await.expect("multi writer failed");
+
+        assert_eq!(
+            single.succeeded, 30,
+            "single: transport={} exec={}",
+            single.errors_transport, single.errors_exec
+        );
+        assert_eq!(
+            multi.succeeded, 120,
+            "multi: transport={} exec={}",
+            multi.errors_transport, multi.errors_exec
+        );
+
+        eprintln!(
+            "[1 writer]  p50={:.2}ms  [4 writers]  p50={:.2}ms  ratio={:.1}x",
+            single.p50_ms,
+            multi.p50_ms,
+            multi.p50_ms / single.p50_ms.max(0.01)
+        );
+
+        assert!(
+            multi.p50_ms < single.p50_ms * 4.0 + 5.0,
+            "4-writer p50 {:.1}ms is more than 4× single-writer p50 {:.1}ms — write serialisation has grown",
+            multi.p50_ms,
+            single.p50_ms
+        );
+    }
+}

@@ -117,21 +117,6 @@ pub enum Response {
     V1(v1::Response),
 }
 
-// /// The contents of a response
-// #[derive(Serialize, Deserialize)]
-// #[serde(tag = "t", content = "r")]
-// pub enum ResponseResult<T> {
-//     #[serde(rename = "o")]
-//     Ok(T),
-//     #[serde(rename = "e")]
-//     Err {
-//         #[serde(rename = "c")]
-//         code: u16,
-//         #[serde(rename = "m")]
-//         message: String,
-//     },
-// }
-
 /// Requests and responses for version 1 of persistent streams
 pub mod v1 {
     use super::*;
@@ -343,7 +328,7 @@ pub mod v1 {
             let mut ic = IterChange::new(&self.changes, self.index)?;
 
             let buf = loop {
-                if let Ok(b) = codec::write_length_prefixed_jsonb(&[ic]) {
+                if let Ok(b) = codec::write_length_prefixed_json(&[ic]) {
                     break b;
                 } else {
                     ic.halve();

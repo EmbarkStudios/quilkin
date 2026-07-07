@@ -1,7 +1,6 @@
 use super::*;
 
 use corrosion::persistent;
-use rand::Rng;
 
 struct Sub {
     #[allow(unused)]
@@ -27,95 +26,20 @@ pub(super) async fn corrosion_subscribe(
     endpoints: CorrosionAddrs,
     hc: HealthCheck,
 ) -> crate::Result<()> {
-    let mut backoff = ExponentialBackoff::new(BACKOFF_INITIAL_DELAY);
-
     // Each query keeps track of the latest change id it has received, if we
     // disconnect from a remote server, we can send this when subscribing to
     // (hopefully) be able to catch up to the state of that server more quickly
     let mut change_ids = QuerySet::new();
 
     loop {
-        let retry_config =
-            tryhard::RetryFutureConfig::new(u32::MAX).custom_backoff(|attempt, error: &_| {
-                tracing::info!(attempt, "Retrying to connect");
-                // reset after success
-                if attempt <= 1 {
-                    backoff = ExponentialBackoff::new(BACKOFF_INITIAL_DELAY);
-                }
-
-                let mut delay = backoff.delay(attempt, &error).min(BACKOFF_MAX_DELAY);
-                delay += Duration::from_millis(
-                    rand::rng().random_range(0..BACKOFF_MAX_JITTER.as_millis() as _),
-                );
-
-                tracing::warn!(?error, "Unable to connect to the corrosion server");
-                tryhard::RetryPolicy::Delay(delay)
-            });
-
-        let connect_to_corrosion = tryhard::retry_fn(|| {
-            tracing::info!(
-                server_count = endpoints.len(),
-                "attempting to connect to corrosion server"
-            );
-
-            // Attempt to connect to multiple servers in parallel, otherwise
-            // down/slow servers in the list can unnecessarily delay connections
-            // to healthy servers.
-            //
-            // Currently we just go with the first server that we can successfully
-            // connect and subscribe to, but in the future we could subscribe
-            // to multiple servers simultaneously 
-            let mut js = tokio::task::JoinSet::new();
-
-            for addr in endpoints.iter().cloned() {
-                let cids = change_ids.clone();
-                js.spawn(async move {
-                    let res = connect_and_sub(&addr, &cids)
-                        .instrument(tracing::debug_span!("connect_and_sub", address = %addr))
-                        .await;
-
-                    (res, addr)
-                });
-            }
-
-            let num_endpoints = endpoints.len();
-
+        let connect_to_corrosion = connect_first(&endpoints, |addr| {
+            let cids = change_ids.clone();
             async move {
-                match tokio::time::timeout(CONNECTION_TIMEOUT, async {
-                    while let Some(join_result) = js.join_next().await {
-                        match join_result {
-                            Ok((result, addr)) => {
-                                match result {
-                                    Ok(sub_state) => {
-                                        return Ok((sub_state, addr));
-                                    }
-                                    Err(error) => {
-                                        tracing::warn!(address = %addr, %error, "failed to connect");
-                                    }
-                                }
-                            }
-                            Err(join_error) => {
-                                if join_error.is_panic() {
-                                    tracing::error!(
-                                        ?join_error,
-                                        "panic occurred in task attempting to connect to corrosion endpoint"
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    eyre::bail!("no successful connections could be made to {num_endpoints} possible corrosion servers");
-                })
-                .await
-                {
-                    Ok(Ok(cae)) => Ok(cae),
-                    Ok(Err(err)) => Err(err),
-                    Err(_) => eyre::bail!("timed out after {CONNECTION_TIMEOUT:?} attempting to connect to one of {num_endpoints} possible corrosion servers"),
-                }
+                connect_and_sub(&addr, &cids)
+                    .instrument(tracing::debug_span!("connect_and_sub", address = %addr))
+                    .await
             }
-        })
-        .with_config(retry_config);
+        });
 
         let (sstate, address) = match connect_to_corrosion
             .instrument(tracing::trace_span!("corrosion_subscribe"))
@@ -159,8 +83,7 @@ async fn connect_and_sub(
         persistent::Metrics::new(crate::metrics::registry()),
     )
     .await
-    .unwrap();
-    //.context("failed to connect")?;
+    .context("failed to connect")?;
 
     tracing::debug!("connected to corrosion server");
 
@@ -234,7 +157,7 @@ async fn process_subscription_events(
     change_ids: &mut ChangeIds,
 ) -> crate::Result<()> {
     use corrosion::{db::read as db, persistent::SubMetrics, pubsub::SubscriptionStream};
-    use pubsub::{ChangeType, QueryEvent};
+    use pubsub::ChangeType;
 
     let process_server_events = |events: Option<SubscriptionStream>,
                                  cid: &mut Option<ChangeId>,
@@ -261,61 +184,12 @@ async fn process_subscription_events(
 
         use crate::config::Datacenter;
 
-        let mut successful = 0;
+        process_events(events, cid, subm, |ct, row| {
+            let dc =
+                db::DatacenterRow::from_sql(row).context("failed to deserialize datacenter row")?;
 
-        for event in events {
-            subm.total_events += 1;
-
-            let event = match event {
-                Ok(e) => e,
-                Err(error) => {
-                    tracing::error!(%error, "failed to deserialize event");
-                    continue;
-                }
-            };
-
-            match event {
-                // The state of row that matches our query changed
-                QueryEvent::Change(ct, _rid, row, id) => {
-                    let dc = match db::DatacenterRow::from_sql(&row) {
-                        Ok(dc) => dc,
-                        Err(error) => {
-                            tracing::error!(%error, "failed to deserialize datacenter row");
-                            continue;
-                        }
-                    };
-
-                    match ct {
-                        ChangeType::Insert | ChangeType::Update => {
-                            dcs.modify(|dcs| {
-                                dcs.insert(
-                                    dc.ip,
-                                    Datacenter {
-                                        qcmp_port: dc.qcmp_port,
-                                        icao_code: dc.icao,
-                                    },
-                                );
-                            });
-                        }
-                        ChangeType::Delete => {
-                            dcs.modify(|dcs| {
-                                dcs.remove(dc.ip);
-                            });
-                        }
-                    }
-
-                    *cid = Some(id);
-                }
-                // The state of a row in the initial query
-                QueryEvent::Row(_rid, row) => {
-                    let dc = match db::DatacenterRow::from_sql(&row) {
-                        Ok(dc) => dc,
-                        Err(error) => {
-                            tracing::error!(%error, "failed to deserialize datacenter row");
-                            continue;
-                        }
-                    };
-
+            match ct {
+                ChangeType::Insert | ChangeType::Update => {
                     dcs.modify(|dcs| {
                         dcs.insert(
                             dc.ip,
@@ -326,24 +200,15 @@ async fn process_subscription_events(
                         );
                     });
                 }
-                QueryEvent::Error(error) => {
-                    tracing::error!(%error, "error from 'clusters' subscription");
-                    continue;
-                }
-                // Marks the end of the initial query to catch us up to the current state of the server
-                QueryEvent::EndOfQuery { time, change_id } => {
-                    tracing::debug!(elapsed = ?Duration::from_secs_f64(time), ?change_id, "received initial state of 'clusters'");
-                    *cid = change_id;
-                }
-                QueryEvent::Columns(_) => {
-                    // irrelevant
+                ChangeType::Delete => {
+                    dcs.modify(|dcs| {
+                        dcs.remove(dc.ip);
+                    });
                 }
             }
 
-            successful += 1;
-        }
-
-        subm.failures = subm.total_events - successful;
+            Ok(())
+        });
 
         Ok(())
     };
@@ -358,70 +223,30 @@ async fn process_subscription_events(
             return Ok(());
         };
 
-        let update_filter = |row: &[SqliteValue]| -> crate::Result<()> {
-            let column = row.first().context("missing 'filter' column")?;
+        process_events(events, cid, subm, |ct, row| {
+            match ct {
+                ChangeType::Insert | ChangeType::Update => {
+                    let column = row.first().context("missing 'filter' column")?;
 
-            let filter = column.as_str().with_context(|| {
-                format!(
-                    "'filter' column is {:?}, not a string",
-                    column.column_type()
-                )
-            })?;
+                    let filter = column.as_str().with_context(|| {
+                        format!(
+                            "'filter' column is {:?}, not a string",
+                            column.column_type()
+                        )
+                    })?;
 
-            fcf.store(serde_json::from_str(filter).context("failed to deserialize filter")?);
-            Ok(())
-        };
-
-        let mut successful = 0;
-
-        for event in events {
-            subm.total_events += 1;
-
-            let event = match event {
-                Ok(e) => e,
-                Err(error) => {
-                    tracing::error!(%error, "failed to deserialize event");
-                    continue;
+                    fcf.store(
+                        serde_json::from_str(filter).context("failed to deserialize filter")?,
+                    );
                 }
-            };
-
-            match event {
-                // The state of row that matches our query changed
-                QueryEvent::Change(ct, _rid, row, id) => {
-                    match ct {
-                        ChangeType::Insert | ChangeType::Update => {
-                            update_filter(&row)?;
-                        }
-                        ChangeType::Delete => {
-                            // TODO: what do we actually want to do here?
-                            tracing::warn!("ignoring `filter` deletion event");
-                        }
-                    }
-
-                    *cid = Some(id);
-                }
-                // The state of a row in the initial query
-                QueryEvent::Row(_rid, row) => {
-                    update_filter(&row)?;
-                }
-                QueryEvent::Error(error) => {
-                    tracing::error!(%error, "error from 'filter' subscription");
-                    continue;
-                }
-                // Marks the end of the initial query to catch us up to the current state of the server
-                QueryEvent::EndOfQuery { time, change_id } => {
-                    tracing::debug!(elapsed = ?Duration::from_secs_f64(time), ?change_id, "received initial state of 'filter'");
-                    *cid = change_id;
-                }
-                QueryEvent::Columns(_) => {
-                    // irrelevant
+                ChangeType::Delete => {
+                    // TODO: what do we actually want to do here?
+                    tracing::warn!("ignoring `filter` deletion event");
                 }
             }
 
-            successful += 1;
-        }
-
-        subm.failures = subm.total_events - successful;
+            Ok(())
+        });
 
         Ok(())
     };
@@ -467,4 +292,67 @@ async fn process_subscription_events(
             }
         }
     }
+}
+
+/// Applies a block of subscription events, tracking the latest change id seen
+///
+/// `apply` is called with each row that changed, receiving [`ChangeType::Insert`]
+/// for rows in the initial query state. Application failures are logged and
+/// counted, but don't stop processing of the remaining events.
+fn process_events(
+    events: corrosion::pubsub::SubscriptionStream,
+    cid: &mut Option<ChangeId>,
+    subm: &mut corrosion::persistent::SubMetrics,
+    mut apply: impl FnMut(pubsub::ChangeType, &[SqliteValue]) -> crate::Result<()>,
+) {
+    use pubsub::{ChangeType, QueryEvent};
+
+    let mut successful = 0;
+
+    for event in events {
+        subm.total_events += 1;
+
+        let event = match event {
+            Ok(e) => e,
+            Err(error) => {
+                tracing::error!(%error, "failed to deserialize event");
+                continue;
+            }
+        };
+
+        match event {
+            // The state of a row that matches our query changed
+            QueryEvent::Change(ct, _rid, row, id) => {
+                if let Err(error) = apply(ct, &row) {
+                    tracing::error!(%error, "failed to apply change");
+                    continue;
+                }
+
+                *cid = Some(id);
+            }
+            // The state of a row in the initial query
+            QueryEvent::Row(_rid, row) => {
+                if let Err(error) = apply(ChangeType::Insert, &row) {
+                    tracing::error!(%error, "failed to apply row");
+                    continue;
+                }
+            }
+            QueryEvent::Error(error) => {
+                tracing::error!(%error, "error event from subscription");
+                continue;
+            }
+            // Marks the end of the initial query to catch us up to the current state of the server
+            QueryEvent::EndOfQuery { time, change_id } => {
+                tracing::debug!(elapsed = ?Duration::from_secs_f64(time), ?change_id, "received initial state");
+                *cid = change_id;
+            }
+            QueryEvent::Columns(_) => {
+                // irrelevant
+            }
+        }
+
+        successful += 1;
+    }
+
+    subm.failures = subm.total_events - successful;
 }

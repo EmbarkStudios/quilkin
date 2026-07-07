@@ -61,7 +61,7 @@ pub struct DBLimits {
     pub max_page_count: Option<u64>,
     /// Max WAL size in bytes after a checkpoint. `None` leaves the `SQLite` default (unlimited).
     pub journal_size_limit: Option<i64>,
-    /// WAL synchronous mode. `None` leaves the `SQLite` default ([`WalSynchronous::Full`]).
+    /// WAL synchronous mode. `None` leaves the startup setting ([`WalSynchronous::Normal`]).
     pub synchronous: Option<WalSynchronous>,
     /// Auto-checkpoint threshold in WAL pages. `Some(0)` disables automatic checkpointing entirely,
     /// deferring all WAL cleanup to the manual [`wal_checkpoint_over_threshold`] path.
@@ -282,6 +282,11 @@ fn run_startup_checks(conn: &rusqlite::Connection, limits: Option<&DBLimits>) ->
     // if it fills up
     conn.pragma_update(None, "temp_store", "MEMORY")?;
 
+    // WAL mode is required; NORMAL skips the per-commit fsync that WAL FULL would add.
+    // Data can only be lost on a simultaneous OS crash + hardware failure, which is acceptable
+    // because corrosion nodes replicate state across peers.
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+
     if let Some(limits) = limits {
         if let Some(max_page_count) = limits.max_page_count {
             conn.pragma_update(None, "max_page_count", max_page_count)?;
@@ -293,7 +298,7 @@ fn run_startup_checks(conn: &rusqlite::Connection, limits: Option<&DBLimits>) ->
         }
         if let Some(sync) = limits.synchronous {
             conn.pragma_update(None, "synchronous", sync.as_str())?;
-            tracing::info!(?sync, "WAL synchronous mode set");
+            tracing::info!(?sync, "WAL synchronous override applied");
         }
         if let Some(n) = limits.wal_autocheckpoint {
             conn.pragma_update(None, "wal_autocheckpoint", n)?;
@@ -382,38 +387,42 @@ async fn vacuum_db(pool: &SplitPool, lim: u64) -> eyre::Result<()> {
         conn.pragma_query_value(None, "freelist_count", |row| row.get(0))?
     };
 
-    let (busy_timeout, cache_size) = {
+    let cache_size: i64 = {
         // update settings in write conn
         let conn = pool.write_low().await?;
-        let orig: u64 = conn.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
-        let cache_size: i64 = conn.pragma_query_value(None, "cache_size", |row| row.get(0))?;
+        let cache_size = conn.pragma_query_value(None, "cache_size", |row| row.get(0))?;
         conn.pragma_update(None, "cache_size", 100000)?;
-        (orig, cache_size)
+        cache_size
     };
 
-    while freelist >= lim {
-        let conn = pool.write_low().await?;
+    let result = async {
+        while freelist >= lim {
+            let conn = pool.write_low().await?;
 
-        tokio::task::block_in_place(|| {
-            let mut prepped = conn.prepare("pragma incremental_vacuum(1000)")?;
-            let mut rows = prepped.query([])?;
+            tokio::task::block_in_place(|| {
+                let mut prepped = conn.prepare("pragma incremental_vacuum(1000)")?;
+                let mut rows = prepped.query([])?;
 
-            while let Ok(Some(_)) = rows.next() {}
+                while let Ok(Some(_)) = rows.next() {}
 
-            freelist = conn.pragma_query_value(None, "freelist_count", |row| row.get(0))?;
+                freelist = conn.pragma_query_value(None, "freelist_count", |row| row.get(0))?;
 
-            Ok::<(), eyre::Error>(())
-        })?;
+                Ok::<(), eyre::Error>(())
+            })?;
 
-        drop(conn);
-        tokio::time::sleep(Duration::from_secs(1)).await;
+            drop(conn);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+
+        Ok(())
     }
+    .await;
 
+    // restore the cache size even if vacuuming failed
     let conn = pool.write_low().await?;
-    conn.pragma_update(None, "busy_timeout", busy_timeout)?;
     conn.pragma_update(None, "cache_size", cache_size)?;
 
-    Ok(())
+    result
 }
 
 fn spawn_db_maintenance(path: &crate::Path, pool: SplitPool, dbm: DBMaintenance) {
