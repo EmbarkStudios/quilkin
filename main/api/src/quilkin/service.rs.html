@@ -975,7 +975,7 @@
 <a href=#975 id=975 data-nosnippet>975</a>                    .make_broadcastable_changes(<span class="prelude-val">None</span>, |tx| {
 <a href=#976 id=976 data-nosnippet>976</a>                        corrosion::db::write::exec_single_interruptible(
 <a href=#977 id=977 data-nosnippet>977</a>                            tx,
-<a href=#978 id=978 data-nosnippet>978</a>                            statement.pop().unwrap(),
+<a href=#978 id=978 data-nosnippet>978</a>                            <span class="kw-2">&amp;</span>statement.pop().unwrap(),
 <a href=#979 id=979 data-nosnippet>979</a>                        )
 <a href=#980 id=980 data-nosnippet>980</a>                        .map_err(|source| {
 <a href=#981 id=981 data-nosnippet>981</a>                            corrosion::types::agent::ChangeError::Rusqlite {
@@ -1036,7 +1036,7 @@
 <a href=#1036 id=1036 data-nosnippet>1036</a>                <span class="kw">let </span>res = btx
 <a href=#1037 id=1037 data-nosnippet>1037</a>                    .make_broadcastable_changes(<span class="prelude-val">None</span>, |tx| {
 <a href=#1038 id=1038 data-nosnippet>1038</a>                        <span class="kw">let </span><span class="kw-2">mut </span>rows = <span class="number">0</span>;
-<a href=#1039 id=1039 data-nosnippet>1039</a>                        <span class="kw">for </span>statement <span class="kw">in </span>statements {
+<a href=#1039 id=1039 data-nosnippet>1039</a>                        <span class="kw">for </span>statement <span class="kw">in </span><span class="kw-2">&amp;</span>statements {
 <a href=#1040 id=1040 data-nosnippet>1040</a>                            rows += corrosion::db::write::exec_single_interruptible(tx, statement)
 <a href=#1041 id=1041 data-nosnippet>1041</a>                                .map_err(|source| {
 <a href=#1042 id=1042 data-nosnippet>1042</a>                                    corrosion::types::agent::ChangeError::Rusqlite {
@@ -1105,7 +1105,7 @@
 <a href=#1105 id=1105 data-nosnippet>1105</a>
 <a href=#1106 id=1106 data-nosnippet>1106</a>                            <span class="kw">let </span>res = btx
 <a href=#1107 id=1107 data-nosnippet>1107</a>                                .make_broadcastable_changes(<span class="prelude-val">None</span>, |tx| {
-<a href=#1108 id=1108 data-nosnippet>1108</a>                                    corrosion::db::write::exec_single_interruptible(tx, statement)
+<a href=#1108 id=1108 data-nosnippet>1108</a>                                    corrosion::db::write::exec_single_interruptible(tx, <span class="kw-2">&amp;</span>statement)
 <a href=#1109 id=1109 data-nosnippet>1109</a>                                    .map_err(|source| {
 <a href=#1110 id=1110 data-nosnippet>1110</a>                                        corrosion::types::agent::ChangeError::Rusqlite {
 <a href=#1111 id=1111 data-nosnippet>1111</a>                                            source,

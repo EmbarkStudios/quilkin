@@ -361,9 +361,9 @@
 <a href=#361 id=361 data-nosnippet>361</a>    }
 <a href=#362 id=362 data-nosnippet>362</a>}
 <a href=#363 id=363 data-nosnippet>363</a>
-<a href=#364 id=364 data-nosnippet>364</a><span class="kw">pub fn </span>exec_interruptible&lt;<span class="kw">const </span>N: usize&gt;(
+<a href=#364 id=364 data-nosnippet>364</a><span class="kw">pub fn </span>exec_interruptible(
 <a href=#365 id=365 data-nosnippet>365</a>    tx: <span class="kw-2">&amp;</span>InterruptibleTransaction&lt;Transaction&lt;<span class="lifetime">'_</span>&gt;&gt;,
-<a href=#366 id=366 data-nosnippet>366</a>    statements: smallvec::SmallVec&lt;[Statement; N]&gt;,
+<a href=#366 id=366 data-nosnippet>366</a>    statements: <span class="kw-2">&amp;</span>[Statement],
 <a href=#367 id=367 data-nosnippet>367</a>) -&gt; <span class="prelude-ty">Result</span>&lt;usize, rusqlite::Error&gt; {
 <a href=#368 id=368 data-nosnippet>368</a>    <span class="kw">let </span><span class="kw-2">mut </span>rows = <span class="number">0</span>;
 <a href=#369 id=369 data-nosnippet>369</a>    <span class="kw">for </span>stmt <span class="kw">in </span>statements {
@@ -376,7 +376,7 @@
 <a href=#376 id=376 data-nosnippet>376</a><span class="attr">#[inline]
 <a href=#377 id=377 data-nosnippet>377</a></span><span class="kw">pub fn </span>exec_single_interruptible(
 <a href=#378 id=378 data-nosnippet>378</a>    tx: <span class="kw-2">&amp;</span>InterruptibleTransaction&lt;Transaction&lt;<span class="lifetime">'_</span>&gt;&gt;,
-<a href=#379 id=379 data-nosnippet>379</a>    statement: Statement,
+<a href=#379 id=379 data-nosnippet>379</a>    statement: <span class="kw-2">&amp;</span>Statement,
 <a href=#380 id=380 data-nosnippet>380</a>) -&gt; <span class="prelude-ty">Result</span>&lt;usize, rusqlite::Error&gt; {
 <a href=#381 id=381 data-nosnippet>381</a>    <span class="kw">let </span><span class="kw-2">mut </span>prepped = tx.prepare_cached(statement.query())<span class="question-mark">?</span>;
 <a href=#382 id=382 data-nosnippet>382</a>    <span class="kw">match </span>statement {

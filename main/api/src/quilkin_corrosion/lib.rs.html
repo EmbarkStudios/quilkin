@@ -2,25 +2,23 @@
 <a href=#2 id=2 data-nosnippet>2</a><span class="kw">pub use </span>corro_types <span class="kw">as </span>types;
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">pub use </span>tripwire::Tripwire;
 <a href=#4 id=4 data-nosnippet>4</a>
-<a href=#5 id=5 data-nosnippet>5</a><span class="kw">pub mod </span>agent;
-<a href=#6 id=6 data-nosnippet>6</a><span class="kw">pub mod </span>codec;
-<a href=#7 id=7 data-nosnippet>7</a><span class="kw">pub mod </span>db;
-<a href=#8 id=8 data-nosnippet>8</a><span class="kw">pub mod </span>metrics;
-<a href=#9 id=9 data-nosnippet>9</a><span class="kw">pub mod </span>persistent;
-<a href=#10 id=10 data-nosnippet>10</a><span class="kw">pub mod </span>pubsub;
-<a href=#11 id=11 data-nosnippet>11</a><span class="kw">pub mod </span>schema;
-<a href=#12 id=12 data-nosnippet>12</a><span class="kw">pub mod </span>server;
+<a href=#5 id=5 data-nosnippet>5</a><span class="kw">pub mod </span>codec;
+<a href=#6 id=6 data-nosnippet>6</a><span class="kw">pub mod </span>db;
+<a href=#7 id=7 data-nosnippet>7</a><span class="kw">pub mod </span>metrics;
+<a href=#8 id=8 data-nosnippet>8</a><span class="kw">pub mod </span>persistent;
+<a href=#9 id=9 data-nosnippet>9</a><span class="kw">pub mod </span>pubsub;
+<a href=#10 id=10 data-nosnippet>10</a><span class="kw">pub mod </span>schema;
+<a href=#11 id=11 data-nosnippet>11</a>
+<a href=#12 id=12 data-nosnippet>12</a><span class="kw">pub use </span>camino::{Utf8Path <span class="kw">as </span>Path, Utf8PathBuf <span class="kw">as </span>PathBuf};
 <a href=#13 id=13 data-nosnippet>13</a>
-<a href=#14 id=14 data-nosnippet>14</a><span class="kw">pub use </span>camino::{Utf8Path <span class="kw">as </span>Path, Utf8PathBuf <span class="kw">as </span>PathBuf};
-<a href=#15 id=15 data-nosnippet>15</a>
-<a href=#16 id=16 data-nosnippet>16</a><span class="kw">pub type </span>Peer = std::net::SocketAddrV6;
-<a href=#17 id=17 data-nosnippet>17</a><span class="kw">pub use </span>smallvec::SmallVec;
-<a href=#18 id=18 data-nosnippet>18</a>
-<a href=#19 id=19 data-nosnippet>19</a><span class="attr">#[inline]
-<a href=#20 id=20 data-nosnippet>20</a></span><span class="kw">pub fn </span>ip_to_peer(ip: std::net::IpAddr) -&gt; Peer {
-<a href=#21 id=21 data-nosnippet>21</a>    <span class="kw">match </span>ip {
-<a href=#22 id=22 data-nosnippet>22</a>        std::net::IpAddr::V4(v4) =&gt; Peer::new(v4.to_ipv6_mapped(), <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>),
-<a href=#23 id=23 data-nosnippet>23</a>        std::net::IpAddr::V6(v6) =&gt; Peer::new(v6, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>),
-<a href=#24 id=24 data-nosnippet>24</a>    }
-<a href=#25 id=25 data-nosnippet>25</a>}
+<a href=#14 id=14 data-nosnippet>14</a><span class="kw">pub type </span>Peer = std::net::SocketAddrV6;
+<a href=#15 id=15 data-nosnippet>15</a><span class="kw">pub use </span>smallvec::SmallVec;
+<a href=#16 id=16 data-nosnippet>16</a>
+<a href=#17 id=17 data-nosnippet>17</a><span class="attr">#[inline]
+<a href=#18 id=18 data-nosnippet>18</a></span><span class="kw">pub fn </span>ip_to_peer(ip: std::net::IpAddr) -&gt; Peer {
+<a href=#19 id=19 data-nosnippet>19</a>    <span class="kw">match </span>ip {
+<a href=#20 id=20 data-nosnippet>20</a>        std::net::IpAddr::V4(v4) =&gt; Peer::new(v4.to_ipv6_mapped(), <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>),
+<a href=#21 id=21 data-nosnippet>21</a>        std::net::IpAddr::V6(v6) =&gt; Peer::new(v6, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>),
+<a href=#22 id=22 data-nosnippet>22</a>    }
+<a href=#23 id=23 data-nosnippet>23</a>}
 </code></pre></div></section></main></body></html>
