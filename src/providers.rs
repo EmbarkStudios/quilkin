@@ -482,6 +482,7 @@ impl Providers {
             let health_check = health_check.clone();
             let mutator = mutator.clone();
             let shutdown = shutdown;
+            let token = crate::signal::cancellation_token(shutdown.clone());
 
             move || {
                 let config = config.clone();
@@ -495,6 +496,7 @@ impl Providers {
                 let health_check = health_check.clone();
                 let mutator = mutator.clone();
                 let shutdown = shutdown.clone();
+                let token = token.clone();
 
                 async move {
                     let client = tokio::time::timeout(
@@ -519,29 +521,32 @@ impl Providers {
 
                     let k8s_leader_election_task = if k8s_leader_election {
                         let ll = config.dyn_cfg.init_leader_lock();
-                        either::Left(tokio::spawn(k8s::update_leader_lock(
+                        either::Left(k8s::update_leader_lock(
                             client.clone(),
                             k8s_namespace,
                             k8s_leader_lease_name,
                             k8s_leader_id,
                             ll,
                             shutdown.clone(),
-                        )))
+                        ))
                     } else {
                         either::Right(std::future::pending())
                     };
 
+                    // Cancels this attempt's batcher tasks when the future is dropped
+                    let batch_token = token.child_token();
+                    let _batch_guard = batch_token.clone().drop_guard();
+
                     let mut gs_streams = tokio::task::JoinSet::new();
                     if let Some(Some(clusters)) = agones_enabled.then(|| config.dyn_cfg.clusters())
                     {
-                        let token = crate::signal::cancellation_token(shutdown.clone());
                         for namespace in agones_namespaces {
                             let cluster_update_batcher =
                                 crate::net::cluster::ClusterUpdateBatcher::spawn(
                                     clusters.clone(),
                                     locality.clone(),
                                     std::time::Duration::from_millis(500),
-                                    token.child_token(),
+                                    batch_token.child_token(),
                                 );
                             let processor = EventProcessor {
                                 namespace: namespace.clone(),
@@ -567,7 +572,7 @@ impl Providers {
                     health_check.store(true, Ordering::SeqCst);
                     tokio::select! {
                         Some(result) = gs_streams.join_next() => result.map_err(From::from).and_then(|result| result),
-                        result = k8s_leader_election_task => result.map_err(eyre::Error::from).and_then(|result| result),
+                        result = k8s_leader_election_task => result,
                         result = k8s_stream => result,
                     }
                 }

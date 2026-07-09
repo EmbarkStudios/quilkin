@@ -375,8 +375,7 @@ where
 {
     let mut interval = tokio::time::interval(poll_interval);
 
-    // The task holds a weak reference so it doesn't keep the map alive,
-    // exiting once all `TtlMap` handles have been dropped.
+    // The weak reference lets the task exit once all `TtlMap` handles are dropped
     tokio::spawn(async move {
         loop {
             interval.tick().await;
@@ -753,8 +752,7 @@ mod tests {
 
     #[tokio::test]
     async fn dropped_map_is_freed() {
-        // The cleanup task must not keep the map alive after the last
-        // `TtlMap` handle is dropped.
+        // Test that the cleanup task doesn't keep the map alive.
         time::pause();
 
         let map =
