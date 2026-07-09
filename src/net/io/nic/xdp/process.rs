@@ -116,13 +116,69 @@ pub struct ConfigState {
     pub clusters: config::Watch<crate::net::ClusterMap>,
 }
 
+/// Matches the default session TTL
+const ASN_CACHE_TTL: i64 = 60 * 1_000_000_000;
+
+struct AsnCacheEntry {
+    asn: Option<(IpNetEntry, maxmind_db::Asn)>,
+    last_access: std::cell::Cell<i64>,
+}
+
+/// Cache of maxmind lookups keyed by client IP, entries not accessed within
+/// [`ASN_CACHE_TTL`] are evicted by [`Self::sweep`]
+#[derive(Default)]
+pub struct AsnCache {
+    map: std::collections::HashMap<IpAddr, AsnCacheEntry>,
+    next_sweep: i64,
+}
+
+impl AsnCache {
+    #[inline]
+    fn get(&self, ip: &IpAddr, now: i64) -> Option<&(IpNetEntry, maxmind_db::Asn)> {
+        let entry = self.map.get(ip)?;
+        entry.last_access.set(now);
+        entry.asn.as_ref()
+    }
+
+    #[inline]
+    fn get_or_insert_with(
+        &mut self,
+        ip: IpAddr,
+        now: i64,
+        lookup: impl FnOnce() -> Option<(IpNetEntry, maxmind_db::Asn)>,
+    ) -> Option<&(IpNetEntry, maxmind_db::Asn)> {
+        let entry = self.map.entry(ip).or_insert_with(|| AsnCacheEntry {
+            asn: lookup(),
+            last_access: std::cell::Cell::new(now),
+        });
+        entry.last_access.set(now);
+        entry.asn.as_ref()
+    }
+
+    /// Evicts idle entries, at most once per TTL interval
+    #[inline]
+    fn sweep(&mut self, now: i64) {
+        if now < self.next_sweep {
+            return;
+        }
+        self.next_sweep = now + ASN_CACHE_TTL;
+        self.map
+            .retain(|_, entry| now - entry.last_access.get() < ASN_CACHE_TTL);
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+}
+
 pub struct State {
     /// The external port is how we determine if packets come from clients (downstream)
     /// or servers (upstream)
     pub external_port: NetworkU16,
     pub qcmp_port: NetworkU16,
     pub destinations: Vec<EndpointAddress>,
-    pub addr_to_asn: std::collections::HashMap<IpAddr, Option<(IpNetEntry, maxmind_db::Asn)>>,
+    pub addr_to_asn: AsnCache,
     pub sessions: Arc<SessionState>,
     pub local_ipv4: std::net::Ipv4Addr,
     pub local_ipv6: std::net::Ipv6Addr,
@@ -141,14 +197,11 @@ impl State {
         let addr = self.sessions.lookup_client(server_addr, port)?;
         let entry = self
             .addr_to_asn
-            .get(&addr.ip())
-            .and_then(|ipe| {
-                ipe.as_ref().map(|(ipe, asn)| AsnInfo {
-                    prefix: &ipe.prefix,
-                    asn: asn.as_str(),
-                })
-            })
-            .unwrap_or(metrics::EMPTY);
+            .get(&addr.ip(), self.last_receive.unix_nanos())
+            .map_or(metrics::EMPTY, |(ipe, asn)| AsnInfo {
+                prefix: &ipe.prefix,
+                asn: asn.as_str(),
+            });
 
         Some((addr, entry))
     }
@@ -162,21 +215,25 @@ impl State {
         server_addr: SocketAddr,
     ) -> (NetworkU16, AsnInfo<'_>, IpAddresses) {
         let ips = self.ips(server_addr.ip());
-        let asn = self.addr_to_asn.entry(client_addr.ip()).or_insert_with(|| {
-            let ipe = maxmind_db::MaxmindDb::lookup(client_addr.ip());
-            ipe.map(|ipe| {
-                let asn = maxmind_db::Asn::new(ipe.id);
-                (ipe, asn)
-            })
-        });
+        let asn = self.addr_to_asn.get_or_insert_with(
+            client_addr.ip(),
+            self.last_receive.unix_nanos(),
+            || {
+                let ipe = maxmind_db::MaxmindDb::lookup(client_addr.ip());
+                ipe.map(|ipe| {
+                    let asn = maxmind_db::Asn::new(ipe.id);
+                    (ipe, asn)
+                })
+            },
+        );
 
-        let port =
-            self.sessions
-                .get_or_create(client_addr, server_addr, asn.as_ref().map(|(ipe, _)| ipe));
+        let port = self
+            .sessions
+            .get_or_create(client_addr, server_addr, asn.map(|(ipe, _)| ipe));
 
         (
             port,
-            asn.as_ref().map_or(metrics::EMPTY, |(ipe, asn)| AsnInfo {
+            asn.map_or(metrics::EMPTY, |(ipe, asn)| AsnInfo {
                 prefix: &ipe.prefix,
                 asn: asn.as_str(),
             }),
@@ -455,6 +512,7 @@ pub fn process_packets<const RXN: usize, const TXN: usize>(
     let now = UtcTimestamp::now();
     let jitter = (now - state.last_receive).nanos();
     state.last_receive = now;
+    state.addr_to_asn.sweep(now.unix_nanos());
     let mut had_read = false;
 
     while let Some(buffer) = rx_slab.pop_back() {
@@ -837,6 +895,27 @@ mod test {
     use super::*;
     use quilkin_xdp::xdp::packet::Pod;
     use xdp::packet::net_types as nt;
+
+    #[test]
+    fn asn_cache_evicts_idle_entries() {
+        let mut cache = AsnCache::default();
+        let one = IpAddr::from([1, 1, 1, 1]);
+        let two = IpAddr::from([2, 2, 2, 2]);
+
+        cache.get_or_insert_with(one, 0, || None);
+        cache.get_or_insert_with(two, 0, || None);
+        cache.sweep(1);
+        assert_eq!(cache.len(), 2);
+
+        // Only `one` is accessed within the TTL.
+        cache.get(&one, ASN_CACHE_TTL);
+        cache.sweep(ASN_CACHE_TTL + 1);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.map.contains_key(&one));
+
+        cache.sweep(ASN_CACHE_TTL * 3);
+        assert_eq!(cache.len(), 0);
+    }
 
     #[test]
     fn xdp_buffer_manipulation() {
