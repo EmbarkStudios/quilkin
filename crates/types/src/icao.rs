@@ -32,7 +32,7 @@ impl AsRef<str> for IcaoCode {
 
 impl Default for IcaoCode {
     fn default() -> Self {
-        Self([b'X', b'X', b'X', b'X'])
+        Self(*b"XXXX")
     }
 }
 

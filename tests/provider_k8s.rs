@@ -386,7 +386,7 @@ fn handles_multiple_namespaces() {
         let guard = clusters.read();
         let endpoint_set = guard.get(&locality).unwrap();
         assert_eq!(endpoint_set.len(), gameservers.len());
-        for (_id, gs) in gameservers.iter() {
+        for gs in gameservers.values() {
             assert!(endpoint_set.contains(&get_endpoint(gs)));
         }
     }
@@ -420,7 +420,7 @@ fn handles_multiple_namespaces() {
         let guard = clusters.read();
         let endpoint_set = guard.get(&locality).unwrap();
         assert_eq!(endpoint_set.len(), gameservers.len());
-        for (_id, gs) in gameservers.iter() {
+        for gs in gameservers.values() {
             assert!(endpoint_set.contains(&get_endpoint(gs)));
         }
     }
@@ -452,7 +452,7 @@ fn handles_multiple_namespaces() {
         let guard = clusters.read();
         let endpoint_set = guard.get(&locality).unwrap();
         assert_eq!(endpoint_set.len(), gameservers.len());
-        for (_id, gs) in gameservers.iter() {
+        for gs in gameservers.values() {
             assert!(endpoint_set.contains(&get_endpoint(gs)));
         }
     }

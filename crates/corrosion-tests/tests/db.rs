@@ -50,7 +50,7 @@ fn make_row(i: u32) -> ServerRow {
 
     ServerRow {
         endpoint,
-        icao: IcaoCode::new_testing([b'B', b'O', b'O', b'P']),
+        icao: IcaoCode::new_testing(*b"BOOP"),
         tokens: [i.to_ne_bytes()].into(),
     }
 }

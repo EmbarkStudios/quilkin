@@ -259,7 +259,7 @@ trace_test!(xds_bridge_to_corrosion, {
         "agent",
         AgentPailConfig {
             endpoints: vec![("server", &[])],
-            icao_code: quilkin::config::IcaoCode::new_testing([b'A', b'B', b'C', b'D']),
+            icao_code: quilkin::config::IcaoCode::new_testing(*b"ABCD"),
             corrosion: false,
         },
         &["server", "relay"],
