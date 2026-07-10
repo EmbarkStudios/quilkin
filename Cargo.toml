@@ -286,7 +286,7 @@ xdp = "0.7.1"
 # we also need to depend on should be kept in line with the versions used by corrosion
 camino = "1.2"
 rusqlite = "=0.38"
-uhlc = "0.7"
+uhlc = { version = "0.9", default-features = false }
 
 corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 corro-client = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
