@@ -207,11 +207,12 @@ impl SessionPool {
             }
             Err((asn_info, error)) => {
                 error.log();
-                let label = format!("proxy::Session::process_recv_packet: {error}");
+                let discriminant = error.discriminant();
                 let asn_metric_info = asn_info.as_ref().into();
 
-                metrics::packets_dropped_total(metrics::WRITE, &label, &asn_metric_info).inc();
-                metrics::errors_total(metrics::WRITE, &label, &asn_metric_info).inc();
+                metrics::packets_dropped_total(metrics::WRITE, discriminant, &asn_metric_info)
+                    .inc();
+                metrics::errors_total(metrics::WRITE, discriminant, &asn_metric_info).inc();
             }
         }
     }
@@ -583,6 +584,16 @@ impl From<(SocketAddr, SocketAddr)> for SessionKey {
 pub enum Error {
     #[error("filter {0}")]
     Filter(#[from] crate::filters::FilterError),
+}
+
+impl Error {
+    /// Bounded value suitable for use as a metric label
+    #[inline]
+    pub fn discriminant(&self) -> &'static str {
+        match self {
+            Self::Filter(fe) => fe.discriminant(),
+        }
+    }
 }
 
 impl Loggable for Error {

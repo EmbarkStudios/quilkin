@@ -808,17 +808,69 @@ impl<C: Collector + Clone + 'static> CollectorExt for C {}
 
 #[inline]
 pub(crate) fn apply_clusters(clusters: &crate::config::Watch<crate::net::ClusterMap>) {
+    // The localities set by the previous call, used to remove series for
+    // localities that no longer exist
+    static PREV_LOCALITIES: Lazy<parking_lot::Mutex<std::collections::HashSet<String>>> =
+        Lazy::new(<_>::default);
+
     let clusters = clusters.read();
     crate::net::cluster::active_clusters().set(clusters.len() as i64);
 
+    let mut current = std::collections::HashSet::with_capacity(clusters.len());
     for entry in clusters.iter() {
-        crate::net::cluster::active_endpoints(
-            &entry
-                .key()
-                .clone()
-                .map(|key| key.to_string())
-                .unwrap_or_default(),
-        )
-        .set(entry.value().len() as i64);
+        let label = entry
+            .key()
+            .as_ref()
+            .map(|key| key.to_string())
+            .unwrap_or_default();
+        crate::net::cluster::active_endpoints(&label).set(entry.value().len() as i64);
+        current.insert(label);
+    }
+
+    let mut prev = PREV_LOCALITIES.lock();
+    for stale in prev.difference(&current) {
+        crate::net::cluster::remove_active_endpoints(stale);
+    }
+    *prev = current;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has_active_endpoints_series(label: &str) -> bool {
+        registry()
+            .gather()
+            .iter()
+            .filter(|mf| mf.name() == "quilkin_active_endpoints")
+            .flat_map(|mf| mf.get_metric())
+            .any(|m| m.get_label().iter().any(|l| l.value() == label))
+    }
+
+    #[test]
+    fn apply_clusters_prunes_removed_localities() {
+        let clusters = crate::config::Watch::new(crate::net::ClusterMap::default());
+        let locality = crate::net::endpoint::Locality::with_region("metrics-prune-test");
+        let label = locality.to_string();
+        clusters.read().insert(
+            None,
+            Some(locality.clone()),
+            [crate::net::endpoint::Endpoint::new(
+                (std::net::Ipv4Addr::LOCALHOST, 7777).into(),
+            )]
+            .into(),
+        );
+
+        // Retried since a concurrent test triggering `apply_clusters` can
+        // prune this series between the apply and the gather
+        let present = (0..3).any(|_| {
+            apply_clusters(&clusters);
+            has_active_endpoints_series(&label)
+        });
+        assert!(present);
+
+        clusters.read().remove_locality(None, &Some(locality));
+        apply_clusters(&clusters);
+        assert!(!has_active_endpoints_series(&label));
     }
 }
