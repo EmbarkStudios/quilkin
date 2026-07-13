@@ -124,25 +124,17 @@ pub struct Inner {
 
 impl<'de> serde::Deserialize<'de> for GameServer {
     fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let value = serde_json::Value::deserialize(de).unwrap();
-
-        serde_json::from_value::<Inner>(value.clone())
-            .map_err(|error| {
-                tracing::trace!(%error, %value, "gameserver failed");
-                Error::custom(error)
-            })
-            .map(
-                |Inner {
-                     metadata,
-                     spec,
-                     status,
-                 }| Self {
-                    metadata,
-                    spec,
-                    status,
-                },
-            )
+        Inner::deserialize(de).map(
+            |Inner {
+                 metadata,
+                 spec,
+                 status,
+             }| Self {
+                metadata,
+                spec,
+                status,
+            },
+        )
     }
 }
 
@@ -561,25 +553,17 @@ pub struct FleetInner {
 
 impl<'de> serde::Deserialize<'de> for Fleet {
     fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let value = serde_json::Value::deserialize(de).unwrap();
-
-        serde_json::from_value::<FleetInner>(value.clone())
-            .map_err(|error| {
-                tracing::trace!(%error, %value, "fleet failed");
-                Error::custom(error)
-            })
-            .map(
-                |FleetInner {
-                     metadata,
-                     spec,
-                     status,
-                 }| Self {
-                    metadata,
-                    spec,
-                    status,
-                },
-            )
+        FleetInner::deserialize(de).map(
+            |FleetInner {
+                 metadata,
+                 spec,
+                 status,
+             }| Self {
+                metadata,
+                spec,
+                status,
+            },
+        )
     }
 }
 
