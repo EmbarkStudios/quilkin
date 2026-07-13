@@ -16,8 +16,8 @@
         <link rel="icon" href="favicon-de23e50b.svg">
         <link rel="shortcut icon" href="favicon-8114d1fc.png">
         <link rel="stylesheet" href="css/variables-8adf115d.css">
-        <link rel="stylesheet" href="css/general-0392ca55.css">
-        <link rel="stylesheet" href="css/chrome-fc474251.css">
+        <link rel="stylesheet" href="css/general-e96d0476.css">
+        <link rel="stylesheet" href="css/chrome-d279d366.css">
         <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-c89b6730.js";
+            window.path_to_searchindex_js = "searchindex-db7a114a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-270f104f.js"></script>
@@ -459,7 +459,7 @@ xonotic-sidecar-htc2x-sdp4k   Ready   34.94.107.201   7599   gke-agones-default-
 <code>GameServer</code>, but we’ll skip this step for this example.</p>
 <p>Choose one of the listed <code>GameServer</code>s from the previous step, and connect to the IP and port of the Xonotic
 server via the “Multiplayer &gt; Address” field in the Xonotic client in the format of {IP}:{PORT}.</p>
-<p><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address.png"></p>
+<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address.png"><span class="img-wrapper"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address.png"></span></label></p>
 <p>You should now be playing a game of Xonotic against 4 bots!</p>
 <h2 id="3-check-out-the-metrics"><a class="header" href="#3-check-out-the-metrics">3. Check out the metrics</a></h2>
 <p>Let’s take a look at some metrics that Quilkin outputs.</p>
@@ -744,7 +744,7 @@ with it in <code>client-token.yaml</code>.</p>
 <p>Now connect to the local client proxy on “[::1]:7777” via the “Multiplayer &gt; Address” field in the
 Xonotic client, and Quilkin will take care of appending the routing token to all your UDP packets, which the Quilkin
 proxies will route to the Allocated GameServer, and you can play a gamee!</p>
-<p><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address-v6.png"></p>
+<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address-v6.png"><span class="img-wrapper"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address-v6.png"></span></label></p>
 <p>…And you didn’t have to change the client or the dedicated game server 🤸</p>
 <h2 id="whats-next-1"><a class="header" href="#whats-next-1">What’s Next?</a></h2>
 <ul>
@@ -1001,7 +1001,7 @@ with it in <code>client-token.yaml</code>.</p>
 <p>Now connect to the local client proxy on “[::1]:7777” via the “Multiplayer &gt; Address” field in the
 Xonotic client, and Quilkin will take care of appending the routing token to all your UDP packets, which the Quilkin
 proxies will route to the Allocated GameServer, and you can play a gamee!</p>
-<p><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address-v6.png"></p>
+<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address-v6.png"><span class="img-wrapper"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address-v6.png"></span></label></p>
 <p>…And you didn’t have to change the client or the dedicated game server 🤸</p>
 <h2 id="whats-next-2"><a class="header" href="#whats-next-2">What’s Next?</a></h2>
 <ul>
@@ -1532,6 +1532,8 @@ down the chain.</p>
 <p>Captures bytes using a regular expression. Unlike other capture strategies,
 the regular expression can return one or many values if there are
 multiple matches.</p>
+<h3 id="quic-destination-connection-id"><a class="header" href="#quic-destination-connection-id">QUIC Destination Connection ID</a></h3>
+<p>Captures DCID from <a href="https://datatracker.ietf.org/doc/html/rfc9000">QUIC</a> conforming packets.</p>
 <h2 id="filter-name"><a class="header" href="#filter-name">Filter name</a></h2>
 <pre><code class="language-text">quilkin.filters.capture.v1alpha1.Capture
 </code></pre>
@@ -2590,7 +2592,7 @@ of protection and observability when orchestrating game servers on top of Kubern
 
         <script src="clipboard-1626706a.min.js"></script>
         <script src="highlight-abc7f01d.js"></script>
-        <script src="book-c22b7243.js"></script>
+        <script src="book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
         <script src="mermaid-eefea253.min.js"></script>

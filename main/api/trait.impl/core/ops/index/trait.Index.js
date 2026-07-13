@@ -1,5 +1,5 @@
 (function() {
-    const implementors = Object.fromEntries([["quilkin",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.96.0/core/ops/index/trait.Index.html\" title=\"trait core::ops::index::Index\">Index</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/1.96.0/std/primitive.usize.html\">usize</a>&gt; for <a class=\"struct\" href=\"quilkin/filters/struct.FilterChain.html\" title=\"struct quilkin::filters::FilterChain\">FilterChain</a>",0]]]]);
+    const implementors = Object.fromEntries([["quilkin",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.97.0/core/ops/index/trait.Index.html\" title=\"trait core::ops::index::Index\">Index</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/1.97.0/std/primitive.usize.html\">usize</a>&gt; for <a class=\"struct\" href=\"quilkin/filters/struct.FilterChain.html\" title=\"struct quilkin::filters::FilterChain\">FilterChain</a>",0]]]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
