@@ -70,7 +70,7 @@ pub fn spawn_listener(
 
     let socket = crate::net::DualStackLocalSocket::new(port).context("failed to bind socket")?;
 
-    let io_loop = IoUringLoop::new(512, socket)?;
+    let io_loop = IoUringLoop::new(2048, socket)?;
     io_loop
         .spawn_io_loop(
             format!("packet-router-{worker_id}"),
@@ -604,7 +604,7 @@ impl IoUringLoop {
                                             let mut data = bytes::BytesMut::new();
                                             data.put_u16_ne(rb.count);
                                             data.put_u16_ne(rb.len(id));
-                                            data.put_u64_ne(alloced);
+                                            data.put_u32_ne(alloced);
                                             loop_ctx.enqueue_send(SendPacket { destination: packet.source, data: data.freeze(), asn_info: None });
                                             continue;
                                         }
