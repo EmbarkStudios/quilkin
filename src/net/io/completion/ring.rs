@@ -140,7 +140,7 @@ impl BufferRing {
 
     #[cfg(debug_assertions)]
     pub fn len(&self, id: u16) -> u16 {
-        let tail = dbg!(dbg!(self.tail.load(Ordering::Relaxed)) & self.mask);
+        let tail = self.tail.load(Ordering::Relaxed) & self.mask;
         if tail > id {
             tail - id
         } else {
