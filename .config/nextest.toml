@@ -4,6 +4,12 @@
 filter = 'package(agones)'
 slow-timeout = { period = "60s" }
 
+# The loadtest tests normally finish in about a second; terminate rather than
+# letting a hang stall the whole run.
+[[profile.default.overrides]]
+filter = 'binary(loadtest)'
+slow-timeout = { period = "60s", terminate-after = 2 }
+
 [[profile.ci.overrides]]
 filter = 'test(multiple_subs)'
 retries = 2

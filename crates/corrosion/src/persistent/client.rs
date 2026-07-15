@@ -292,7 +292,20 @@ impl MutationClient {
             }
 
             tracing::debug!("waiting for server to shutdown this stream...");
-            let code = recv.received_reset().await.map_err(StreamError::Reset);
+            // The server finishes the stream before resetting it, so if the
+            // FIN is acknowledged first the reset is never sent and waiting
+            // only on `received_reset` would hang forever
+            let code = loop {
+                match recv.read_chunk(usize::MAX, true).await {
+                    // Finished cleanly OR already ended by an error handled in
+                    // the loop above
+                    Ok(None) | Err(quinn::ReadError::ClosedStream) => break Ok(None),
+                    // Responses were drained above, ignore stragglers
+                    Ok(Some(_)) => {}
+                    Err(quinn::ReadError::Reset(code)) => break Ok(Some(code)),
+                    Err(error) => break Err(StreamError::Read(error)),
+                }
+            };
             tracing::debug!("client finished");
             code
         });
