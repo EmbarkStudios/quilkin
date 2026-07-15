@@ -103,6 +103,12 @@ impl UdpBackend {
     }
 }
 
+impl std::fmt::Display for UdpBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 /// Represents the required arguments to run a worker task that
 /// processes packets received downstream.
 pub struct Listener {

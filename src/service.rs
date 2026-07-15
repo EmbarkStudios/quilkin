@@ -650,17 +650,18 @@ impl Service {
             return Ok(());
         }
 
-        tracing::info!(port=%self.udp_port, "starting udp service");
+        let resolved_backend = self.udp_backend.resolve();
+        tracing::info!(
+            port=%self.udp_port,
+            selected_backend=%self.udp_backend,
+            %resolved_backend,
+            "starting udp service"
+        );
 
         #[cfg(target_os = "linux")]
         {
             let explicit_kernel = matches!(self.udp_backend, crate::net::io::UdpBackend::Kernel);
-            if explicit_kernel
-                || matches!(
-                    self.udp_backend.resolve(),
-                    crate::net::io::UdpBackend::Kernel
-                )
-            {
+            if explicit_kernel || matches!(resolved_backend, crate::net::io::UdpBackend::Kernel) {
                 match self.spawn_xdp(config.clone()) {
                     Ok(xdp) => {
                         // XDP handles QCMP in-kernel; disable the user-space QCMP service.
