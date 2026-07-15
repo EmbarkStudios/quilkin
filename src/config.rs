@@ -670,17 +670,10 @@ impl Config {
                             return Ok(());
                         }
 
-                        let resource = crate::xds::Resource::Cluster(
-                            quilkin_xds::generated::quilkin::config::v1alpha1::Cluster {
-                                locality: key.clone().map(|l| l.into()),
-                                endpoints: value.endpoint_iter().map(|ep| ep.into()).collect(),
-                            },
-                        );
-
                         resources.push(XdsResource {
                             name: key_s,
                             version,
-                            resource: Some(resource.try_encode()?),
+                            resource: Some(value.encoded_cluster(key)?),
                             ..Default::default()
                         });
 

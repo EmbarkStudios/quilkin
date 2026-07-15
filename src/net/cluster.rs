@@ -18,12 +18,17 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
     net::IpAddr,
-    sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
+    },
 };
 
+use arc_swap::ArcSwapOption;
 use corrosion::pubsub::ChangeId;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
+use prost_types::Any;
 use serde::{Deserialize, Serialize};
 
 use crate::net::endpoint::{Endpoint, EndpointAddress, EndpointMetadata, Locality, Metadata};
@@ -172,6 +177,35 @@ impl EndpointSetWriteGuard<'_> {
 
 type InnerMap = BTreeMap<EndpointAddress, EndpointMetadata>;
 
+/// A memoized xDS `Cluster` encoding, valid for a given content
+/// [`version`](EndpointSet::version) and [`Locality`]. Locality is part of
+/// the key since [`ClusterMap::update_unlocated_endpoints`] can change it
+/// without bumping the version.
+#[derive(Debug)]
+struct EncodedCluster {
+    version: EndpointSetVersion,
+    locality: Option<Locality>,
+    resource: Any,
+}
+
+/// Lock-free, lazily-populated single-entry cache for [`EncodedCluster`].
+/// A separate type so [`EndpointSet`] can keep deriving [`Clone`]/[`Debug`].
+#[derive(Default)]
+struct ClusterCache(ArcSwapOption<EncodedCluster>);
+
+impl Clone for ClusterCache {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self(ArcSwapOption::new(self.0.load_full()))
+    }
+}
+
+impl fmt::Debug for ClusterCache {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClusterCache").finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EndpointSet {
     endpoints: InnerMap,
@@ -179,6 +213,7 @@ pub struct EndpointSet {
     /// The hash of all of the endpoints in this set
     hash: u64,
     change_id: ChangeId,
+    cache: ClusterCache,
 }
 
 impl EndpointSet {
@@ -215,6 +250,7 @@ impl EndpointSet {
             token_map: Default::default(),
             hash: 0,
             change_id: ChangeId(0),
+            cache: ClusterCache::default(),
         }
     }
 
@@ -274,6 +310,34 @@ impl EndpointSet {
     #[inline]
     pub fn version(&self) -> EndpointSetVersion {
         EndpointSetVersion::from_number(self.hash)
+    }
+
+    /// Returns this set encoded as an xDS `Cluster` resource for `locality`,
+    /// reusing the memoized encoding when the version and locality match.
+    #[inline]
+    pub fn encoded_cluster(&self, locality: &Option<Locality>) -> Result<Any, prost::EncodeError> {
+        let version = self.version();
+
+        if let Some(cached) = self.cache.0.load_full()
+            && cached.version == version
+            && cached.locality == *locality
+        {
+            return Ok(cached.resource.clone());
+        }
+
+        let resource = crate::xds::Resource::Cluster(proto::Cluster {
+            locality: locality.clone().map(Into::into),
+            endpoints: self.endpoint_iter().map(Into::into).collect(),
+        })
+        .try_encode()?;
+
+        self.cache.0.store(Some(Arc::new(EncodedCluster {
+            version,
+            locality: locality.clone(),
+            resource: resource.clone(),
+        })));
+
+        Ok(resource)
     }
 
     /// Returns the latest change id seen from a remote server
@@ -1493,5 +1557,54 @@ mod tests {
             cluster.get(&Some(nl1)).unwrap().endpoints,
             set_to_map(not_expected)
         );
+    }
+
+    #[test]
+    fn memoized_cluster_encoding() {
+        let nl1 = Locality::with_region("nl-1");
+        let set = EndpointSet::new(
+            [
+                Endpoint::new((Ipv4Addr::new(1, 2, 3, 4), 1234).into()),
+                Endpoint::new((Ipv4Addr::new(4, 3, 2, 1), 1234).into()),
+            ]
+            .into(),
+        );
+
+        let expected = crate::xds::Resource::Cluster(proto::Cluster {
+            locality: None,
+            endpoints: set.endpoint_iter().map(Into::into).collect(),
+        })
+        .try_encode()
+        .unwrap();
+        let first = set.encoded_cluster(&None).unwrap();
+        assert_eq!(first, expected);
+
+        let cached = set.cache.0.load_full().unwrap();
+        assert_eq!(set.encoded_cluster(&None).unwrap(), expected);
+        assert!(std::sync::Arc::ptr_eq(
+            &cached,
+            &set.cache.0.load_full().unwrap()
+        ));
+
+        let relocated = set.encoded_cluster(&Some(nl1)).unwrap();
+        assert_ne!(relocated, first);
+        assert!(!std::sync::Arc::ptr_eq(
+            &cached,
+            &set.cache.0.load_full().unwrap()
+        ));
+    }
+
+    #[test]
+    fn cluster_cache_invalidates_on_mutation() {
+        let mut set = EndpointSet::new([Endpoint::new((Ipv4Addr::LOCALHOST, 7777).into())].into());
+
+        let before = set.encoded_cluster(&None).unwrap();
+        let version_before = set.version();
+
+        set.modify()
+            .replace_endpoint(Endpoint::new((Ipv4Addr::new(9, 9, 9, 9), 8888).into()));
+
+        assert_ne!(set.version(), version_before);
+        assert_ne!(set.encoded_cluster(&None).unwrap(), before);
     }
 }
