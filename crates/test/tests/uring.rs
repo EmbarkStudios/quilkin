@@ -77,7 +77,9 @@ trace_test!(refreshes_recv_ring, {
 
     let mut buf = [0u8; 4];
 
-    for i in 0..10000u32 {
+    const COUNT: u32 = 10000;
+
+    for i in 0..COUNT {
         client.send_to(&i.to_ne_bytes(), addr).await.unwrap();
 
         let (len, _addr) = sb
@@ -89,4 +91,29 @@ trace_test!(refreshes_recv_ring, {
         assert_eq!(len, 4);
         assert_eq!(u32::from_ne_bytes(buf), i);
     }
+
+    client
+        .send_to(b"QLKN_GET_RECV_RING", addr)
+        .await
+        .expect("failed to send debug request");
+    let mut buf = [0u8; 8];
+    let (len, _addr) = sb
+        .timeout(100, client.recv_from(&mut buf))
+        .await
+        .0
+        .expect("should have debug response packet");
+
+    assert_eq!(len, 8);
+    // We _should_ have excatly 1 outstanding buffer in the buffer ring, the one that has our debug request
+    let count = buf[0] as u16 | (buf[1] as u16) << 8;
+    let len = buf[2] as u16 | (buf[3] as u16) << 8;
+    let alloced =
+        buf[4] as u32 | (buf[5] as u32) << 8 | (buf[6] as u32) << 16 | (buf[7] as u32) << 24;
+
+    assert_eq!(COUNT + 1, alloced);
+    assert_eq!(
+        len,
+        count - 1,
+        "expected to have 1 buffer outstanding in the ring!"
+    );
 });

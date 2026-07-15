@@ -555,6 +555,8 @@ impl IoUringLoop {
                 loop_ctx.sync();
 
                 let mut last_received_at = None;
+                #[cfg(debug_assertions)]
+                let mut alloced = 0;
 
                 // The core io uring loop
                 'io: loop {
@@ -590,6 +592,23 @@ impl IoUringLoop {
                                     let Some(packet) = loop_ctx.pop_recv(cqe, &rb) else { continue; };
 
                                     let id = packet.buffer.id();
+
+                                    // When testing we check if this is a special packet that's querying our state
+                                    #[cfg(debug_assertions)]
+                                    {
+                                        alloced += 1;
+
+                                        if &packet.buffer[..] == b"QLKN_GET_RECV_RING" {
+                                            use bytes::BufMut;
+
+                                            let mut data = bytes::BytesMut::new();
+                                            data.put_u16_ne(rb.count);
+                                            data.put_u16_ne(rb.len(id));
+                                            data.put_u64_ne(alloced);
+                                            loop_ctx.enqueue_send(SendPacket { destination: packet.source, data: data.freeze(), asn_info: None });
+                                            continue;
+                                        }
+                                    }
 
                                     process_packet(&mut ctx, filters, packet, &mut last_received_at);
 
