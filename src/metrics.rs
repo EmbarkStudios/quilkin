@@ -579,6 +579,7 @@ pub(crate) fn bytes_total(direction: Direction, _asn: &AsnInfo<'_>) -> IntCounte
     BYTES_TOTAL.with_label_values(&[direction.label()])
 }
 
+#[must_use]
 pub(crate) fn errors_total(direction: Direction, display: &str, _asn: &AsnInfo<'_>) -> IntCounter {
     static ERRORS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {

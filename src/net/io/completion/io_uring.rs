@@ -329,6 +329,7 @@ impl<'uring> LoopCtx<'uring> {
 
         if ret < 0 {
             let error = std::io::Error::from_raw_os_error(-ret);
+            metrics::errors_total(metrics::READ, &error.to_string(), &metrics::EMPTY).inc();
             tracing::error!(%error, "error receiving packet");
             return None;
         }
@@ -342,6 +343,7 @@ impl<'uring> LoopCtx<'uring> {
 
         // This _should_ theoretically never happen
         if flags & flags::IORING_CQE_F_BUFFER == 0 {
+            metrics::errors_total(metrics::READ, "no buffer selected", &metrics::EMPTY).inc();
             tracing::error!("failed to receive packet, a buffer was not selected");
             return None;
         }
@@ -352,6 +354,7 @@ impl<'uring> LoopCtx<'uring> {
         let addr = match rb.extract(ret as _, &self.recv_hdr) {
             Ok(addr) => addr,
             Err(error) => {
+                metrics::errors_total(metrics::READ, &error.to_string(), &metrics::EMPTY).inc();
                 tracing::error!(%error, "failed to extract source address");
                 return None;
             }
@@ -373,7 +376,8 @@ impl<'uring> LoopCtx<'uring> {
                 metrics::WRITE,
                 "io-uring packet send slab is at capacity",
                 &packet.asn_info.as_ref().into(),
-            );
+            )
+            .inc();
             return;
         }
 

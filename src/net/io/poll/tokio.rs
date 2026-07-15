@@ -239,6 +239,12 @@ fn spawn_poll_listener_impl(
                             );
                         }
                         Err(error) => {
+                            crate::metrics::errors_total(
+                                crate::metrics::READ,
+                                &error.to_string(),
+                                &crate::metrics::EMPTY,
+                            )
+                            .inc();
                             tracing::error!(%error, "error receiving packet");
                             return;
                         }
