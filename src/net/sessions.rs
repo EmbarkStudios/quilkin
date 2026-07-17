@@ -96,6 +96,7 @@ pub struct SessionPool {
     cached_filter_chain: CachedFilterChain,
     max_sessions: usize,
     backend: crate::net::io::UdpBackend,
+    pub ring_buffer_len: u16,
 }
 
 /// The wrapper struct responsible for holding all of the socket related mappings.
@@ -116,6 +117,7 @@ impl SessionPool {
         cached_filter_chain: CachedFilterChain,
         max_sessions: usize,
         backend: crate::net::io::UdpBackend,
+        ring_buffer_len: u16,
     ) -> Arc<Self> {
         const SESSION_TIMEOUT_SECONDS: Duration = Duration::from_secs(60);
         const SESSION_EXPIRY_POLL_INTERVAL: Duration = Duration::from_secs(60);
@@ -129,6 +131,7 @@ impl SessionPool {
             cached_filter_chain,
             max_sessions,
             backend,
+            ring_buffer_len,
         })
     }
 
@@ -619,6 +622,7 @@ mod tests {
                 fake.cached(),
                 usize::MAX,
                 backend,
+                64,
             ),
             pending_sends,
         )
@@ -768,7 +772,13 @@ mod tests {
         let (pending_sends, _srecv) = crate::net::queue(1, backend).unwrap();
         let fake = crate::config::filter::FilterChainConfig::default();
         (
-            SessionPool::new(vec![pending_sends.clone()], fake.cached(), limit, backend),
+            SessionPool::new(
+                vec![pending_sends.clone()],
+                fake.cached(),
+                limit,
+                backend,
+                64,
+            ),
             pending_sends,
         )
     }

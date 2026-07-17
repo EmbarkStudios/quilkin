@@ -208,7 +208,7 @@ cfg_select! {
 /// The same as [`DualStackLocalSocket`] but uses epoll instead of uring.
 #[derive(Debug)]
 pub struct DualStackEpollSocket {
-    socket: tokio::net::UdpSocket,
+    pub socket: tokio::net::UdpSocket,
 }
 
 impl DualStackEpollSocket {
