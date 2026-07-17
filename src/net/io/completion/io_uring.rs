@@ -51,6 +51,7 @@ pub fn spawn_listener(
     listener: crate::net::io::Listener,
     pending_sends: crate::net::PacketQueue,
     filter_chain: CachedFilterChain,
+    recv_ring_len: u16,
 ) -> eyre::Result<()> {
     let crate::net::io::Listener {
         worker_id,
@@ -70,7 +71,7 @@ pub fn spawn_listener(
 
     let socket = crate::net::DualStackLocalSocket::new(port).context("failed to bind socket")?;
 
-    let io_loop = IoUringLoop::new(2048, socket)?;
+    let io_loop = IoUringLoop::new(recv_ring_len, socket)?;
     io_loop
         .spawn_io_loop(
             format!("packet-router-{worker_id}"),
@@ -324,17 +325,28 @@ impl<'uring> LoopCtx<'uring> {
         &mut self,
         cqe: io_uring::cqueue::Entry,
         br: &'rb super::ring::BufferRing,
-    ) -> Option<RecvPacket<'rb>> {
+    ) -> std::io::Result<Option<RecvPacket<'rb>>> {
         let ret = cqe.result();
+        let flags = cqe.flags();
 
         if ret < 0 {
             let error = std::io::Error::from_raw_os_error(-ret);
             metrics::errors_total(metrics::READ, &error.to_string(), &metrics::EMPTY).inc();
-            tracing::error!(%error, "error receiving packet");
-            return None;
-        }
 
-        let flags = cqe.flags();
+            // For now, only requeue recv if it's ENOBUFS, most of the other errors that could theoretically occur for
+            // recvmsg either can't happen in our io-uring context, or would indicate a terminal error
+            if -ret != libc::ENOBUFS {
+                return Err(error);
+            }
+
+            tracing::debug!(%error, "no buffers available in recv ring buffer");
+
+            if flags & flags::IORING_CQE_F_MORE == 0 {
+                self.enqueue_recvmsg();
+            }
+
+            return Ok(None);
+        }
 
         // Requeue the recv if needed
         if flags & flags::IORING_CQE_F_MORE == 0 {
@@ -344,8 +356,9 @@ impl<'uring> LoopCtx<'uring> {
         // This _should_ theoretically never happen
         if flags & flags::IORING_CQE_F_BUFFER == 0 {
             metrics::errors_total(metrics::READ, "no buffer selected", &metrics::EMPTY).inc();
-            tracing::error!("failed to receive packet, a buffer was not selected");
-            return None;
+
+            // Differentiate this from ENOBUFS
+            return Err(std::io::Error::other("no buffer selected"));
         }
 
         let buffer_id = (flags >> 16) as u16;
@@ -356,14 +369,16 @@ impl<'uring> LoopCtx<'uring> {
             Err(error) => {
                 metrics::errors_total(metrics::READ, &error.to_string(), &metrics::EMPTY).inc();
                 tracing::error!(%error, "failed to extract source address");
-                return None;
+                // TODO: should this be terminal? not having this would indicate that the kernel is not upholding its
+                // API promise of prepending the source address before the packet contents
+                return Ok(None);
             }
         };
 
-        Some(RecvPacket {
+        Ok(Some(RecvPacket {
             buffer: rb,
             source: addr,
-        })
+        }))
     }
 
     /// Enqueues a `send_to` on the socket
@@ -458,16 +473,16 @@ const BUFFER_RING: u16 = 0xfeed;
 
 pub struct IoUringLoop {
     socket: crate::net::DualStackLocalSocket,
-    concurrent_sends: u32,
+    recv_buffer_len: u16,
 }
 
 impl IoUringLoop {
     pub fn new(
-        concurrent_sends: u16,
+        recv_buffer_len: u16,
         socket: crate::net::DualStackLocalSocket,
     ) -> Result<Self, PipelineError> {
         Ok(Self {
-            concurrent_sends: concurrent_sends as _,
+            recv_buffer_len: recv_buffer_len.next_power_of_two(),
             socket,
         })
     }
@@ -482,18 +497,18 @@ impl IoUringLoop {
         let dispatcher = tracing::dispatcher::get_default(|d| d.clone());
 
         let socket = self.socket;
-        let concurrent_sends = self.concurrent_sends;
+        let recv_buffer_len = self.recv_buffer_len as u32;
 
         let mut ring =
             io_uring::IoUring::<io_uring::squeue::Entry, io_uring::cqueue::Entry>::builder()
-                .setup_cqsize(self.concurrent_sends)
-                .build(self.concurrent_sends >> 1)?;
+                .setup_cqsize(recv_buffer_len)
+                .build(recv_buffer_len >> 1)?;
 
         let mut pending_sends_event = pending_sends.1;
         let pending_sends = pending_sends.0;
 
         let rb = super::ring::BufferRing::new(
-            concurrent_sends as u16,
+            self.recv_buffer_len as u16,
             // we only deal with non-fragmented UDP with a presumed MTU of 1500, though we also need to account for the extra metadata for multishot recvmsg, so just round up to the next power of 2
             2048,
         )
@@ -505,7 +520,7 @@ impl IoUringLoop {
                 crate::metrics::game_traffic_tasks().inc();
                 let _guard = tracing::dispatcher::set_default(&dispatcher);
 
-                let queued_sends = slab::Slab::with_capacity(concurrent_sends as usize);
+                let queued_sends = slab::Slab::with_capacity(recv_buffer_len as usize);
 
                 // Just double buffer the pending writes for simplicity
                 let mut double_pending_sends = Vec::with_capacity(pending_sends.capacity());
@@ -589,7 +604,17 @@ impl IoUringLoop {
                             let op = (ud >> 56) as u8;
                             match op {
                                 IORING_OP_RECVMSG => {
-                                    let Some(packet) = loop_ctx.pop_recv(cqe, &rb) else { continue; };
+                                    let packet = match loop_ctx.pop_recv(cqe, &rb) {
+                                        Ok(Some(packet)) => packet,
+                                        Ok(None) => {
+                                            // A (hopefully) transient error occurred
+                                            continue;
+                                        }
+                                        Err(error) => {
+                                            tracing::error!(%error, "terminal error occurred receiving a packet");
+                                            break 'io;
+                                        }
+                                    };
 
                                     let id = packet.buffer.id();
 
@@ -705,7 +730,10 @@ pub fn spawn_session(
         }
     };
 
-    let io_loop = IoUringLoop::new(64, crate::net::DualStackLocalSocket::from_raw(raw_socket))?;
+    let io_loop = IoUringLoop::new(
+        pool.ring_buffer_len,
+        crate::net::DualStackLocalSocket::from_raw(raw_socket),
+    )?;
 
     io_loop.spawn_io_loop(
         format!("session-{id}"),

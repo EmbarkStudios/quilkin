@@ -119,11 +119,14 @@ impl Listener {
         self,
         queue: crate::net::PacketQueue,
         fc: crate::config::filter::CachedFilterChain,
+        _recv_ring_len: u16,
     ) -> eyre::Result<()> {
         match self.backend {
             UdpBackend::Poll => poll::tokio::spawn_listener(self, queue, fc),
             #[cfg(target_os = "linux")]
-            UdpBackend::Completion => completion::io_uring::spawn_listener(self, queue, fc),
+            UdpBackend::Completion => {
+                completion::io_uring::spawn_listener(self, queue, fc, _recv_ring_len)
+            }
             #[cfg(target_os = "linux")]
             UdpBackend::Kernel => {
                 unreachable!("XDP runs via spawn_xdp and never reaches the queue-based listener")

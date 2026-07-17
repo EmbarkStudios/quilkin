@@ -86,6 +86,20 @@ pub struct Service {
         default_value_t = 5_000
     )]
     pub udp_session_limit: usize,
+    /// The number of entries allocated in a ring buffer for receives
+    #[clap(
+        long = "service.udp.ringbuffer.len",
+        env = "QUILKIN_SERVICE_UDP_RING_BUFFER_LEN",
+        default_value_t = 2048
+    )]
+    pub udp_ring_buffer: u16,
+    /// The number of entries allocated in a ring buffer for receives per session
+    #[clap(
+        long = "service.udp.session.ringbuffer.len",
+        env = "QUILKIN_SERVICE_UDP_SESSION_RING_BUFFER_LEN",
+        default_value_t = 256
+    )]
+    pub session_pool_ring_buffer: u16,
     /// The UDP I/O backend to use.
     /// auto selects the best available: kernel (XDP) -> completion (io-uring) -> poll (epoll).
     #[clap(
@@ -230,6 +244,8 @@ impl Default for Service {
             udp_port: 7777,
             udp_workers: std::num::NonZeroUsize::new(num_cpus::get()).unwrap(),
             udp_session_limit: 10_000,
+            udp_ring_buffer: 2048,
+            session_pool_ring_buffer: 256,
             udp_backend: crate::net::io::UdpBackend::Auto,
             xds_enabled: <_>::default(),
             xds_port: 7800,
@@ -348,6 +364,16 @@ impl Service {
     /// Sets the UDP I/O backend.
     pub fn udp_backend(mut self, backend: crate::net::io::UdpBackend) -> Self {
         self.udp_backend = backend;
+        self
+    }
+
+    pub fn udp_ring_buffer_len(mut self, len: u16) -> Self {
+        self.udp_ring_buffer = len;
+        self
+    }
+
+    pub fn session_pool_ring_buffer_len(mut self, len: u16) -> Self {
+        self.session_pool_ring_buffer = len;
         self
     }
 
@@ -793,8 +819,16 @@ impl Service {
             cached_filters,
             self.udp_session_limit,
             backend,
+            self.session_pool_ring_buffer,
         );
-        crate::net::packet::spawn_receivers(config, socket, worker_sends, &sessions, backend)?;
+        crate::net::packet::spawn_receivers(
+            config,
+            socket,
+            worker_sends,
+            &sessions,
+            backend,
+            self.udp_ring_buffer,
+        )?;
 
         let finished = shutdown.push("udp");
         let mut srx = shutdown.shutdown_rx();
