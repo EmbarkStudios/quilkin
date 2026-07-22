@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+package quilkin.filters.game_protocol.v1alpha1;
+
+message GameProtocol {
+    bytes key = 1;
+}
