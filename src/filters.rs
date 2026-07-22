@@ -30,6 +30,7 @@ pub mod debug;
 pub mod decryptor;
 pub mod drop;
 pub mod firewall;
+pub mod game_protocol;
 pub mod load_balancer;
 pub mod local_rate_limit;
 pub mod r#match;
@@ -59,6 +60,7 @@ pub use self::{
     error::{ConvertProtoConfigError, CreationError, FilterError},
     factory::{CreateFilterArgs, DynFilterFactory, FilterFactory, FilterInstance},
     firewall::Firewall,
+    game_protocol::GameProtocol,
     load_balancer::LoadBalancer,
     local_rate_limit::LocalRateLimit,
     r#match::Match,
@@ -94,6 +96,7 @@ pub enum FilterKind {
     TokenRouter,
     HashedTokenRouter,
     TestFilter,
+    GameProtocol,
 }
 
 /// Statically safe version of [`Filter`], if you're writing a Rust filter, you
