@@ -1083,8 +1083,16 @@ mod tests {
     #[cfg_attr(target_os = "macos", ignore)]
     async fn http_server() {
         let (tx, rx) = crate::signal::channel();
-        let socket = raw_socket_with_reuse(0).unwrap();
-        let qcmp_port = socket.local_addr().unwrap().as_socket().unwrap().port();
+        // Bind the TCP listener first to claim a genuinely free port: the UDP
+        // socket below sets SO_REUSEPORT, which can make the kernel hand out
+        // an ephemeral port already shared by another test's QCMP socket.
+        let listener = quilkin_system::net::tcp::default_nonblocking_listener((
+            std::net::Ipv6Addr::UNSPECIFIED,
+            0,
+        ))
+        .expect("failed to build listener");
+        let qcmp_port = listener.local_addr().unwrap().port();
+        let socket = raw_socket_with_reuse(qcmp_port).unwrap();
         let pc = crate::codec::qcmp::port_channel();
         crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1109,12 +1117,6 @@ mod tests {
         let phoenix = Phoenix::builder(measurement)
             .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
             .build();
-
-        let listener = quilkin_system::net::tcp::default_nonblocking_listener((
-            std::net::Ipv6Addr::UNSPECIFIED,
-            qcmp_port,
-        ))
-        .expect("failed to build listener");
 
         let end = super::spawn(listener, datacenters, phoenix, rx).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1163,8 +1165,16 @@ mod tests {
     #[cfg_attr(target_os = "macos", ignore)]
     async fn get_network_coordinates() {
         let (tx, rx) = crate::signal::channel();
-        let socket = raw_socket_with_reuse(0).unwrap();
-        let qcmp_port = socket.local_addr().unwrap().as_socket().unwrap().port();
+        // Bind the TCP listener first to claim a genuinely free port: the UDP
+        // socket below sets SO_REUSEPORT, which can make the kernel hand out
+        // an ephemeral port already shared by another test's QCMP socket.
+        let listener = quilkin_system::net::tcp::default_nonblocking_listener((
+            std::net::Ipv6Addr::UNSPECIFIED,
+            0,
+        ))
+        .expect("failed to build listener");
+        let qcmp_port = listener.local_addr().unwrap().port();
+        let socket = raw_socket_with_reuse(qcmp_port).unwrap();
         let pc = crate::codec::qcmp::port_channel();
         crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1189,12 +1199,6 @@ mod tests {
         let phoenix = Phoenix::builder(measurement)
             .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
             .build();
-
-        let listener = quilkin_system::net::tcp::default_nonblocking_listener((
-            std::net::Ipv6Addr::UNSPECIFIED,
-            qcmp_port,
-        ))
-        .expect("failed to build listener");
 
         let end = super::spawn(listener, datacenters, phoenix, rx).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
