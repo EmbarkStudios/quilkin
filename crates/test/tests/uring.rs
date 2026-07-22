@@ -117,3 +117,93 @@ trace_test!(refreshes_recv_ring, {
         "expected to have 1 buffer outstanding in the ring!"
     );
 });
+
+// Severely constrains the ring buffer length to ensure that we requeue when we run out of recv buffers
+trace_test!(requeues_recv, {
+    let mut sc = qt::sandbox_config!();
+
+    sc.push("server", ServerPailConfig::default(), &[]);
+    let mut sb = sc.spinup().await;
+
+    let (mut packet_rx, endpoint) = sb.server("server");
+
+    let mut service = quilkin::Service::builder().udp();
+    let config = std::sync::Arc::new(quilkin::Config::new(
+        None,
+        Default::default(),
+        &Default::default(),
+        &mut service,
+    ));
+    config
+        .dyn_cfg
+        .clusters()
+        .unwrap()
+        .modify(|clusters| clusters.insert_default([endpoint.into()].into()));
+
+    let socket = sb.client();
+    let (ws, addr) = sb.socket();
+
+    // XDP doesn't go through spawn_io_loop — use the best user-space backend.
+    let backend = {
+        #[cfg(target_os = "linux")]
+        {
+            quilkin::net::io::UdpBackend::probe_user_space()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            quilkin::net::io::UdpBackend::Poll
+        }
+    };
+    let pending_sends = quilkin::net::queue(100, backend).unwrap();
+
+    // we'll test a single DownstreamReceiveWorkerConfig
+    quilkin::net::io::Listener {
+        worker_id: 1,
+        port: addr.port(),
+        config: config.clone(),
+        sessions: quilkin::net::sessions::SessionPool::new(
+            vec![pending_sends.0.clone()],
+            config.dyn_cfg.cached_filter_chain().unwrap(),
+            usize::MAX,
+            backend,
+            4,
+        ),
+        backend,
+    }
+    .spawn_io_loop(
+        pending_sends,
+        config.dyn_cfg.cached_filter_chain().unwrap(),
+        4,
+    )
+    .expect("failed to spawn task");
+
+    // Drop the socket otherwise the test won't exit
+    drop(ws);
+
+    const COUNT: u32 = 1000;
+    const BLOCK_COUNT: u32 = 100;
+    let msg = "hello-downstream";
+    let mut recvd = 0;
+    let start = std::time::Instant::now();
+
+    while recvd < COUNT {
+        for _ in 0..BLOCK_COUNT {
+            if socket.socket.try_send_to(msg.as_bytes(), addr).is_err() {
+                break;
+            }
+        }
+
+        for _ in 0..BLOCK_COUNT {
+            let Ok(out) = packet_rx.try_recv() else {
+                break;
+            };
+
+            recvd += 1;
+            assert_eq!(out, msg);
+        }
+
+        if start.elapsed() > std::time::Duration::from_secs(2) {
+            panic!("timed out {recvd}");
+        }
+    }
+});
