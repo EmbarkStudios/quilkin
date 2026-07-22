@@ -1083,151 +1083,155 @@
 <a href=#1083 id=1083 data-nosnippet>1083</a>    #[cfg_attr(target_os = <span class="string">"macos"</span>, ignore)]
 <a href=#1084 id=1084 data-nosnippet>1084</a>    </span><span class="kw">async fn </span>http_server() {
 <a href=#1085 id=1085 data-nosnippet>1085</a>        <span class="kw">let </span>(tx, rx) = <span class="kw">crate</span>::signal::channel();
-<a href=#1086 id=1086 data-nosnippet>1086</a>        <span class="kw">let </span>socket = raw_socket_with_reuse(<span class="number">0</span>).unwrap();
-<a href=#1087 id=1087 data-nosnippet>1087</a>        <span class="kw">let </span>qcmp_port = socket.local_addr().unwrap().as_socket().unwrap().port();
-<a href=#1088 id=1088 data-nosnippet>1088</a>        <span class="kw">let </span>pc = <span class="kw">crate</span>::codec::qcmp::port_channel();
-<a href=#1089 id=1089 data-nosnippet>1089</a>        <span class="kw">crate</span>::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
-<a href=#1090 id=1090 data-nosnippet>1090</a>        tokio::time::sleep(Duration::from_millis(<span class="number">150</span>)).<span class="kw">await</span>;
-<a href=#1091 id=1091 data-nosnippet>1091</a>
-<a href=#1092 id=1092 data-nosnippet>1092</a>        <span class="kw">let </span>icao_code = <span class="string">"ABCD"</span>.parse().unwrap();
-<a href=#1093 id=1093 data-nosnippet>1093</a>
-<a href=#1094 id=1094 data-nosnippet>1094</a>        <span class="kw">let </span>datacenters =
-<a href=#1095 id=1095 data-nosnippet>1095</a>            <span class="kw">crate</span>::config::Watch::&lt;<span class="kw">crate</span>::config::DatacenterMap&gt;::new(Default::default());
-<a href=#1096 id=1096 data-nosnippet>1096</a>
-<a href=#1097 id=1097 data-nosnippet>1097</a>        datacenters.write().insert(
-<a href=#1098 id=1098 data-nosnippet>1098</a>            std::net::Ipv4Addr::LOCALHOST.into(),
-<a href=#1099 id=1099 data-nosnippet>1099</a>            <span class="kw">crate</span>::config::Datacenter {
-<a href=#1100 id=1100 data-nosnippet>1100</a>                qcmp_port,
-<a href=#1101 id=1101 data-nosnippet>1101</a>                icao_code,
-<a href=#1102 id=1102 data-nosnippet>1102</a>            },
-<a href=#1103 id=1103 data-nosnippet>1103</a>        );
+<a href=#1086 id=1086 data-nosnippet>1086</a>        <span class="comment">// Bind the TCP listener first to claim a genuinely free port: the UDP
+<a href=#1087 id=1087 data-nosnippet>1087</a>        // socket below sets SO_REUSEPORT, which can make the kernel hand out
+<a href=#1088 id=1088 data-nosnippet>1088</a>        // an ephemeral port already shared by another test's QCMP socket.
+<a href=#1089 id=1089 data-nosnippet>1089</a>        </span><span class="kw">let </span>listener = quilkin_system::net::tcp::default_nonblocking_listener((
+<a href=#1090 id=1090 data-nosnippet>1090</a>            std::net::Ipv6Addr::UNSPECIFIED,
+<a href=#1091 id=1091 data-nosnippet>1091</a>            <span class="number">0</span>,
+<a href=#1092 id=1092 data-nosnippet>1092</a>        ))
+<a href=#1093 id=1093 data-nosnippet>1093</a>        .expect(<span class="string">"failed to build listener"</span>);
+<a href=#1094 id=1094 data-nosnippet>1094</a>        <span class="kw">let </span>qcmp_port = listener.local_addr().unwrap().port();
+<a href=#1095 id=1095 data-nosnippet>1095</a>        <span class="kw">let </span>socket = raw_socket_with_reuse(qcmp_port).unwrap();
+<a href=#1096 id=1096 data-nosnippet>1096</a>        <span class="kw">let </span>pc = <span class="kw">crate</span>::codec::qcmp::port_channel();
+<a href=#1097 id=1097 data-nosnippet>1097</a>        <span class="kw">crate</span>::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+<a href=#1098 id=1098 data-nosnippet>1098</a>        tokio::time::sleep(Duration::from_millis(<span class="number">150</span>)).<span class="kw">await</span>;
+<a href=#1099 id=1099 data-nosnippet>1099</a>
+<a href=#1100 id=1100 data-nosnippet>1100</a>        <span class="kw">let </span>icao_code = <span class="string">"ABCD"</span>.parse().unwrap();
+<a href=#1101 id=1101 data-nosnippet>1101</a>
+<a href=#1102 id=1102 data-nosnippet>1102</a>        <span class="kw">let </span>datacenters =
+<a href=#1103 id=1103 data-nosnippet>1103</a>            <span class="kw">crate</span>::config::Watch::&lt;<span class="kw">crate</span>::config::DatacenterMap&gt;::new(Default::default());
 <a href=#1104 id=1104 data-nosnippet>1104</a>
-<a href=#1105 id=1105 data-nosnippet>1105</a>        <span class="kw">let </span>measurement =
-<a href=#1106 id=1106 data-nosnippet>1106</a>            <span class="kw">crate</span>::codec::qcmp::QcmpTransceiver::with_artificial_delay(Duration::from_millis(<span class="number">50</span>))
-<a href=#1107 id=1107 data-nosnippet>1107</a>                .unwrap();
-<a href=#1108 id=1108 data-nosnippet>1108</a>
-<a href=#1109 id=1109 data-nosnippet>1109</a>        <span class="kw">let </span>phoenix = Phoenix::builder(measurement)
-<a href=#1110 id=1110 data-nosnippet>1110</a>            .interval_range(Duration::from_millis(<span class="number">10</span>)..Duration::from_millis(<span class="number">15</span>))
-<a href=#1111 id=1111 data-nosnippet>1111</a>            .build();
+<a href=#1105 id=1105 data-nosnippet>1105</a>        datacenters.write().insert(
+<a href=#1106 id=1106 data-nosnippet>1106</a>            std::net::Ipv4Addr::LOCALHOST.into(),
+<a href=#1107 id=1107 data-nosnippet>1107</a>            <span class="kw">crate</span>::config::Datacenter {
+<a href=#1108 id=1108 data-nosnippet>1108</a>                qcmp_port,
+<a href=#1109 id=1109 data-nosnippet>1109</a>                icao_code,
+<a href=#1110 id=1110 data-nosnippet>1110</a>            },
+<a href=#1111 id=1111 data-nosnippet>1111</a>        );
 <a href=#1112 id=1112 data-nosnippet>1112</a>
-<a href=#1113 id=1113 data-nosnippet>1113</a>        <span class="kw">let </span>listener = quilkin_system::net::tcp::default_nonblocking_listener((
-<a href=#1114 id=1114 data-nosnippet>1114</a>            std::net::Ipv6Addr::UNSPECIFIED,
-<a href=#1115 id=1115 data-nosnippet>1115</a>            qcmp_port,
-<a href=#1116 id=1116 data-nosnippet>1116</a>        ))
-<a href=#1117 id=1117 data-nosnippet>1117</a>        .expect(<span class="string">"failed to build listener"</span>);
-<a href=#1118 id=1118 data-nosnippet>1118</a>
-<a href=#1119 id=1119 data-nosnippet>1119</a>        <span class="kw">let </span>end = <span class="kw">super</span>::spawn(listener, datacenters, phoenix, rx).unwrap();
-<a href=#1120 id=1120 data-nosnippet>1120</a>        tokio::time::sleep(Duration::from_millis(<span class="number">150</span>)).<span class="kw">await</span>;
-<a href=#1121 id=1121 data-nosnippet>1121</a>
-<a href=#1122 id=1122 data-nosnippet>1122</a>        <span class="kw">let </span>client =
-<a href=#1123 id=1123 data-nosnippet>1123</a>            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-<a href=#1124 id=1124 data-nosnippet>1124</a>                .build_http::&lt;http_body_util::Empty&lt;bytes::Bytes&gt;&gt;();
-<a href=#1125 id=1125 data-nosnippet>1125</a>        <span class="kw">use </span>http_body_util::BodyExt;
-<a href=#1126 id=1126 data-nosnippet>1126</a>        <span class="kw">for _ in </span><span class="number">0</span>..<span class="number">10 </span>{
-<a href=#1127 id=1127 data-nosnippet>1127</a>            <span class="kw">let </span>resp = tokio::time::timeout(
-<a href=#1128 id=1128 data-nosnippet>1128</a>                Duration::from_millis(<span class="number">100</span>),
-<a href=#1129 id=1129 data-nosnippet>1129</a>                client
-<a href=#1130 id=1130 data-nosnippet>1130</a>                    .get(<span class="macro">format!</span>(<span class="string">"http://localhost:{qcmp_port}/"</span>).parse().unwrap())
-<a href=#1131 id=1131 data-nosnippet>1131</a>                    .<span class="kw">await
-<a href=#1132 id=1132 data-nosnippet>1132</a>                    </span>.unwrap()
-<a href=#1133 id=1133 data-nosnippet>1133</a>                    .into_body()
-<a href=#1134 id=1134 data-nosnippet>1134</a>                    .collect(),
-<a href=#1135 id=1135 data-nosnippet>1135</a>            )
-<a href=#1136 id=1136 data-nosnippet>1136</a>            .<span class="kw">await
-<a href=#1137 id=1137 data-nosnippet>1137</a>            </span>.unwrap()
-<a href=#1138 id=1138 data-nosnippet>1138</a>            .unwrap()
-<a href=#1139 id=1139 data-nosnippet>1139</a>            .to_bytes();
-<a href=#1140 id=1140 data-nosnippet>1140</a>
-<a href=#1141 id=1141 data-nosnippet>1141</a>            <span class="kw">let </span>map = serde_json::from_slice::&lt;serde_json::Map&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt;&gt;(<span class="kw-2">&amp;</span>resp).unwrap();
+<a href=#1113 id=1113 data-nosnippet>1113</a>        <span class="kw">let </span>measurement =
+<a href=#1114 id=1114 data-nosnippet>1114</a>            <span class="kw">crate</span>::codec::qcmp::QcmpTransceiver::with_artificial_delay(Duration::from_millis(<span class="number">50</span>))
+<a href=#1115 id=1115 data-nosnippet>1115</a>                .unwrap();
+<a href=#1116 id=1116 data-nosnippet>1116</a>
+<a href=#1117 id=1117 data-nosnippet>1117</a>        <span class="kw">let </span>phoenix = Phoenix::builder(measurement)
+<a href=#1118 id=1118 data-nosnippet>1118</a>            .interval_range(Duration::from_millis(<span class="number">10</span>)..Duration::from_millis(<span class="number">15</span>))
+<a href=#1119 id=1119 data-nosnippet>1119</a>            .build();
+<a href=#1120 id=1120 data-nosnippet>1120</a>
+<a href=#1121 id=1121 data-nosnippet>1121</a>        <span class="kw">let </span>end = <span class="kw">super</span>::spawn(listener, datacenters, phoenix, rx).unwrap();
+<a href=#1122 id=1122 data-nosnippet>1122</a>        tokio::time::sleep(Duration::from_millis(<span class="number">150</span>)).<span class="kw">await</span>;
+<a href=#1123 id=1123 data-nosnippet>1123</a>
+<a href=#1124 id=1124 data-nosnippet>1124</a>        <span class="kw">let </span>client =
+<a href=#1125 id=1125 data-nosnippet>1125</a>            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+<a href=#1126 id=1126 data-nosnippet>1126</a>                .build_http::&lt;http_body_util::Empty&lt;bytes::Bytes&gt;&gt;();
+<a href=#1127 id=1127 data-nosnippet>1127</a>        <span class="kw">use </span>http_body_util::BodyExt;
+<a href=#1128 id=1128 data-nosnippet>1128</a>        <span class="kw">for _ in </span><span class="number">0</span>..<span class="number">10 </span>{
+<a href=#1129 id=1129 data-nosnippet>1129</a>            <span class="kw">let </span>resp = tokio::time::timeout(
+<a href=#1130 id=1130 data-nosnippet>1130</a>                Duration::from_millis(<span class="number">100</span>),
+<a href=#1131 id=1131 data-nosnippet>1131</a>                client
+<a href=#1132 id=1132 data-nosnippet>1132</a>                    .get(<span class="macro">format!</span>(<span class="string">"http://localhost:{qcmp_port}/"</span>).parse().unwrap())
+<a href=#1133 id=1133 data-nosnippet>1133</a>                    .<span class="kw">await
+<a href=#1134 id=1134 data-nosnippet>1134</a>                    </span>.unwrap()
+<a href=#1135 id=1135 data-nosnippet>1135</a>                    .into_body()
+<a href=#1136 id=1136 data-nosnippet>1136</a>                    .collect(),
+<a href=#1137 id=1137 data-nosnippet>1137</a>            )
+<a href=#1138 id=1138 data-nosnippet>1138</a>            .<span class="kw">await
+<a href=#1139 id=1139 data-nosnippet>1139</a>            </span>.unwrap()
+<a href=#1140 id=1140 data-nosnippet>1140</a>            .unwrap()
+<a href=#1141 id=1141 data-nosnippet>1141</a>            .to_bytes();
 <a href=#1142 id=1142 data-nosnippet>1142</a>
-<a href=#1143 id=1143 data-nosnippet>1143</a>            <span class="kw">let </span>coords = Coordinates {
-<a href=#1144 id=1144 data-nosnippet>1144</a>                incoming: std::time::Duration::from_millis(<span class="number">50</span>).as_nanos() <span class="kw">as </span>f64 / <span class="number">2.0</span>,
-<a href=#1145 id=1145 data-nosnippet>1145</a>                outgoing: std::time::Duration::from_millis(<span class="number">1</span>).as_nanos() <span class="kw">as </span>f64 / <span class="number">2.0</span>,
-<a href=#1146 id=1146 data-nosnippet>1146</a>            };
-<a href=#1147 id=1147 data-nosnippet>1147</a>
-<a href=#1148 id=1148 data-nosnippet>1148</a>            <span class="kw">let </span>min = coords.rtt_estimate();
-<a href=#1149 id=1149 data-nosnippet>1149</a>            <span class="kw">let </span>max = min * <span class="number">3.0</span>;
-<a href=#1150 id=1150 data-nosnippet>1150</a>            <span class="kw">let </span>distance = map[icao_code.as_ref()].as_f64().unwrap();
-<a href=#1151 id=1151 data-nosnippet>1151</a>
-<a href=#1152 id=1152 data-nosnippet>1152</a>            <span class="macro">assert!</span>(
-<a href=#1153 id=1153 data-nosnippet>1153</a>                distance &gt; min &amp;&amp; distance &lt; max,
-<a href=#1154 id=1154 data-nosnippet>1154</a>                <span class="string">"expected distance {distance} to be &gt; {min} and &lt; {max}"</span>,
-<a href=#1155 id=1155 data-nosnippet>1155</a>            );
-<a href=#1156 id=1156 data-nosnippet>1156</a>        }
-<a href=#1157 id=1157 data-nosnippet>1157</a>
-<a href=#1158 id=1158 data-nosnippet>1158</a>        <span class="kw">let _ </span>= tx.send(());
-<a href=#1159 id=1159 data-nosnippet>1159</a>        end();
-<a href=#1160 id=1160 data-nosnippet>1160</a>    }
-<a href=#1161 id=1161 data-nosnippet>1161</a>
-<a href=#1162 id=1162 data-nosnippet>1162</a>    <span class="attr">#[tokio::test]
-<a href=#1163 id=1163 data-nosnippet>1163</a>    #[cfg_attr(target_os = <span class="string">"macos"</span>, ignore)]
-<a href=#1164 id=1164 data-nosnippet>1164</a>    </span><span class="kw">async fn </span>get_network_coordinates() {
-<a href=#1165 id=1165 data-nosnippet>1165</a>        <span class="kw">let </span>(tx, rx) = <span class="kw">crate</span>::signal::channel();
-<a href=#1166 id=1166 data-nosnippet>1166</a>        <span class="kw">let </span>socket = raw_socket_with_reuse(<span class="number">0</span>).unwrap();
-<a href=#1167 id=1167 data-nosnippet>1167</a>        <span class="kw">let </span>qcmp_port = socket.local_addr().unwrap().as_socket().unwrap().port();
-<a href=#1168 id=1168 data-nosnippet>1168</a>        <span class="kw">let </span>pc = <span class="kw">crate</span>::codec::qcmp::port_channel();
-<a href=#1169 id=1169 data-nosnippet>1169</a>        <span class="kw">crate</span>::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
-<a href=#1170 id=1170 data-nosnippet>1170</a>        tokio::time::sleep(Duration::from_millis(<span class="number">150</span>)).<span class="kw">await</span>;
-<a href=#1171 id=1171 data-nosnippet>1171</a>
-<a href=#1172 id=1172 data-nosnippet>1172</a>        <span class="kw">let </span>icao_code = <span class="string">"ABCD"</span>.parse().unwrap();
-<a href=#1173 id=1173 data-nosnippet>1173</a>
-<a href=#1174 id=1174 data-nosnippet>1174</a>        <span class="kw">let </span>datacenters =
-<a href=#1175 id=1175 data-nosnippet>1175</a>            <span class="kw">crate</span>::config::Watch::&lt;<span class="kw">crate</span>::config::DatacenterMap&gt;::new(Default::default());
-<a href=#1176 id=1176 data-nosnippet>1176</a>
-<a href=#1177 id=1177 data-nosnippet>1177</a>        datacenters.write().insert(
-<a href=#1178 id=1178 data-nosnippet>1178</a>            std::net::Ipv4Addr::LOCALHOST.into(),
-<a href=#1179 id=1179 data-nosnippet>1179</a>            <span class="kw">crate</span>::config::Datacenter {
-<a href=#1180 id=1180 data-nosnippet>1180</a>                qcmp_port,
-<a href=#1181 id=1181 data-nosnippet>1181</a>                icao_code,
-<a href=#1182 id=1182 data-nosnippet>1182</a>            },
-<a href=#1183 id=1183 data-nosnippet>1183</a>        );
-<a href=#1184 id=1184 data-nosnippet>1184</a>
-<a href=#1185 id=1185 data-nosnippet>1185</a>        <span class="kw">let </span>measurement =
-<a href=#1186 id=1186 data-nosnippet>1186</a>            <span class="kw">crate</span>::codec::qcmp::QcmpTransceiver::with_artificial_delay(Duration::from_millis(<span class="number">50</span>))
-<a href=#1187 id=1187 data-nosnippet>1187</a>                .unwrap();
-<a href=#1188 id=1188 data-nosnippet>1188</a>
-<a href=#1189 id=1189 data-nosnippet>1189</a>        <span class="kw">let </span>phoenix = Phoenix::builder(measurement)
-<a href=#1190 id=1190 data-nosnippet>1190</a>            .interval_range(Duration::from_millis(<span class="number">10</span>)..Duration::from_millis(<span class="number">15</span>))
-<a href=#1191 id=1191 data-nosnippet>1191</a>            .build();
-<a href=#1192 id=1192 data-nosnippet>1192</a>
-<a href=#1193 id=1193 data-nosnippet>1193</a>        <span class="kw">let </span>listener = quilkin_system::net::tcp::default_nonblocking_listener((
-<a href=#1194 id=1194 data-nosnippet>1194</a>            std::net::Ipv6Addr::UNSPECIFIED,
-<a href=#1195 id=1195 data-nosnippet>1195</a>            qcmp_port,
-<a href=#1196 id=1196 data-nosnippet>1196</a>        ))
-<a href=#1197 id=1197 data-nosnippet>1197</a>        .expect(<span class="string">"failed to build listener"</span>);
+<a href=#1143 id=1143 data-nosnippet>1143</a>            <span class="kw">let </span>map = serde_json::from_slice::&lt;serde_json::Map&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt;&gt;(<span class="kw-2">&amp;</span>resp).unwrap();
+<a href=#1144 id=1144 data-nosnippet>1144</a>
+<a href=#1145 id=1145 data-nosnippet>1145</a>            <span class="kw">let </span>coords = Coordinates {
+<a href=#1146 id=1146 data-nosnippet>1146</a>                incoming: std::time::Duration::from_millis(<span class="number">50</span>).as_nanos() <span class="kw">as </span>f64 / <span class="number">2.0</span>,
+<a href=#1147 id=1147 data-nosnippet>1147</a>                outgoing: std::time::Duration::from_millis(<span class="number">1</span>).as_nanos() <span class="kw">as </span>f64 / <span class="number">2.0</span>,
+<a href=#1148 id=1148 data-nosnippet>1148</a>            };
+<a href=#1149 id=1149 data-nosnippet>1149</a>
+<a href=#1150 id=1150 data-nosnippet>1150</a>            <span class="kw">let </span>min = coords.rtt_estimate();
+<a href=#1151 id=1151 data-nosnippet>1151</a>            <span class="kw">let </span>max = min * <span class="number">3.0</span>;
+<a href=#1152 id=1152 data-nosnippet>1152</a>            <span class="kw">let </span>distance = map[icao_code.as_ref()].as_f64().unwrap();
+<a href=#1153 id=1153 data-nosnippet>1153</a>
+<a href=#1154 id=1154 data-nosnippet>1154</a>            <span class="macro">assert!</span>(
+<a href=#1155 id=1155 data-nosnippet>1155</a>                distance &gt; min &amp;&amp; distance &lt; max,
+<a href=#1156 id=1156 data-nosnippet>1156</a>                <span class="string">"expected distance {distance} to be &gt; {min} and &lt; {max}"</span>,
+<a href=#1157 id=1157 data-nosnippet>1157</a>            );
+<a href=#1158 id=1158 data-nosnippet>1158</a>        }
+<a href=#1159 id=1159 data-nosnippet>1159</a>
+<a href=#1160 id=1160 data-nosnippet>1160</a>        <span class="kw">let _ </span>= tx.send(());
+<a href=#1161 id=1161 data-nosnippet>1161</a>        end();
+<a href=#1162 id=1162 data-nosnippet>1162</a>    }
+<a href=#1163 id=1163 data-nosnippet>1163</a>
+<a href=#1164 id=1164 data-nosnippet>1164</a>    <span class="attr">#[tokio::test]
+<a href=#1165 id=1165 data-nosnippet>1165</a>    #[cfg_attr(target_os = <span class="string">"macos"</span>, ignore)]
+<a href=#1166 id=1166 data-nosnippet>1166</a>    </span><span class="kw">async fn </span>get_network_coordinates() {
+<a href=#1167 id=1167 data-nosnippet>1167</a>        <span class="kw">let </span>(tx, rx) = <span class="kw">crate</span>::signal::channel();
+<a href=#1168 id=1168 data-nosnippet>1168</a>        <span class="comment">// Bind the TCP listener first to claim a genuinely free port: the UDP
+<a href=#1169 id=1169 data-nosnippet>1169</a>        // socket below sets SO_REUSEPORT, which can make the kernel hand out
+<a href=#1170 id=1170 data-nosnippet>1170</a>        // an ephemeral port already shared by another test's QCMP socket.
+<a href=#1171 id=1171 data-nosnippet>1171</a>        </span><span class="kw">let </span>listener = quilkin_system::net::tcp::default_nonblocking_listener((
+<a href=#1172 id=1172 data-nosnippet>1172</a>            std::net::Ipv6Addr::UNSPECIFIED,
+<a href=#1173 id=1173 data-nosnippet>1173</a>            <span class="number">0</span>,
+<a href=#1174 id=1174 data-nosnippet>1174</a>        ))
+<a href=#1175 id=1175 data-nosnippet>1175</a>        .expect(<span class="string">"failed to build listener"</span>);
+<a href=#1176 id=1176 data-nosnippet>1176</a>        <span class="kw">let </span>qcmp_port = listener.local_addr().unwrap().port();
+<a href=#1177 id=1177 data-nosnippet>1177</a>        <span class="kw">let </span>socket = raw_socket_with_reuse(qcmp_port).unwrap();
+<a href=#1178 id=1178 data-nosnippet>1178</a>        <span class="kw">let </span>pc = <span class="kw">crate</span>::codec::qcmp::port_channel();
+<a href=#1179 id=1179 data-nosnippet>1179</a>        <span class="kw">crate</span>::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+<a href=#1180 id=1180 data-nosnippet>1180</a>        tokio::time::sleep(Duration::from_millis(<span class="number">150</span>)).<span class="kw">await</span>;
+<a href=#1181 id=1181 data-nosnippet>1181</a>
+<a href=#1182 id=1182 data-nosnippet>1182</a>        <span class="kw">let </span>icao_code = <span class="string">"ABCD"</span>.parse().unwrap();
+<a href=#1183 id=1183 data-nosnippet>1183</a>
+<a href=#1184 id=1184 data-nosnippet>1184</a>        <span class="kw">let </span>datacenters =
+<a href=#1185 id=1185 data-nosnippet>1185</a>            <span class="kw">crate</span>::config::Watch::&lt;<span class="kw">crate</span>::config::DatacenterMap&gt;::new(Default::default());
+<a href=#1186 id=1186 data-nosnippet>1186</a>
+<a href=#1187 id=1187 data-nosnippet>1187</a>        datacenters.write().insert(
+<a href=#1188 id=1188 data-nosnippet>1188</a>            std::net::Ipv4Addr::LOCALHOST.into(),
+<a href=#1189 id=1189 data-nosnippet>1189</a>            <span class="kw">crate</span>::config::Datacenter {
+<a href=#1190 id=1190 data-nosnippet>1190</a>                qcmp_port,
+<a href=#1191 id=1191 data-nosnippet>1191</a>                icao_code,
+<a href=#1192 id=1192 data-nosnippet>1192</a>            },
+<a href=#1193 id=1193 data-nosnippet>1193</a>        );
+<a href=#1194 id=1194 data-nosnippet>1194</a>
+<a href=#1195 id=1195 data-nosnippet>1195</a>        <span class="kw">let </span>measurement =
+<a href=#1196 id=1196 data-nosnippet>1196</a>            <span class="kw">crate</span>::codec::qcmp::QcmpTransceiver::with_artificial_delay(Duration::from_millis(<span class="number">50</span>))
+<a href=#1197 id=1197 data-nosnippet>1197</a>                .unwrap();
 <a href=#1198 id=1198 data-nosnippet>1198</a>
-<a href=#1199 id=1199 data-nosnippet>1199</a>        <span class="kw">let </span>end = <span class="kw">super</span>::spawn(listener, datacenters, phoenix, rx).unwrap();
-<a href=#1200 id=1200 data-nosnippet>1200</a>        tokio::time::sleep(Duration::from_millis(<span class="number">150</span>)).<span class="kw">await</span>;
-<a href=#1201 id=1201 data-nosnippet>1201</a>
-<a href=#1202 id=1202 data-nosnippet>1202</a>        <span class="kw">let </span>client =
-<a href=#1203 id=1203 data-nosnippet>1203</a>            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-<a href=#1204 id=1204 data-nosnippet>1204</a>                .build_http::&lt;http_body_util::Empty&lt;bytes::Bytes&gt;&gt;();
-<a href=#1205 id=1205 data-nosnippet>1205</a>        <span class="kw">use </span>http_body_util::BodyExt;
-<a href=#1206 id=1206 data-nosnippet>1206</a>        <span class="kw">for _ in </span><span class="number">0</span>..<span class="number">10 </span>{
-<a href=#1207 id=1207 data-nosnippet>1207</a>            <span class="kw">let </span>resp = tokio::time::timeout(
-<a href=#1208 id=1208 data-nosnippet>1208</a>                Duration::from_millis(<span class="number">100</span>),
-<a href=#1209 id=1209 data-nosnippet>1209</a>                client
-<a href=#1210 id=1210 data-nosnippet>1210</a>                    .get(
-<a href=#1211 id=1211 data-nosnippet>1211</a>                        <span class="macro">format!</span>(<span class="string">"http://localhost:{qcmp_port}/network-coordinates"</span>)
-<a href=#1212 id=1212 data-nosnippet>1212</a>                            .parse()
-<a href=#1213 id=1213 data-nosnippet>1213</a>                            .unwrap(),
-<a href=#1214 id=1214 data-nosnippet>1214</a>                    )
-<a href=#1215 id=1215 data-nosnippet>1215</a>                    .<span class="kw">await
-<a href=#1216 id=1216 data-nosnippet>1216</a>                    </span>.unwrap()
-<a href=#1217 id=1217 data-nosnippet>1217</a>                    .into_body()
-<a href=#1218 id=1218 data-nosnippet>1218</a>                    .collect(),
-<a href=#1219 id=1219 data-nosnippet>1219</a>            )
-<a href=#1220 id=1220 data-nosnippet>1220</a>            .<span class="kw">await
-<a href=#1221 id=1221 data-nosnippet>1221</a>            </span>.unwrap()
-<a href=#1222 id=1222 data-nosnippet>1222</a>            .unwrap()
-<a href=#1223 id=1223 data-nosnippet>1223</a>            .to_bytes();
-<a href=#1224 id=1224 data-nosnippet>1224</a>
-<a href=#1225 id=1225 data-nosnippet>1225</a>            <span class="kw">let </span>map = serde_json::from_slice::&lt;HashMap&lt;IcaoCode, Coordinates&gt;&gt;(<span class="kw-2">&amp;</span>resp).unwrap();
-<a href=#1226 id=1226 data-nosnippet>1226</a>            <span class="macro">assert!</span>(map.contains_key(<span class="kw-2">&amp;</span>icao_code));
-<a href=#1227 id=1227 data-nosnippet>1227</a>        }
+<a href=#1199 id=1199 data-nosnippet>1199</a>        <span class="kw">let </span>phoenix = Phoenix::builder(measurement)
+<a href=#1200 id=1200 data-nosnippet>1200</a>            .interval_range(Duration::from_millis(<span class="number">10</span>)..Duration::from_millis(<span class="number">15</span>))
+<a href=#1201 id=1201 data-nosnippet>1201</a>            .build();
+<a href=#1202 id=1202 data-nosnippet>1202</a>
+<a href=#1203 id=1203 data-nosnippet>1203</a>        <span class="kw">let </span>end = <span class="kw">super</span>::spawn(listener, datacenters, phoenix, rx).unwrap();
+<a href=#1204 id=1204 data-nosnippet>1204</a>        tokio::time::sleep(Duration::from_millis(<span class="number">150</span>)).<span class="kw">await</span>;
+<a href=#1205 id=1205 data-nosnippet>1205</a>
+<a href=#1206 id=1206 data-nosnippet>1206</a>        <span class="kw">let </span>client =
+<a href=#1207 id=1207 data-nosnippet>1207</a>            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+<a href=#1208 id=1208 data-nosnippet>1208</a>                .build_http::&lt;http_body_util::Empty&lt;bytes::Bytes&gt;&gt;();
+<a href=#1209 id=1209 data-nosnippet>1209</a>        <span class="kw">use </span>http_body_util::BodyExt;
+<a href=#1210 id=1210 data-nosnippet>1210</a>        <span class="kw">for _ in </span><span class="number">0</span>..<span class="number">10 </span>{
+<a href=#1211 id=1211 data-nosnippet>1211</a>            <span class="kw">let </span>resp = tokio::time::timeout(
+<a href=#1212 id=1212 data-nosnippet>1212</a>                Duration::from_millis(<span class="number">100</span>),
+<a href=#1213 id=1213 data-nosnippet>1213</a>                client
+<a href=#1214 id=1214 data-nosnippet>1214</a>                    .get(
+<a href=#1215 id=1215 data-nosnippet>1215</a>                        <span class="macro">format!</span>(<span class="string">"http://localhost:{qcmp_port}/network-coordinates"</span>)
+<a href=#1216 id=1216 data-nosnippet>1216</a>                            .parse()
+<a href=#1217 id=1217 data-nosnippet>1217</a>                            .unwrap(),
+<a href=#1218 id=1218 data-nosnippet>1218</a>                    )
+<a href=#1219 id=1219 data-nosnippet>1219</a>                    .<span class="kw">await
+<a href=#1220 id=1220 data-nosnippet>1220</a>                    </span>.unwrap()
+<a href=#1221 id=1221 data-nosnippet>1221</a>                    .into_body()
+<a href=#1222 id=1222 data-nosnippet>1222</a>                    .collect(),
+<a href=#1223 id=1223 data-nosnippet>1223</a>            )
+<a href=#1224 id=1224 data-nosnippet>1224</a>            .<span class="kw">await
+<a href=#1225 id=1225 data-nosnippet>1225</a>            </span>.unwrap()
+<a href=#1226 id=1226 data-nosnippet>1226</a>            .unwrap()
+<a href=#1227 id=1227 data-nosnippet>1227</a>            .to_bytes();
 <a href=#1228 id=1228 data-nosnippet>1228</a>
-<a href=#1229 id=1229 data-nosnippet>1229</a>        <span class="kw">let _ </span>= tx.send(());
-<a href=#1230 id=1230 data-nosnippet>1230</a>        end();
-<a href=#1231 id=1231 data-nosnippet>1231</a>    }
-<a href=#1232 id=1232 data-nosnippet>1232</a>}
+<a href=#1229 id=1229 data-nosnippet>1229</a>            <span class="kw">let </span>map = serde_json::from_slice::&lt;HashMap&lt;IcaoCode, Coordinates&gt;&gt;(<span class="kw-2">&amp;</span>resp).unwrap();
+<a href=#1230 id=1230 data-nosnippet>1230</a>            <span class="macro">assert!</span>(map.contains_key(<span class="kw-2">&amp;</span>icao_code));
+<a href=#1231 id=1231 data-nosnippet>1231</a>        }
+<a href=#1232 id=1232 data-nosnippet>1232</a>
+<a href=#1233 id=1233 data-nosnippet>1233</a>        <span class="kw">let _ </span>= tx.send(());
+<a href=#1234 id=1234 data-nosnippet>1234</a>        end();
+<a href=#1235 id=1235 data-nosnippet>1235</a>    }
+<a href=#1236 id=1236 data-nosnippet>1236</a>}
 </code></pre></div></section></main></body></html>
