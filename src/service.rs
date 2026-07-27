@@ -695,7 +695,7 @@ impl Service {
                             return Err(err);
                         }
                         // Auto probed XDP as available but setup failed — fall back.
-                        tracing::debug!(
+                        tracing::warn!(
                             ?err,
                             "XDP setup failed, falling back to user-space backend"
                         );
