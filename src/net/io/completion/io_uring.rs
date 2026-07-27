@@ -508,7 +508,7 @@ impl IoUringLoop {
         let pending_sends = pending_sends.0;
 
         let rb = super::ring::BufferRing::new(
-            self.recv_buffer_len as u16,
+            recv_buffer_len as u16,
             // we only deal with non-fragmented UDP with a presumed MTU of 1500, though we also need to account for the extra metadata for multishot recvmsg, so just round up to the next power of 2
             2048,
         )
