@@ -397,48 +397,49 @@
 <a href=#397 id=397 data-nosnippet>397</a>        .dump_pprof()
 <a href=#398 id=398 data-nosnippet>398</a>        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))<span class="question-mark">?</span>;
 <a href=#399 id=399 data-nosnippet>399</a>    Response::builder()
-<a href=#400 id=400 data-nosnippet>400</a>        .body(Body::from(pprof))
-<a href=#401 id=401 data-nosnippet>401</a>        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
-<a href=#402 id=402 data-nosnippet>402</a>}
-<a href=#403 id=403 data-nosnippet>403</a>
-<a href=#404 id=404 data-nosnippet>404</a><span class="attr">#[cfg(test)]
-<a href=#405 id=405 data-nosnippet>405</a></span><span class="kw">mod </span>tests {
-<a href=#406 id=406 data-nosnippet>406</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#407 id=407 data-nosnippet>407</a>
-<a href=#408 id=408 data-nosnippet>408</a>    <span class="attr">#[tokio::test]
-<a href=#409 id=409 data-nosnippet>409</a>    </span><span class="kw">async fn </span>live() {
-<a href=#410 id=410 data-nosnippet>410</a>        <span class="kw">let </span>(shutdown_tx, _shutdown_rx) = <span class="kw">crate</span>::signal::channel();
-<a href=#411 id=411 data-nosnippet>411</a>        <span class="kw">let </span>health = Health::new(shutdown_tx);
-<a href=#412 id=412 data-nosnippet>412</a>        <span class="kw">let </span>admin = Admin {
-<a href=#413 id=413 data-nosnippet>413</a>            config: <span class="kw">crate</span>::test::TestHelper::new_config(),
-<a href=#414 id=414 data-nosnippet>414</a>            ready: &lt;<span class="kw">_</span>&gt;::default(),
-<a href=#415 id=415 data-nosnippet>415</a>            health,
-<a href=#416 id=416 data-nosnippet>416</a>        };
-<a href=#417 id=417 data-nosnippet>417</a>
-<a href=#418 id=418 data-nosnippet>418</a>        <span class="kw">let </span>server = axum_test::TestServer::new(admin.router()).unwrap();
-<a href=#419 id=419 data-nosnippet>419</a>
-<a href=#420 id=420 data-nosnippet>420</a>        server.get(<span class="string">"/live"</span>).expect_success().<span class="kw">await</span>;
-<a href=#421 id=421 data-nosnippet>421</a>
-<a href=#422 id=422 data-nosnippet>422</a>        <span class="kw">let </span>_unused = std::panic::catch_unwind(|| {
-<a href=#423 id=423 data-nosnippet>423</a>            <span class="macro">panic!</span>(<span class="string">"oh no!"</span>);
-<a href=#424 id=424 data-nosnippet>424</a>        });
-<a href=#425 id=425 data-nosnippet>425</a>
-<a href=#426 id=426 data-nosnippet>426</a>        server.get(<span class="string">"/live"</span>).expect_failure().<span class="kw">await</span>;
-<a href=#427 id=427 data-nosnippet>427</a>    }
-<a href=#428 id=428 data-nosnippet>428</a>
-<a href=#429 id=429 data-nosnippet>429</a>    <span class="attr">#[tokio::test]
-<a href=#430 id=430 data-nosnippet>430</a>    </span><span class="kw">async fn </span>collect_metrics() {
-<a href=#431 id=431 data-nosnippet>431</a>        <span class="kw">let </span>response = <span class="kw">super</span>::collect_metrics();
-<a href=#432 id=432 data-nosnippet>432</a>        <span class="macro">assert_eq!</span>(response.status(), hyper::StatusCode::OK);
-<a href=#433 id=433 data-nosnippet>433</a>    }
-<a href=#434 id=434 data-nosnippet>434</a>
-<a href=#435 id=435 data-nosnippet>435</a>    <span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)]
-<a href=#436 id=436 data-nosnippet>436</a>    #[tokio::test]
-<a href=#437 id=437 data-nosnippet>437</a>    </span><span class="kw">async fn </span>collect_pprof() {
-<a href=#438 id=438 data-nosnippet>438</a>        <span class="comment">// Custom time to make the test fast.
-<a href=#439 id=439 data-nosnippet>439</a>        </span><span class="kw">super</span>::collect_pprof(std::time::Duration::from_millis(<span class="number">1</span>), <span class="number">100</span>)
-<a href=#440 id=440 data-nosnippet>440</a>            .<span class="kw">await
-<a href=#441 id=441 data-nosnippet>441</a>            </span>.unwrap();
-<a href=#442 id=442 data-nosnippet>442</a>    }
-<a href=#443 id=443 data-nosnippet>443</a>}
+<a href=#400 id=400 data-nosnippet>400</a>        .header(axum::http::header::CONTENT_TYPE, <span class="string">"application/octet-stream"</span>)
+<a href=#401 id=401 data-nosnippet>401</a>        .body(Body::from(pprof))
+<a href=#402 id=402 data-nosnippet>402</a>        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
+<a href=#403 id=403 data-nosnippet>403</a>}
+<a href=#404 id=404 data-nosnippet>404</a>
+<a href=#405 id=405 data-nosnippet>405</a><span class="attr">#[cfg(test)]
+<a href=#406 id=406 data-nosnippet>406</a></span><span class="kw">mod </span>tests {
+<a href=#407 id=407 data-nosnippet>407</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#408 id=408 data-nosnippet>408</a>
+<a href=#409 id=409 data-nosnippet>409</a>    <span class="attr">#[tokio::test]
+<a href=#410 id=410 data-nosnippet>410</a>    </span><span class="kw">async fn </span>live() {
+<a href=#411 id=411 data-nosnippet>411</a>        <span class="kw">let </span>(shutdown_tx, _shutdown_rx) = <span class="kw">crate</span>::signal::channel();
+<a href=#412 id=412 data-nosnippet>412</a>        <span class="kw">let </span>health = Health::new(shutdown_tx);
+<a href=#413 id=413 data-nosnippet>413</a>        <span class="kw">let </span>admin = Admin {
+<a href=#414 id=414 data-nosnippet>414</a>            config: <span class="kw">crate</span>::test::TestHelper::new_config(),
+<a href=#415 id=415 data-nosnippet>415</a>            ready: &lt;<span class="kw">_</span>&gt;::default(),
+<a href=#416 id=416 data-nosnippet>416</a>            health,
+<a href=#417 id=417 data-nosnippet>417</a>        };
+<a href=#418 id=418 data-nosnippet>418</a>
+<a href=#419 id=419 data-nosnippet>419</a>        <span class="kw">let </span>server = axum_test::TestServer::new(admin.router()).unwrap();
+<a href=#420 id=420 data-nosnippet>420</a>
+<a href=#421 id=421 data-nosnippet>421</a>        server.get(<span class="string">"/live"</span>).expect_success().<span class="kw">await</span>;
+<a href=#422 id=422 data-nosnippet>422</a>
+<a href=#423 id=423 data-nosnippet>423</a>        <span class="kw">let </span>_unused = std::panic::catch_unwind(|| {
+<a href=#424 id=424 data-nosnippet>424</a>            <span class="macro">panic!</span>(<span class="string">"oh no!"</span>);
+<a href=#425 id=425 data-nosnippet>425</a>        });
+<a href=#426 id=426 data-nosnippet>426</a>
+<a href=#427 id=427 data-nosnippet>427</a>        server.get(<span class="string">"/live"</span>).expect_failure().<span class="kw">await</span>;
+<a href=#428 id=428 data-nosnippet>428</a>    }
+<a href=#429 id=429 data-nosnippet>429</a>
+<a href=#430 id=430 data-nosnippet>430</a>    <span class="attr">#[tokio::test]
+<a href=#431 id=431 data-nosnippet>431</a>    </span><span class="kw">async fn </span>collect_metrics() {
+<a href=#432 id=432 data-nosnippet>432</a>        <span class="kw">let </span>response = <span class="kw">super</span>::collect_metrics();
+<a href=#433 id=433 data-nosnippet>433</a>        <span class="macro">assert_eq!</span>(response.status(), hyper::StatusCode::OK);
+<a href=#434 id=434 data-nosnippet>434</a>    }
+<a href=#435 id=435 data-nosnippet>435</a>
+<a href=#436 id=436 data-nosnippet>436</a>    <span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)]
+<a href=#437 id=437 data-nosnippet>437</a>    #[tokio::test]
+<a href=#438 id=438 data-nosnippet>438</a>    </span><span class="kw">async fn </span>collect_pprof() {
+<a href=#439 id=439 data-nosnippet>439</a>        <span class="comment">// Custom time to make the test fast.
+<a href=#440 id=440 data-nosnippet>440</a>        </span><span class="kw">super</span>::collect_pprof(std::time::Duration::from_millis(<span class="number">1</span>), <span class="number">100</span>)
+<a href=#441 id=441 data-nosnippet>441</a>            .<span class="kw">await
+<a href=#442 id=442 data-nosnippet>442</a>            </span>.unwrap();
+<a href=#443 id=443 data-nosnippet>443</a>    }
+<a href=#444 id=444 data-nosnippet>444</a>}
 </code></pre></div></section></main></body></html>
