@@ -132,10 +132,15 @@ trace_test!(uring_receiver, {
             config.dyn_cfg.cached_filter_chain().unwrap(),
             usize::MAX,
             backend,
+            4,
         ),
         backend,
     }
-    .spawn_io_loop(pending_sends, config.dyn_cfg.cached_filter_chain().unwrap())
+    .spawn_io_loop(
+        pending_sends,
+        config.dyn_cfg.cached_filter_chain().unwrap(),
+        4,
+    )
     .expect("failed to spawn task");
 
     // Drop the socket, otherwise it can
@@ -193,12 +198,14 @@ trace_test!(
             config.dyn_cfg.cached_filter_chain().unwrap(),
             usize::MAX,
             backend,
+            64,
         );
 
         const WORKER_COUNT: usize = 3;
 
         let (socket, addr) = sb.socket();
-        net::packet::spawn_receivers(config, socket, pending_sends, &sessions, backend).unwrap();
+        net::packet::spawn_receivers(config, socket, pending_sends, &sessions, backend, 64)
+            .unwrap();
 
         let socket = std::sync::Arc::new(sb.client());
         let msg = "recv-from";

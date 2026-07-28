@@ -88,6 +88,7 @@ struct Admin {
 #[derive(serde::Deserialize)]
 struct ProfileParams {
     seconds: Option<u64>,
+    frequency: Option<i32>,
 }
 
 impl Admin {
@@ -133,7 +134,16 @@ impl Admin {
             router = router.route(
                 "/debug/pprof/profile",
                 axum::routing::get(|params: axum::extract::Query<ProfileParams>| async move {
-                    match collect_pprof(params.seconds.map(std::time::Duration::from_secs)).await {
+                    match collect_pprof(
+                        params
+                            .seconds
+                            .or(Some(2))
+                            .map(std::time::Duration::from_secs)
+                            .unwrap(),
+                        params.frequency.unwrap_or(100),
+                    )
+                    .await
+                    {
                         Ok(value) => value.into_response(),
                         Err(error) => {
                             tracing::warn!(%error, "admin http server error");
@@ -208,13 +218,13 @@ fn collect_metrics() -> Response<Body> {
 /// the default if `None`.
 #[cfg(target_os = "linux")]
 async fn collect_pprof(
-    duration: Option<std::time::Duration>,
+    duration: std::time::Duration,
+    frequency: i32,
 ) -> Result<impl IntoResponse, eyre::Error> {
-    let duration = duration.unwrap_or_else(|| std::time::Duration::from_secs(2));
     tracing::debug!(duration_seconds = duration.as_secs(), "profiling");
 
     let guard = pprof::ProfilerGuardBuilder::default()
-        .frequency(1000)
+        .frequency(frequency)
         // From the pprof docs, this blocklist helps prevent deadlock with
         // libgcc's unwind.
         .blocklist(&["libc", "libgcc", "pthread", "vdso"])
@@ -426,7 +436,7 @@ mod tests {
     #[tokio::test]
     async fn collect_pprof() {
         // Custom time to make the test fast.
-        super::collect_pprof(Some(std::time::Duration::from_millis(1)))
+        super::collect_pprof(std::time::Duration::from_millis(1), 100)
             .await
             .unwrap();
     }

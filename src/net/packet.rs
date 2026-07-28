@@ -248,6 +248,7 @@ pub fn spawn_receivers(
     worker_sends: Vec<crate::net::PacketQueue>,
     sessions: &Arc<SessionPool>,
     backend: crate::net::io::UdpBackend,
+    recv_ring_len: u16,
 ) -> crate::Result<()> {
     let port = crate::net::socket_port(&socket);
 
@@ -264,7 +265,7 @@ pub fn spawn_receivers(
             backend,
         };
 
-        worker.spawn_io_loop(ws, pfc.clone())?;
+        worker.spawn_io_loop(ws, pfc.clone(), recv_ring_len)?;
     }
 
     Ok(())
