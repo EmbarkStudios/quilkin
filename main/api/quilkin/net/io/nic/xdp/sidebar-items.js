@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["NicConfig","NicUnavailable","XdpSetupError","XdpSpawnError"],"fn":["is_available","setup_xdp_io","spawn"],"mod":["process"],"struct":["XdpConfig","XdpLoop","XdpWorkers"]};
+window.SIDEBAR_ITEMS = {"enum":["NicConfig","NicUnavailable","XdpSetupError","XdpSpawnError"],"fn":["is_available","setup_xdp_io","spawn"],"mod":["diagnostics","process"],"struct":["XdpConfig","XdpLoop","XdpWorkers"]};
