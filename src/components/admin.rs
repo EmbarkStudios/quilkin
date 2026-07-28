@@ -397,6 +397,7 @@ async fn handle_get_heap() -> Result<Response<Body>, (StatusCode, String)> {
         .dump_pprof()
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     Response::builder()
+        .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
         .body(Body::from(pprof))
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
 }
