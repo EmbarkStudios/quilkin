@@ -717,6 +717,12 @@ impl Service {
                         return Ok(());
                     }
                     Err(err) => {
+                        if let Some(diagnosis) =
+                            crate::net::io::nic::xdp::diagnostics::diagnose(&err)
+                        {
+                            tracing::warn!(%diagnosis, "XDP setup failed with a permission error");
+                        }
+
                         if explicit_kernel {
                             return Err(err);
                         }

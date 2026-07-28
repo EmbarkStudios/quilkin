@@ -5,6 +5,7 @@ use quilkin_xdp::xdp::{
     nic::{NicIndex, NicName},
 };
 use std::sync::Arc;
+pub mod diagnostics;
 pub mod process;
 
 pub enum NicConfig<'n> {
