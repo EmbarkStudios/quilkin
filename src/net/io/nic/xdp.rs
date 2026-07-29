@@ -474,13 +474,18 @@ fn io_loop(
 
             // Ensure the fill ring doesn't get starved, which could drop packets
             if let Err(error) = fill.enqueue(&mut umem, BATCH_SIZE * 2 - recvd, true) {
-                // This is shoehorning an error that isn't attributable to a particular packet
-                crate::metrics::errors_total(
-                    crate::metrics::Direction::Read,
-                    &io_error_to_discriminant(error),
-                    &crate::metrics::EMPTY,
-                )
-                .inc();
+                // EAGAIN means the wakeup wasn't delivered, but the buffers are
+                // already enqueued in the ring, so the kernel will pick them up
+                // on the next successful wakeup or its own polling; not an error.
+                if error.raw_os_error() != Some(libc::EAGAIN) {
+                    // This is shoehorning an error that isn't attributable to a particular packet
+                    crate::metrics::errors_total(
+                        crate::metrics::Direction::Read,
+                        &io_error_to_discriminant(error),
+                        &crate::metrics::EMPTY,
+                    )
+                    .inc();
+                }
             }
 
             // Process each of the packets that we received, potentially queuing
@@ -497,20 +502,18 @@ fn io_loop(
             let enqueued_sends = match tx.send(&mut tx_slab, true) {
                 Ok(es) => es,
                 Err(error) => {
-                    // These are all temporary errors that can occur during normal
-                    // operation
-                    // if !matches!(
-                    //     error.raw_os_error(),
-                    //     Some(libc::EBUSY | libc::ENOBUFS | libc::EAGAIN | libc::ENETDOWN)
-                    // ) {
-                    // This is shoehorning an error that isn't attributable to a particular packet
-                    crate::metrics::errors_total(
-                        crate::metrics::Direction::Read,
-                        &io_error_to_discriminant(error),
-                        &crate::metrics::EMPTY,
-                    )
-                    .inc();
-                    //}
+                    // EAGAIN means the wakeup wasn't delivered, but the packets are
+                    // already enqueued in the ring, so the kernel will send them on
+                    // the next successful wakeup or its own polling; not an error.
+                    if error.raw_os_error() != Some(libc::EAGAIN) {
+                        // This is shoehorning an error that isn't attributable to a particular packet
+                        crate::metrics::errors_total(
+                            crate::metrics::Direction::Read,
+                            &io_error_to_discriminant(error),
+                            &crate::metrics::EMPTY,
+                        )
+                        .inc();
+                    }
 
                     before - tx_slab.len()
                 }
