@@ -59,10 +59,7 @@ pub struct XdpPermissionDiagnosis {
 
 impl fmt::Display for XdpPermissionDiagnosis {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "EPERM from the kernel's `bpf` syscall — live diagnosis: "
-        )?;
+        f.write_str("EPERM from the kernel's `bpf` syscall - live diagnosis: ")?;
         for (name, gate) in &self.capabilities {
             write!(f, "{name} {gate}; ")?;
         }

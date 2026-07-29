@@ -74,15 +74,12 @@ FROM debian:bookworm-slim
 
 WORKDIR /
 
-RUN groupadd --gid 65532 nonroot && \
-    useradd --create-home --uid 65532 --gid 65532 --shell /bin/bash nonroot && \
-    apt-get update && \
+RUN apt-get update && \
     apt-get install --no-install-recommends -y ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /workspace/license.html .
 COPY --from=builder /workspace/dependencies-src.zip .
-COPY --from=builder --chown=nonroot:nonroot /workspace/quilkin-bin /quilkin
+COPY --from=builder /workspace/quilkin-bin /quilkin
 
-USER nonroot
 ENTRYPOINT ["/quilkin"]
