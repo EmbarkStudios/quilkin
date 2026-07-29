@@ -474,71 +474,74 @@
 <a href=#474 id=474 data-nosnippet>474</a>
 <a href=#475 id=475 data-nosnippet>475</a>            <span class="comment">// Ensure the fill ring doesn't get starved, which could drop packets
 <a href=#476 id=476 data-nosnippet>476</a>            </span><span class="kw">if let </span><span class="prelude-val">Err</span>(error) = fill.enqueue(<span class="kw-2">&amp;mut </span>umem, BATCH_SIZE * <span class="number">2 </span>- recvd, <span class="bool-val">true</span>) {
-<a href=#477 id=477 data-nosnippet>477</a>                <span class="comment">// This is shoehorning an error that isn't attributable to a particular packet
-<a href=#478 id=478 data-nosnippet>478</a>                </span><span class="kw">crate</span>::metrics::errors_total(
-<a href=#479 id=479 data-nosnippet>479</a>                    <span class="kw">crate</span>::metrics::Direction::Read,
-<a href=#480 id=480 data-nosnippet>480</a>                    <span class="kw-2">&amp;</span>io_error_to_discriminant(error),
-<a href=#481 id=481 data-nosnippet>481</a>                    <span class="kw-2">&amp;</span><span class="kw">crate</span>::metrics::EMPTY,
-<a href=#482 id=482 data-nosnippet>482</a>                )
-<a href=#483 id=483 data-nosnippet>483</a>                .inc();
-<a href=#484 id=484 data-nosnippet>484</a>            }
-<a href=#485 id=485 data-nosnippet>485</a>
-<a href=#486 id=486 data-nosnippet>486</a>            <span class="comment">// Process each of the packets that we received, potentially queuing
-<a href=#487 id=487 data-nosnippet>487</a>            // packets to be sent
-<a href=#488 id=488 data-nosnippet>488</a>            </span>process::process_packets(
-<a href=#489 id=489 data-nosnippet>489</a>                <span class="kw-2">&amp;mut </span>rx_slab,
-<a href=#490 id=490 data-nosnippet>490</a>                <span class="kw-2">&amp;mut </span>umem,
-<a href=#491 id=491 data-nosnippet>491</a>                <span class="kw-2">&amp;mut </span>tx_slab,
-<a href=#492 id=492 data-nosnippet>492</a>                <span class="kw-2">&amp;mut </span>config,
-<a href=#493 id=493 data-nosnippet>493</a>                <span class="kw-2">&amp;mut </span>state,
-<a href=#494 id=494 data-nosnippet>494</a>            );
-<a href=#495 id=495 data-nosnippet>495</a>
-<a href=#496 id=496 data-nosnippet>496</a>            <span class="kw">let </span>before = tx_slab.len();
-<a href=#497 id=497 data-nosnippet>497</a>            <span class="kw">let </span>enqueued_sends = <span class="kw">match </span>tx.send(<span class="kw-2">&amp;mut </span>tx_slab, <span class="bool-val">true</span>) {
-<a href=#498 id=498 data-nosnippet>498</a>                <span class="prelude-val">Ok</span>(es) =&gt; es,
-<a href=#499 id=499 data-nosnippet>499</a>                <span class="prelude-val">Err</span>(error) =&gt; {
-<a href=#500 id=500 data-nosnippet>500</a>                    <span class="comment">// These are all temporary errors that can occur during normal
-<a href=#501 id=501 data-nosnippet>501</a>                    // operation
-<a href=#502 id=502 data-nosnippet>502</a>                    // if !matches!(
-<a href=#503 id=503 data-nosnippet>503</a>                    //     error.raw_os_error(),
-<a href=#504 id=504 data-nosnippet>504</a>                    //     Some(libc::EBUSY | libc::ENOBUFS | libc::EAGAIN | libc::ENETDOWN)
-<a href=#505 id=505 data-nosnippet>505</a>                    // ) {
-<a href=#506 id=506 data-nosnippet>506</a>                    // This is shoehorning an error that isn't attributable to a particular packet
-<a href=#507 id=507 data-nosnippet>507</a>                    </span><span class="kw">crate</span>::metrics::errors_total(
-<a href=#508 id=508 data-nosnippet>508</a>                        <span class="kw">crate</span>::metrics::Direction::Read,
-<a href=#509 id=509 data-nosnippet>509</a>                        <span class="kw-2">&amp;</span>io_error_to_discriminant(error),
-<a href=#510 id=510 data-nosnippet>510</a>                        <span class="kw-2">&amp;</span><span class="kw">crate</span>::metrics::EMPTY,
-<a href=#511 id=511 data-nosnippet>511</a>                    )
-<a href=#512 id=512 data-nosnippet>512</a>                    .inc();
-<a href=#513 id=513 data-nosnippet>513</a>                    <span class="comment">//}
-<a href=#514 id=514 data-nosnippet>514</a>
-<a href=#515 id=515 data-nosnippet>515</a>                    </span>before - tx_slab.len()
-<a href=#516 id=516 data-nosnippet>516</a>                }
-<a href=#517 id=517 data-nosnippet>517</a>            };
-<a href=#518 id=518 data-nosnippet>518</a>
-<a href=#519 id=519 data-nosnippet>519</a>            <span class="comment">// Return frames that have completed sending
-<a href=#520 id=520 data-nosnippet>520</a>            </span>pending_sends += enqueued_sends;
-<a href=#521 id=521 data-nosnippet>521</a>            pending_sends -= completion.dequeue(<span class="kw-2">&amp;mut </span>umem, pending_sends);
-<a href=#522 id=522 data-nosnippet>522</a>
-<a href=#523 id=523 data-nosnippet>523</a>            <span class="kw">let </span>new = umem.outstanding() <span class="kw">as </span>i64;
-<a href=#524 id=524 data-nosnippet>524</a>            <span class="kw">crate</span>::metrics::allocated_xdp_packets().add(new - outstanding);
-<a href=#525 id=525 data-nosnippet>525</a>            outstanding = new;
-<a href=#526 id=526 data-nosnippet>526</a>        }
-<a href=#527 id=527 data-nosnippet>527</a>    }
-<a href=#528 id=528 data-nosnippet>528</a>}
-<a href=#529 id=529 data-nosnippet>529</a>
-<a href=#530 id=530 data-nosnippet>530</a><span class="attr">#[inline]
-<a href=#531 id=531 data-nosnippet>531</a></span><span class="kw">fn </span>io_error_to_discriminant(error: std::io::Error) -&gt; std::borrow::Cow&lt;<span class="lifetime">'static</span>, str&gt; {
-<a href=#532 id=532 data-nosnippet>532</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(code) = error.raw_os_error() <span class="kw">else </span>{
-<a href=#533 id=533 data-nosnippet>533</a>        <span class="kw">return </span>error.to_string().into();
-<a href=#534 id=534 data-nosnippet>534</a>    };
-<a href=#535 id=535 data-nosnippet>535</a>
-<a href=#536 id=536 data-nosnippet>536</a>    <span class="kw">match </span>code {
-<a href=#537 id=537 data-nosnippet>537</a>        libc::EBUSY =&gt; <span class="string">"EBUSY"</span>.into(),
-<a href=#538 id=538 data-nosnippet>538</a>        libc::ENOBUFS =&gt; <span class="string">"ENOBUFS"</span>.into(),
-<a href=#539 id=539 data-nosnippet>539</a>        libc::EAGAIN =&gt; <span class="string">"EAGAIN"</span>.into(),
-<a href=#540 id=540 data-nosnippet>540</a>        libc::ENETDOWN =&gt; <span class="string">"ENETDOWN"</span>.into(),
-<a href=#541 id=541 data-nosnippet>541</a>        other =&gt; <span class="macro">format!</span>(<span class="string">"{other}"</span>).into(),
-<a href=#542 id=542 data-nosnippet>542</a>    }
-<a href=#543 id=543 data-nosnippet>543</a>}
+<a href=#477 id=477 data-nosnippet>477</a>                <span class="comment">// EAGAIN means the wakeup wasn't delivered, but the buffers are
+<a href=#478 id=478 data-nosnippet>478</a>                // already enqueued in the ring, so the kernel will pick them up
+<a href=#479 id=479 data-nosnippet>479</a>                // on the next successful wakeup or its own polling; not an error.
+<a href=#480 id=480 data-nosnippet>480</a>                </span><span class="kw">if </span>error.raw_os_error() != <span class="prelude-val">Some</span>(libc::EAGAIN) {
+<a href=#481 id=481 data-nosnippet>481</a>                    <span class="comment">// This is shoehorning an error that isn't attributable to a particular packet
+<a href=#482 id=482 data-nosnippet>482</a>                    </span><span class="kw">crate</span>::metrics::errors_total(
+<a href=#483 id=483 data-nosnippet>483</a>                        <span class="kw">crate</span>::metrics::Direction::Read,
+<a href=#484 id=484 data-nosnippet>484</a>                        <span class="kw-2">&amp;</span>io_error_to_discriminant(error),
+<a href=#485 id=485 data-nosnippet>485</a>                        <span class="kw-2">&amp;</span><span class="kw">crate</span>::metrics::EMPTY,
+<a href=#486 id=486 data-nosnippet>486</a>                    )
+<a href=#487 id=487 data-nosnippet>487</a>                    .inc();
+<a href=#488 id=488 data-nosnippet>488</a>                }
+<a href=#489 id=489 data-nosnippet>489</a>            }
+<a href=#490 id=490 data-nosnippet>490</a>
+<a href=#491 id=491 data-nosnippet>491</a>            <span class="comment">// Process each of the packets that we received, potentially queuing
+<a href=#492 id=492 data-nosnippet>492</a>            // packets to be sent
+<a href=#493 id=493 data-nosnippet>493</a>            </span>process::process_packets(
+<a href=#494 id=494 data-nosnippet>494</a>                <span class="kw-2">&amp;mut </span>rx_slab,
+<a href=#495 id=495 data-nosnippet>495</a>                <span class="kw-2">&amp;mut </span>umem,
+<a href=#496 id=496 data-nosnippet>496</a>                <span class="kw-2">&amp;mut </span>tx_slab,
+<a href=#497 id=497 data-nosnippet>497</a>                <span class="kw-2">&amp;mut </span>config,
+<a href=#498 id=498 data-nosnippet>498</a>                <span class="kw-2">&amp;mut </span>state,
+<a href=#499 id=499 data-nosnippet>499</a>            );
+<a href=#500 id=500 data-nosnippet>500</a>
+<a href=#501 id=501 data-nosnippet>501</a>            <span class="kw">let </span>before = tx_slab.len();
+<a href=#502 id=502 data-nosnippet>502</a>            <span class="kw">let </span>enqueued_sends = <span class="kw">match </span>tx.send(<span class="kw-2">&amp;mut </span>tx_slab, <span class="bool-val">true</span>) {
+<a href=#503 id=503 data-nosnippet>503</a>                <span class="prelude-val">Ok</span>(es) =&gt; es,
+<a href=#504 id=504 data-nosnippet>504</a>                <span class="prelude-val">Err</span>(error) =&gt; {
+<a href=#505 id=505 data-nosnippet>505</a>                    <span class="comment">// EAGAIN means the wakeup wasn't delivered, but the packets are
+<a href=#506 id=506 data-nosnippet>506</a>                    // already enqueued in the ring, so the kernel will send them on
+<a href=#507 id=507 data-nosnippet>507</a>                    // the next successful wakeup or its own polling; not an error.
+<a href=#508 id=508 data-nosnippet>508</a>                    </span><span class="kw">if </span>error.raw_os_error() != <span class="prelude-val">Some</span>(libc::EAGAIN) {
+<a href=#509 id=509 data-nosnippet>509</a>                        <span class="comment">// This is shoehorning an error that isn't attributable to a particular packet
+<a href=#510 id=510 data-nosnippet>510</a>                        </span><span class="kw">crate</span>::metrics::errors_total(
+<a href=#511 id=511 data-nosnippet>511</a>                            <span class="kw">crate</span>::metrics::Direction::Read,
+<a href=#512 id=512 data-nosnippet>512</a>                            <span class="kw-2">&amp;</span>io_error_to_discriminant(error),
+<a href=#513 id=513 data-nosnippet>513</a>                            <span class="kw-2">&amp;</span><span class="kw">crate</span>::metrics::EMPTY,
+<a href=#514 id=514 data-nosnippet>514</a>                        )
+<a href=#515 id=515 data-nosnippet>515</a>                        .inc();
+<a href=#516 id=516 data-nosnippet>516</a>                    }
+<a href=#517 id=517 data-nosnippet>517</a>
+<a href=#518 id=518 data-nosnippet>518</a>                    before - tx_slab.len()
+<a href=#519 id=519 data-nosnippet>519</a>                }
+<a href=#520 id=520 data-nosnippet>520</a>            };
+<a href=#521 id=521 data-nosnippet>521</a>
+<a href=#522 id=522 data-nosnippet>522</a>            <span class="comment">// Return frames that have completed sending
+<a href=#523 id=523 data-nosnippet>523</a>            </span>pending_sends += enqueued_sends;
+<a href=#524 id=524 data-nosnippet>524</a>            pending_sends -= completion.dequeue(<span class="kw-2">&amp;mut </span>umem, pending_sends);
+<a href=#525 id=525 data-nosnippet>525</a>
+<a href=#526 id=526 data-nosnippet>526</a>            <span class="kw">let </span>new = umem.outstanding() <span class="kw">as </span>i64;
+<a href=#527 id=527 data-nosnippet>527</a>            <span class="kw">crate</span>::metrics::allocated_xdp_packets().add(new - outstanding);
+<a href=#528 id=528 data-nosnippet>528</a>            outstanding = new;
+<a href=#529 id=529 data-nosnippet>529</a>        }
+<a href=#530 id=530 data-nosnippet>530</a>    }
+<a href=#531 id=531 data-nosnippet>531</a>}
+<a href=#532 id=532 data-nosnippet>532</a>
+<a href=#533 id=533 data-nosnippet>533</a><span class="attr">#[inline]
+<a href=#534 id=534 data-nosnippet>534</a></span><span class="kw">fn </span>io_error_to_discriminant(error: std::io::Error) -&gt; std::borrow::Cow&lt;<span class="lifetime">'static</span>, str&gt; {
+<a href=#535 id=535 data-nosnippet>535</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(code) = error.raw_os_error() <span class="kw">else </span>{
+<a href=#536 id=536 data-nosnippet>536</a>        <span class="kw">return </span>error.to_string().into();
+<a href=#537 id=537 data-nosnippet>537</a>    };
+<a href=#538 id=538 data-nosnippet>538</a>
+<a href=#539 id=539 data-nosnippet>539</a>    <span class="kw">match </span>code {
+<a href=#540 id=540 data-nosnippet>540</a>        libc::EBUSY =&gt; <span class="string">"EBUSY"</span>.into(),
+<a href=#541 id=541 data-nosnippet>541</a>        libc::ENOBUFS =&gt; <span class="string">"ENOBUFS"</span>.into(),
+<a href=#542 id=542 data-nosnippet>542</a>        libc::EAGAIN =&gt; <span class="string">"EAGAIN"</span>.into(),
+<a href=#543 id=543 data-nosnippet>543</a>        libc::ENETDOWN =&gt; <span class="string">"ENETDOWN"</span>.into(),
+<a href=#544 id=544 data-nosnippet>544</a>        other =&gt; <span class="macro">format!</span>(<span class="string">"{other}"</span>).into(),
+<a href=#545 id=545 data-nosnippet>545</a>    }
+<a href=#546 id=546 data-nosnippet>546</a>}
 </code></pre></div></section></main></body></html>
