@@ -65,6 +65,7 @@ pub struct XdpWorkers {
     ebpf_prog: quilkin_xdp::EbpfProgram,
     workers: Vec<quilkin_xdp::XdpWorker>,
     nic: NicIndex,
+    xdp_link: quilkin_xdp::aya::programs::xdp::XdpLinkId,
     external_port: NetworkU16,
     qcmp_port: NetworkU16,
     ipv6: std::net::Ipv6Addr,
@@ -110,6 +111,8 @@ pub enum XdpSetupError {
     Xdp(#[from] xdp::error::Error),
     #[error("XDP load error: {0}")]
     XdpLoad(#[from] quilkin_xdp::LoadError),
+    #[error("failed to attach XDP program: {0}")]
+    XdpAttach(#[from] quilkin_xdp::aya::programs::ProgramError),
     #[error("bind error: {0}")]
     BindError(#[from] quilkin_xdp::BindError),
 }
@@ -118,8 +121,6 @@ pub enum XdpSetupError {
 pub enum XdpSpawnError {
     #[error("Failed to spawn worker thread: {0}")]
     Thread(#[source] std::io::Error),
-    #[error("Failed to attach XDP program: {0}")]
-    XdpAttach(#[from] quilkin_xdp::aya::programs::ProgramError),
 }
 
 /// Attempts to setup XDP by querying NIC support and allocating ring buffers
@@ -263,6 +264,14 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
 
     let mut ebpf_prog = quilkin_xdp::EbpfProgram::load(config.external_port, config.qcmp_port)?;
 
+    // Attach before binding sockets: some drivers (eg gve) require XDP
+    // already enabled on the NIC before a socket can bind a queue with
+    // `XDP_ZEROCOPY`. Default flags use driver mode if supported, else SKB.
+    let xdp_link = ebpf_prog.attach(
+        nic_index,
+        quilkin_xdp::aya::programs::xdp::XdpMode::default(),
+    )?;
+
     let umem_cfg = xdp::umem::UmemCfgBuilder {
         frame_size: xdp::umem::FrameSize::TwoK,
         // Provide enough headroom so that we can convert an ipv4 header to ipv6
@@ -283,16 +292,11 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     let ring_cfg = xdp::RingConfigBuilder::default().build()?;
     let workers = ebpf_prog.create_and_bind_sockets(nic_index, umem_cfg, &device_caps, ring_cfg)?;
 
-    tracing::info!(
-        nic = ?nic_index,
-        queue_count = workers.len(),
-        "XDP is running"
-    );
-
     Ok(XdpWorkers {
         ebpf_prog,
         workers,
         nic: nic_index,
+        xdp_link,
         external_port: config.external_port.into(),
         qcmp_port: config.qcmp_port.into(),
         ipv4,
@@ -339,14 +343,17 @@ impl XdpLoop {
 /// The entrypoint into the XDP I/O loop.
 ///
 /// This spawns a named thread for each configured XDP socket to run the packet
-/// receiving + processing + sending, after which the eBPF program used to route
-/// packets to the XDP sockets is attached to the NIC.
+/// receiving + processing + sending. The eBPF program used to route packets to
+/// the XDP sockets is already attached to the NIC by [`setup_xdp_io`] by this
+/// point.
 ///
 /// # Errors
 ///
-/// This can fail if threads can not be spawned for some reason (unlikely), the
-/// more likely reason for failure is the inability to attach the eBPF program
+/// This can fail if threads can not be spawned for some reason (unlikely)
 pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoop, XdpSpawnError> {
+    let nic = workers.nic;
+    let ebpf_prog = workers.ebpf_prog;
+    let xdp_link = workers.xdp_link;
     let external_port = workers.external_port;
     let qcmp_port = workers.qcmp_port;
     let ipv4 = workers.ipv4;
@@ -354,7 +361,8 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
     let session_state = Arc::new(process::SessionState::default());
     let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-    let mut threads = Vec::with_capacity(workers.workers.len());
+    let queue_count = workers.workers.len();
+    let mut threads = Vec::with_capacity(queue_count);
     for (i, mut worker) in workers.workers.into_iter().enumerate() {
         let cfg = config.clone();
         let ss = session_state.clone();
@@ -388,19 +396,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
         threads.push(jh);
     }
 
-    // Now that all the io loops are running, attach the eBPF program to route
-    // packets to the bound sockets
-    let mut ebpf_prog = workers.ebpf_prog;
-
-    // We use the default flags here, which means that the program will be attached
-    // in driver mode if the NIC + driver is capable of it, otherwise it will fallback
-    // to SKB mode. This allows maximum compatibility, and we already provide
-    // flags to force zerocopy, which relies on driver mode, so the user can use
-    // that if they don't want the fallback behavior
-    let xdp_link = ebpf_prog.attach(
-        workers.nic,
-        quilkin_xdp::aya::programs::xdp::XdpMode::default(),
-    )?;
+    tracing::info!(?nic, queue_count, "XDP is running");
 
     Ok(XdpLoop {
         threads,
