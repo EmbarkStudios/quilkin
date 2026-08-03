@@ -182,42 +182,42 @@
 <a href=#182 id=182 data-nosnippet>182</a>        <span class="prelude-val">Ok</span>(entries)
 <a href=#183 id=183 data-nosnippet>183</a>    }
 <a href=#184 id=184 data-nosnippet>184</a>
-<a href=#185 id=185 data-nosnippet>185</a>    <span class="kw">pub fn </span>attach(
-<a href=#186 id=186 data-nosnippet>186</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#187 id=187 data-nosnippet>187</a>        nic: NicIndex,
-<a href=#188 id=188 data-nosnippet>188</a>        mode: aya::programs::xdp::XdpMode,
-<a href=#189 id=189 data-nosnippet>189</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;aya::programs::xdp::XdpLinkId, aya::programs::ProgramError&gt; {
-<a href=#190 id=190 data-nosnippet>190</a>        <span class="kw">if let </span><span class="prelude-val">Err</span>(_error) = aya_log::EbpfLogger::init(<span class="kw-2">&amp;mut </span><span class="self">self</span>.bpf) {
-<a href=#191 id=191 data-nosnippet>191</a>            <span class="comment">// Would be good to enable this if we do end up adding log messages to
-<a href=#192 id=192 data-nosnippet>192</a>            // the eBPF program, right now we don't so this will error as the ring
-<a href=#193 id=193 data-nosnippet>193</a>            // buffer used to transfer log messages is not created if there are none
-<a href=#194 id=194 data-nosnippet>194</a>            //tracing::warn!(%error, "failed to initialize eBPF logging");
-<a href=#195 id=195 data-nosnippet>195</a>        </span>}
-<a href=#196 id=196 data-nosnippet>196</a>
-<a href=#197 id=197 data-nosnippet>197</a>        <span class="comment">// We use this entrypoint for now, but in the future we could also use
-<a href=#198 id=198 data-nosnippet>198</a>        // a round robin mode when the xdp lib supports shared Umem
-<a href=#199 id=199 data-nosnippet>199</a>        </span><span class="kw">let </span>program: <span class="kw-2">&amp;mut </span>aya::programs::Xdp = <span class="self">self
-<a href=#200 id=200 data-nosnippet>200</a>            </span>.bpf
-<a href=#201 id=201 data-nosnippet>201</a>            .program_mut(<span class="string">"all_queues"</span>)
-<a href=#202 id=202 data-nosnippet>202</a>            .expect(<span class="string">"failed to locate 'all_queues' program"</span>)
-<a href=#203 id=203 data-nosnippet>203</a>            .try_into()
-<a href=#204 id=204 data-nosnippet>204</a>            .expect(<span class="string">"'all_queues' is not an xdp program"</span>);
-<a href=#205 id=205 data-nosnippet>205</a>        program.load()<span class="question-mark">?</span>;
+<a href=#185 id=185 data-nosnippet>185</a>    <span class="comment">// We use this entrypoint for now, but in the future we could also use
+<a href=#186 id=186 data-nosnippet>186</a>    // a round robin mode when the xdp lib supports shared Umem
+<a href=#187 id=187 data-nosnippet>187</a>    </span><span class="kw">fn </span>program_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>aya::programs::Xdp {
+<a href=#188 id=188 data-nosnippet>188</a>        <span class="self">self</span>.bpf
+<a href=#189 id=189 data-nosnippet>189</a>            .program_mut(<span class="string">"all_queues"</span>)
+<a href=#190 id=190 data-nosnippet>190</a>            .expect(<span class="string">"failed to locate 'all_queues' program"</span>)
+<a href=#191 id=191 data-nosnippet>191</a>            .try_into()
+<a href=#192 id=192 data-nosnippet>192</a>            .expect(<span class="string">"'all_queues' is not an xdp program"</span>)
+<a href=#193 id=193 data-nosnippet>193</a>    }
+<a href=#194 id=194 data-nosnippet>194</a>
+<a href=#195 id=195 data-nosnippet>195</a>    <span class="doccomment">/// Verifies and loads the program into the kernel; call once, before [`Self::attach`].
+<a href=#196 id=196 data-nosnippet>196</a>    </span><span class="kw">pub fn </span>load_into_kernel(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;(), aya::programs::ProgramError&gt; {
+<a href=#197 id=197 data-nosnippet>197</a>        <span class="kw">if let </span><span class="prelude-val">Err</span>(_error) = aya_log::EbpfLogger::init(<span class="kw-2">&amp;mut </span><span class="self">self</span>.bpf) {
+<a href=#198 id=198 data-nosnippet>198</a>            <span class="comment">// Would be good to enable this if we do end up adding log messages to
+<a href=#199 id=199 data-nosnippet>199</a>            // the eBPF program, right now we don't so this will error as the ring
+<a href=#200 id=200 data-nosnippet>200</a>            // buffer used to transfer log messages is not created if there are none
+<a href=#201 id=201 data-nosnippet>201</a>            //tracing::warn!(%error, "failed to initialize eBPF logging");
+<a href=#202 id=202 data-nosnippet>202</a>        </span>}
+<a href=#203 id=203 data-nosnippet>203</a>
+<a href=#204 id=204 data-nosnippet>204</a>        <span class="self">self</span>.program_mut().load()
+<a href=#205 id=205 data-nosnippet>205</a>    }
 <a href=#206 id=206 data-nosnippet>206</a>
-<a href=#207 id=207 data-nosnippet>207</a>        program.attach_to_if_index(nic.into(), mode)
-<a href=#208 id=208 data-nosnippet>208</a>    }
-<a href=#209 id=209 data-nosnippet>209</a>
-<a href=#210 id=210 data-nosnippet>210</a>    <span class="kw">pub fn </span>detach(
-<a href=#211 id=211 data-nosnippet>211</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#212 id=212 data-nosnippet>212</a>        link_id: aya::programs::xdp::XdpLinkId,
-<a href=#213 id=213 data-nosnippet>213</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), aya::programs::ProgramError&gt; {
-<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">let </span>program: <span class="kw-2">&amp;mut </span>aya::programs::Xdp = <span class="self">self
-<a href=#215 id=215 data-nosnippet>215</a>            </span>.bpf
-<a href=#216 id=216 data-nosnippet>216</a>            .program_mut(<span class="string">"all_queues"</span>)
-<a href=#217 id=217 data-nosnippet>217</a>            .expect(<span class="string">"failed to locate 'all_queues' program"</span>)
-<a href=#218 id=218 data-nosnippet>218</a>            .try_into()
-<a href=#219 id=219 data-nosnippet>219</a>            .expect(<span class="string">"'all_queues' is not an xdp program"</span>);
-<a href=#220 id=220 data-nosnippet>220</a>        program.detach(link_id)
+<a href=#207 id=207 data-nosnippet>207</a>    <span class="doccomment">/// Attaches the loaded program to `nic`; safe to retry, eg after reconfiguring the NIC.
+<a href=#208 id=208 data-nosnippet>208</a>    </span><span class="kw">pub fn </span>attach(
+<a href=#209 id=209 data-nosnippet>209</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#210 id=210 data-nosnippet>210</a>        nic: NicIndex,
+<a href=#211 id=211 data-nosnippet>211</a>        mode: aya::programs::xdp::XdpMode,
+<a href=#212 id=212 data-nosnippet>212</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;aya::programs::xdp::XdpLinkId, aya::programs::ProgramError&gt; {
+<a href=#213 id=213 data-nosnippet>213</a>        <span class="self">self</span>.program_mut().attach_to_if_index(nic.into(), mode)
+<a href=#214 id=214 data-nosnippet>214</a>    }
+<a href=#215 id=215 data-nosnippet>215</a>
+<a href=#216 id=216 data-nosnippet>216</a>    <span class="kw">pub fn </span>detach(
+<a href=#217 id=217 data-nosnippet>217</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#218 id=218 data-nosnippet>218</a>        link_id: aya::programs::xdp::XdpLinkId,
+<a href=#219 id=219 data-nosnippet>219</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), aya::programs::ProgramError&gt; {
+<a href=#220 id=220 data-nosnippet>220</a>        <span class="self">self</span>.program_mut().detach(link_id)
 <a href=#221 id=221 data-nosnippet>221</a>    }
 <a href=#222 id=222 data-nosnippet>222</a>}
 </code></pre></div></section></main></body></html>
