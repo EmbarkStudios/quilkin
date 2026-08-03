@@ -149,6 +149,7 @@ tikv-jemallocator = { workspace = true, optional = true }
 tikv-jemalloc-ctl = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+ethtool = { version = "0.2.9", default-features = false, features = ["tokio_socket"] }
 io-uring = { version = "0.7", default-features = false }
 libc.workspace = true
 pprof = { version = "0.13.1", package = "pprof2" }

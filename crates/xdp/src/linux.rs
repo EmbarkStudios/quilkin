@@ -182,11 +182,18 @@ impl EbpfProgram {
         Ok(entries)
     }
 
-    pub fn attach(
-        &mut self,
-        nic: NicIndex,
-        mode: aya::programs::xdp::XdpMode,
-    ) -> Result<aya::programs::xdp::XdpLinkId, aya::programs::ProgramError> {
+    // We use this entrypoint for now, but in the future we could also use
+    // a round robin mode when the xdp lib supports shared Umem
+    fn program_mut(&mut self) -> &mut aya::programs::Xdp {
+        self.bpf
+            .program_mut("all_queues")
+            .expect("failed to locate 'all_queues' program")
+            .try_into()
+            .expect("'all_queues' is not an xdp program")
+    }
+
+    /// Verifies and loads the program into the kernel; call once, before [`Self::attach`].
+    pub fn load_into_kernel(&mut self) -> Result<(), aya::programs::ProgramError> {
         if let Err(_error) = aya_log::EbpfLogger::init(&mut self.bpf) {
             // Would be good to enable this if we do end up adding log messages to
             // the eBPF program, right now we don't so this will error as the ring
@@ -194,29 +201,22 @@ impl EbpfProgram {
             //tracing::warn!(%error, "failed to initialize eBPF logging");
         }
 
-        // We use this entrypoint for now, but in the future we could also use
-        // a round robin mode when the xdp lib supports shared Umem
-        let program: &mut aya::programs::Xdp = self
-            .bpf
-            .program_mut("all_queues")
-            .expect("failed to locate 'all_queues' program")
-            .try_into()
-            .expect("'all_queues' is not an xdp program");
-        program.load()?;
+        self.program_mut().load()
+    }
 
-        program.attach_to_if_index(nic.into(), mode)
+    /// Attaches the loaded program to `nic`; safe to retry, eg after reconfiguring the NIC.
+    pub fn attach(
+        &mut self,
+        nic: NicIndex,
+        mode: aya::programs::xdp::XdpMode,
+    ) -> Result<aya::programs::xdp::XdpLinkId, aya::programs::ProgramError> {
+        self.program_mut().attach_to_if_index(nic.into(), mode)
     }
 
     pub fn detach(
         &mut self,
         link_id: aya::programs::xdp::XdpLinkId,
     ) -> Result<(), aya::programs::ProgramError> {
-        let program: &mut aya::programs::Xdp = self
-            .bpf
-            .program_mut("all_queues")
-            .expect("failed to locate 'all_queues' program")
-            .try_into()
-            .expect("'all_queues' is not an xdp program");
-        program.detach(link_id)
+        self.program_mut().detach(link_id)
     }
 }
