@@ -3890,7 +3890,6 @@ dependencies = [
  "dashmap",
  "either",
  "enum_dispatch",
- "ethtool",
  "eyre",
  "fixedstr",
  "form_urlencoded",
@@ -4055,8 +4054,11 @@ version = "0.1.0"
 dependencies = [
  "aya",
  "aya-log",
+ "ethtool",
+ "futures",
  "libc",
  "thiserror 2.0.18",
+ "tokio",
  "xdp",
 ]
 

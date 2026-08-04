@@ -149,7 +149,6 @@ tikv-jemallocator = { workspace = true, optional = true }
 tikv-jemalloc-ctl = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ethtool = { version = "0.2.9", default-features = false, features = ["tokio_socket"] }
 io-uring = { version = "0.7", default-features = false }
 libc.workspace = true
 pprof = { version = "0.13.1", package = "pprof2" }
@@ -220,6 +219,7 @@ bytes = { version = "1.11.1", features = ["serde"] }
 compact_str = "0.7"
 corrosion = { path = "crates/corrosion", version = "0.1.0", package = "quilkin-corrosion" }
 data-encoding = "2.10"
+ethtool = { version = "0.2.9", default-features = false, features = ["tokio_socket"] }
 eyre = "0.6.12"
 fixedstr = { version = "0.5", features = ["flex-str"] }
 futures = "0.3.31"
