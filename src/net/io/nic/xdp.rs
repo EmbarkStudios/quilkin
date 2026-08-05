@@ -257,7 +257,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         .map_err(|err| XdpSetupError::ChannelsQuery(name, err))?;
     device_caps.queue_count = channels.current();
 
-    tracing::debug!(?device_caps, nic = ?nic_index, "XDP features for device");
+    tracing::info!(?device_caps, nic = ?nic_index, "XDP features for device");
 
     if config.require_zero_copy
         && matches!(device_caps.zero_copy, xdp::nic::XdpZeroCopy::Unavailable)
