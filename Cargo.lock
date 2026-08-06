@@ -6549,8 +6549,9 @@ dependencies = [
 
 [[package]]
 name = "xdp"
-version = "0.7.3"
-source = "git+https://codeberg.org/ca1ne/xdp?branch=queues#ba2db0a8bfeaf9084c291196d19bb8c3c543219e"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9efb2e28167f29f3f15e2ab4a1fcd56df6e01d33052b95db2b28a93568e88cce"
 
 [[package]]
 name = "yansi"
