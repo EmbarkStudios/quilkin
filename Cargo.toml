@@ -305,3 +305,6 @@ tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
+
+[patch.crates-io]
+xdp = { git = "https://codeberg.org/ca1ne/xdp", branch = "queues" }

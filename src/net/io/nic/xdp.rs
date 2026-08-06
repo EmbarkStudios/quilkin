@@ -90,8 +90,6 @@ pub enum XdpSetupError {
     NicUnavailable(#[from] NicUnavailable),
     #[error("failed to query device capabilities for {0}: {1}")]
     NicQuery(NicName, #[source] std::io::Error),
-    #[error("failed to query queue channels for {0}: {1}")]
-    ChannelsQuery(NicName, #[source] std::io::Error),
     #[error("failed to query ip addresses for {0}: {1}")]
     AddressQuery(NicName, #[source] std::io::Error),
     #[error("`XDP_ZEROCOPY` is unavailable for {0}")]
@@ -165,28 +163,26 @@ fn next_queue_count_to_try(current: u32) -> Option<u32> {
 fn attach_xdp_program(
     ebpf_prog: &mut quilkin_xdp::EbpfProgram,
     nic: NicIndex,
-    initial_channels: quilkin_xdp::Channels,
-) -> Result<
-    (quilkin_xdp::aya::programs::xdp::XdpLinkId, u32),
-    quilkin_xdp::aya::programs::ProgramError,
-> {
+    queues: &mut quilkin_xdp::xdp::nic::Queues,
+) -> Result<quilkin_xdp::aya::programs::xdp::XdpLinkId, quilkin_xdp::aya::programs::ProgramError> {
     ebpf_prog.load_into_kernel()?;
 
     let mode = quilkin_xdp::aya::programs::xdp::XdpMode::default();
-    let uses_combined = initial_channels.uses_combined();
-    let mut queue_count = initial_channels.current();
+    // We've already synchronized the tx and rx counts if needed before this function
+    let mut queue_count = queues.rx_count();
 
     loop {
         match ebpf_prog.attach(nic, mode) {
-            Ok(link) => return Ok((link, queue_count)),
+            Ok(link) => return Ok(link),
             Err(error) => {
-                let Some(reduced) = next_queue_count_to_try(queue_count) else {
+                let reduced = queue_count / 2;
+                if reduced < 1 {
                     return Err(error);
-                };
+                }
 
-                if let Err(shrink_error) =
-                    quilkin_xdp::shrink_queue_count(nic, uses_combined, reduced)
-                {
+                queues.set_rx_and_tx(reduced);
+
+                if let Err(shrink_error) = nic.set_queue_counts(queues) {
                     tracing::warn!(
                         %shrink_error,
                         ?nic,
@@ -214,7 +210,7 @@ fn attach_xdp_program(
 /// Binding to fewer queues is possible in the future but requires additional
 /// work in the `xdp` crate
 pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> {
-    let nic_index = match config.nic {
+    let nic = match config.nic {
         NicConfig::Default => {
             let mut chosen = None;
 
@@ -240,38 +236,31 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         NicConfig::Index(index) => xdp::nic::NicIndex::new(index),
     };
 
-    let name = nic_index
+    let name = nic
         .name()
-        .map_err(|_err| NicUnavailable::UnknownIndex(nic_index.into()))?;
+        .map_err(|_err| NicUnavailable::UnknownIndex(nic.into()))?;
 
-    tracing::info!(nic = ?nic_index, "selected NIC");
+    tracing::info!(nic = ?nic, "selected NIC");
 
-    let mut device_caps = nic_index
+    let mut device_caps = nic
         .query_capabilities()
         .map_err(|err| XdpSetupError::NicQuery(name, err))?;
 
-    // `query_capabilities` reports its own queue count, but `query_channels`
-    // is the richer, authoritative source (it also knows the reporting
-    // style), so supersede it here rather than tracking two queue counts.
-    let channels = quilkin_xdp::query_channels(nic_index)
-        .map_err(|err| XdpSetupError::ChannelsQuery(name, err))?;
-    device_caps.queue_count = channels.current();
-
-    tracing::info!(?device_caps, nic = ?nic_index, "XDP features for device");
+    tracing::info!(?device_caps, nic = ?nic, "XDP features for device");
 
     if config.require_zero_copy
         && matches!(device_caps.zero_copy, xdp::nic::XdpZeroCopy::Unavailable)
     {
-        tracing::error!(?device_caps, nic = ?nic_index, "XDP features for device");
+        tracing::error!(?device_caps, nic = ?nic, "XDP features for device");
         return Err(XdpSetupError::ZeroCopyUnavailable(name));
     }
 
     if config.require_tx_checksum && !device_caps.tx_metadata.checksum() {
-        tracing::error!(?device_caps, nic = ?nic_index, "XDP features for device");
+        tracing::error!(?device_caps, nic = ?nic, "XDP features for device");
         return Err(XdpSetupError::TxChecksumUnavailable(name));
     }
 
-    let (ipv4, ipv6) = nic_index
+    let (ipv4, ipv6) = nic
         .addresses()
         .and_then(|(ipv4, ipv6)| {
             if ipv4.is_none() && ipv6.is_none() {
@@ -294,8 +283,34 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     // and we only need 2k since we only care about non-fragmented UDP packets
     const PACKET_SIZE: u64 = 2 * 1024;
 
+    // It's extremely unlikely these number will ever differ, but if they do we take the minimum
+    let rx_count = device_caps.queues.rx_count();
+    let tx_count = device_caps.queues.tx_count();
+
+    if rx_count != tx_count {
+        tracing::warn!(
+            ?nic,
+            rx_count,
+            tx_count,
+            "the selected NIC has a different number of RX and TX queues"
+        );
+        let qc = rx_count.min(tx_count);
+
+        // If the tx count is higher it doesn't really matter since they just wouldn't be used, but if we have more rx than tx
+        // we need to reduce as otherwise we might not be able to send on some of the i/o loops
+        if rx_count > tx_count {
+            device_caps.queues.set_rx_and_tx(qc);
+            if let Err(error) = nic.set_queue_counts(&device_caps.queues) {
+                tracing::error!(%error, ?nic, rx_count, tx_count, "failed to synchronize queue counts before attach");
+                return Err(XdpSetupError::NicQuery(name, error));
+            }
+        }
+    }
+
+    let queue_count = device_caps.queues.rx_count();
+
     let packet_count = if let Some(max) = config.maximum_packet_memory {
-        let bytes_per_socket = max / device_caps.queue_count as u64;
+        let bytes_per_socket = max / queue_count as u64;
         let packet_count = (bytes_per_socket / PACKET_SIZE).next_power_of_two();
         if MINIMUM_UMEM_COUNT > packet_count {
             fn byte_units(b: u64) -> (f64, &'static str) {
@@ -312,8 +327,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
             }
 
             let (max, xunit) = byte_units(max);
-            let (min, nunit) =
-                byte_units(MINIMUM_UMEM_COUNT * PACKET_SIZE * device_caps.queue_count as u64);
+            let (min, nunit) = byte_units(MINIMUM_UMEM_COUNT * PACKET_SIZE * queue_count as u64);
 
             return Err(XdpSetupError::MinimumMemoryRequirementsExceeded {
                 max,
@@ -321,7 +335,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
                 min,
                 nunit,
                 nic: name,
-                queue_count: device_caps.queue_count,
+                queue_count,
             });
         }
 
@@ -334,8 +348,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
 
     // Attach before binding: some drivers (eg gve) need XDP already enabled
     // before a socket can bind a queue with `XDP_ZEROCOPY`.
-    let (xdp_link, queue_count) = attach_xdp_program(&mut ebpf_prog, nic_index, channels)?;
-    device_caps.queue_count = queue_count;
+    let xdp_link = attach_xdp_program(&mut ebpf_prog, nic, &mut device_caps.queues)?;
 
     let umem_cfg = xdp::umem::UmemCfgBuilder {
         frame_size: xdp::umem::FrameSize::TwoK,
@@ -355,12 +368,12 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     .build()?;
 
     let ring_cfg = xdp::RingConfigBuilder::default().build()?;
-    let workers = ebpf_prog.create_and_bind_sockets(nic_index, umem_cfg, &device_caps, ring_cfg)?;
+    let workers = ebpf_prog.create_and_bind_sockets(nic, umem_cfg, &device_caps, ring_cfg)?;
 
     Ok(XdpWorkers {
         ebpf_prog,
         workers,
-        nic: nic_index,
+        nic,
         xdp_link,
         external_port: config.external_port.into(),
         qcmp_port: config.qcmp_port.into(),

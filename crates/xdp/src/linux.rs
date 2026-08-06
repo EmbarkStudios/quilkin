@@ -162,8 +162,10 @@ impl EbpfProgram {
             self.bpf.map_mut("XSK").expect("failed to retrieve XSK map"),
         )?;
 
-        let mut entries = Vec::with_capacity(device_caps.queue_count as _);
-        for i in 0..device_caps.queue_count {
+        let queue_count = device_caps.queues.rx_count();
+
+        let mut entries = Vec::with_capacity(queue_count as _);
+        for i in 0..queue_count {
             let umem = xdp::Umem::map(umem_cfg)?;
             let mut sb = xdp::socket::XdpSocketBuilder::new()?;
             let (rings, mut bind_flags) = sb.build_wakable_rings(&umem, ring_cfg)?;

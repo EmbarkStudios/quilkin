@@ -1470,23 +1470,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ethtool"
-version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7f0218cf6f43c8207b24602757c18a43dc8cd71a24ecce4b656489a2f27bc76"
-dependencies = [
- "futures",
- "genetlink",
- "log",
- "netlink-packet-core",
- "netlink-packet-generic",
- "netlink-proto",
- "netlink-sys",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
 name = "event-listener"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1777,20 +1760,6 @@ checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
-]
-
-[[package]]
-name = "genetlink"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d8935531e8e0919b17043c668cc18bfac1622f2fab73125f4f018124ee330b8"
-dependencies = [
- "futures",
- "log",
- "netlink-packet-core",
- "netlink-packet-generic",
- "netlink-proto",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3160,52 +3129,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
-name = "netlink-packet-core"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3463cbb78394cb0141e2c926b93fc2197e473394b761986eca3b9da2c63ae0f4"
-dependencies = [
- "paste",
-]
-
-[[package]]
-name = "netlink-packet-generic"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f891b2e0054cac5a684a06628f59568f841c93da4e551239da6e518f539e775"
-dependencies = [
- "netlink-packet-core",
-]
-
-[[package]]
-name = "netlink-proto"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6f7398dddf5f152d2a91a2921a134c6097056e292c0d4b9906007855e7cece6"
-dependencies = [
- "bytes",
- "futures-channel",
- "futures-util",
- "log",
- "netlink-packet-core",
- "netlink-sys",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "netlink-sys"
-version = "0.8.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd6c30ed10fa69cc491d491b85cc971f6bdeb8e7367b7cde2ee6cc878d583fae"
-dependencies = [
- "bytes",
- "futures-util",
- "libc",
- "log",
- "tokio",
-]
-
-[[package]]
 name = "nix"
 version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4148,11 +4071,8 @@ dependencies = [
  "aya",
  "aya-log",
  "aya-obj",
- "ethtool",
- "futures",
  "libc",
  "thiserror 2.0.18",
- "tokio",
  "xdp",
 ]
 
@@ -6630,8 +6550,7 @@ dependencies = [
 [[package]]
 name = "xdp"
 version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21a573b5aa423fecf27e2dc9c4009db67cd2f35718c2a859d7352ee3fe0d1780"
+source = "git+https://codeberg.org/ca1ne/xdp?branch=queues#ba2db0a8bfeaf9084c291196d19bb8c3c543219e"
 
 [[package]]
 name = "yansi"
