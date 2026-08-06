@@ -231,7 +231,8 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
             chosen.ok_or(NicUnavailable::NoAvailableDefault)?
         }
         NicConfig::Name(name) => {
-            let cname = std::ffi::CString::new(name).unwrap();
+            let cname = std::ffi::CString::new(name)
+                .map_err(|_nul| NicUnavailable::UnknownName(name.to_owned()))?;
             xdp::nic::NicIndex::lookup_by_name(&cname)
                 .map_err(NicUnavailable::Query)?
                 .ok_or_else(|| NicUnavailable::UnknownName(name.to_owned()))?
@@ -302,7 +303,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
                 let mut unit = 0;
                 const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB"];
 
-                while units > 1024.0 {
+                while units > 1024.0 && unit + 1 < UNITS.len() {
                     units /= 1024.0;
                     unit += 1;
                 }
@@ -393,11 +394,11 @@ impl XdpLoop {
         for jh in self.threads {
             if let Err(error) = jh.join() {
                 if let Some(error) = error.downcast_ref::<&'static str>() {
-                    tracing::error!(error, "XDP I/O thread enountered error");
+                    tracing::error!(error, "XDP I/O thread encountered error");
                 } else if let Some(error) = error.downcast_ref::<String>() {
-                    tracing::error!(error, "XDP I/O thread enountered error");
+                    tracing::error!(error, "XDP I/O thread encountered error");
                 } else {
-                    tracing::error!(?error, "XDP I/O thread enountered error");
+                    tracing::error!(?error, "XDP I/O thread encountered error");
                 };
             }
         }

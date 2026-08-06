@@ -862,6 +862,45 @@ async fn qcmp() {
         umem.free_packet(pong_packet);
     }
 
+    // A ping packet padded to the minimum frame size
+    {
+        let mut ping_packet = unsafe { umem.alloc().expect("umem has no available packets") };
+
+        let ping = qcmp::Protocol::Ping {
+            client_timestamp: ping_time,
+            nonce: 98,
+        };
+
+        ping.encode(&mut qp);
+
+        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+            .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
+            .udp(CLIENT.port(), PROXY.port())
+            .write(&mut ping_packet, &qp)
+            .unwrap();
+
+        assert_eq!(ping_packet.len(), 59);
+        ping_packet.append(&[0]).unwrap();
+
+        rx_slab.push_front(ping_packet);
+        process::process_packets(
+            &mut rx_slab,
+            &mut umem,
+            &mut tx_slab,
+            &mut cfg_state,
+            &mut state,
+        );
+
+        let pong_packet = tx_slab.pop_back().expect("padded ping packet was dropped");
+        let udp = UdpHeaders::parse_packet(&pong_packet).unwrap().unwrap();
+        let pong = qcmp::Protocol::parse(&pong_packet[udp.data])
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(pong.nonce(), 98);
+        umem.free_packet(pong_packet);
+    }
+
     // A pong packet, should be rejected
     {
         let mut bad_packet = unsafe { umem.alloc().expect("umem has no available packets") };
@@ -892,4 +931,240 @@ async fn qcmp() {
         assert!(tx_slab.is_empty());
         unsafe { umem.alloc().expect("umem should have available memory") };
     }
+}
+
+/// Validates ethernet padding is trimmed rather than rejected, and not forwarded
+#[tokio::test]
+async fn trims_ethernet_padding() {
+    const SERVER: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 1111);
+    const PROXY: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(2, 2, 2, 2), 7777);
+    const CLIENT: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(5, 5, 5, 5), 8888);
+
+    let mut cfg_state = make_config(
+        filters::FilterChain::default(),
+        endpoints(&[(SERVER.into(), &[])]),
+    );
+
+    let mut state = process::State {
+        external_port: PROXY.port().into(),
+        qcmp_port: 0.into(),
+        destinations: Vec::with_capacity(1),
+        addr_to_asn: Default::default(),
+        sessions: Arc::new(Default::default()),
+        local_ipv4: *PROXY.ip(),
+        local_ipv6: Ipv6Addr::from_bits(0),
+        last_receive: UtcTimestamp::now(),
+    };
+
+    // The size of a QCMP ping, which pads to the minimum frame size
+    let data = [0xf0u8; 17];
+
+    let mut umem = xdp::Umem::map(
+        xdp::umem::UmemCfgBuilder {
+            frame_size: xdp::umem::FrameSize::TwoK,
+            head_room: 0,
+            frame_count: 1,
+            ..Default::default()
+        }
+        .build()
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut client_packet = unsafe { umem.alloc().unwrap() };
+
+    etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
+        .udp(CLIENT.port(), PROXY.port())
+        .write(&mut client_packet, &data)
+        .unwrap();
+
+    // 14 (ethernet) + 20 (ipv4) + 8 (udp) + 17 (payload)
+    assert_eq!(client_packet.len(), 59);
+    client_packet.append(&[0]).unwrap();
+
+    let mut rx_slab = LittleSlab::new();
+    rx_slab.push_front(client_packet);
+    let mut tx_slab = LittleSlab::new();
+    process::process_packets(
+        &mut rx_slab,
+        &mut umem,
+        &mut tx_slab,
+        &mut cfg_state,
+        &mut state,
+    );
+
+    let server_packet = tx_slab.pop_back().expect("padded packet was dropped");
+    let udp = UdpHeaders::parse_packet(&server_packet).unwrap().unwrap();
+
+    assert_eq!(udp.destination_address(), SERVER.into());
+    assert_eq!(&server_packet[udp.data], &data[..]);
+    assert_eq!(server_packet.len(), 59);
+}
+
+/// Validates frames we're unable to parse are dropped and their frames freed
+#[tokio::test]
+async fn drops_unparsable_packets() {
+    const SERVER: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 1111);
+    const PROXY: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(2, 2, 2, 2), 7777);
+    const CLIENT: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(5, 5, 5, 5), 8888);
+
+    let mut cfg_state = make_config(
+        filters::FilterChain::default(),
+        endpoints(&[(SERVER.into(), &[])]),
+    );
+
+    let mut state = process::State {
+        external_port: PROXY.port().into(),
+        qcmp_port: 0.into(),
+        destinations: Vec::with_capacity(1),
+        addr_to_asn: Default::default(),
+        sessions: Arc::new(Default::default()),
+        local_ipv4: *PROXY.ip(),
+        local_ipv6: Ipv6Addr::from_bits(0),
+        last_receive: UtcTimestamp::now(),
+    };
+
+    let mut umem = xdp::Umem::map(
+        xdp::umem::UmemCfgBuilder {
+            frame_size: xdp::umem::FrameSize::TwoK,
+            head_room: 0,
+            frame_count: 1,
+            ..Default::default()
+        }
+        .build()
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut rx_slab = LittleSlab::new();
+    let mut tx_slab = LittleSlab::new();
+
+    // The umem has a single frame, so a packet that wasn't freed fails the next alloc
+    let mut process = |umem: &mut xdp::Umem, packet: xdp::Packet| {
+        rx_slab.push_front(packet);
+        process::process_packets(&mut rx_slab, umem, &mut tx_slab, &mut cfg_state, &mut state);
+        assert!(rx_slab.is_empty());
+        assert!(tx_slab.is_empty(), "an unparsable packet was forwarded");
+    };
+
+    // Not an IP frame at all
+    {
+        let mut packet = unsafe { umem.alloc().expect("umem has no available packets") };
+        packet.append(&[0xab; 60]).unwrap();
+        process(&mut umem, packet);
+    }
+
+    // A TCP packet
+    {
+        let mut packet = unsafe { umem.alloc().expect("umem has no available packets") };
+        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+            .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
+            .tcp(CLIENT.port(), PROXY.port(), 0, 4096)
+            .write(&mut packet, &[0xf0; 20])
+            .unwrap();
+        process(&mut umem, packet);
+    }
+
+    // A datagram larger than the frame that holds it
+    {
+        let mut packet = unsafe { umem.alloc().expect("umem has no available packets") };
+        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+            .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
+            .udp(CLIENT.port(), PROXY.port())
+            .write(&mut packet, &[0xf0; 20])
+            .unwrap();
+        packet.adjust_tail(-4).unwrap();
+        process(&mut umem, packet);
+    }
+
+    // Trailing data on a frame that is too large to have been padded
+    {
+        let mut packet = unsafe { umem.alloc().expect("umem has no available packets") };
+        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+            .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
+            .udp(CLIENT.port(), PROXY.port())
+            .write(&mut packet, &[0xf0; 20])
+            .unwrap();
+        packet.append(&[0; 4]).unwrap();
+        process(&mut umem, packet);
+    }
+
+    unsafe { umem.alloc().expect("a dropped packet wasn't freed") };
+}
+
+/// Validates a filter modification that doesn't fit drops the packet
+#[tokio::test]
+async fn drops_packets_filters_cant_modify() {
+    const SERVER: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 1111);
+    const PROXY: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(2, 2, 2, 2), 7777);
+    const CLIENT: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(5, 5, 5, 5), 8888);
+
+    let mut umem = xdp::Umem::map(
+        xdp::umem::UmemCfgBuilder {
+            frame_size: xdp::umem::FrameSize::TwoK,
+            head_room: 20,
+            frame_count: 1,
+            ..Default::default()
+        }
+        .build()
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut rx_slab = LittleSlab::new();
+    let mut tx_slab = LittleSlab::new();
+
+    // More than can ever fit in the 2k frame alongside the payload
+    let concat_data = vec![0xff; 1500];
+    let data = [0xf1u8; 1000];
+
+    for strategy in [
+        filters::concatenate::Strategy::Append,
+        filters::concatenate::Strategy::Prepend,
+    ] {
+        let mut cfg_state = make_config(
+            qt::filter_chain!([
+                Concatenate => filters::concatenate::Config {
+                    on_read: strategy,
+                    on_write: filters::concatenate::Strategy::DoNothing,
+                    bytes: concat_data.clone(),
+                },
+            ]),
+            endpoints(&[(SERVER.into(), &[])]),
+        );
+
+        let mut state = process::State {
+            external_port: PROXY.port().into(),
+            qcmp_port: 0.into(),
+            destinations: Vec::with_capacity(1),
+            addr_to_asn: Default::default(),
+            sessions: Arc::new(Default::default()),
+            local_ipv4: *PROXY.ip(),
+            local_ipv6: Ipv6Addr::from_bits(0),
+            last_receive: UtcTimestamp::now(),
+        };
+
+        // If this fails, the previously dropped packet wasn't freed
+        let mut client_packet = unsafe { umem.alloc().expect("umem has no available packets") };
+
+        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+            .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
+            .udp(CLIENT.port(), PROXY.port())
+            .write(&mut client_packet, &data)
+            .unwrap();
+
+        rx_slab.push_front(client_packet);
+        process::process_packets(
+            &mut rx_slab,
+            &mut umem,
+            &mut tx_slab,
+            &mut cfg_state,
+            &mut state,
+        );
+
+        assert!(tx_slab.is_empty(), "forwarded a partially modified packet");
+    }
+
+    unsafe { umem.alloc().expect("a dropped packet wasn't freed") };
 }

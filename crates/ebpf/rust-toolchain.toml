@@ -16,8 +16,8 @@
 # Compiling eBPF requires nightly since we need to build the core library as it
 # is not part of the target distribution
 channel = "nightly"
-# We need the std (actually core) library component since we need to build it from source
-components = ["rust-std"]
+# `rust-src` is what `-Z build-std=core` builds core from
+components = ["rust-src", "rust-std"]
 # The actual target the `l` means little endian, we don't target big endian
 targets = ["bpfel-unknown-none"]
 # We don't need documentation

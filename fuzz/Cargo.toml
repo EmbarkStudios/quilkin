@@ -1,0 +1,25 @@
+[package]
+name = "quilkin-fuzz"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# The session map spawns a cleanup task, so a runtime has to be entered
+tokio = { workspace = true, features = ["time"] }
+# The default jemalloc feature replaces the allocator the sanitizers instrument
+quilkin = { path = "..", default-features = false }
+
+[[bin]]
+name = "xdp_process"
+path = "fuzz_targets/xdp_process.rs"
+test = false
+doc = false
+bench = false
+
+[lints]
+workspace = true

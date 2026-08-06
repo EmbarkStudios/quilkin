@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+//! The object quilkin loads is committed at `crates/xdp/bin/packet-router.bin`,
+//! changes here require running `crates/ebpf/build.sh --update`.
+
 #![no_std]
 #![no_main]
 #![allow(internal_features)]
@@ -39,15 +42,15 @@ type Action = xdp_action::Type;
 static XSK: XskMap = XskMap::with_max_entries(128, 0);
 
 // Number of sockets in the `XSK` map
-#[no_mangle]
+#[unsafe(no_mangle)]
 static SOCKET_COUNT: u32 = 0;
 static mut COUNTER: u32 = 0;
 
 /// The external port used by clients. Network order.
-#[no_mangle]
+#[unsafe(no_mangle)]
 static EXTERNAL_PORT_NO: u16 = u16::to_be(7777);
 /// The port used to respond to QCMP messages. Network order.
-#[no_mangle]
+#[unsafe(no_mangle)]
 static QCMP_PORT_NO: u16 = u16::to_be(7600);
 
 /// The beginning of the port range quilkin will use for server sessions, we
@@ -55,6 +58,12 @@ static QCMP_PORT_NO: u16 = u16::to_be(7600);
 /// assigning ephemeral ports is 32768–60999, so we can easily determine in eBPF
 /// if a port is intended for quilkin or not without relying on extra state
 const EPHEMERAL_PORT_START: u16 = 61000;
+
+/// An [ihl](https://en.wikipedia.org/wiki/IPv4#IHL) of 5, ie 20 bytes, means the
+/// ipv4 header carries no options
+const IPV4_IHL_NO_OPTIONS: u8 = 5;
+/// The fragment offset and more fragments flag, both zero when unfragmented
+const IPV4_FRAGMENT_MASK: u16 = 0x3fff;
 
 // eBPF doesn't support 32-bit atomic operations, but AtomicU64 doesn't provide
 // fetch_add when targeting eBPF for some reason, so we just roll our own
@@ -87,7 +96,12 @@ pub fn packet_router(ctx: &XdpContext) -> Result<(), ()> {
                 let v4hdr = &*ipv4hdr;
 
                 match v4hdr.proto {
-                    IpProto::Udp => {
+                    // Note the UDP header is only at this offset if the ipv4
+                    // header has no options, and only the first fragment has one
+                    IpProto::Udp
+                        if v4hdr.ihl() == IPV4_IHL_NO_OPTIONS
+                            && u16::from_be(v4hdr.frag_off) & IPV4_FRAGMENT_MASK == 0 =>
+                    {
                         let udp_hdr = &*ptr_at::<UdpHdr>(&ctx, EthHdr::LEN + Ipv4Hdr::LEN)?;
                         udp_hdr.dest
                     }
@@ -166,6 +180,6 @@ pub fn round_robin(ctx: XdpContext) -> Action {
 
 /// We can't panic, but we still need to satisfy the linker
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
+fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }

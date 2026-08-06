@@ -34,3 +34,16 @@ run = """
   fi
   podman build --cap-add=all --format docker $secret_arg -t quilkin:"${version}-${sha}" -t quilkin:latest .
 """
+
+[tasks.fuzz]
+description = "Fuzz the XDP packet processing, pass a duration in seconds, 0 runs until interrupted"
+run = """
+  # cargo-fuzz overrides RUSTFLAGS, so the target features .cargo/config.toml
+  # sets have to be repeated here. gxhash reads partial tails 16 bytes at a time,
+  # which trips both the address sanitizer and the standard library's UB checks,
+  # neither of which can be suppressed per dependency. Overflow and debug
+  # assertions still apply.
+  RUSTFLAGS="-Ctarget-feature=+aes,+avx2 -Zub-checks=off" \
+    cargo +nightly fuzz run --sanitizer=none xdp_process -- \
+      -max_total_time={{arg(name="seconds", default="60")}} -max_len=2048
+"""

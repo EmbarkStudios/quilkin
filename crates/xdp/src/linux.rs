@@ -97,13 +97,6 @@ impl EbpfProgram {
     /// The external port, the port used by clients, must be passed in due to
     /// how globals work in eBPF.
     pub fn load(external_port: u16, qcmp_port: u16) -> Result<Self, LoadError> {
-        let mut loader = aya::EbpfLoader::new();
-        let external_port_no = external_port.to_be();
-        loader.override_global("EXTERNAL_PORT_NO", &external_port_no, true);
-
-        let qcmp_port_no = qcmp_port.to_be();
-        loader.override_global("QCMP_PORT_NO", &qcmp_port_no, true);
-
         // We exploit the fact that Linux by default does not assign ephemeral
         // ports in the full range allowed by IANA, but we want to sanity check
         // it here, as otherwise something else could have been assigned an
@@ -134,6 +127,19 @@ impl EbpfProgram {
         if end != 60999 {
             return Err(LoadError::DefaultPortRangeModified(start, end));
         }
+
+        Ok(Self::load_program(external_port, qcmp_port)?)
+    }
+
+    /// The eBPF load itself, [`Self::load`] additionally validates the assumption
+    /// the port mapping relies on
+    fn load_program(external_port: u16, qcmp_port: u16) -> Result<Self, aya::EbpfError> {
+        let mut loader = aya::EbpfLoader::new();
+        let external_port_no = external_port.to_be();
+        loader.override_global("EXTERNAL_PORT_NO", &external_port_no, true);
+
+        let qcmp_port_no = qcmp_port.to_be();
+        loader.override_global("QCMP_PORT_NO", &qcmp_port_no, true);
 
         Ok(Self {
             bpf: loader.load(PROGRAM)?,
@@ -218,5 +224,304 @@ impl EbpfProgram {
         link_id: aya::programs::xdp::XdpLinkId,
     ) -> Result<(), aya::programs::ProgramError> {
         self.program_mut().detach(link_id)
+    }
+}
+
+/// The eBPF object is committed rather than built, so these validate it still
+/// has what [`EbpfProgram::load`] expects.
+///
+/// Loading a program requires `CAP_BPF` + `CAP_NET_ADMIN`, so the tests that
+/// need the kernel are `#[ignore]`d. Run the built test binary under sudo rather
+/// than cargo, which would leave root owned artifacts in `target`:
+///
+/// ```sh
+/// BIN=$(cargo test -p quilkin-xdp --no-run 2>&1 | grep -oE '\(target/[^)]+\)' | tr -d '()')
+/// sudo "$BIN" --ignored --test-threads 1
+/// ```
+#[cfg(test)]
+mod tests {
+    use super::{EbpfProgram, PROGRAM};
+    use aya::programs::{TestRun as _, TestRunOptions};
+
+    const EXTERNAL_PORT: u16 = 7777;
+    const QCMP_PORT: u16 = 7600;
+
+    /// The action the kernel reports the program returned
+    const XDP_PASS: u32 = 2;
+    const XDP_REDIRECT: u32 = 4;
+
+    fn parse() -> aya_obj::Object {
+        aya_obj::Object::parse(PROGRAM).expect("failed to parse eBPF program")
+    }
+
+    /// Options for the ipv4 frames [`frame`] builds
+    struct Ipv4 {
+        proto: u8,
+        /// The low nibble of the first header byte, 5 means no options
+        ihl: u8,
+        /// The fragment offset and flags, non-zero means fragmented
+        fragment: u16,
+        destination_port: u16,
+    }
+
+    impl Default for Ipv4 {
+        fn default() -> Self {
+            Self {
+                proto: 17,
+                ihl: 5,
+                fragment: 0,
+                destination_port: EXTERNAL_PORT,
+            }
+        }
+    }
+
+    /// Builds a minimal ethernet + ipv4 + UDP frame, the payload is irrelevant as
+    /// the program only ever reads headers
+    fn frame(ip: Ipv4) -> Vec<u8> {
+        const LEN: usize = 14 + 20 + 8 + 4;
+        let mut frame = vec![0u8; LEN];
+
+        // Ethernet, destination and source are never read
+        frame[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
+
+        // ipv4
+        frame[14] = 0x40 | ip.ihl;
+        frame[16..18].copy_from_slice(&((LEN - 14) as u16).to_be_bytes());
+        frame[20..22].copy_from_slice(&ip.fragment.to_be_bytes());
+        frame[22] = 64;
+        frame[23] = ip.proto;
+        frame[26..30].copy_from_slice(&[5, 5, 5, 5]);
+        frame[30..34].copy_from_slice(&[2, 2, 2, 2]);
+
+        // UDP
+        frame[34..36].copy_from_slice(&8888u16.to_be_bytes());
+        frame[36..38].copy_from_slice(&ip.destination_port.to_be_bytes());
+        frame[38..40].copy_from_slice(&12u16.to_be_bytes());
+
+        frame
+    }
+
+    /// A loaded program with a socket in its `XSK` map, everything has to be kept
+    /// alive for the map entry to stay valid
+    struct Loaded {
+        program: EbpfProgram,
+        _socket: xdp::socket::XdpSocket,
+        _rings: xdp::WakableRings,
+        _umem: xdp::Umem,
+    }
+
+    /// Loads the program into the kernel, which is where the verifier runs, and
+    /// binds a socket to the first NIC queue so that redirect decisions are
+    /// observable, without one the fallback for an empty `XSK` map is the same
+    /// [`XDP_PASS`] as a packet the program isn't interested in
+    fn load() -> Loaded {
+        let mut prog =
+            EbpfProgram::load_program(EXTERNAL_PORT, QCMP_PORT).expect("failed to load program");
+        prog.load_into_kernel()
+            .expect("the kernel rejected the program");
+
+        let nic = xdp::nic::InterfaceIter::new()
+            .expect("failed to enumerate NICs")
+            .next()
+            .expect("no NIC available to bind an AF_XDP socket to");
+
+        let umem = xdp::Umem::map(
+            xdp::umem::UmemCfgBuilder {
+                frame_size: xdp::umem::FrameSize::TwoK,
+                frame_count: 64,
+                ..Default::default()
+            }
+            .build()
+            .expect("invalid umem config"),
+        )
+        .expect("failed to map umem");
+
+        let mut sb = xdp::socket::XdpSocketBuilder::new().expect("failed to create socket");
+        let (rings, mut bind_flags) = sb
+            .build_wakable_rings(
+                &umem,
+                xdp::RingConfigBuilder::default()
+                    .build()
+                    .expect("invalid ring config"),
+            )
+            .expect("failed to build rings");
+        bind_flags.force_copy();
+
+        let socket = sb
+            .bind(nic, 0, bind_flags)
+            .expect("failed to bind socket to queue 0");
+
+        {
+            use std::os::fd::AsRawFd as _;
+            let mut xsk = aya::maps::XskMap::try_from(prog.bpf.map_mut("XSK").expect("no XSK map"))
+                .expect("XSK is not an xskmap");
+            xsk.set(0, socket.as_raw_fd(), 0)
+                .expect("failed to insert socket into the XSK map");
+        }
+
+        Loaded {
+            program: prog,
+            _socket: socket,
+            _rings: rings,
+            _umem: umem,
+        }
+    }
+
+    /// Note the kernel rejects a `data_in` below the size of an ethernet header
+    fn run(prog: &mut EbpfProgram, frame: &[u8]) -> u32 {
+        prog.program_mut()
+            .test_run(TestRunOptions {
+                data_in: Some(frame),
+                ..Default::default()
+            })
+            .expect("failed to run program")
+            .return_value
+    }
+
+    /// The verifier is the only authority on whether the committed object is
+    /// loadable, everything else here is downstream of this passing
+    #[test]
+    #[ignore = "requires CAP_BPF"]
+    fn loads_into_kernel() {
+        let mut prog =
+            EbpfProgram::load_program(EXTERNAL_PORT, QCMP_PORT).expect("failed to load program");
+        prog.load_into_kernel()
+            .expect("the kernel rejected the program");
+    }
+
+    #[test]
+    #[ignore = "requires CAP_BPF"]
+    fn routes_udp_quilkin_owns() {
+        let mut loaded = load();
+        let prog = &mut loaded.program;
+
+        for port in [EXTERNAL_PORT, QCMP_PORT, 61000, u16::MAX] {
+            assert_eq!(
+                run(
+                    prog,
+                    &frame(Ipv4 {
+                        destination_port: port,
+                        ..Default::default()
+                    })
+                ),
+                XDP_REDIRECT,
+                "port {port} should be routed to a socket"
+            );
+        }
+    }
+
+    /// The I/O loop parses at fixed header offsets, so anything the offsets don't
+    /// hold for has to be left to the kernel
+    #[test]
+    #[ignore = "requires CAP_BPF"]
+    fn passes_frames_the_io_loop_cant_parse() {
+        let mut loaded = load();
+        let prog = &mut loaded.program;
+
+        let cases = [
+            (
+                "not UDP",
+                Ipv4 {
+                    proto: 6,
+                    ..Default::default()
+                },
+            ),
+            (
+                "ipv4 options",
+                Ipv4 {
+                    ihl: 6,
+                    ..Default::default()
+                },
+            ),
+            // A later fragment has no UDP header at all
+            (
+                "fragment offset",
+                Ipv4 {
+                    fragment: 0x0001,
+                    ..Default::default()
+                },
+            ),
+            // The first fragment of a fragmented datagram
+            (
+                "more fragments",
+                Ipv4 {
+                    fragment: 0x2000,
+                    ..Default::default()
+                },
+            ),
+            // Don't fight the kernel for ports we don't own
+            (
+                "unrelated port",
+                Ipv4 {
+                    destination_port: 53,
+                    ..Default::default()
+                },
+            ),
+        ];
+
+        for (case, ip) in cases {
+            assert_eq!(
+                run(prog, &frame(ip)),
+                XDP_PASS,
+                "{case} should be passed to the kernel"
+            );
+        }
+
+        // Frames too short to hold the headers the program reads
+        let full = frame(Ipv4::default());
+        for length in [14, 33, 41] {
+            assert_eq!(
+                run(prog, &full[..length]),
+                XDP_PASS,
+                "a {length} byte frame should be passed to the kernel"
+            );
+        }
+
+        // The don't fragment flag is not a fragment
+        assert_eq!(
+            run(
+                prog,
+                &frame(Ipv4 {
+                    fragment: 0x4000,
+                    ..Default::default()
+                })
+            ),
+            XDP_REDIRECT,
+        );
+    }
+
+    #[test]
+    fn has_expected_programs_and_maps() {
+        let object = parse();
+
+        for program in ["all_queues", "round_robin"] {
+            let program = object
+                .programs
+                .get(program)
+                .unwrap_or_else(|| panic!("'{program}' program not found"));
+            assert!(
+                matches!(program.section, aya_obj::ProgramSection::Xdp { .. }),
+                "'{:?}' is not an xdp program",
+                program.section
+            );
+        }
+
+        assert!(object.maps.contains_key("XSK"), "'XSK' map not found");
+    }
+
+    #[test]
+    fn port_globals_can_be_overridden() {
+        let mut object = parse();
+
+        let port = 7777u16.to_be_bytes();
+        object
+            .patch_map_data(
+                [
+                    ("EXTERNAL_PORT_NO", (&port[..], true)),
+                    ("QCMP_PORT_NO", (&port[..], true)),
+                ]
+                .into(),
+            )
+            .expect("failed to override port globals");
     }
 }

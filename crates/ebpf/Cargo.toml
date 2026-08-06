@@ -2,8 +2,9 @@
 name = "quilkin-ebpf"
 version = "0.1.0"
 description = "quilkin's eBPF module"
-license.workspace = true
-edition.workspace = true
+# This crate is its own workspace, so these can't be inherited from the root
+license = "Apache-2.0"
+edition = "2024"
 
 [dependencies]
 aya-ebpf = "0.1.1"

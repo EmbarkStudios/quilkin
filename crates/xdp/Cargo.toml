@@ -22,5 +22,9 @@ futures.workspace = true
 libc.workspace = true
 tokio.workspace = true
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# Validates the committed eBPF object, must be the same revision as `aya`
+aya-obj = { git = "https://github.com/aya-rs/aya", rev = "2453204" }
+
 [lints]
 workspace = true

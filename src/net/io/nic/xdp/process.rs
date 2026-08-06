@@ -14,7 +14,7 @@ use quilkin_xdp::xdp::{
     Umem,
     packet::{
         Packet, PacketError, csum,
-        net_types::{IpAddresses, NetworkU16, UdpHdr, UdpHeaders},
+        net_types::{IpAddresses, IpHdr, Ipv4Hdr, NetworkU16, UdpHdr, UdpHeaders},
     },
     slab::{Slab, StackSlab},
 };
@@ -33,6 +33,39 @@ use std::{
 struct PacketWrapper {
     buffer: Packet,
     headers: UdpHeaders,
+    /// A modification a filter requested that couldn't be applied, the packet is
+    /// dropped rather than forwarded partially modified
+    failure: Option<&'static str>,
+}
+
+impl PacketWrapper {
+    #[inline]
+    fn new(buffer: Packet, headers: UdpHeaders) -> Self {
+        Self {
+            buffer,
+            headers,
+            failure: None,
+        }
+    }
+
+    /// Records a modification that couldn't be applied, keeping the first
+    #[inline]
+    fn fail(&mut self, failure: &'static str) {
+        self.failure.get_or_insert(failure);
+    }
+
+    /// Shrinks the data payload, recording `failure` if that would move the tail
+    /// into the headers
+    #[inline]
+    fn trim(&mut self, length: usize, failure: &'static str) {
+        if length > self.headers.data_length() || self.buffer.adjust_tail(-(length as i32)).is_err()
+        {
+            self.fail(failure);
+            return;
+        }
+
+        self.headers.data.end -= length;
+    }
 }
 
 impl filters::Packet for PacketWrapper {
@@ -50,56 +83,47 @@ impl filters::Packet for PacketWrapper {
 impl filters::PacketMut for PacketWrapper {
     #[inline]
     fn extend_head(&mut self, bytes: &[u8]) {
-        self.buffer
-            .insert(self.headers.data.start, bytes)
-            .expect("failed to extend head");
+        if self.buffer.insert(self.headers.data.start, bytes).is_err() {
+            self.fail("filter::extend head");
+            return;
+        }
+
         self.headers.data.end += bytes.len();
     }
 
     #[inline]
     fn extend_tail(&mut self, bytes: &[u8]) {
-        self.buffer.append(bytes).expect("failed to extend head");
+        if self.buffer.append(bytes).is_err() {
+            self.fail("filter::extend tail");
+            return;
+        }
+
         self.headers.data.end += bytes.len();
     }
 
     #[inline]
     fn remove_head(&mut self, length: usize) {
-        let mut data = [0u8; 2048];
-
-        if length > self.headers.data_length() || length == 0 {
+        if length == 0 {
             return;
         }
 
-        let Some(slice) = self
-            .buffer
-            .get(self.headers.data.start + length..self.headers.data.end)
-        else {
-            if self.buffer.adjust_tail(-(length as i32)).is_ok() {
-                self.headers.data.end -= length;
-            }
+        if length > self.headers.data_length() || self.headers.data.end > self.buffer.len() {
+            self.fail("filter::remove head");
             return;
-        };
-        let remainder = slice.len();
-        data[..remainder].copy_from_slice(slice);
-
-        let Some(slice) = self
-            .buffer
-            .get_mut(self.headers.data.start..self.headers.data.start + remainder)
-        else {
-            return;
-        };
-        slice.copy_from_slice(&data[..remainder]);
-
-        if self.buffer.adjust_tail(-(length as i32)).is_ok() {
-            self.headers.data.end -= length;
         }
+
+        // Shift the payload down over the removed bytes, the headers are rewritten
+        // before the packet is sent
+        self.buffer.copy_within(
+            self.headers.data.start + length..self.headers.data.end,
+            self.headers.data.start,
+        );
+        self.trim(length, "filter::remove head");
     }
 
     #[inline]
     fn remove_tail(&mut self, length: usize) {
-        if self.buffer.adjust_tail(-(length as i32)).is_ok() {
-            self.headers.data.end -= length;
-        }
+        self.trim(length, "filter::remove tail");
     }
 
     // Only used in the io-uring/reference implementations
@@ -323,7 +347,8 @@ impl PortMap {
 
     #[inline]
     fn get(&self, port: NetworkU16) -> Option<SocketAddr> {
-        let i = (port.host() - EPHEMERAL_RANGE_END) as usize;
+        // The eBPF program only routes ports we allocated, but don't rely on it
+        let i = port.host().checked_sub(EPHEMERAL_RANGE_END)? as usize;
         let bucket = i / BUCKET_SIZE;
 
         let bucket = self.buckets.get(bucket)?;
@@ -498,6 +523,83 @@ impl SessionState {
     }
 }
 
+/// The minimum ethernet frame size, the 4 byte frame check sequence is stripped
+/// before we see it
+const MIN_ETHERNET_FRAME: usize = 60;
+
+/// Parses the headers of a received frame, returning the reason it couldn't be
+/// parsed, which is used as the drop metric label.
+///
+/// Ethernet pads frames to [`MIN_ETHERNET_FRAME`], so an ipv4 packet with a
+/// payload below 18 bytes (eg. a 17 byte QCMP ping) carries trailing padding that
+/// isn't part of the datagram, which we trim. Anything else the eBPF program
+/// couldn't rule out, eg. a truncated frame, is rejected.
+#[inline]
+fn parse_headers(buffer: &mut Packet) -> Result<UdpHeaders, &'static str> {
+    // Two iterations at most, the reparse is against an exactly sized frame
+    for _ in 0..2 {
+        let error = match UdpHeaders::parse_packet(buffer) {
+            // Both the parse above and the checksums we calculate read the UDP
+            // header at the offset a 20 byte ipv4 header puts it at, which the
+            // parse itself doesn't validate
+            Ok(Some(headers)) => {
+                return match &headers.ip {
+                    IpHdr::V4(v4) if usize::from(v4.internet_header_length()) != Ipv4Hdr::LEN => {
+                        Err("ipv4 header length")
+                    }
+                    _ => Ok(headers),
+                };
+            }
+            Ok(None) => return Err("non-UDP packet"),
+            Err(error) => error,
+        };
+
+        // `offset` is where the UDP header starts and `size` the datagram length,
+        // so anything past their sum is padding
+        let PacketError::InsufficientData {
+            offset,
+            size,
+            length,
+        } = error
+        else {
+            return Err(error.discriminant());
+        };
+
+        let Some(padding) = length.checked_sub(offset + size) else {
+            return Err("truncated packet");
+        };
+
+        // Padding only ever exists to reach the minimum frame size
+        if padding == 0 || length > MIN_ETHERNET_FRAME {
+            return Err("trailing data");
+        }
+
+        if let Err(error) = buffer.adjust_tail(-(padding as i32)) {
+            return Err(error.discriminant());
+        }
+    }
+
+    Err("malformed packet")
+}
+
+/// Returns the frame to be dropped if a filter failed, or requested a
+/// modification that couldn't be applied
+#[inline]
+fn filtered(
+    result: Result<(), filters::FilterError>,
+    packet: PacketWrapper,
+) -> Result<PacketWrapper, (PipelineError, Packet)> {
+    let error = match result {
+        Ok(()) => match packet.failure {
+            None => return Ok(packet),
+            Some(failure) => filters::FilterError::Custom(failure),
+        },
+        Err(error) => error,
+    };
+
+    Err((PipelineError::Filter(error), packet.buffer))
+}
+
 #[inline]
 pub fn process_packets<const RXN: usize, const TXN: usize>(
     rx_slab: &mut StackSlab<RXN>,
@@ -515,11 +617,23 @@ pub fn process_packets<const RXN: usize, const TXN: usize>(
     state.addr_to_asn.sweep(now.unix_nanos());
     let mut had_read = false;
 
-    while let Some(buffer) = rx_slab.pop_back() {
-        let Ok(Some(headers)) = UdpHeaders::parse_packet(&buffer) else {
-            unreachable!(
-                "we somehow got a non-UDP packet, this should be impossible with the eBPF program we use to route packets"
-            );
+    while let Some(mut buffer) = rx_slab.pop_back() {
+        // This indicates a packet that is split, which we don't handle _at all_
+        // right now, and only the first buffer has headers, so check before parsing
+        if buffer.is_continued() {
+            metrics::packets_dropped_total(metrics::READ, "split packet", &metrics::EMPTY).inc();
+            umem.free_packet(buffer);
+            continue;
+        }
+
+        let headers = match parse_headers(&mut buffer) {
+            Ok(headers) => headers,
+            Err(reason) => {
+                tracing::debug!(reason, length = buffer.len(), "dropped unparsable packet");
+                metrics::packets_dropped_total(metrics::READ, reason, &metrics::EMPTY).inc();
+                umem.free_packet(buffer);
+                continue;
+            }
         };
 
         if headers.udp.destination == state.qcmp_port {
@@ -535,14 +649,7 @@ pub fn process_packets<const RXN: usize, const TXN: usize>(
             metrics::WRITE
         };
 
-        // This indicates a packet that is split, which we don't handle _at all_ right now
-        if buffer.is_continued() {
-            metrics::packets_dropped_total(direction, "split packet", &metrics::EMPTY).inc();
-            umem.free_packet(buffer);
-            continue;
-        }
-
-        let packet = PacketWrapper { buffer, headers };
+        let packet = PacketWrapper::new(buffer, headers);
 
         let res = {
             let _timer = metrics::processing_time(direction).start_timer();
@@ -618,12 +725,8 @@ fn process_client_packet<const TXN: usize>(
     let mut ctx =
         filters::ReadContext::new(cm, source_addr.into(), packet, &mut state.destinations);
 
-    let mut packet = match filters.read(&mut ctx) {
-        Ok(()) => ctx.contents,
-        Err(err) => {
-            return Err((PipelineError::Filter(err), ctx.contents.buffer));
-        }
-    };
+    let result = filters.read(&mut ctx);
+    let mut packet = filtered(result, ctx.contents)?;
 
     let Some(dest_addr) = state.destinations.pop() else {
         return Ok(Some(packet.buffer));
@@ -736,12 +839,8 @@ fn process_server_packet<const TXN: usize>(
 
     let mut ctx = filters::WriteContext::new(server_addr.into(), client_addr.into(), packet);
 
-    let mut packet = match filters.write(&mut ctx) {
-        Ok(()) => ctx.contents,
-        Err(err) => {
-            return Err((PipelineError::Filter(err), ctx.contents.buffer));
-        }
-    };
+    let result = filters.write(&mut ctx);
+    let mut packet = filtered(result, ctx.contents)?;
 
     let mut headers = UdpHeaders {
         eth: packet.headers.eth.swapped(),
@@ -917,6 +1016,93 @@ mod test {
         assert_eq!(cache.len(), 0);
     }
 
+    /// Builds an ipv4 UDP packet with `padding` trailing bytes
+    fn ipv4_packet(
+        data: &mut [u8; 2048],
+        proto: nt::IpProto::Enum,
+        payload: &[u8],
+        padding: usize,
+    ) -> Packet {
+        let mut v4 = nt::Ipv4Hdr::zeroed();
+        v4.reset(64, proto);
+        v4.source = u32::from_be_bytes([5; 4]).into();
+        v4.destination = u32::from_be_bytes([2; 4]).into();
+
+        let start = nt::EthHdr::LEN + nt::Ipv4Hdr::LEN + nt::UdpHdr::LEN;
+        let mut headers = UdpHeaders::new(
+            nt::EthHdr {
+                source: nt::MacAddress([1; 6]),
+                destination: nt::MacAddress([2; 6]),
+                ether_type: nt::EtherType::Ipv4,
+            },
+            nt::IpHdr::V4(v4),
+            UdpHdr {
+                source: 8888.into(),
+                destination: 7777.into(),
+                length: NetworkU16(0),
+                check: 0,
+            },
+            start..start + payload.len(),
+        );
+
+        let mut packet = xdp::Packet::testing_new(data);
+        packet.adjust_tail(start as _).unwrap();
+        headers.set_packet_headers(&mut packet).unwrap();
+        packet.insert(start, payload).unwrap();
+        if proto == nt::IpProto::Udp {
+            packet.calc_udp_checksum().unwrap();
+        }
+        packet.append(&vec![0; padding]).unwrap();
+
+        packet
+    }
+
+    #[test]
+    fn trims_ethernet_padding() {
+        // The size of a QCMP ping, which pads to the 60 byte minimum frame size
+        let payload = [0xfdu8; 17];
+        let mut data = [0u8; 2048];
+        let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &payload, 1);
+
+        assert_eq!(packet.len(), MIN_ETHERNET_FRAME);
+        let headers = parse_headers(&mut packet).expect("failed to parse padded packet");
+
+        assert_eq!(headers.data_length(), payload.len());
+        assert_eq!(&packet[headers.data], &payload[..]);
+        assert_eq!(packet.len(), MIN_ETHERNET_FRAME - 1);
+    }
+
+    #[test]
+    fn rejects_unparsable_packets() {
+        let mut data = [0u8; 2048];
+
+        // Not UDP
+        let mut packet = ipv4_packet(&mut data, nt::IpProto::Tcp, &[0xfd; 17], 0);
+        assert_eq!(parse_headers(&mut packet).err(), Some("non-UDP packet"));
+
+        // A datagram larger than the frame that holds it
+        let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &[0xfd; 17], 0);
+        packet.adjust_tail(-4).unwrap();
+        assert_eq!(parse_headers(&mut packet).err(), Some("truncated packet"));
+
+        // Trailing data on a frame too large to have been padded
+        let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &[0xfd; 32], 4);
+        assert_eq!(parse_headers(&mut packet).err(), Some("trailing data"));
+
+        // An ipv4 header length the fixed header offsets don't hold for, 4 is
+        // below the 5 that means no options, both put the UDP header elsewhere
+        for ihl in [4, 6] {
+            let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &[0xfd; 17], 0);
+            packet[nt::EthHdr::LEN] = 0x40 | ihl;
+            assert_eq!(parse_headers(&mut packet).err(), Some("ipv4 header length"));
+        }
+
+        // Too small to even hold the ethernet header
+        let mut packet = xdp::Packet::testing_new(&mut data);
+        packet.append(&[0xab; 8]).unwrap();
+        assert_eq!(parse_headers(&mut packet).err(), Some("truncated packet"));
+    }
+
     #[test]
     fn xdp_buffer_manipulation() {
         let payload = [0xfdu8; 21];
@@ -949,7 +1135,7 @@ mod test {
         buffer.insert(headers.data.start, &payload).unwrap();
         buffer.calc_udp_checksum().unwrap();
 
-        let mut wrapper = PacketWrapper { buffer, headers };
+        let mut wrapper = PacketWrapper::new(buffer, headers);
 
         use crate::filters::{Packet, PacketMut};
 
