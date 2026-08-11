@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Change","ChangeIter"],"mod":["changes","handler","metrics","swim","sync","transport"],"struct":["GossipContext","Members"],"type":["ChangeAndSource"]};
