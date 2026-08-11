@@ -99,7 +99,7 @@ impl BroadcastingTransactor {
         let txr = inner.clone();
         tokio::spawn(async move { write_loop(txr, write_rx).await });
 
-        btx
+        Self { inner, write_tx }
     }
 
     /// Sets the number of oldest `servers` rows purged on the second recovery attempt.

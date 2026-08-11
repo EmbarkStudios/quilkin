@@ -1073,7 +1073,7 @@ where
         for change_res in rows {
             let (table, pk, column, cl) = change_res?;
 
-            for (_id, (candidates, handle)) in candidates.iter_mut() {
+            for (candidates, handle) in candidates.values_mut() {
                 let change = corro_types::pubsub::MatchableChange {
                     table: &table,
                     pk: &pk,

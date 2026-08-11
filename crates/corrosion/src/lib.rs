@@ -36,10 +36,12 @@ impl Clock {
         // The try_into().unwrap() is an unfortunate necessity, the uhlc lib only provides TryFrom implementations,
         // but the conversion literally cannot fail, it would only fail if corrosion actorid increased in size beyond
         // its current 16 bytes
-        self.0.update_with_timestamp(&uhlc::Timestamp::new(
-            ts.to_ntp64(),
-            actor_id.try_into().unwrap(),
-        ))
+        self.0
+            .update_with_timestamp(&uhlc::Timestamp::new(
+                ts.to_ntp64(),
+                actor_id.try_into().unwrap(),
+            ))
+            .map_err(|e| e.to_string())
     }
 
     #[inline]
