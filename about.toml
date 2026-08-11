@@ -41,6 +41,9 @@ accepted = ["BSL-1.0"]
 [enquote]
 accepted = ["Unlicense"]
 
+[minicbor]
+accepted = ["BlueOak-1.0.0"]
+
 [webpki.clarify]
 license = "ISC AND Apache-2.0 AND BSD-3-Clause"
 files = [
