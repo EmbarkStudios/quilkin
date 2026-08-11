@@ -59,7 +59,7 @@ impl GameProtocol {
 
         let nonce: [u8; 12] = nonce
             .try_into()
-            .map_err(|_| FilterError::Custom("invalid nonce length"))?;
+            .map_err(|_e| FilterError::Custom("invalid nonce length"))?;
 
         let mut cipher = chacha20::ChaCha20::new(&self.config.key.into(), &nonce.into());
         cipher.apply_keystream(&mut data[..addr.len()]);
@@ -124,7 +124,7 @@ fn cbor_to_io(de: minicbor::decode::Error) -> std::io::Error {
 
     // Unfortunately minicbor hides the message string, so for every other
     // error we just have to fallback to Display :(
-    std::io::Error::new(std::io::ErrorKind::Other, de)
+    std::io::Error::other(de)
 }
 
 impl Filter for GameProtocol {
@@ -179,7 +179,7 @@ impl Filter for GameProtocol {
         let mut decoder = minicbor::Decoder::new(data);
 
         let addr = decoder.bytes().map_err(cbor_to_io)?;
-        ctx.dest = Self::decode_socket_addr(&addr)?.into();
+        ctx.dest = Self::decode_socket_addr(addr)?.into();
         ctx.contents.remove_tail(data.len() + 6);
         Self::append_trailer(&mut ctx.contents, &[]);
 
