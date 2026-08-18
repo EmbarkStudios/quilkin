@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["BindError","LoadError"],"fn":["query_channels","shrink_queue_count"],"struct":["Channels","EbpfProgram","NicIndex","XdpWorker"]};
+window.SIDEBAR_ITEMS = {"enum":["BindError","LoadError"],"struct":["EbpfProgram","NicIndex","XdpWorker"]};
