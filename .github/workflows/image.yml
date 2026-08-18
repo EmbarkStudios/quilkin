@@ -56,8 +56,8 @@ jobs:
           build-args: |
             BUILDKIT_CONTEXT_KEEP_GIT_DIR=1
             RUST_TOOLCHAIN=${{ steps.info.outputs.toolchain_version }}
-          cache-from: type=registry,ref=ghcr.io/embarkstudios/quilkin:buildcache-${{ matrix.cache_tag }}
-          cache-to: type=registry,ref=ghcr.io/embarkstudios/quilkin:buildcache-${{ matrix.cache_tag }},mode=max
+          cache-from: type=registry,ref=ghcr.io/embarkstudios/quilkin-buildcache:${{ matrix.cache_tag }}
+          cache-to: type=registry,ref=ghcr.io/embarkstudios/quilkin-buildcache:${{ matrix.cache_tag }},mode=max
           outputs: type=image,name=ghcr.io/embarkstudios/quilkin,push-by-digest=true,name-canonical=true,push=true
         env:
           # Set the build timestamp to the commit timestamp, so we can

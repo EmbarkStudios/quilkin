@@ -36,7 +36,7 @@ jobs:
     env:
       RUST_BACKTRACE: "1"
       # dedicated buildx cache for the dev-profile test image: written on main, read on every run.
-      BUILDCACHE_REF: ghcr.io/embarkstudios/quilkin:buildcache-agones-amd64
+      BUILDCACHE_REF: ghcr.io/embarkstudios/quilkin-buildcache:agones-amd64
       BUILDCACHE_WRITE: ${{ github.event_name == 'push' }}
     steps:
       - uses: actions/checkout@v4
