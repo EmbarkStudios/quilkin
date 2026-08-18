@@ -29,7 +29,7 @@ path = "src/bin/loadtest/main.rs"
 
 [dependencies]
 # Packet creation/parsing to validate the packet processing for XDP
-etherparse = "0.19"
+etherparse = "0.21"
 bytes.workspace = true
 camino.workspace = true
 clap = { version = "4.5.54", features = ["derive"] }
