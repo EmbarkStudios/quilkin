@@ -296,8 +296,7 @@ impl Filter for FilterChain {
         // has rejected, and the destinations is empty, we passthrough to all.
         // Which mimics the old behaviour while avoid clones in most cases.
         if ctx.destinations.is_empty() {
-            ctx.destinations
-                .extend(ctx.endpoints.endpoints().into_iter().map(|ep| ep.address));
+            ctx.endpoints.destinations(ctx.destinations);
         }
 
         Ok(())
@@ -388,7 +387,18 @@ mod tests {
         config.filters.read(&mut context).unwrap();
         let expected = endpoints_fixture.clone();
 
-        assert_eq!(&*expected.endpoints(), &*context.destinations);
+        assert_eq!(
+            expected
+                .endpoints()
+                .into_iter()
+                .map(|ep| ep.address)
+                .collect::<Vec<_>>(),
+            context
+                .destinations
+                .iter()
+                .map(|d| d.address.clone())
+                .collect::<Vec<_>>()
+        );
         assert_eq!(
             "hello:odr:127.0.0.1:70",
             std::str::from_utf8(&context.contents).unwrap()
@@ -445,7 +455,14 @@ mod tests {
             (context.contents, context.metadata)
         };
         let expected = endpoints_fixture.clone();
-        assert_eq!(expected.endpoints(), dest);
+        assert_eq!(
+            expected
+                .endpoints()
+                .into_iter()
+                .map(|ep| ep.address)
+                .collect::<Vec<_>>(),
+            dest.iter().map(|d| d.address.clone()).collect::<Vec<_>>()
+        );
         assert_eq!(b"hello:odr:127.0.0.1:70:odr:127.0.0.1:70", &*contents);
         assert_eq!(
             "receive:receive",

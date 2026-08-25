@@ -23,14 +23,14 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use crate::net::{ClusterMap, EndpointAddress};
+use crate::net::{ClusterMap, Destination, EndpointAddress};
 
 /// Chooses from a set of endpoints that a proxy is connected to.
 pub trait EndpointChooser: Send + Sync {
     /// Asks for the next endpoint(s) to use.
     fn choose_endpoints(
         &self,
-        destinations: &mut Vec<EndpointAddress>,
+        destinations: &mut Vec<Destination>,
         endpoints: &ClusterMap,
         src: &EndpointAddress,
     );
@@ -52,7 +52,7 @@ impl RoundRobinEndpointChooser {
 impl EndpointChooser for RoundRobinEndpointChooser {
     fn choose_endpoints(
         &self,
-        destinations: &mut Vec<EndpointAddress>,
+        destinations: &mut Vec<Destination>,
         endpoints: &ClusterMap,
         _src: &EndpointAddress,
     ) {
@@ -60,10 +60,8 @@ impl EndpointChooser for RoundRobinEndpointChooser {
         // Note: The index is guaranteed to be in range.
         destinations.push(
             endpoints
-                .nth_endpoint(count % endpoints.num_of_endpoints())
-                .unwrap()
-                .address
-                .clone(),
+                .nth_destination(count % endpoints.num_of_endpoints())
+                .unwrap(),
         );
     }
 }
@@ -74,13 +72,13 @@ pub struct RandomEndpointChooser;
 impl EndpointChooser for RandomEndpointChooser {
     fn choose_endpoints(
         &self,
-        destinations: &mut Vec<EndpointAddress>,
+        destinations: &mut Vec<Destination>,
         endpoints: &ClusterMap,
         _src: &EndpointAddress,
     ) {
         // The index is guaranteed to be in range.
         let index = rand::rng().random_range(0..endpoints.num_of_endpoints());
-        destinations.push(endpoints.nth_endpoint(index).unwrap().address.clone());
+        destinations.push(endpoints.nth_destination(index).unwrap());
     }
 }
 
@@ -90,7 +88,7 @@ pub struct HashEndpointChooser;
 impl EndpointChooser for HashEndpointChooser {
     fn choose_endpoints(
         &self,
-        destinations: &mut Vec<EndpointAddress>,
+        destinations: &mut Vec<Destination>,
         endpoints: &ClusterMap,
         src: &EndpointAddress,
     ) {
@@ -98,10 +96,8 @@ impl EndpointChooser for HashEndpointChooser {
         src.hash(&mut hasher);
         destinations.push(
             endpoints
-                .nth_endpoint(hasher.finish() as usize % endpoints.num_of_endpoints())
-                .unwrap()
-                .address
-                .clone(),
+                .nth_destination(hasher.finish() as usize % endpoints.num_of_endpoints())
+                .unwrap(),
         );
     }
 }

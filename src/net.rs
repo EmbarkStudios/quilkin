@@ -42,7 +42,7 @@ cfg_select! {
 
 pub use {
     self::{
-        cluster::ClusterMap,
+        cluster::{ClusterMap, Destination},
         endpoint::{Endpoint, EndpointAddress},
         error::PipelineError,
         packet::{Packet, PacketMut, PacketQueue, PacketQueueReceiver, PacketQueueSender, queue},

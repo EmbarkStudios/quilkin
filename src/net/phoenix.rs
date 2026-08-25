@@ -247,7 +247,24 @@ impl From<(i64, i64)> for DistanceMeasure {
     }
 }
 
+/// Upper bound on a plausible one-way latency between two datacenters.
+///
+/// A peer that replies with a zero or badly skewed timestamp yields a leg on the
+/// order of the unix epoch in nanos. Feeding that to a cumulative histogram
+/// corrupts its `_sum` permanently and wrecks the coordinate solve, so
+/// measurements outside the range are discarded rather than clamped.
+const MAX_PLAUSIBLE_LATENCY: Duration = Duration::from_secs(10);
+
 impl DistanceMeasure {
+    /// Whether both legs fall in the range a network path can produce.
+    #[inline]
+    pub fn is_plausible(self) -> bool {
+        let max = MAX_PLAUSIBLE_LATENCY.as_nanos() as i64;
+        let leg = |nanos: i64| (0..=max).contains(&nanos);
+
+        leg(self.incoming.nanos()) && leg(self.outgoing.nanos())
+    }
+
     #[inline]
     pub fn total_nanos(self) -> i64 {
         self.incoming.nanos() + self.outgoing.nanos()
@@ -476,6 +493,15 @@ impl<M: Measurement + 'static> Phoenix<M> {
             };
 
             match result {
+                Ok(distance) if !distance.is_plausible() => {
+                    tracing::warn!(
+                        %address,
+                        incoming_nanos = distance.incoming.nanos(),
+                        outgoing_nanos = distance.outgoing.nanos(),
+                        "discarding implausible measurement, the peer's timestamps are wrong"
+                    );
+                    node.increase_error_estimate();
+                }
                 Ok(distance) => {
                     crate::metrics::phoenix_measurement_seconds(node.icao_code, "incoming")
                         .observe(distance.incoming.duration().as_secs_f64());
@@ -989,6 +1015,37 @@ mod tests {
             result.is_err(),
             "Builder should panic when given an invalid subset percentage."
         );
+    }
+
+    #[test]
+    fn implausible_measurements_are_rejected() {
+        assert!(DistanceMeasure::from((500_000, 1_500_000)).is_plausible());
+        assert!(DistanceMeasure::default().is_plausible());
+
+        // A peer replying with a zero timestamp makes a leg the size of the unix
+        // epoch in nanos
+        let epoch_nanos = 1_730_000_000_000_000_000;
+        assert!(!DistanceMeasure::from((500_000, epoch_nanos)).is_plausible());
+        assert!(!DistanceMeasure::from((epoch_nanos, 500_000)).is_plausible());
+        // Clock skew the other way
+        assert!(!DistanceMeasure::from((-1, 500_000)).is_plausible());
+    }
+
+    #[tokio::test]
+    async fn implausible_measurements_are_not_recorded() {
+        // A peer replying with a zero timestamp makes a leg the size of the unix
+        // epoch in nanos
+        let epoch_nanos = 1_730_000_000_000_000_000;
+        let address: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let phoenix = Phoenix::new(MockMeasurement {
+            latencies: HashMap::from([(address, DistanceMeasure::from((500_000, epoch_nanos)))]),
+        });
+        phoenix.add_node(address, abcd());
+
+        phoenix.measure_all_nodes().await;
+
+        // Discarded rather than clamped, so it can't skew the coordinate solve
+        assert!(phoenix.ordered_nodes_by_latency().is_empty());
     }
 
     #[tokio::test]

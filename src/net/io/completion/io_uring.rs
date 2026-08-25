@@ -216,7 +216,7 @@ pub enum PacketProcessorCtx {
         config: Arc<crate::config::Config>,
         sessions: Arc<SessionPool>,
         worker_id: usize,
-        destinations: Vec<crate::net::EndpointAddress>,
+        destinations: Vec<crate::net::Destination>,
     },
     SessionPool {
         pool: Arc<SessionPool>,
@@ -239,8 +239,11 @@ fn process_packet(
         } => {
             let received_at = UtcTimestamp::now();
             if let Some(last_received_at) = last_received_at {
-                metrics::packet_jitter(metrics::READ, &metrics::EMPTY)
-                    .set((received_at - *last_received_at).nanos());
+                metrics::set_packet_jitter(
+                    metrics::READ,
+                    &metrics::EMPTY,
+                    (received_at - *last_received_at).nanos(),
+                );
             }
             *last_received_at = Some(received_at);
 
@@ -630,7 +633,7 @@ impl IoUringLoop {
                                             data.put_u16_ne(rb.count);
                                             data.put_u16_ne(rb.len(id));
                                             data.put_u32_ne(alloced);
-                                            loop_ctx.enqueue_send(SendPacket { destination: packet.source, data: data.freeze(), asn_info: None });
+                                            loop_ctx.enqueue_send(SendPacket { destination: packet.source, data: data.freeze(), asn_info: None, cluster: std::sync::Arc::from("") });
                                             continue;
                                         }
                                     }
@@ -666,15 +669,20 @@ impl IoUringLoop {
                                         };
 
                                         let asn_info = zs.asn_info.as_ref().into();
+                                        let locality = &*zs.cluster;
 
                                         if ret < 0 {
-                                            let source =
-                                                std::io::Error::from_raw_os_error(-ret).to_string();
-                                            metrics::errors_total(send_dir, &source, &asn_info).inc();
-                                            metrics::packets_dropped_total(send_dir, &source, &asn_info)
-                                                .inc();
+                                            let error = std::io::Error::from_raw_os_error(-ret);
+                                            metrics::errors_total(send_dir, metrics::io_error_kind(&error), &asn_info).inc();
+                                            metrics::packets_dropped_total(
+                                                send_dir,
+                                                metrics::DropReason::SocketError,
+                                                "",
+                                                locality,
+                                            )
+                                            .inc();
                                         } else if ret as usize != zs.data.len() {
-                                            metrics::packets_total(send_dir, &asn_info).inc();
+                                            metrics::packets_total(send_dir, &asn_info, locality).inc();
                                             metrics::errors_total(
                                                 send_dir,
                                                 "sent bytes != packet length",
@@ -682,8 +690,9 @@ impl IoUringLoop {
                                             )
                                             .inc();
                                         } else {
-                                            metrics::packets_total(send_dir, &asn_info).inc();
-                                            metrics::bytes_total(send_dir, &asn_info).inc_by(ret as u64);
+                                            metrics::packets_total(send_dir, &asn_info, locality).inc();
+                                            metrics::bytes_total(send_dir, &asn_info, locality)
+                                                .inc_by(ret as u64);
                                         }
                                     }
 

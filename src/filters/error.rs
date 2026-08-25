@@ -48,6 +48,44 @@ impl FilterError {
             Self::Custom(custom) => custom,
         }
     }
+
+    /// The bounded drop reason this error corresponds to.
+    ///
+    /// A filter dropping a packet by design is separated from a filter failing:
+    /// the first is the chain working as configured, the second is a fault.
+    #[inline]
+    pub fn drop_reason(&self) -> crate::metrics::DropReason {
+        use crate::metrics::DropReason;
+
+        match self {
+            Self::FirewallDenied | Self::Dropped | Self::RateLimitExceeded => {
+                DropReason::FilterDrop
+            }
+            Self::TokenRouter(tr) => tr.drop_reason(),
+            Self::NoValueCaptured | Self::MatchNoMetadata | Self::Custom(_) => {
+                DropReason::FilterError
+            }
+            Self::Io(..) => DropReason::SocketError,
+        }
+    }
+
+    /// The filter that produced this error, empty when it didn't come from a
+    /// specific filter.
+    ///
+    /// Kept apart from [`Self::drop_reason`] so renaming or reconfiguring a
+    /// filter doesn't change the reason vocabulary.
+    #[inline]
+    pub fn filter_name(&self) -> &'static str {
+        match self {
+            Self::NoValueCaptured => "capture",
+            Self::TokenRouter(..) => "token_router",
+            Self::FirewallDenied => "firewall",
+            Self::MatchNoMetadata => "match",
+            Self::Dropped => "drop",
+            Self::RateLimitExceeded => "rate_limit",
+            Self::Io(..) | Self::Custom(..) => "",
+        }
+    }
 }
 
 impl std::error::Error for FilterError {}

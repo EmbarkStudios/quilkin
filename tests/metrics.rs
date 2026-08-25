@@ -97,4 +97,16 @@ async fn metrics_server() {
     let write_regex = regex::Regex::new(r#"quilkin_packets_total\{.*event="write".*\} 2"#).unwrap();
     assert!(read_regex.is_match(&response));
     assert!(write_regex.is_match(&response));
+
+    // The proxy in front of the echo server routes to a cluster with no locality,
+    // so the label is present and empty rather than absent
+    assert!(
+        regex::Regex::new(r#"quilkin_packets_total\{.*destination=""#)
+            .unwrap()
+            .is_match(&response)
+    );
+
+    // Registered by the aggregation, which spawns with the UDP service, so a
+    // proxy exports the distribution whether or not it currently has players
+    assert!(response.contains("quilkin_session_jitter_seconds_bucket"));
 }

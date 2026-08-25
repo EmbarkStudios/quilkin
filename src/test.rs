@@ -325,6 +325,8 @@ impl TestHelper {
             .qcmp_port(0)
             .phoenix()
             .phoenix_port(0)
+            // Fast enough for a test to observe an aggregation without waiting
+            .session_metrics_interval(1)
             .spawn_services(&config, shutdown)
             .await
             .expect("failed to spawn services");

@@ -34,21 +34,21 @@ trace_test!(fan_out, {
         client.send_to(msg.as_bytes(), addr).await.unwrap();
         assert_eq!(
             msg,
-            sb.timeout(100, server1_rx.recv())
+            sb.timeout(RECV_TIMEOUT, server1_rx.recv())
                 .await
                 .0
                 .expect("should get a packet")
         );
         assert_eq!(
             msg,
-            sb.timeout(100, server2_rx.recv())
+            sb.timeout(RECV_TIMEOUT, server2_rx.recv())
                 .await
                 .0
                 .expect("should get a packet")
         );
         assert_eq!(
             msg,
-            sb.timeout(100, server3_rx.recv())
+            sb.timeout(RECV_TIMEOUT, server3_rx.recv())
                 .await
                 .0
                 .expect("should get a packet")
@@ -83,7 +83,7 @@ trace_test!(refreshes_recv_ring, {
         client.send_to(&i.to_ne_bytes(), addr).await.unwrap();
 
         let (len, _addr) = sb
-            .timeout(100, client.recv_from(&mut buf))
+            .timeout(RECV_TIMEOUT, client.recv_from(&mut buf))
             .await
             .0
             .expect("should have received packet");
@@ -98,7 +98,7 @@ trace_test!(refreshes_recv_ring, {
         .expect("failed to send debug request");
     let mut buf = [0u8; 8];
     let (len, _addr) = sb
-        .timeout(100, client.recv_from(&mut buf))
+        .timeout(RECV_TIMEOUT, client.recv_from(&mut buf))
         .await
         .0
         .expect("should have debug response packet");
@@ -164,6 +164,7 @@ trace_test!(requeues_recv, {
         sessions: quilkin::net::sessions::SessionPool::new(
             vec![pending_sends.0.clone()],
             config.dyn_cfg.cached_filter_chain().unwrap(),
+            config.dyn_cfg.clusters().cloned(),
             usize::MAX,
             backend,
             4,

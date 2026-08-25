@@ -86,7 +86,7 @@ mod tests {
             filter.read(&mut context).unwrap();
         }
 
-        dest
+        dest.into_iter().map(|d| d.address).collect()
     }
 
     #[tokio::test]

@@ -56,7 +56,7 @@ impl Filter for TokenRouter {
             Some(metadata::Value::Bytes(token)) => {
                 let tok = crate::net::cluster::Token::new(token);
 
-                ctx.endpoints.addresses_for_token(tok, ctx.destinations);
+                ctx.endpoints.destinations_for_token(tok, ctx.destinations);
 
                 if ctx.destinations.is_empty() {
                     Err(FilterError::TokenRouter(RouterError::NoEndpointMatch {
@@ -100,6 +100,18 @@ pub enum RouterError {
 }
 
 impl RouterError {
+    #[inline]
+    pub fn drop_reason(&self) -> crate::metrics::DropReason {
+        use crate::metrics::DropReason;
+
+        match self {
+            // The packet carried no token to route on, so the chain is
+            // misconfigured or the client is wrong, not the routing table
+            Self::NoTokenFound => DropReason::FilterError,
+            Self::NoEndpointMatch { .. } => DropReason::NoEndpointMatch,
+        }
+    }
+
     #[inline]
     pub fn discriminant(&self) -> &'static str {
         match self {
@@ -315,7 +327,7 @@ mod tests {
     }
 
     fn with_ctx(
-        dest: &mut Vec<crate::net::EndpointAddress>,
+        dest: &mut Vec<crate::net::Destination>,
         test: impl FnOnce(ReadContext<'_, bytes::BytesMut>),
     ) {
         let endpoint1 = Endpoint::with_metadata(

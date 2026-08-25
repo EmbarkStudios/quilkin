@@ -127,4 +127,8 @@ pub struct SendPacket {
     pub data: bytes::Bytes,
     /// The asn info for the sender, used for metrics
     pub asn_info: Option<crate::net::maxmind_db::MetricsIpNetEntry>,
+    /// The cluster this packet belongs to, as a label value, so traffic can be
+    /// attributed to a gameserver fleet. Empty when the destination didn't come
+    /// from a cluster with a locality.
+    pub cluster: std::sync::Arc<str>,
 }

@@ -118,7 +118,11 @@ trace_test!(relay_routing, {
 
         assert_eq!(
             "hello",
-            sandbox.timeout(1000, server_rx.recv()).await.0.unwrap()
+            sandbox
+                .timeout(RECV_TIMEOUT, server_rx.recv())
+                .await
+                .0
+                .unwrap()
         );
 
         tracing::info!(%token, "received packet");
@@ -217,7 +221,7 @@ trace_test!(datacenter_discovery, {
 
     loop {
         let rt = sandbox
-            .timeout(10000, proxy_delta_rx.recv())
+            .timeout(RECV_TIMEOUT, proxy_delta_rx.recv())
             .await
             .0
             .unwrap();
@@ -233,7 +237,7 @@ trace_test!(datacenter_discovery, {
     }
     loop {
         let rt = sandbox
-            .timeout(10000, proxy_delta_rx.recv())
+            .timeout(RECV_TIMEOUT, proxy_delta_rx.recv())
             .await
             .0
             .unwrap();
@@ -335,7 +339,7 @@ trace_test!(filter_update, {
         let mut updates = 0x0;
         while (updates & 0x11) != 0x11 {
             let rt = sandbox
-                .timeout(10000, proxy_delta_rx.recv())
+                .timeout(RECV_TIMEOUT, proxy_delta_rx.recv())
                 .await
                 .0
                 .unwrap();
@@ -356,7 +360,11 @@ trace_test!(filter_update, {
         tracing::info!(len = token.len(), "received packet");
         assert_eq!(
             "hello",
-            sandbox.timeout(10000, server_rx.recv()).await.0.unwrap()
+            sandbox
+                .timeout(RECV_TIMEOUT, server_rx.recv())
+                .await
+                .0
+                .unwrap()
         );
 
         tracing::info!(len = token.len(), "sending bad packet");

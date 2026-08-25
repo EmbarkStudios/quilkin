@@ -172,20 +172,27 @@ fn spawn_poll_listener_impl(
                     let destination = packet.destination;
                     let (result, _) = ps_send_to(&send_socket, packet.data, destination).await;
                     let asn_info = packet.asn_info.as_ref().into();
+                    let locality = &*packet.cluster;
                     match result {
                         Ok(size) => {
-                            crate::metrics::packets_total(crate::metrics::WRITE, &asn_info).inc();
-                            crate::metrics::bytes_total(crate::metrics::WRITE, &asn_info)
+                            crate::metrics::packets_total(
+                                crate::metrics::WRITE,
+                                &asn_info,
+                                locality,
+                            )
+                            .inc();
+                            crate::metrics::bytes_total(crate::metrics::WRITE, &asn_info, locality)
                                 .inc_by(size as u64);
                         }
                         Err(error) => {
-                            let source = error.to_string();
-                            crate::metrics::errors_total(crate::metrics::WRITE, &source, &asn_info)
+                            let kind = crate::metrics::io_error_kind(&error);
+                            crate::metrics::errors_total(crate::metrics::WRITE, kind, &asn_info)
                                 .inc();
                             crate::metrics::packets_dropped_total(
                                 crate::metrics::WRITE,
-                                &source,
-                                &asn_info,
+                                crate::metrics::DropReason::SocketError,
+                                "",
+                                locality,
                             )
                             .inc();
                         }
@@ -223,11 +230,11 @@ fn spawn_poll_listener_impl(
                             let packet = crate::net::packet::DownstreamPacket { contents: buffer, source, filters };
 
                             if let Some(last_received_at) = last_received_at {
-                                crate::metrics::packet_jitter(
+                                crate::metrics::set_packet_jitter(
                                     crate::metrics::READ,
                                     &crate::metrics::EMPTY,
-                                )
-                                .set((received_at - last_received_at).nanos());
+                                    (received_at - last_received_at).nanos(),
+                                );
                             }
                             last_received_at = Some(received_at);
 
@@ -314,26 +321,32 @@ pub fn spawn_session(
                         );
                         let (result, _) = ps_send_to(&socket2, packet.data, destination).await;
                         let asn_info = packet.asn_info.as_ref().into();
+                        let locality = &*packet.cluster;
                         match result {
                             Ok(size) => {
-                                crate::metrics::packets_total(crate::metrics::READ, &asn_info)
-                                    .inc();
-                                crate::metrics::bytes_total(crate::metrics::READ, &asn_info)
-                                    .inc_by(size as u64);
+                                crate::metrics::packets_total(
+                                    crate::metrics::READ,
+                                    &asn_info,
+                                    locality,
+                                )
+                                .inc();
+                                crate::metrics::bytes_total(
+                                    crate::metrics::READ,
+                                    &asn_info,
+                                    locality,
+                                )
+                                .inc_by(size as u64);
                             }
                             Err(error) => {
                                 tracing::trace!(%error, "sending packet upstream failed");
-                                let source = error.to_string();
-                                crate::metrics::errors_total(
-                                    crate::metrics::READ,
-                                    &source,
-                                    &asn_info,
-                                )
-                                .inc();
+                                let kind = crate::metrics::io_error_kind(&error);
+                                crate::metrics::errors_total(crate::metrics::READ, kind, &asn_info)
+                                    .inc();
                                 crate::metrics::packets_dropped_total(
                                     crate::metrics::READ,
-                                    &source,
-                                    &asn_info,
+                                    crate::metrics::DropReason::SocketError,
+                                    "",
+                                    locality,
                                 )
                                 .inc();
                             }

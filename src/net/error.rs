@@ -35,12 +35,14 @@ impl PipelineError {
         direction: crate::metrics::Direction,
         asn_info: &crate::metrics::AsnInfo<'_>,
     ) {
-        if matches!(
-            self,
-            PipelineError::Io(_) | PipelineError::Filter(crate::filters::FilterError::Io(_))
-        ) {
-            crate::metrics::errors_total(direction, &self.to_string(), asn_info).inc();
-        }
+        let io = match self {
+            PipelineError::Io(io) | PipelineError::Filter(crate::filters::FilterError::Io(io)) => {
+                io
+            }
+            _ => return,
+        };
+
+        crate::metrics::errors_total(direction, crate::metrics::io_error_kind(io), asn_info).inc();
     }
 
     pub fn discriminant(&self) -> &'static str {
@@ -51,6 +53,32 @@ impl PipelineError {
             Self::Io(_) => "io",
             Self::DisallowedSourceIP(_) => "disallowed source ip",
             Self::SessionLimit => "session limit",
+        }
+    }
+
+    /// The bounded drop reason this error corresponds to.
+    #[inline]
+    pub fn drop_reason(&self) -> crate::metrics::DropReason {
+        use crate::metrics::DropReason;
+
+        match self {
+            Self::NoUpstreamEndpoints => DropReason::NoEndpointMatch,
+            Self::Filter(fe) => fe.drop_reason(),
+            Self::Session(_) => DropReason::Internal,
+            Self::Io(_) => DropReason::SocketError,
+            // Spoofed or misdirected source, ie not a packet we can parse as
+            // belonging to a client
+            Self::DisallowedSourceIP(_) => DropReason::InvalidPacket,
+            Self::SessionLimit => DropReason::SessionLimit,
+        }
+    }
+
+    /// The filter that produced this error, empty when it didn't come from one.
+    #[inline]
+    pub fn filter_name(&self) -> &'static str {
+        match self {
+            Self::Filter(fe) => fe.filter_name(),
+            _ => "",
         }
     }
 }

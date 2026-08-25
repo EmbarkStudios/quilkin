@@ -306,6 +306,16 @@ impl EndpointSet {
         self.endpoints.contains_key(&ep.address)
     }
 
+    #[inline]
+    pub fn contains_address(&self, address: &EndpointAddress) -> bool {
+        self.endpoints.contains_key(address)
+    }
+
+    #[inline]
+    pub fn addresses(&self) -> impl Iterator<Item = &EndpointAddress> {
+        self.endpoints.keys()
+    }
+
     /// Unique version for this endpoint set
     #[inline]
     pub fn version(&self) -> EndpointSetVersion {
@@ -518,7 +528,8 @@ impl EndpointSet {
     pub fn corrosion_apply(
         &mut self,
         ss: corrosion::pubsub::SubscriptionStream,
-        token_map: &DashMap<u64, BTreeSet<EndpointAddress>>,
+        locality: &Option<Locality>,
+        token_map: &DashMap<u64, BTreeSet<Destination>>,
         subm: &mut corrosion::persistent::SubMetrics,
     ) -> (ChangeId, isize) {
         use corrosion::{
@@ -572,7 +583,7 @@ impl EndpointSet {
 
                 {
                     let mut tm = token_map.entry(tok.0).or_default();
-                    tm.insert(addr.clone());
+                    tm.insert(Destination::new(addr.clone(), locality.clone()));
                 }
 
                 this.entry(tok.0).or_default().insert(addr.clone());
@@ -582,7 +593,7 @@ impl EndpointSet {
                 let tok = Token::new(tok);
 
                 let remove = if let Some(mut tm) = token_map.get_mut(&tok.0) {
-                    tm.remove(addr);
+                    tm.remove(&Destination::new(addr.clone(), locality.clone()));
                     tm.is_empty()
                 } else {
                     false
@@ -689,12 +700,47 @@ impl EndpointSet {
 pub struct ClusterMap<S = gxhash::GxBuildHasher> {
     map: DashMap<Option<Locality>, EndpointSet, S>,
     localities: DashMap<Option<Locality>, Option<std::net::IpAddr>>,
-    token_map: DashMap<u64, BTreeSet<EndpointAddress>>,
+    token_map: DashMap<u64, BTreeSet<Destination>>,
     num_endpoints: AtomicUsize,
     version: AtomicU64,
 }
 
 type DashMapRef<'inner> = dashmap::mapref::one::Ref<'inner, Option<Locality>, EndpointSet>;
+
+/// An endpoint that routing selected, paired with the cluster it was selected
+/// from.
+///
+/// The cluster travels with the address because it is only knowable at the point
+/// of the routing decision: the same address may be configured in more than one
+/// locality, so recovering it afterwards from the address alone is guesswork.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Destination {
+    pub address: EndpointAddress,
+    /// Locality of the cluster the endpoint was routed from, `None` for a
+    /// cluster configured without one.
+    pub cluster: Option<Locality>,
+}
+
+impl Destination {
+    #[inline]
+    pub fn new(address: EndpointAddress, cluster: Option<Locality>) -> Self {
+        Self { address, cluster }
+    }
+
+    /// The cluster as a metric label value, empty when there isn't one.
+    #[inline]
+    pub fn cluster_label(&self) -> &str {
+        self.cluster
+            .as_ref()
+            .map_or("", |locality| locality.as_str())
+    }
+}
+
+impl From<EndpointAddress> for Destination {
+    fn from(address: EndpointAddress) -> Self {
+        Self::new(address, None)
+    }
+}
 
 impl ClusterMap {
     pub fn new() -> Self {
@@ -748,18 +794,15 @@ where
 
             self.version.fetch_add(1, Relaxed);
 
-            for (token_hash, addrs) in token_map_diff {
-                if let Some(addrs) = addrs {
-                    self.token_map.insert(token_hash, addrs);
-                } else {
-                    self.token_map.remove(&token_hash);
-                }
-            }
+            self.apply_token_diff(&locality, token_map_diff);
         } else {
-            for (token_hash, addrs) in &endpoint_set.token_map {
-                self.token_map
-                    .insert(*token_hash, addrs.iter().cloned().collect());
-            }
+            self.apply_token_diff(
+                &locality,
+                endpoint_set
+                    .token_map
+                    .iter()
+                    .map(|(token, addrs)| (*token, Some(addrs.iter().cloned().collect()))),
+            );
 
             let new_len = endpoint_set.len();
             self.map.insert(locality, endpoint_set);
@@ -819,18 +862,15 @@ where
 
             self.version.fetch_add(1, Relaxed);
 
-            for (token_hash, addrs) in token_map_diff {
-                if let Some(addrs) = addrs {
-                    self.token_map.insert(token_hash, addrs);
-                } else {
-                    self.token_map.remove(&token_hash);
-                }
-            }
+            self.apply_token_diff(&locality, token_map_diff);
         } else {
-            for (token_hash, addrs) in &cluster.token_map {
-                self.token_map
-                    .insert(*token_hash, addrs.iter().cloned().collect());
-            }
+            self.apply_token_diff(
+                &locality,
+                cluster
+                    .token_map
+                    .iter()
+                    .map(|(token, addrs)| (*token, Some(addrs.iter().cloned().collect()))),
+            );
 
             upserted.extend(cluster.to_map());
 
@@ -872,6 +912,70 @@ where
                 None
             }
         })
+    }
+
+    /// Applies `locality`'s token map changes to the aggregated one, tagging each
+    /// entry with the cluster that contributed it so routing can report it.
+    ///
+    /// Routing tokens are globally unique, so a locality's entry for a token is
+    /// the entire entry and replacing it wholesale is correct.
+    #[inline]
+    fn apply_token_diff(
+        &self,
+        locality: &Option<Locality>,
+        diff: impl IntoIterator<Item = (u64, Option<BTreeSet<EndpointAddress>>)>,
+    ) {
+        for (token_hash, addresses) in diff {
+            match addresses {
+                Some(addresses) => {
+                    self.token_map.insert(
+                        token_hash,
+                        addresses
+                            .into_iter()
+                            .map(|address| Destination::new(address, locality.clone()))
+                            .collect(),
+                    );
+                }
+                None => {
+                    self.token_map.remove(&token_hash);
+                }
+            }
+        }
+    }
+
+    /// Whether any cluster currently contains an endpoint at `address`.
+    ///
+    /// Used to tell an endpoint disappearing from underneath a session apart from
+    /// a player going quiet, so it runs once per session rather than per packet.
+    /// Which cluster a packet was routed to is carried by [`Destination`], since
+    /// only the routing decision knows that.
+    ///
+    /// Note that an endpoint configured by name is keyed by that name, so it
+    /// isn't found by the address the name resolves to.
+    #[inline]
+    pub fn contains_endpoint(&self, address: &std::net::SocketAddr) -> bool {
+        let address = EndpointAddress::from(*address);
+        let mut localities = self
+            .map
+            .iter()
+            .filter(|entry| entry.value().contains_address(&address));
+
+        let Some(first) = localities.next() else {
+            return false;
+        };
+
+        // A misconfiguration rather than something to resolve: an endpoint in two
+        // clusters makes traffic attribution and capacity accounting ambiguous
+        if let Some(second) = localities.next() {
+            tracing::warn!(
+                %address,
+                first = ?first.key(),
+                second = ?second.key(),
+                "endpoint is present in more than one cluster"
+            );
+        }
+
+        true
     }
 
     /// Applies a batch of updates to the `ClusterMap`
@@ -1024,10 +1128,41 @@ where
         self.do_remove_locality(locality)
     }
 
-    pub fn addresses_for_token(&self, token: Token, addrs: &mut Vec<EndpointAddress>) {
+    pub fn destinations_for_token(&self, token: Token, destinations: &mut Vec<Destination>) {
         if let Some(ma) = self.token_map.get(&token.0) {
-            addrs.extend(ma.value().iter().cloned());
+            destinations.extend(ma.value().iter().cloned());
         }
+    }
+
+    /// Every endpoint, paired with the cluster it belongs to.
+    #[inline]
+    pub fn destinations(&self, destinations: &mut Vec<Destination>) {
+        for entry in self.map.iter() {
+            destinations.extend(
+                entry
+                    .value()
+                    .addresses()
+                    .map(|address| Destination::new(address.clone(), entry.key().clone())),
+            );
+        }
+    }
+
+    /// The `index`th endpoint, paired with the cluster it belongs to.
+    #[inline]
+    pub fn nth_destination(&self, mut index: usize) -> Option<Destination> {
+        for entry in self.map.iter() {
+            let set = entry.value();
+            if index < set.len() {
+                return set
+                    .addresses()
+                    .nth(index)
+                    .map(|address| Destination::new(address.clone(), entry.key().clone()));
+            }
+
+            index -= set.len();
+        }
+
+        None
     }
 }
 
@@ -1051,7 +1186,7 @@ where
             .map
             .entry(Some((*CORRO).clone()))
             .or_insert_with(|| EndpointSet::new(BTreeSet::default()))
-            .corrosion_apply(ss, &self.token_map, subm);
+            .corrosion_apply(ss, &Some((*CORRO).clone()), &self.token_map, subm);
 
         // If we don't update the num_endpoints and it's 0, no filter will run!
         if diff >= 0 {
@@ -1237,11 +1372,17 @@ where
     fn from(map: DashMap<Option<Locality>, EndpointSet, S>) -> Self {
         let num_endpoints = AtomicUsize::new(map.iter().map(|kv| kv.value().len()).sum());
 
-        let token_map = DashMap::<u64, BTreeSet<EndpointAddress>>::default();
+        let token_map = DashMap::<u64, BTreeSet<Destination>>::default();
         let localities = DashMap::default();
         for es in &map {
             for (token_hash, addrs) in &es.value().token_map {
-                token_map.insert(*token_hash, addrs.iter().cloned().collect());
+                token_map.insert(
+                    *token_hash,
+                    addrs
+                        .iter()
+                        .map(|address| Destination::new(address.clone(), es.key().clone()))
+                        .collect(),
+                );
             }
 
             localities.insert(es.key().clone(), None);
@@ -1473,6 +1614,64 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     use super::*;
+
+    #[test]
+    fn contains_endpoint() {
+        let se1 = Locality::with_region("se-1");
+        let localised: std::net::SocketAddr = (Ipv4Addr::LOCALHOST, 7777).into();
+        let unlocalised: std::net::SocketAddr = (Ipv4Addr::LOCALHOST, 7778).into();
+
+        let cluster = ClusterMap::new();
+        cluster.insert(None, Some(se1), [Endpoint::new(localised.into())].into());
+        cluster.insert(None, None, [Endpoint::new(unlocalised.into())].into());
+
+        assert!(cluster.contains_endpoint(&localised));
+        // Present, in a cluster configured without a locality
+        assert!(cluster.contains_endpoint(&unlocalised));
+        assert!(!cluster.contains_endpoint(&(Ipv4Addr::LOCALHOST, 7779).into()));
+    }
+
+    #[test]
+    fn destinations_carry_the_cluster_they_were_routed_from() {
+        let se1 = Locality::with_region("se-1");
+        let de1 = Locality::with_region("de-1");
+
+        let endpoint = |port: u16, token: &[u8]| {
+            Endpoint::with_metadata(
+                (Ipv4Addr::LOCALHOST, port).into(),
+                crate::net::endpoint::Metadata {
+                    tokens: [token.to_vec()].into(),
+                },
+            )
+        };
+
+        let cluster = ClusterMap::new();
+        cluster.insert(None, Some(se1.clone()), [endpoint(7777, b"abc")].into());
+        cluster.insert(None, Some(de1.clone()), [endpoint(7778, b"def")].into());
+
+        let resolve = |token: &[u8]| {
+            let mut destinations = Vec::new();
+            cluster.destinations_for_token(Token::new(token), &mut destinations);
+            destinations
+        };
+
+        // Tokens are globally unique, so each resolves within exactly one cluster,
+        // and the cluster travels with the address the router picked
+        assert_eq!(
+            resolve(b"abc"),
+            [Destination::new(
+                (Ipv4Addr::LOCALHOST, 7777).into(),
+                Some(se1)
+            )]
+        );
+        assert_eq!(
+            resolve(b"def"),
+            [Destination::new(
+                (Ipv4Addr::LOCALHOST, 7778).into(),
+                Some(de1)
+            )]
+        );
+    }
 
     #[test]
     fn merge() {

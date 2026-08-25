@@ -40,13 +40,33 @@ use crate::{
 use parking_lot::RwLock;
 
 pub(crate) mod inner_metrics;
+pub mod quality;
 
 pub type SessionMap = crate::collections::ttl::TtlMap<SessionKey, Session>;
+
+/// What the send path needs from a session, all of it resolved when the session
+/// was created.
+pub(crate) struct SessionRoute {
+    /// `GeoIP` information for the client, for metrics.
+    pub asn_info: Option<MetricsIpNetEntry>,
+    /// The cluster routing selected the destination from, as a label value.
+    /// Empty for a cluster configured without a locality, or for a destination
+    /// that didn't come from the cluster map at all.
+    pub destination: Arc<str>,
+    pub pending_sends: PacketQueueSender,
+}
 
 /// Responsible for managing sending processed traffic to its destination and
 /// tracking metrics and other information about the session.
 pub trait SessionManager {
-    fn send(&self, key: SessionKey, contents: bytes::Bytes) -> Result<(), super::PipelineError>;
+    /// Sends `contents` upstream, `cluster` being the locality routing selected
+    /// the destination from.
+    fn send(
+        &self,
+        key: SessionKey,
+        contents: bytes::Bytes,
+        cluster: Option<crate::net::endpoint::Locality>,
+    ) -> Result<(), super::PipelineError>;
 }
 
 #[derive(PartialEq, Eq, Hash)]
@@ -94,6 +114,10 @@ pub struct SessionPool {
     downstream_sends: Vec<PacketQueueSender>,
     downstream_index: atomic::AtomicUsize,
     cached_filter_chain: CachedFilterChain,
+    /// Used to tell an endpoint disappearing from underneath a session apart from
+    /// a player going quiet. Sessions are never reported as `endpoint_gone` when
+    /// unset.
+    clusters: Option<crate::config::Watch<crate::net::ClusterMap>>,
     max_sessions: usize,
     backend: crate::net::io::UdpBackend,
     pub ring_buffer_len: u16,
@@ -106,6 +130,10 @@ struct SocketStorage {
     destination_to_sources: HashMap<(SocketAddr, u16), SocketAddr>,
     sources_to_asn_info: HashMap<SocketAddr, IpNetEntry>,
     sockets_to_destination: HashMap<u16, HashSet<SocketAddr>>,
+    /// The cluster each destination belongs to, recorded when a session to it is
+    /// created, since a packet arriving from upstream carries no routing decision
+    /// to read it from.
+    destination_to_cluster: HashMap<SocketAddr, Arc<str>>,
 }
 
 impl SessionPool {
@@ -115,6 +143,7 @@ impl SessionPool {
     pub fn new(
         downstream_sends: Vec<PacketQueueSender>,
         cached_filter_chain: CachedFilterChain,
+        clusters: Option<crate::config::Watch<crate::net::ClusterMap>>,
         max_sessions: usize,
         backend: crate::net::io::UdpBackend,
         ring_buffer_len: u16,
@@ -129,6 +158,7 @@ impl SessionPool {
             downstream_sends,
             downstream_index: atomic::AtomicUsize::new(0),
             cached_filter_chain,
+            clusters,
             max_sessions,
             backend,
             ring_buffer_len,
@@ -139,7 +169,8 @@ impl SessionPool {
     fn create_new_session_from_new_socket(
         self: &Arc<Self>,
         key: SessionKey,
-    ) -> Result<(Option<MetricsIpNetEntry>, PacketQueueSender), super::PipelineError> {
+        cluster: Option<crate::net::endpoint::Locality>,
+    ) -> Result<SessionRoute, super::PipelineError> {
         tracing::trace!(source=%key.source, dest=%key.dest, "creating new socket for session");
         let raw_socket = crate::net::raw_socket_with_reuse(0)?;
         let port = raw_socket
@@ -159,7 +190,7 @@ impl SessionPool {
         self.ports_to_sockets
             .write()
             .insert(port, pending_sends.clone());
-        self.create_session_from_existing_socket(key, pending_sends, port)
+        self.create_session_from_existing_socket(key, pending_sends, port, cluster)
     }
 
     pub(crate) fn process_received_upstream_packet(
@@ -172,7 +203,7 @@ impl SessionPool {
     ) {
         let received_at = UtcTimestamp::now();
         recv_addr.set_ip(recv_addr.ip().to_canonical());
-        let (downstream_addr, asn_info): (SocketAddr, Option<MetricsIpNetEntry>) = {
+        let (downstream_addr, asn_info, cluster) = {
             let storage = self.storage.read();
             let Some(downstream_addr) = storage.destination_to_sources.get(&(recv_addr, port))
             else {
@@ -181,20 +212,38 @@ impl SessionPool {
             };
             let asn_info = storage.sources_to_asn_info.get(downstream_addr);
 
-            (*downstream_addr, asn_info.map(MetricsIpNetEntry::from))
+            (
+                *downstream_addr,
+                asn_info.map(MetricsIpNetEntry::from),
+                storage
+                    .destination_to_cluster
+                    .get(&recv_addr)
+                    .cloned()
+                    .unwrap_or_else(|| Arc::from("")),
+            )
         };
 
         let asn_metric_info = asn_info.as_ref().into();
 
         if let Some(last_received_at) = last_received_at {
-            metrics::packet_jitter(metrics::WRITE, &asn_metric_info)
-                .set((received_at - *last_received_at).nanos());
+            metrics::set_packet_jitter(
+                metrics::WRITE,
+                &asn_metric_info,
+                (received_at - *last_received_at).nanos(),
+            );
         }
         *last_received_at = Some(received_at);
 
         let result = {
             let _timer = metrics::processing_time(metrics::WRITE).start_timer();
-            Self::process_recv_packet(recv_addr, downstream_addr, asn_info, packet, filters)
+            Self::process_recv_packet(
+                recv_addr,
+                downstream_addr,
+                asn_info,
+                cluster,
+                packet,
+                filters,
+            )
         };
 
         match result {
@@ -208,14 +257,18 @@ impl SessionPool {
                     self.downstream_sends.get_unchecked(index).push(packet);
                 }
             }
-            Err((asn_info, error)) => {
+            Err((asn_info, cluster, error)) => {
                 error.log();
-                let discriminant = error.discriminant();
                 let asn_metric_info = asn_info.as_ref().into();
 
-                metrics::packets_dropped_total(metrics::WRITE, discriminant, &asn_metric_info)
-                    .inc();
-                metrics::errors_total(metrics::WRITE, discriminant, &asn_metric_info).inc();
+                metrics::packets_dropped_total(
+                    metrics::WRITE,
+                    error.drop_reason(),
+                    error.filter_name(),
+                    &cluster,
+                )
+                .inc();
+                metrics::errors_total(metrics::WRITE, error.discriminant(), &asn_metric_info).inc();
             }
         }
     }
@@ -227,14 +280,20 @@ impl SessionPool {
     pub(crate) fn get(
         self: &Arc<Self>,
         key @ SessionKey { dest, .. }: SessionKey,
-    ) -> Result<(Option<MetricsIpNetEntry>, PacketQueueSender), super::PipelineError> {
+        cluster: Option<crate::net::endpoint::Locality>,
+    ) -> Result<SessionRoute, super::PipelineError> {
         tracing::trace!(source=%key.source, dest=%key.dest, "SessionPool::get");
         // If we already have a session for the key pairing, return that session.
         if let Some(entry) = self.session_map.get(&key) {
-            return Ok((
-                entry.asn_info.as_ref().map(MetricsIpNetEntry::from),
-                entry.pending_sends.clone(),
-            ));
+            // The only point on the downstream path holding the session, so also
+            // where its jitter estimate is updated
+            entry.quality.record_arrival();
+
+            return Ok(SessionRoute {
+                asn_info: entry.asn_info.as_ref().map(MetricsIpNetEntry::from),
+                destination: entry.destination.clone(),
+                pending_sends: entry.pending_sends.clone(),
+            });
         }
 
         if self.session_map.len() >= self.max_sessions {
@@ -256,7 +315,7 @@ impl SessionPool {
             let no_sockets = self.ports_to_sockets.read().is_empty();
             return if no_sockets {
                 // Initial case where we have no allocated or reserved sockets.
-                self.create_new_session_from_new_socket(key)
+                self.create_new_session_from_new_socket(key, cluster)
             } else {
                 // Where we have no allocated sockets for a destination, assign
                 // the first available one.
@@ -268,7 +327,7 @@ impl SessionPool {
                     .map(|(port, socket)| (*port, socket.clone()))
                     .ok_or(SessionError::MissingAllocatedSocket)?;
 
-                self.create_session_from_existing_socket(key, sender, port)
+                self.create_session_from_existing_socket(key, sender, port, cluster)
             };
         };
 
@@ -287,10 +346,10 @@ impl SessionPool {
                 .get_mut(&dest)
                 .ok_or(SessionError::MissingDestinationSocket)?
                 .insert(port);
-            self.create_session_from_existing_socket(key, socket, port)
+            self.create_session_from_existing_socket(key, socket, port, cluster)
         } else {
             drop(storage);
-            self.create_new_session_from_new_socket(key)
+            self.create_new_session_from_new_socket(key, cluster)
         }
     }
 
@@ -300,8 +359,23 @@ impl SessionPool {
         key: SessionKey,
         pending_sends: PacketQueueSender,
         socket_port: u16,
-    ) -> Result<(Option<MetricsIpNetEntry>, PacketQueueSender), super::PipelineError> {
+        cluster: Option<crate::net::endpoint::Locality>,
+    ) -> Result<SessionRoute, super::PipelineError> {
         tracing::trace!(source=%key.source, dest=%key.dest, "reusing socket for session");
+        // Interned once per session rather than per packet: the label is the
+        // cluster routing chose, and a session's destination doesn't change
+        let destination: Arc<str> = cluster
+            .as_ref()
+            .map_or("", |locality| locality.as_str())
+            .into();
+
+        // Resolved once here rather than at close, so a destination that was never
+        // in the cluster map can't later look like one that vanished from it
+        let tracked = self
+            .clusters
+            .as_ref()
+            .is_some_and(|clusters| clusters.read().contains_endpoint(&key.dest));
+
         let asn_info = {
             let mut storage = self.storage.write();
             storage
@@ -317,6 +391,14 @@ impl SessionPool {
             storage
                 .destination_to_sources
                 .insert((key.dest, socket_port), key.source);
+
+            // The upstream receive path has no routing decision to read the
+            // cluster from, so it reads it back from here
+            drop(
+                storage
+                    .destination_to_cluster
+                    .insert(key.dest, destination.clone()),
+            );
 
             let asn_info = crate::net::maxmind_db::MaxmindDb::lookup(key.source.ip());
 
@@ -337,33 +419,44 @@ impl SessionPool {
             socket_port,
             self.clone(),
             asn_info,
+            destination.clone(),
+            tracked,
         );
         tracing::trace!("inserting session into map");
         self.session_map.insert(key, session);
         tracing::trace!("session inserted");
-        Ok((asn_metrics_info, pending_sends))
+        Ok(SessionRoute {
+            asn_info: asn_metrics_info,
+            destination,
+            pending_sends,
+        })
     }
 
     /// Processes a packet that is received by this session.
+    #[allow(clippy::type_complexity)]
     fn process_recv_packet<P: PacketMut>(
         source: SocketAddr,
         dest: SocketAddr,
         asn_info: Option<MetricsIpNetEntry>,
+        cluster: Arc<str>,
         packet: P,
         filters: &crate::filters::FilterChain,
-    ) -> Result<SendPacket, (Option<MetricsIpNetEntry>, Error)> {
+    ) -> Result<SendPacket, (Option<MetricsIpNetEntry>, Arc<str>, Error)> {
         tracing::trace!(%source, %dest, length = packet.len(), "received packet from upstream");
 
         let mut context = crate::filters::WriteContext::new(source.into(), dest.into(), packet);
 
         if let Err(err) = filters.write(&mut context) {
-            return Err((asn_info, err.into()));
+            return Err((asn_info, cluster, err.into()));
         }
 
         Ok(SendPacket {
             data: context.contents.freeze(),
             destination: dest,
             asn_info,
+            // The traffic is from the gameserver this session is routed to, so it
+            // belongs to the same cluster as the downstream direction
+            cluster,
         })
     }
 
@@ -378,8 +471,9 @@ impl SessionPool {
         self: &Arc<Self>,
         key: SessionKey,
         packet: bytes::Bytes,
+        cluster: Option<crate::net::endpoint::Locality>,
     ) -> Result<(), super::PipelineError> {
-        self.send_inner(key, packet)?;
+        self.send_inner(key, packet, cluster)?;
         Ok(())
     }
 
@@ -389,15 +483,21 @@ impl SessionPool {
         self: &Arc<Self>,
         key: SessionKey,
         packet: bytes::Bytes,
+        cluster: Option<crate::net::endpoint::Locality>,
     ) -> Result<PacketQueueSender, super::PipelineError> {
-        let (asn_info, sender) = self.get(key)?;
+        let SessionRoute {
+            asn_info,
+            destination,
+            pending_sends,
+        } = self.get(key, cluster)?;
 
-        sender.push(SendPacket {
+        pending_sends.push(SendPacket {
             destination: key.dest,
             data: packet,
             asn_info,
+            cluster: destination,
         });
-        Ok(sender)
+        Ok(pending_sends)
     }
 
     /// Spawns a session I/O loop for the given socket, dispatching to the
@@ -482,13 +582,24 @@ impl SessionPool {
         // Not asserted because the source might not have GeoIP info.
         storage.sources_to_asn_info.remove(source);
         storage.destination_to_sources.remove(&(*dest, port));
+
+        // Only once no session is left using the destination, since the locality
+        // is shared by all of them
+        if !storage.destination_to_sockets.contains_key(dest) {
+            storage.destination_to_cluster.remove(dest);
+        }
         tracing::trace!("socket released");
     }
 }
 
 impl SessionManager for Arc<SessionPool> {
-    fn send(&self, key: SessionKey, contents: bytes::Bytes) -> Result<(), super::PipelineError> {
-        SessionPool::send(self, key, contents)
+    fn send(
+        &self,
+        key: SessionKey,
+        contents: bytes::Bytes,
+        cluster: Option<crate::net::endpoint::Locality>,
+    ) -> Result<(), super::PipelineError> {
+        SessionPool::send(self, key, contents, cluster)
     }
 }
 
@@ -513,6 +624,14 @@ pub struct Session {
     pending_sends: PacketQueueSender,
     /// The `GeoIP` information of the source.
     asn_info: Option<IpNetEntry>,
+    /// The cluster routing selected the destination from, as a label value.
+    destination: Arc<str>,
+    /// Whether the destination was in the cluster map when the session was
+    /// created. When it wasn't, its absence later says nothing.
+    tracked: bool,
+    /// Interarrival jitter of this session, folded into aggregate metrics by
+    /// [`quality::spawn_aggregator`].
+    quality: quality::SessionQualityHandle,
     /// The socket pool of the session.
     pool: Arc<SessionPool>,
 }
@@ -524,13 +643,18 @@ impl Session {
         socket_port: u16,
         pool: Arc<SessionPool>,
         asn_info: Option<IpNetEntry>,
+        destination: Arc<str>,
+        tracked: bool,
     ) -> Self {
         let s = Self {
             key,
             pending_sends,
             pool,
             socket_port,
+            quality: quality::SessionQualityHandle::register(asn_info.as_ref()),
             asn_info,
+            destination,
+            tracked,
             created_at: Instant::now(),
         };
 
@@ -556,10 +680,35 @@ impl Session {
         inner_metrics::active_sessions(self.asn_info.as_ref())
     }
 
+    /// Why this session is ending.
+    ///
+    /// UDP has no close, so a player leaving is indistinguishable from one going
+    /// quiet and is reported as an idle timeout. What is worth separating out is
+    /// the endpoint having gone away underneath the session, and the proxy itself
+    /// going away.
+    fn close_reason(&self) -> inner_metrics::CloseReason {
+        if crate::metrics::shutdown_initiated().get() != 0 {
+            return inner_metrics::CloseReason::Shutdown;
+        }
+
+        // Only meaningful for a destination that was in the cluster map when the
+        // session was created
+        if self.tracked
+            && let Some(clusters) = &self.pool.clusters
+            && !clusters.read().contains_endpoint(&self.key.dest)
+        {
+            return inner_metrics::CloseReason::EndpointGone;
+        }
+
+        inner_metrics::CloseReason::IdleTimeout
+    }
+
     fn release(&mut self) {
+        let reason = self.close_reason();
         self.active_session_metric().dec();
+        inner_metrics::sessions_closed_total(reason).inc();
         inner_metrics::duration_secs().observe(self.created_at.elapsed().as_secs() as f64);
-        tracing::debug!(source = %self.key.source, dest_address = %self.key.dest, "Session closed");
+        tracing::debug!(source = %self.key.source, dest_address = %self.key.dest, ?reason, "Session closed");
         SessionPool::release_socket(self.pool.clone(), self.key, self.socket_port);
     }
 }
@@ -597,6 +746,20 @@ impl Error {
             Self::Filter(fe) => fe.discriminant(),
         }
     }
+
+    #[inline]
+    pub fn drop_reason(&self) -> crate::metrics::DropReason {
+        match self {
+            Self::Filter(fe) => fe.drop_reason(),
+        }
+    }
+
+    #[inline]
+    pub fn filter_name(&self) -> &'static str {
+        match self {
+            Self::Filter(fe) => fe.filter_name(),
+        }
+    }
 }
 
 impl Loggable for Error {
@@ -620,12 +783,130 @@ mod tests {
             SessionPool::new(
                 vec![pending_sends.clone()],
                 fake.cached(),
+                None,
                 usize::MAX,
                 backend,
                 64,
             ),
             pending_sends,
         )
+    }
+
+    /// A pool with a cluster map holding `dest`, so destination attribution and
+    /// endpoint-gone detection are both live.
+    async fn new_pool_with_cluster(
+        dest: SocketAddr,
+        locality: Option<crate::net::endpoint::Locality>,
+    ) -> (
+        Arc<SessionPool>,
+        crate::config::Watch<crate::net::ClusterMap>,
+    ) {
+        let backend = crate::net::io::UdpBackend::default();
+        let (pending_sends, _srecv) = crate::net::queue(1, backend).unwrap();
+        let fake = crate::config::filter::FilterChainConfig::default();
+
+        let clusters = crate::config::Watch::new(crate::net::ClusterMap::default());
+        clusters.read().insert(
+            None,
+            locality,
+            [crate::net::endpoint::Endpoint::new(dest.into())].into(),
+        );
+
+        let pool = SessionPool::new(
+            vec![pending_sends],
+            fake.cached(),
+            Some(clusters.clone()),
+            usize::MAX,
+            backend,
+            64,
+        );
+
+        (pool, clusters)
+    }
+
+    #[tokio::test]
+    async fn sessions_carry_the_cluster_routing_chose() {
+        let dest: SocketAddr = (std::net::Ipv4Addr::LOCALHOST, 8090u16).into();
+        let locality = crate::net::endpoint::Locality::with_region("session-locality-test");
+        let (pool, _clusters) = new_pool_with_cluster(dest, Some(locality.clone())).await;
+
+        let key: SessionKey = ((std::net::Ipv4Addr::LOCALHOST, 8091u16).into(), dest).into();
+        let route = pool.get(key, Some(locality.clone())).unwrap();
+
+        assert_eq!(&*route.destination, locality.to_string().as_str());
+    }
+
+    #[tokio::test]
+    async fn a_destination_outside_the_cluster_map_is_not_tracked() {
+        let known: SocketAddr = (std::net::Ipv4Addr::LOCALHOST, 8092u16).into();
+        let (pool, _clusters) = new_pool_with_cluster(known, None).await;
+
+        let unknown: SocketAddr = (std::net::Ipv4Addr::LOCALHOST, 8093u16).into();
+        let key: SessionKey = ((std::net::Ipv4Addr::LOCALHOST, 8094u16).into(), unknown).into();
+        drop(pool.get(key, None).unwrap());
+
+        // Never in the cluster map, so its absence at close says nothing
+        assert!(!pool.session_map.get(&key).unwrap().tracked);
+    }
+
+    #[tokio::test]
+    async fn a_destination_routed_without_a_cluster_still_detects_it_vanishing() {
+        let dest: SocketAddr = (std::net::Ipv4Addr::LOCALHOST, 8099u16).into();
+        let locality = crate::net::endpoint::Locality::with_region("no-cluster-gone-test");
+        let (pool, clusters) = new_pool_with_cluster(dest, Some(locality.clone())).await;
+
+        // Routed without a cluster, as the decryptor filter does when it decodes a
+        // destination out of the packet itself
+        let key: SessionKey = ((std::net::Ipv4Addr::LOCALHOST, 8100u16).into(), dest).into();
+        let route = pool.get(key, None).unwrap();
+
+        assert!(route.destination.is_empty());
+
+        clusters.read().remove_locality(None, &Some(locality));
+        assert_eq!(
+            pool.session_map.get(&key).unwrap().close_reason(),
+            inner_metrics::CloseReason::EndpointGone
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_whose_endpoint_vanished_closes_as_endpoint_gone() {
+        let dest: SocketAddr = (std::net::Ipv4Addr::LOCALHOST, 8095u16).into();
+        let locality = crate::net::endpoint::Locality::with_region("endpoint-gone-test");
+        let (pool, clusters) = new_pool_with_cluster(dest, Some(locality.clone())).await;
+
+        let key: SessionKey = ((std::net::Ipv4Addr::LOCALHOST, 8096u16).into(), dest).into();
+        drop(pool.get(key, None).unwrap());
+
+        let session = pool.session_map.get(&key).unwrap();
+        assert_eq!(
+            session.close_reason(),
+            inner_metrics::CloseReason::IdleTimeout
+        );
+
+        clusters.read().remove_locality(None, &Some(locality));
+        assert_eq!(
+            session.close_reason(),
+            inner_metrics::CloseReason::EndpointGone
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_records_arrivals_for_its_jitter_estimate() {
+        let (pool, _receiver) = new_pool().await;
+        let key: SessionKey = (
+            (std::net::Ipv4Addr::LOCALHOST, 8097u16).into(),
+            (std::net::Ipv4Addr::UNSPECIFIED, 8098u16).into(),
+        )
+            .into();
+
+        // The first `get` creates the session, subsequent ones are packets
+        drop(pool.get(key, None).unwrap());
+        drop(pool.get(key, None).unwrap());
+        drop(pool.get(key, None).unwrap());
+
+        let session = pool.session_map.get(&key).unwrap();
+        assert_eq!(session.quality.packets_since_last_sample(), 2);
     }
 
     #[tokio::test]
@@ -637,7 +918,7 @@ mod tests {
         )
             .into();
 
-        let _session = pool.get(key).unwrap();
+        let _session = pool.get(key, None).unwrap();
 
         assert!(pool.drop_session(key).await);
 
@@ -658,8 +939,8 @@ mod tests {
         )
             .into();
 
-        let _session1 = pool.get(key1).unwrap();
-        let _session2 = pool.get(key2).unwrap();
+        let _session1 = pool.get(key1, None).unwrap();
+        let _session2 = pool.get(key2, None).unwrap();
 
         assert!(pool.drop_session(key1).await);
         assert!(!pool.has_no_allocated_sockets());
@@ -683,8 +964,8 @@ mod tests {
         )
             .into();
 
-        let _socket1 = pool.get(key1).unwrap();
-        let _socket2 = pool.get(key2).unwrap();
+        let _socket1 = pool.get(key1, None).unwrap();
+        let _socket2 = pool.get(key2, None).unwrap();
         assert_ne!(
             pool.session_map.get(&key1).unwrap().socket_port,
             pool.session_map.get(&key2).unwrap().socket_port
@@ -708,8 +989,8 @@ mod tests {
         )
             .into();
 
-        let _socket1 = pool.get(key1).unwrap();
-        let _socket2 = pool.get(key2).unwrap();
+        let _socket1 = pool.get(key1, None).unwrap();
+        let _socket2 = pool.get(key2, None).unwrap();
 
         assert_eq!(
             pool.session_map.get(&key1).unwrap().socket_port,
@@ -731,13 +1012,13 @@ mod tests {
         )
             .into();
 
-        let socket1 = pool.get(key1).unwrap();
+        let socket1 = pool.get(key1, None).unwrap();
 
         let task = tokio::spawn(async move {
             drop(socket1);
         });
 
-        let _socket2 = pool.get(key2).unwrap();
+        let _socket2 = pool.get(key2, None).unwrap();
 
         task.await.unwrap();
     }
@@ -756,13 +1037,13 @@ mod tests {
         )
             .into();
 
-        let socket1 = pool.get(key1).unwrap();
+        let socket1 = pool.get(key1, None).unwrap();
 
         let task = tokio::spawn(async move {
             drop(socket1);
         });
 
-        let _socket2 = pool.get(key2).unwrap();
+        let _socket2 = pool.get(key2, None).unwrap();
 
         task.await.unwrap();
     }
@@ -775,6 +1056,7 @@ mod tests {
             SessionPool::new(
                 vec![pending_sends.clone()],
                 fake.cached(),
+                None,
                 limit,
                 backend,
                 64,
@@ -795,11 +1077,11 @@ mod tests {
     async fn session_limit_rejects_new_sessions_at_capacity() {
         let (pool, _receiver) = pool_with_limit(2);
 
-        assert!(pool.get(key(8080, 9000)).is_ok());
-        assert!(pool.get(key(8081, 9000)).is_ok());
+        assert!(pool.get(key(8080, 9000), None).is_ok());
+        assert!(pool.get(key(8081, 9000), None).is_ok());
 
         assert!(matches!(
-            pool.get(key(8082, 9000)),
+            pool.get(key(8082, 9000), None),
             Err(super::super::PipelineError::SessionLimit)
         ));
     }
@@ -808,32 +1090,32 @@ mod tests {
     async fn session_limit_allows_existing_session_at_capacity() {
         let (pool, _receiver) = pool_with_limit(1);
 
-        assert!(pool.get(key(8080, 9000)).is_ok());
+        assert!(pool.get(key(8080, 9000), None).is_ok());
 
         // Limit hit — new session rejected.
         assert!(matches!(
-            pool.get(key(8081, 9000)),
+            pool.get(key(8081, 9000), None),
             Err(super::super::PipelineError::SessionLimit)
         ));
 
         // But re-fetching the existing session must still succeed.
-        assert!(pool.get(key(8080, 9000)).is_ok());
+        assert!(pool.get(key(8080, 9000), None).is_ok());
     }
 
     #[tokio::test]
     async fn session_limit_recovers_after_session_removed() {
         let (pool, _receiver) = pool_with_limit(1);
 
-        assert!(pool.get(key(8080, 9000)).is_ok());
+        assert!(pool.get(key(8080, 9000), None).is_ok());
         assert!(matches!(
-            pool.get(key(8081, 9000)),
+            pool.get(key(8081, 9000), None),
             Err(super::super::PipelineError::SessionLimit)
         ));
 
         pool.drop_session(key(8080, 9000)).await;
 
         // Slot freed — a new session should be accepted.
-        assert!(pool.get(key(8081, 9000)).is_ok());
+        assert!(pool.get(key(8081, 9000), None).is_ok());
     }
 
     #[tokio::test]
@@ -853,7 +1135,7 @@ mod tests {
         let msg = b"helloworld";
 
         let pending = pool
-            .send_inner(key, bytes::Bytes::from_static(msg))
+            .send_inner(key, bytes::Bytes::from_static(msg), None)
             .unwrap();
         let pending = pending.swap(Vec::new());
 

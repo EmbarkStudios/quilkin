@@ -78,6 +78,47 @@ pub(crate) fn sessions_rejected_total() -> &'static IntCounter {
     &SESSIONS_REJECTED_TOTAL
 }
 
+/// Why a session ended.
+///
+/// A fall in session count looks the same whether players left or their
+/// endpoints vanished, and those want different responses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CloseReason {
+    /// No traffic within the session TTL. UDP has no close, so this is how a
+    /// player leaving normally looks.
+    IdleTimeout,
+    /// The endpoint the session was routed to is no longer in the cluster map.
+    EndpointGone,
+    /// The proxy is shutting down.
+    Shutdown,
+}
+
+impl CloseReason {
+    fn label(self) -> &'static str {
+        match self {
+            Self::IdleTimeout => "idle_timeout",
+            Self::EndpointGone => "endpoint_gone",
+            Self::Shutdown => "shutdown",
+        }
+    }
+}
+
+pub(crate) fn sessions_closed_total(reason: CloseReason) -> prometheus::IntCounter {
+    static SESSIONS_CLOSED: Lazy<prometheus::IntCounterVec> = Lazy::new(|| {
+        prometheus::register_int_counter_vec_with_registry! {
+            Opts::new(
+                "quilkin_sessions_closed_total",
+                "total number of sessions closed, by the reason they ended",
+            ),
+            &[crate::metrics::REASON_LABEL],
+            crate::metrics::registry(),
+        }
+        .unwrap()
+    });
+
+    SESSIONS_CLOSED.with_label_values(&[reason.label()])
+}
+
 pub(crate) fn duration_secs() -> &'static Histogram {
     static DURATION_SECS: Lazy<Histogram> = Lazy::new(|| {
         register(

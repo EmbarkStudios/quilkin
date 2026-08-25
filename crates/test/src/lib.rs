@@ -9,6 +9,13 @@ use tokio::sync::mpsc;
 #[cfg(target_os = "linux")]
 pub mod xdp_util;
 
+/// Upper bound for waiting on a packet that is expected to arrive.
+///
+/// Generous on purpose: shared CI runners have been observed stalling every
+/// test process on the machine for ~500ms while sandboxes spin up, and this is
+/// only a guard against hanging forever, not a latency assertion.
+pub const RECV_TIMEOUT: u64 = 10_000;
+
 pub const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[inline]

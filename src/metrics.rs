@@ -31,6 +31,16 @@ pub(crate) const READ: Direction = Direction::Read;
 pub(crate) const WRITE: Direction = Direction::Write;
 #[allow(dead_code)]
 pub(crate) const ASN_LABEL: &str = "asn";
+pub(crate) const REASON_LABEL: &str = "reason";
+/// The filter responsible for a drop, empty when the drop wasn't a filter's
+/// decision. Kept separate from [`REASON_LABEL`] so renaming a filter doesn't
+/// change the reason vocabulary a breakdown is built on.
+pub(crate) const FILTER_LABEL: &str = "filter";
+/// The cluster a packet was destined for, ie the locality of the endpoint it was
+/// routed to. Empty when the packet was dropped before it was routed to one.
+///
+/// Carries the same values as `quilkin_active_endpoints`, so the two join.
+pub(crate) const DESTINATION_LABEL: &str = "destination";
 
 /// Label value for [`DIRECTION_LABEL`] for `read` events
 pub const READ_DIRECTION_LABEL: &str = "read";
@@ -348,6 +358,101 @@ impl Direction {
             Self::Write => WRITE_DIRECTION_LABEL,
         }
     }
+
+    #[inline]
+    const fn index(self) -> usize {
+        match self {
+            Self::Read => 0,
+            Self::Write => 1,
+        }
+    }
+}
+
+/// Why a packet was dropped.
+///
+/// Deliberately a closed set: drop breakdowns are built on these values, so they
+/// must survive a filter being renamed and an `errno` producing different text on
+/// a different kernel. Anything variable belongs in a log, or in
+/// [`FILTER_LABEL`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropReason {
+    /// No endpoint was available, or none matched the packet's routing token.
+    NoEndpointMatch,
+    /// A filter chose to drop the packet, ie the chain worked as configured.
+    FilterDrop,
+    /// A filter failed to process the packet.
+    FilterError,
+    /// The socket refused the packet, or the packet couldn't be built for it.
+    SocketError,
+    /// A send or receive queue was full.
+    QueueFull,
+    /// The packet couldn't be parsed as a datagram we handle.
+    InvalidPacket,
+    /// The session limit was reached, so no session could be established.
+    SessionLimit,
+    /// Quilkin lost track of state it needs to forward the packet.
+    Internal,
+}
+
+impl DropReason {
+    #[inline]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NoEndpointMatch => "no_endpoint_match",
+            Self::FilterDrop => "filter_drop",
+            Self::FilterError => "filter_error",
+            Self::SocketError => "socket_error",
+            Self::QueueFull => "queue_full",
+            Self::InvalidPacket => "invalid_packet",
+            Self::SessionLimit => "session_limit",
+            Self::Internal => "internal",
+        }
+    }
+}
+
+/// The [`std::io::ErrorKind`] of `error` as a bounded label value.
+///
+/// `Display` for an I/O error interpolates the raw OS string, which varies by
+/// platform and libc and so can't be a label.
+#[inline]
+pub fn io_error_kind(error: &std::io::Error) -> &'static str {
+    use std::io::ErrorKind;
+
+    // `ErrorKind::Uncategorized` can't be named, and the errnos a UDP send
+    // actually fails with under load land in it, so they're matched on the raw
+    // value before falling back
+    #[cfg(target_os = "linux")]
+    if let Some(errno) = error.raw_os_error() {
+        let named = match errno {
+            libc::ENOBUFS => Some("no_buffer_space"),
+            libc::EMSGSIZE => Some("message_too_long"),
+            libc::ENETDOWN => Some("network_down"),
+            libc::ENETRESET => Some("network_reset"),
+            libc::ENOENT => Some("not_found"),
+            _ => None,
+        };
+
+        if let Some(named) = named {
+            return named;
+        }
+    }
+
+    match error.kind() {
+        ErrorKind::AddrInUse => "addr_in_use",
+        ErrorKind::AddrNotAvailable => "addr_not_available",
+        ErrorKind::BrokenPipe => "broken_pipe",
+        ErrorKind::ConnectionRefused => "connection_refused",
+        ErrorKind::ConnectionReset => "connection_reset",
+        ErrorKind::Interrupted => "interrupted",
+        // EINVAL, which a send to an address the socket can't reach produces
+        ErrorKind::InvalidInput => "invalid_input",
+        ErrorKind::NotConnected => "not_connected",
+        ErrorKind::OutOfMemory => "out_of_memory",
+        ErrorKind::PermissionDenied => "permission_denied",
+        ErrorKind::TimedOut => "timed_out",
+        ErrorKind::WouldBlock => "would_block",
+        _ => "other",
+    }
 }
 
 pub struct AsnInfo<'a> {
@@ -427,12 +532,23 @@ pub(crate) fn phoenix_measurement_seconds(
     icao: crate::config::IcaoCode,
     direction: &str,
 ) -> Histogram {
+    /// ~2x spacing across the range one-way inter-datacenter latency occupies,
+    /// 0.5 ms to 0.5 s.
+    ///
+    /// The Prometheus default buckets are for HTTP durations: they put
+    /// everything below 5 ms in one bucket, which is where same-datacenter
+    /// measurements all land, and spend five buckets above 500 ms, which no
+    /// network path reaches.
+    const BUCKETS: &[f64] = &[
+        0.0005, 0.001, 0.002, 0.004, 0.008, 0.015, 0.03, 0.05, 0.08, 0.12, 0.2, 0.3, 0.5,
+    ];
+
     static PHOENIX_MEASUREMENT: Lazy<HistogramVec> = Lazy::new(|| {
         prometheus::register_histogram_vec_with_registry! {
             prometheus::histogram_opts! {
                 "quilkin_phoenix_measurement_seconds",
                 "Histogram of phoenix measurements for a given node",
-                prometheus::DEFAULT_BUCKETS.to_vec()
+                BUCKETS.to_vec()
             },
             &["icao", "direction"],
             registry(),
@@ -563,75 +679,203 @@ pub(crate) fn processing_time(direction: Direction) -> Histogram {
     PROCESSING_TIME.with_label_values(&[direction.label()])
 }
 
-pub(crate) fn bytes_total(direction: Direction, _asn: &AsnInfo<'_>) -> IntCounter {
+pub(crate) fn bytes_total(
+    direction: Direction,
+    _asn: &AsnInfo<'_>,
+    destination_locality: &str,
+) -> IntCounter {
     static BYTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
                 "quilkin_bytes_total",
                 "total number of bytes",
             },
-            &[Direction::LABEL],
+            &[Direction::LABEL, DESTINATION_LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    BYTES_TOTAL.with_label_values(&[direction.label()])
+    BYTES_TOTAL.with_label_values(&[direction.label(), destination_locality])
 }
 
 #[must_use]
-pub(crate) fn errors_total(direction: Direction, display: &str, _asn: &AsnInfo<'_>) -> IntCounter {
+pub(crate) fn errors_total(direction: Direction, reason: &str, _asn: &AsnInfo<'_>) -> IntCounter {
     static ERRORS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
                 "quilkin_errors_total",
                 "total number of errors sending packets",
             },
-            &[Direction::LABEL, "display"],
+            &[Direction::LABEL, REASON_LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    ERRORS_TOTAL.with_label_values(&[direction.label(), display])
+    ERRORS_TOTAL.with_label_values(&[direction.label(), reason])
 }
 
-pub(crate) fn packet_jitter(direction: Direction, _asn: &AsnInfo<'_>) -> IntGauge {
-    static PACKET_JITTER: Lazy<IntGaugeVec> = Lazy::new(|| {
-        prometheus::register_int_gauge_vec_with_registry! {
-            prometheus::opts! {
-                "quilkin_packet_jitter",
-                "The time between new packets",
+static PACKET_JITTER: Lazy<IntGaugeVec> = Lazy::new(|| {
+    prometheus::register_int_gauge_vec_with_registry! {
+        prometheus::opts! {
+            "quilkin_packet_jitter",
+            "The time between new packets",
+        },
+        &[Direction::LABEL],
+        registry(),
+    }
+    .unwrap()
+});
+
+/// Counts observations per direction so [`remove_packet_jitter`] can tell a
+/// current value from one a since-idle proxy is still publishing.
+static PACKET_JITTER_OBSERVATIONS: [std::sync::atomic::AtomicU64; 2] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 2];
+
+/// Sets `quilkin_packet_jitter` to the interarrival time of the packet just
+/// processed, in nanoseconds.
+///
+/// This is the interarrival time seen by an I/O loop, which covers every session
+/// it serves; for the per-session distribution see
+/// `quilkin_session_jitter_seconds`.
+#[inline]
+pub(crate) fn set_packet_jitter(direction: Direction, _asn: &AsnInfo<'_>, nanos: i64) {
+    PACKET_JITTER_OBSERVATIONS[direction.index()]
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    PACKET_JITTER
+        .with_label_values(&[direction.label()])
+        .set(nanos);
+}
+
+/// Number of times `quilkin_packet_jitter` has been set for `direction`.
+#[inline]
+pub(crate) fn packet_jitter_observations(direction: Direction) -> u64 {
+    PACKET_JITTER_OBSERVATIONS[direction.index()].load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Stops exporting `quilkin_packet_jitter` for `direction`.
+///
+/// The metric is a gauge set per packet, so a proxy that stops receiving would
+/// otherwise keep publishing its last value indefinitely.
+pub(crate) fn remove_packet_jitter(direction: Direction) {
+    drop(PACKET_JITTER.remove_label_values(&[direction.label()]));
+}
+
+/// Per-session interarrival jitter, in seconds.
+///
+/// A histogram rather than a mean, because a cluster mean of 0.5 ms is
+/// compatible with a few percent of players at 80 ms, and those are the players
+/// worth knowing about.
+pub(crate) fn session_jitter_seconds() -> &'static Histogram {
+    /// ~2x spacing across the range player connections actually occupy, 0.1 ms
+    /// to 0.5 s.
+    const BUCKETS: &[f64] = &[
+        0.0001, 0.00025, 0.0005, 0.001, 0.002, 0.004, 0.008, 0.015, 0.03, 0.06, 0.12, 0.25, 0.5,
+    ];
+
+    static SESSION_JITTER: Lazy<Histogram> = Lazy::new(|| {
+        prometheus::register_histogram_with_registry! {
+            prometheus::histogram_opts! {
+                "quilkin_session_jitter_seconds",
+                "Distribution of per-session interarrival jitter of downstream packets",
+                BUCKETS.to_vec()
             },
-            &[Direction::LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    PACKET_JITTER.with_label_values(&[direction.label()])
+    &SESSION_JITTER
 }
 
-pub(crate) fn packets_total(direction: Direction, _asn: &AsnInfo<'_>) -> IntCounter {
+static SESSIONS_ACTIVE_BY_ASN: Lazy<IntGaugeVec> = Lazy::new(|| {
+    prometheus::register_int_gauge_vec_with_registry! {
+        prometheus::opts! {
+            "quilkin_sessions_active_by_asn",
+            "Active sessions by client ASN, for the largest ASNs at this proxy. Sessions belonging to any other ASN are counted under `asn=\"other\"`, so the breakdown sums to the session total.",
+        },
+        &[ASN_LABEL],
+        registry(),
+    }
+    .unwrap()
+});
+
+pub(crate) fn sessions_active_by_asn(asn: &str) -> IntGauge {
+    SESSIONS_ACTIVE_BY_ASN.with_label_values(&[asn])
+}
+
+/// Stops exporting `quilkin_sessions_active_by_asn` for `asn`, used when it
+/// falls out of the exported set.
+pub(crate) fn remove_sessions_active_by_asn(asn: &str) {
+    drop(SESSIONS_ACTIVE_BY_ASN.remove_label_values(&[asn]));
+}
+
+static CLIENT_SESSIONS_DEGRADED: Lazy<IntGaugeVec> = Lazy::new(|| {
+    prometheus::register_int_gauge_vec_with_registry! {
+        prometheus::opts! {
+            "quilkin_client_sessions_degraded",
+            "Sessions breaching a connection quality threshold, by client ASN. Only ASNs currently breaching are exported, so a healthy proxy publishes nothing here. Divide by `quilkin_sessions_active_by_asn` for the affected share; do it across the fleet, since one proxy sees too few sessions of any one ASN to judge it.",
+        },
+        &[ASN_LABEL, REASON_LABEL],
+        registry(),
+    }
+    .unwrap()
+});
+
+pub(crate) fn client_sessions_degraded(asn: &str, reason: &str) -> IntGauge {
+    CLIENT_SESSIONS_DEGRADED.with_label_values(&[asn, reason])
+}
+
+/// Stops exporting `quilkin_client_sessions_degraded` for `asn`, used when it
+/// recovers.
+pub(crate) fn remove_client_sessions_degraded(asn: &str, reason: &str) {
+    drop(CLIENT_SESSIONS_DEGRADED.remove_label_values(&[asn, reason]));
+}
+
+/// Counts degraded session observations, so a rate can be alerted on without
+/// depending on a threshold the proxy would have to pick.
+pub(crate) fn client_sessions_degraded_total(reason: &str) -> IntCounter {
+    static CLIENT_SESSIONS_DEGRADED: Lazy<IntCounterVec> = Lazy::new(|| {
+        prometheus::register_int_counter_vec_with_registry! {
+            prometheus::opts! {
+                "quilkin_client_sessions_degraded_total",
+                "Total number of times a session was observed breaching a connection quality threshold",
+            },
+            &[REASON_LABEL],
+            registry(),
+        }
+        .unwrap()
+    });
+
+    CLIENT_SESSIONS_DEGRADED.with_label_values(&[reason])
+}
+
+pub(crate) fn packets_total(
+    direction: Direction,
+    _asn: &AsnInfo<'_>,
+    destination_locality: &str,
+) -> IntCounter {
     static PACKETS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
             prometheus::opts! {
                 "quilkin_packets_total",
                 "Total number of packets",
             },
-            &[Direction::LABEL],
+            &[Direction::LABEL, DESTINATION_LABEL],
             registry(),
         }
         .unwrap()
     });
 
-    PACKETS_TOTAL.with_label_values(&[direction.label()])
+    PACKETS_TOTAL.with_label_values(&[direction.label(), destination_locality])
 }
 
 pub(crate) fn packets_dropped_total(
     direction: Direction,
-    source: &str,
-    _asn: &AsnInfo<'_>,
+    reason: DropReason,
+    filter: &str,
+    destination_locality: &str,
 ) -> IntCounter {
     static PACKETS_DROPPED: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {
@@ -639,13 +883,30 @@ pub(crate) fn packets_dropped_total(
                 "quilkin_packets_dropped_total",
                 "Total number of dropped packets",
             },
-            &[Direction::LABEL, "source"],
+            &[
+                Direction::LABEL,
+                REASON_LABEL,
+                FILTER_LABEL,
+                DESTINATION_LABEL,
+            ],
             registry(),
         }
         .unwrap()
     });
 
-    PACKETS_DROPPED.with_label_values(&[direction.label(), source])
+    PACKETS_DROPPED.with_label_values(&[
+        direction.label(),
+        reason.label(),
+        filter,
+        destination_locality,
+    ])
+}
+
+/// [`packets_dropped_total`] for drops with no filter or destination to
+/// attribute, ie packets dropped before they were routed.
+#[inline]
+pub(crate) fn packets_dropped(direction: Direction, reason: DropReason) -> IntCounter {
+    packets_dropped_total(direction, reason, "", "")
 }
 
 pub(crate) fn provider_task_failures_total(provider_task: &str) -> IntCounter {
@@ -846,6 +1107,91 @@ mod tests {
             .filter(|mf| mf.name() == "quilkin_active_endpoints")
             .flat_map(|mf| mf.get_metric())
             .any(|m| m.get_label().iter().any(|l| l.value() == label))
+    }
+
+    #[test]
+    fn drops_are_labelled_with_a_bounded_reason() {
+        use crate::filters::FilterError;
+        use crate::net::PipelineError;
+
+        // The vocabulary a drop breakdown is built on, which must not shift when
+        // a filter is renamed or an errno differs
+        assert_eq!(
+            PipelineError::NoUpstreamEndpoints.drop_reason(),
+            DropReason::NoEndpointMatch
+        );
+        assert_eq!(
+            PipelineError::Filter(FilterError::Dropped).drop_reason(),
+            DropReason::FilterDrop
+        );
+        assert_eq!(
+            PipelineError::Filter(FilterError::NoValueCaptured).drop_reason(),
+            DropReason::FilterError
+        );
+        assert_eq!(
+            PipelineError::Filter(FilterError::Custom("anything at all")).drop_reason(),
+            DropReason::FilterError
+        );
+        assert_eq!(
+            PipelineError::Io(std::io::Error::from_raw_os_error(22)).drop_reason(),
+            DropReason::SocketError
+        );
+
+        // A filter's identity is a separate label, so it never widens the reasons
+        assert_eq!(
+            PipelineError::Filter(FilterError::FirewallDenied).filter_name(),
+            "firewall"
+        );
+        assert_eq!(
+            PipelineError::Io(std::io::Error::from_raw_os_error(22)).filter_name(),
+            ""
+        );
+
+        // EINVAL, which used to reach the label as "Invalid argument (os error 22)"
+        assert_eq!(
+            io_error_kind(&std::io::Error::from_raw_os_error(22)),
+            "invalid_input"
+        );
+
+        // The errnos a UDP send fails with under load. `ErrorKind` puts both in
+        // its uncategorised bucket, so without naming them the most common real
+        // send failures would be indistinguishable.
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(
+                io_error_kind(&std::io::Error::from_raw_os_error(libc::ENOBUFS)),
+                "no_buffer_space"
+            );
+            assert_eq!(
+                io_error_kind(&std::io::Error::from_raw_os_error(libc::EMSGSIZE)),
+                "message_too_long"
+            );
+        }
+    }
+
+    #[test]
+    fn dropped_packets_carry_the_full_label_set() {
+        packets_dropped_total(READ, DropReason::FilterDrop, "firewall", "eu-north1").inc();
+
+        let rendered = registry()
+            .gather()
+            .iter()
+            .filter(|mf| mf.name() == "quilkin_packets_dropped_total")
+            .flat_map(|mf| mf.get_metric())
+            .any(|m| {
+                let labels: std::collections::HashMap<_, _> = m
+                    .get_label()
+                    .iter()
+                    .map(|l| (l.name(), l.value()))
+                    .collect();
+
+                labels.get(DIRECTION_LABEL) == Some(&"read")
+                    && labels.get(REASON_LABEL) == Some(&"filter_drop")
+                    && labels.get(FILTER_LABEL) == Some(&"firewall")
+                    && labels.get(DESTINATION_LABEL) == Some(&"eu-north1")
+            });
+
+        assert!(rendered);
     }
 
     #[test]

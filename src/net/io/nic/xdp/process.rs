@@ -2,10 +2,9 @@ use crate::{
     filters::{self, Filter as _},
     metrics::{self, AsnInfo},
     net::{
-        EndpointAddress,
         error::PipelineError,
         maxmind_db::{self, IpNetEntry},
-        sessions::inner_metrics as session_metrics,
+        sessions::{inner_metrics as session_metrics, quality as session_quality},
     },
     time::UtcTimestamp,
 };
@@ -201,7 +200,7 @@ pub struct State {
     /// or servers (upstream)
     pub external_port: NetworkU16,
     pub qcmp_port: NetworkU16,
-    pub destinations: Vec<EndpointAddress>,
+    pub destinations: Vec<crate::net::Destination>,
     pub addr_to_asn: AsnCache,
     pub sessions: Arc<SessionState>,
     pub local_ipv4: std::net::Ipv4Addr,
@@ -217,8 +216,8 @@ impl State {
         &self,
         server_addr: SocketAddr,
         port: NetworkU16,
-    ) -> Option<(SocketAddr, AsnInfo<'_>)> {
-        let addr = self.sessions.lookup_client(server_addr, port)?;
+    ) -> Option<(SocketAddr, AsnInfo<'_>, Arc<str>)> {
+        let (addr, cluster) = self.sessions.lookup_client(server_addr, port)?;
         let entry = self
             .addr_to_asn
             .get(&addr.ip(), self.last_receive.unix_nanos())
@@ -227,7 +226,7 @@ impl State {
                 asn: asn.as_str(),
             });
 
-        Some((addr, entry))
+        Some((addr, entry, cluster))
     }
 
     /// Retrieves or creates a session, ie a mapping of a server endpoint + port
@@ -237,6 +236,7 @@ impl State {
         &mut self,
         client_addr: SocketAddr,
         server_addr: SocketAddr,
+        cluster: &str,
     ) -> (NetworkU16, AsnInfo<'_>, IpAddresses) {
         let ips = self.ips(server_addr.ip());
         let asn = self.addr_to_asn.get_or_insert_with(
@@ -251,9 +251,9 @@ impl State {
             },
         );
 
-        let port = self
-            .sessions
-            .get_or_create(client_addr, server_addr, asn.map(|(ipe, _)| ipe));
+        let port =
+            self.sessions
+                .get_or_create(client_addr, server_addr, asn.map(|(ipe, _)| ipe), cluster);
 
         (
             port,
@@ -391,6 +391,9 @@ struct ClientInfo {
     created_at: Instant,
     /// The port used to identify this unique session to the IP owning this map
     port: NetworkU16,
+    /// Interarrival jitter of this session, folded into aggregate metrics by
+    /// [`crate::net::sessions::quality::spawn_aggregator`]
+    quality: session_quality::SessionQualityHandle,
 }
 
 struct PortMapper {
@@ -398,15 +401,20 @@ struct PortMapper {
     /// to the server endpoint `Self` is associated with
     client_to_port: Arc<parking_lot::Mutex<std::collections::HashMap<SocketAddr, ClientInfo>>>,
     port_to_client: Arc<parking_lot::RwLock<PortMap>>,
+    /// The cluster the server endpoint this maps to belongs to, as routing
+    /// reported it when the first session to that endpoint was created. Held here
+    /// rather than per client, since it's a property of the server.
+    cluster: Arc<str>,
     port: AtomicU16,
 }
 
 impl PortMapper {
     #[inline]
-    fn new() -> Self {
+    fn new(cluster: &str) -> Self {
         Self {
             client_to_port: Arc::new(Default::default()),
             port_to_client: Arc::new(parking_lot::RwLock::new(PortMap::new())),
+            cluster: Arc::from(cluster),
             port: AtomicU16::new(EPHEMERAL_RANGE_END),
         }
     }
@@ -418,7 +426,11 @@ impl PortMapper {
         asn: Option<&IpNetEntry>,
     ) -> Option<NetworkU16> {
         match self.client_to_port.lock().entry(client_addr) {
-            Entry::Occupied(entry) => Some(entry.get().port),
+            Entry::Occupied(entry) => {
+                let client = entry.get();
+                client.quality.record_arrival();
+                Some(client.port)
+            }
             Entry::Vacant(entry) => {
                 let port = self.port.fetch_add(1, Ordering::Relaxed);
 
@@ -434,6 +446,7 @@ impl PortMapper {
 
                 let port = port.into();
                 entry.insert(ClientInfo {
+                    quality: session_quality::SessionQualityHandle::register(asn),
                     asn_info: asn.cloned(),
                     created_at: Instant::now(),
                     port,
@@ -457,6 +470,7 @@ impl Drop for PortMapper {
 
         for client_info in lock.values() {
             session_metrics::active_sessions(client_info.asn_info.as_ref()).dec();
+            session_metrics::sessions_closed_total(session_metrics::CloseReason::IdleTimeout).inc();
             session_metrics::duration_secs()
                 .observe(now.duration_since(client_info.created_at).as_secs_f64());
         }
@@ -480,10 +494,17 @@ impl SessionState {
     /// Attempts to lookup a client endpoint based on the server endpoint that sent
     /// the packet to the specified port
     #[inline]
-    fn lookup_client(&self, server_addr: SocketAddr, port: NetworkU16) -> Option<SocketAddr> {
-        self.sessions
-            .get(&server_addr)
-            .and_then(|pm| pm.get_client(port))
+    fn lookup_client(
+        &self,
+        server_addr: SocketAddr,
+        port: NetworkU16,
+    ) -> Option<(SocketAddr, Arc<str>)> {
+        // The cluster lives on the port mapper, which is keyed by the server
+        // address, so it comes back from the lookup already being done here
+        let pm = self.sessions.get(&server_addr)?;
+        let client = pm.get_client(port)?;
+
+        Some((client, pm.cluster.clone()))
     }
 
     /// Retrieves the port used to forward packets from the specified client
@@ -495,13 +516,14 @@ impl SessionState {
         client_addr: SocketAddr,
         server_addr: SocketAddr,
         asn: Option<&IpNetEntry>,
+        cluster: &str,
     ) -> NetworkU16 {
         let port = match self.sessions.entry(server_addr) {
             crate::collections::ttl::Entry::Occupied(entry) => {
                 entry.get().get_or_alloc(client_addr, asn)
             }
             crate::collections::ttl::Entry::Vacant(entry) => {
-                let pm = PortMapper::new();
+                let pm = PortMapper::new(cluster);
                 let port = pm.get_or_alloc(client_addr, asn);
                 entry.insert(pm);
                 port
@@ -519,7 +541,7 @@ impl SessionState {
         // the client endpoint is any longer, or, slightly worse, a packet gets
         // redirected to a different client.
         self.sessions.remove(server_addr);
-        self.get_or_create(client_addr, server_addr, asn)
+        self.get_or_create(client_addr, server_addr, asn, cluster)
     }
 }
 
@@ -621,7 +643,7 @@ pub fn process_packets<const RXN: usize, const TXN: usize>(
         // This indicates a packet that is split, which we don't handle _at all_
         // right now, and only the first buffer has headers, so check before parsing
         if buffer.is_continued() {
-            metrics::packets_dropped_total(metrics::READ, "split packet", &metrics::EMPTY).inc();
+            metrics::packets_dropped(metrics::READ, metrics::DropReason::InvalidPacket).inc();
             umem.free_packet(buffer);
             continue;
         }
@@ -630,7 +652,7 @@ pub fn process_packets<const RXN: usize, const TXN: usize>(
             Ok(headers) => headers,
             Err(reason) => {
                 tracing::debug!(reason, length = buffer.len(), "dropped unparsable packet");
-                metrics::packets_dropped_total(metrics::READ, reason, &metrics::EMPTY).inc();
+                metrics::packets_dropped(metrics::READ, metrics::DropReason::InvalidPacket).inc();
                 umem.free_packet(buffer);
                 continue;
             }
@@ -667,9 +689,14 @@ pub fn process_packets<const RXN: usize, const TXN: usize>(
                 umem.free_packet(packet);
             }
             Err((error, packet)) => {
-                let discriminant = error.discriminant();
                 error.inc_system_errors_total(direction, &metrics::EMPTY);
-                metrics::packets_dropped_total(direction, discriminant, &metrics::EMPTY).inc();
+                metrics::packets_dropped_total(
+                    direction,
+                    error.drop_reason(),
+                    error.filter_name(),
+                    "",
+                )
+                .inc();
 
                 umem.free_packet(packet);
             }
@@ -677,15 +704,17 @@ pub fn process_packets<const RXN: usize, const TXN: usize>(
     }
 
     if had_read {
-        metrics::packet_jitter(metrics::READ, &metrics::EMPTY).set(jitter);
+        metrics::set_packet_jitter(metrics::READ, &metrics::EMPTY, jitter);
     }
 }
 
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn push_packet<const TXN: usize>(
     direction: metrics::Direction,
     packet: Packet,
     asn: AsnInfo<'_>,
+    cluster: &str,
     data_length: usize,
     res: Result<(), PacketError>,
     tx_slab: &mut StackSlab<TXN>,
@@ -694,17 +723,16 @@ fn push_packet<const TXN: usize>(
     match res {
         Ok(()) => {
             if let Some(packet) = tx_slab.push_front(packet) {
-                metrics::packets_dropped_total(direction, "tx slab full", &metrics::EMPTY).inc();
+                metrics::packets_dropped(direction, metrics::DropReason::QueueFull).inc();
                 umem.free_packet(packet);
             } else {
-                metrics::packets_total(direction, &asn).inc();
-                metrics::bytes_total(direction, &asn).inc_by(data_length as u64);
+                metrics::packets_total(direction, &asn, cluster).inc();
+                metrics::bytes_total(direction, &asn, cluster).inc_by(data_length as u64);
             }
         }
         Err(err) => {
-            let discriminant = err.discriminant();
-            metrics::errors_total(direction, discriminant, &metrics::EMPTY).inc();
-            metrics::packets_dropped_total(direction, discriminant, &metrics::EMPTY).inc();
+            metrics::errors_total(direction, err.discriminant(), &metrics::EMPTY).inc();
+            metrics::packets_dropped(direction, metrics::DropReason::SocketError).inc();
             umem.free_packet(packet);
         }
     }
@@ -746,10 +774,11 @@ fn process_client_packet<const TXN: usize>(
     // a new packet for each destination, only modifying the headers
     if !state.destinations.is_empty() {
         while let Some(daddr) = state.destinations.pop() {
-            let Ok(dest_addr) = daddr.to_socket_addr() else {
+            let Ok(dest_addr) = daddr.address.to_socket_addr() else {
                 continue;
             };
-            let (source, asn, ips) = state.session(source_addr, dest_addr);
+            let cluster = daddr.cluster_label();
+            let (source, asn, ips) = state.session(source_addr, dest_addr, cluster);
 
             let mut headers = UdpHeaders {
                 eth,
@@ -776,6 +805,7 @@ fn process_client_packet<const TXN: usize>(
                 metrics::Direction::Read,
                 new_packet,
                 asn,
+                cluster,
                 data_length,
                 res,
                 tx_slab,
@@ -784,10 +814,11 @@ fn process_client_packet<const TXN: usize>(
         }
     }
 
-    let Ok(dest_addr) = dest_addr.to_socket_addr() else {
+    let cluster = dest_addr.cluster_label();
+    let Ok(dest_addr) = dest_addr.address.to_socket_addr() else {
         return Ok(Some(packet.buffer));
     };
-    let (source, asn, ips) = state.session(source_addr, dest_addr);
+    let (source, asn, ips) = state.session(source_addr, dest_addr, cluster);
 
     let mut headers = UdpHeaders {
         eth,
@@ -808,6 +839,7 @@ fn process_client_packet<const TXN: usize>(
         metrics::Direction::Read,
         packet.buffer,
         asn,
+        cluster,
         data_length,
         res,
         tx_slab,
@@ -829,13 +861,14 @@ fn process_server_packet<const TXN: usize>(
     let mut server_addr = packet.headers.source_address();
     server_addr.set_ip(server_addr.ip().to_canonical());
 
-    let Some((client_addr, asn)) = state.lookup_client(server_addr, packet.headers.udp.destination)
+    let Some((client_addr, asn, cluster)) =
+        state.lookup_client(server_addr, packet.headers.udp.destination)
     else {
         tracing::debug!(address = %server_addr, "received traffic from a server that has no downstream");
         return Ok(Some(packet.buffer));
     };
 
-    metrics::packet_jitter(metrics::Direction::Write, &asn).set(jitter);
+    metrics::set_packet_jitter(metrics::Direction::Write, &asn, jitter);
 
     let mut ctx = filters::WriteContext::new(server_addr.into(), client_addr.into(), packet);
 
@@ -863,6 +896,7 @@ fn process_server_packet<const TXN: usize>(
         metrics::Direction::Write,
         packet.buffer,
         asn,
+        &cluster,
         packet.headers.data_length(),
         res,
         tx_slab,

@@ -75,6 +75,15 @@ impl Locality {
         self.buffer.as_str().to_owned()
     }
 
+    /// The full colon separated locality, borrowed.
+    ///
+    /// Unlike [`Self::colon_separated_string`] this doesn't allocate, which
+    /// matters where it's used as a metric label on the packet path.
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        self.buffer.as_str()
+    }
+
     #[inline]
     pub fn region(&self) -> &str {
         &self.buffer[..self.region]

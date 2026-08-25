@@ -109,8 +109,12 @@ impl Filter for Decryptor {
                         };
 
                         self.decode_chacha20(nonce, edata);
-                        ctx.destinations
-                            .push(Self::decode_destination(edata).into());
+                        // The address came out of the packet, not out of the
+                        // cluster map, so there is no cluster it was routed from
+                        ctx.destinations.push(crate::net::Destination::new(
+                            Self::decode_destination(edata).into(),
+                            None,
+                        ));
                         Ok(())
                     }
                 }
@@ -286,7 +290,12 @@ mod tests {
             filter.read(&mut ctx).unwrap();
             assert_eq!(
                 std::net::SocketAddr::from(expected),
-                ctx.destinations.pop().unwrap().to_socket_addr().unwrap()
+                ctx.destinations
+                    .pop()
+                    .unwrap()
+                    .address
+                    .to_socket_addr()
+                    .unwrap()
             );
         }
 
@@ -312,7 +321,12 @@ mod tests {
             filter.read(&mut ctx).unwrap();
             assert_eq!(
                 std::net::SocketAddr::from(expected),
-                ctx.destinations.pop().unwrap().to_socket_addr().unwrap()
+                ctx.destinations
+                    .pop()
+                    .unwrap()
+                    .address
+                    .to_socket_addr()
+                    .unwrap()
             );
         }
     }

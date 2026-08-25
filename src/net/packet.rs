@@ -114,7 +114,7 @@ impl<P: PacketMut> DownstreamPacket<'_, P> {
         worker_id: usize,
         config: &Arc<Config>,
         sessions: &S,
-        destinations: &mut Vec<crate::net::EndpointAddress>,
+        destinations: &mut Vec<crate::net::Destination>,
     ) {
         tracing::trace!(
             id = worker_id,
@@ -125,10 +125,14 @@ impl<P: PacketMut> DownstreamPacket<'_, P> {
 
         let timer = metrics::processing_time(metrics::READ).start_timer();
         if let Err(error) = self.process_inner(config, sessions, destinations) {
-            let discriminant = error.discriminant();
-
             error.inc_system_errors_total(metrics::READ, &metrics::EMPTY);
-            metrics::packets_dropped_total(metrics::READ, discriminant, &metrics::EMPTY).inc();
+            metrics::packets_dropped_total(
+                metrics::READ,
+                error.drop_reason(),
+                error.filter_name(),
+                "",
+            )
+            .inc();
         }
 
         timer.stop_and_record();
@@ -140,7 +144,7 @@ impl<P: PacketMut> DownstreamPacket<'_, P> {
         self,
         config: &Arc<Config>,
         sessions: &S,
-        destinations: &mut Vec<crate::net::EndpointAddress>,
+        destinations: &mut Vec<crate::net::Destination>,
     ) -> Result<(), PipelineError> {
         let Some(clusters) = config
             .dyn_cfg
@@ -191,18 +195,18 @@ impl<P: PacketMut> DownstreamPacket<'_, P> {
         {
             let session_key = SessionKey {
                 source: self.source,
-                dest: dest.to_socket_addr()?,
+                dest: dest.address.to_socket_addr()?,
             };
 
-            sessions.send(session_key, contents)?;
+            sessions.send(session_key, contents, dest.cluster)?;
         } else {
-            for epa in destinations.drain(0..) {
+            for dest in destinations.drain(0..) {
                 let session_key = SessionKey {
                     source: self.source,
-                    dest: epa.to_socket_addr()?,
+                    dest: dest.address.to_socket_addr()?,
                 };
 
-                sessions.send(session_key, contents.clone())?;
+                sessions.send(session_key, contents.clone(), dest.cluster)?;
             }
         }
 
@@ -217,7 +221,7 @@ pub fn bench_process_packet(
     source: std::net::SocketAddr,
     config: &Arc<Config>,
     filter_chain: &crate::filters::FilterChain,
-    destinations: &mut Vec<crate::net::EndpointAddress>,
+    destinations: &mut Vec<crate::net::Destination>,
 ) {
     struct Noop;
     impl crate::net::sessions::SessionManager for Noop {
@@ -225,6 +229,7 @@ pub fn bench_process_packet(
             &self,
             _key: crate::net::sessions::SessionKey,
             _contents: bytes::Bytes,
+            _cluster: Option<crate::net::endpoint::Locality>,
         ) -> Result<(), crate::net::PipelineError> {
             Ok(())
         }
@@ -305,6 +310,7 @@ mod tests {
         let session_manager = SessionPool::new(
             vec![],
             cached_filter_chain,
+            None,
             usize::MAX,
             crate::net::io::UdpBackend::default(),
         );

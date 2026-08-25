@@ -27,14 +27,14 @@ trace_test!(server, {
     client.send_to(msg.as_bytes(), addr).await.unwrap();
     assert_eq!(
         msg,
-        sb.timeout(100, server1_rx.recv())
+        sb.timeout(RECV_TIMEOUT, server1_rx.recv())
             .await
             .0
             .expect("should get a packet")
     );
     assert_eq!(
         msg,
-        sb.timeout(100, server2_rx.recv())
+        sb.timeout(RECV_TIMEOUT, server2_rx.recv())
             .await
             .0
             .expect("should get a packet")
@@ -56,7 +56,10 @@ trace_test!(client, {
     let msg = "hello";
     tracing::debug!(%local_addr, "sending packet");
     client.send_to(msg.as_bytes(), local_addr).await.unwrap();
-    assert_eq!(msg, sb.timeout(100, dest_rx.recv()).await.0.unwrap(),);
+    assert_eq!(
+        msg,
+        sb.timeout(RECV_TIMEOUT, dest_rx.recv()).await.0.unwrap(),
+    );
 });
 
 trace_test!(with_filter, {
@@ -81,7 +84,7 @@ trace_test!(with_filter, {
     client.send_to(msg.as_bytes(), local_addr).await.unwrap();
 
     // search for the filter strings.
-    let result = sb.timeout(1000, rx.recv()).await.0.unwrap();
+    let result = sb.timeout(RECV_TIMEOUT, rx.recv()).await.0.unwrap();
     assert!(result.starts_with(&format!("{msg}:odr:[::1]:")));
 });
 
@@ -130,6 +133,7 @@ trace_test!(uring_receiver, {
         sessions: quilkin::net::sessions::SessionPool::new(
             vec![pending_sends.0.clone()],
             config.dyn_cfg.cached_filter_chain().unwrap(),
+            config.dyn_cfg.clusters().cloned(),
             usize::MAX,
             backend,
             4,
@@ -149,7 +153,10 @@ trace_test!(uring_receiver, {
     let msg = "hello-downstream";
     tracing::debug!("sending packet");
     socket.send_to(msg.as_bytes(), addr).await.unwrap();
-    assert_eq!(msg, sb.timeout(200, packet_rx.recv()).await.0.unwrap());
+    assert_eq!(
+        msg,
+        sb.timeout(RECV_TIMEOUT, packet_rx.recv()).await.0.unwrap()
+    );
 });
 
 trace_test!(
@@ -196,6 +203,7 @@ trace_test!(
         let sessions = net::SessionPool::new(
             pending_sends.iter().map(|ps| ps.0.clone()).collect(),
             config.dyn_cfg.cached_filter_chain().unwrap(),
+            config.dyn_cfg.clusters().cloned(),
             usize::MAX,
             backend,
             64,
@@ -224,7 +232,7 @@ trace_test!(
         for _ in 0..WORKER_COUNT {
             assert_eq!(
                 msg,
-                sb.timeout(20, packet_rx.recv())
+                sb.timeout(RECV_TIMEOUT, packet_rx.recv())
                     .await
                     .0
                     .expect("should receive a packet")

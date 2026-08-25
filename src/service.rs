@@ -100,6 +100,8 @@ pub struct Service {
         default_value_t = 256
     )]
     pub session_pool_ring_buffer: u16,
+    #[clap(flatten)]
+    pub session_metrics: SessionMetricsCli,
     /// The UDP I/O backend to use.
     /// auto selects the best available: kernel (XDP) -> completion (io-uring) -> poll (epoll).
     #[clap(
@@ -249,6 +251,72 @@ pub struct Service {
 
 pub type Finalizer = Box<dyn FnOnce() + Send>;
 
+/// Options for the aggregation that turns per-session connection quality into
+/// bounded metrics.
+///
+/// Per-player and per-ISP breakdowns can't be labels, so the proxy aggregates
+/// them internally and exports a projection whose series count these options
+/// bound.
+#[derive(Debug, Clone, clap::Parser)]
+#[command(next_help_heading = "Session Metrics Options")]
+pub struct SessionMetricsCli {
+    /// How often, in seconds, per-session connection quality is folded into
+    /// metrics.
+    #[clap(
+        long = "service.udp.metrics.interval",
+        env = "QUILKIN_SERVICE_UDP_METRICS_INTERVAL",
+        default_value_t = 15
+    )]
+    pub interval_secs: u64,
+    /// Fraction of sessions whose jitter is recorded into
+    /// `quilkin_session_jitter_seconds` each interval.
+    #[clap(
+        long = "service.udp.metrics.sample-fraction",
+        env = "QUILKIN_SERVICE_UDP_METRICS_SAMPLE_FRACTION",
+        default_value_t = 1.0
+    )]
+    pub sample_fraction: f64,
+    /// Number of client ASNs to report, largest first, with the rest counted
+    /// under `asn="other"`. 0 disables per-ASN reporting.
+    #[clap(
+        long = "service.udp.metrics.top-asns",
+        env = "QUILKIN_SERVICE_UDP_METRICS_TOP_ASNS",
+        default_value_t = 32
+    )]
+    pub top_asns: usize,
+    /// Jitter, in milliseconds, at or above which a session counts as degraded.
+    #[clap(
+        long = "service.udp.metrics.jitter-threshold-ms",
+        env = "QUILKIN_SERVICE_UDP_METRICS_JITTER_THRESHOLD_MS",
+        default_value_t = 30
+    )]
+    pub jitter_threshold_ms: u64,
+}
+
+impl Default for SessionMetricsCli {
+    fn default() -> Self {
+        Self {
+            interval_secs: 15,
+            sample_fraction: 1.0,
+            top_asns: 32,
+            jitter_threshold_ms: 30,
+        }
+    }
+}
+
+impl From<&SessionMetricsCli> for crate::net::sessions::quality::AggregationConfig {
+    fn from(cli: &SessionMetricsCli) -> Self {
+        // Deliberately not clamped: `AggregationConfig::validate` rejects values
+        // that would silently produce meaningless metrics
+        Self {
+            interval: std::time::Duration::from_secs(cli.interval_secs),
+            sample_fraction: cli.sample_fraction,
+            top_asns: cli.top_asns,
+            jitter_threshold: std::time::Duration::from_millis(cli.jitter_threshold_ms),
+        }
+    }
+}
+
 pub struct ServicePorts {
     pub mds: Option<u16>,
     pub phoenix: Option<u16>,
@@ -271,6 +339,7 @@ impl Default for Service {
             udp_enabled: <_>::default(),
             udp_port: 7777,
             udp_workers: std::num::NonZeroUsize::new(num_cpus::get()).unwrap(),
+            session_metrics: <_>::default(),
             udp_session_limit: 10_000,
             udp_ring_buffer: 2048,
             session_pool_ring_buffer: 256,
@@ -306,6 +375,12 @@ impl Service {
     /// Enables the UDP service.
     pub fn udp(mut self) -> Self {
         self.udp_enabled = true;
+        self
+    }
+
+    /// Sets how often per-session connection quality is folded into metrics.
+    pub fn session_metrics_interval(mut self, interval_secs: u64) -> Self {
+        self.session_metrics.interval_secs = interval_secs;
         self
     }
 
@@ -728,6 +803,15 @@ impl Service {
             return Ok(());
         }
 
+        // Only a proxy has sessions to aggregate; a QCMP-only instance would
+        // otherwise run the task over an empty registry
+        if self.udp_enabled {
+            crate::net::sessions::quality::spawn_aggregator(
+                (&self.session_metrics).into(),
+                shutdown,
+            )?;
+        }
+
         let resolved_backend = self.udp_backend.resolve();
         tracing::info!(
             port=%self.udp_port,
@@ -876,6 +960,10 @@ impl Service {
         let sessions = SessionPool::new(
             session_sends,
             cached_filters,
+            // Used to tell an endpoint disappearing from underneath a session
+            // apart from a player going quiet. The `destination` label doesn't
+            // need it: the cluster arrives with the routing decision.
+            config.dyn_cfg.clusters().cloned(),
             self.udp_session_limit,
             backend,
             self.session_pool_ring_buffer,

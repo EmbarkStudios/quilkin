@@ -17,7 +17,7 @@
 #[cfg(doc)]
 use crate::filters::Filter;
 use crate::net::{
-    ClusterMap,
+    ClusterMap, Destination,
     endpoint::{EndpointAddress, metadata::DynamicMetadata},
 };
 
@@ -25,8 +25,9 @@ use crate::net::{
 pub struct ReadContext<'ctx, P> {
     /// The upstream endpoints that the packet will be forwarded to.
     pub endpoints: &'ctx ClusterMap,
-    /// The upstream endpoints that the packet will be forwarded to.
-    pub destinations: &'ctx mut Vec<EndpointAddress>,
+    /// The endpoints the packet will be forwarded to, each paired with the
+    /// cluster it was routed from.
+    pub destinations: &'ctx mut Vec<Destination>,
     /// The source of the received packet.
     pub source: EndpointAddress,
     /// Contents of the received packet.
@@ -42,7 +43,7 @@ impl<'ctx, P: super::PacketMut> ReadContext<'ctx, P> {
         endpoints: &'ctx ClusterMap,
         source: EndpointAddress,
         contents: P,
-        destinations: &'ctx mut Vec<EndpointAddress>,
+        destinations: &'ctx mut Vec<Destination>,
     ) -> Self {
         Self {
             endpoints,
