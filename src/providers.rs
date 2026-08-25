@@ -499,11 +499,9 @@ impl Providers {
                 let token = token.clone();
 
                 async move {
-                    let client = tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        kube::Client::try_default(),
-                    )
-                    .await??;
+                    let client =
+                        tokio::time::timeout(std::time::Duration::from_secs(5), k8s::client())
+                            .await??;
 
                     let k8s_stream =
                         if let Some(Some(fc)) = k8s_enabled.then(|| config.dyn_cfg.filters()) {

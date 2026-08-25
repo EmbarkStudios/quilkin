@@ -45,6 +45,32 @@ fn track_event<T>(kind: &'static str, event: Event<T>) -> Event<T> {
     event
 }
 
+/// Client-side inactivity timeout for apiserver connections.
+///
+/// A watch connection that goes silent yields neither events nor errors, so this
+/// is the only thing that detects one: kube's stream parks on `Pending` and the
+/// tracked `resourceVersion` goes stale until the socket times out.
+///
+/// Bounded on both sides:
+/// - above the apiserver's bookmark cadence (`defaultBookmarkFrequency`, 60s),
+///   so an idle namespace is not read as a dead connection
+/// - below the watch deadline (`timeoutSeconds`, 290s -- see
+///   `gameserver_events`), or the connection is recycled before this can fire
+///
+/// kube's defaults pair a 290s deadline with a 295s read timeout; shorten one
+/// only alongside the other.
+const WATCH_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// Builds a kube client that fails fast when a connection goes silent.
+///
+/// Prefer over [`kube::Client::try_default`], which leaves the read timeout at
+/// kube's 295s default. See [`WATCH_IDLE_TIMEOUT`].
+pub async fn client() -> crate::Result<kube::Client> {
+    let mut config = kube::Config::infer().await?;
+    config.read_timeout = Some(WATCH_IDLE_TIMEOUT);
+    Ok(kube::Client::try_from(config)?)
+}
+
 const LEADER_LEASE_DURATION: kube_lease_manager::DurationSeconds = 3;
 const LEADER_LEASE_RENEW_INTERVAL: kube_lease_manager::DurationSeconds = 1;
 
@@ -178,12 +204,15 @@ fn gameserver_events(
         kube::Api::namespaced(client, gameservers_namespace);
     let gs_writer =
         kube::runtime::reflector::store::Writer::<DeserializeGuard<GameServer>>::default();
-    let mut config = kube::runtime::watcher::Config::default()
-        // Default timeout is 5 minutes, far too slow for us to react.
-        .timeout(15);
-
-    // Retreive unbounded results.
-    config.page_size = None;
+    // `timeout` is left at kube's default (`timeoutSeconds=290`). It caps how
+    // long the apiserver holds the connection open, not event latency -- events
+    // stream as they arrive -- so lowering it adds reconnect churn for no gain
+    // in reactivity. Connection liveness is `WATCH_IDLE_TIMEOUT`'s job.
+    let config = kube::runtime::watcher::Config {
+        // Retreive unbounded results.
+        page_size: None,
+        ..Default::default()
+    };
 
     kube::runtime::watcher(gameservers, config)
         .default_backoff()
