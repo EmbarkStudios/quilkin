@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-db7a114a.js";
+            window.path_to_searchindex_js = "searchindex-32b77bed.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-270f104f.js"></script>
@@ -2100,8 +2100,9 @@ properties:
 <p>The following are metrics that Quilkin provides while in Proxy Mode.</p>
 <h1 id="asn-maxmind-information"><a class="header" href="#asn-maxmind-information">ASN Maxmind Information</a></h1>
 <p>If Quilkin is provided a a MaxmindDB GeoIP database, Quilkin will log the
-following information in the <code>maxmind information</code> log, as well as populate
-the following fields in any metrics with matching labels.</p>
+following information in the <code>maxmind information</code> log. Only <code>country_code</code>, on
+<code>quilkin_session_active</code>, and <code>asn</code>, on the connection quality metrics below, are
+exported as labels; the rest are too high in cardinality to be.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2137,15 +2138,27 @@ by default with Quilkin.</p>
 </ul>
 </li>
 <li>
-<p><code>quilkin_packets_dropped_total{reason, asn, ip_prefix}</code> (Counter)</p>
-<p>The total number of packets (not associated with any session) that were dropped by proxy.
-Not that packets reflected by this metric were dropped at an earlier stage before they were associated with any session. For session based metrics, see the list of <a href="#session-metrics">session metrics</a> instead.</p>
+<p><code>quilkin_packets_dropped_total{event, reason, filter, destination}</code> (Counter)</p>
+<p>The total number of packets that were dropped by the proxy.</p>
 <ul>
-<li><code>reason = NoConfiguredEndpoints</code>
+<li>The <code>reason</code> label is a closed set, so a breakdown built on it survives a
+filter being renamed or an <code>errno</code> producing different text:
 <ul>
-<li><code>NoConfiguredEndpoints</code>: No upstream endpoints were available to send the packet to. This can occur e.g if the endpoints cluster was scaled down to zero and the proxy is configured via a control plane.</li>
+<li><code>no_endpoint_match</code>: no upstream endpoint was available, or none matched the packet’s routing token.</li>
+<li><code>filter_drop</code>: a filter chose to drop the packet, ie the chain worked as configured.</li>
+<li><code>filter_error</code>: a filter failed to process the packet.</li>
+<li><code>socket_error</code>: the socket refused the packet, or the packet couldn’t be built for it.</li>
+<li><code>queue_full</code>: a send or receive queue was full.</li>
+<li><code>invalid_packet</code>: the packet couldn’t be parsed as a datagram Quilkin handles. The specific parse failure is logged rather than labelled.</li>
+<li><code>session_limit</code>: the session limit was reached, so no session could be established.</li>
+<li><code>internal</code>: Quilkin lost track of state it needed to forward the packet.</li>
 </ul>
 </li>
+<li>The <code>filter</code> label is the filter responsible, and is empty when the drop
+wasn’t a filter’s decision.</li>
+<li>The <code>destination</code> label is described under
+<a href="#general-metrics"><code>quilkin_bytes_total</code></a>, and is empty for packets dropped
+before they were routed.</li>
 </ul>
 </li>
 <li>
@@ -2158,36 +2171,55 @@ Not that packets reflected by this metric were dropped at an earlier stage befor
 knows of rather than those that it is connected to (see <a href="#session-metrics">Session Metrics</a> instead for those)</p>
 </li>
 <li>
-<p><code>quilkin_bytes_total{event, asn, ip_prefix}</code></p>
+<p><code>quilkin_bytes_total{event, destination}</code></p>
 <p>The total number of bytes sent or received</p>
 <ul>
-<li>The <code>event</code> label is either:
+<li>
+<p>The <code>event</code> label is either:</p>
 <ul>
 <li><code>read</code>: when the proxy receives data from a downstream connection on the listening port.</li>
 <li><code>write</code>: when the proxy sends data to a downstream connection via the listening port.</li>
 </ul>
 </li>
+<li>
+<p>The <code>destination</code> label is the cluster the packet was routed to, so traffic
+can be attributed to a gameserver fleet rather than only counted in aggregate.
+It carries the same values as <code>quilkin_active_endpoints</code>, so the two can be
+joined.</p>
+<p>The cluster comes from the routing decision itself, not from looking the
+address up afterwards, so it is the cluster the packet actually went through
+even when the same endpoint is configured in more than one. It is empty when
+the destination didn’t come from a cluster with a locality, which includes
+destinations a filter decoded from the packet rather than selecting from the
+cluster map. Note that <code>event=write</code> traffic carries the cluster of the
+gameserver that sent it, not of the client it is going to.</p>
+</li>
 </ul>
 </li>
 <li>
-<p><code>quilkin_packets_total{event, asn, ip_prefix}</code></p>
+<p><code>quilkin_packets_total{event, destination}</code></p>
 <p>The total number of packets sent or recieved.</p>
 <ul>
-<li>The <code>event</code> label is either:
-<ul>
-<li><code>read</code>: when the proxy receives data from a downstream connection on the listening port.</li>
-<li><code>write</code>: when the proxy sends data to a downstream connection via the listening port.</li>
-</ul>
-</li>
+<li>The labels are the same as <a href="#general-metrics"><code>quilkin_bytes_total</code></a>.</li>
 </ul>
 </li>
 <li>
-<p><code>quilkin_packet_jitter{event, asn, ip_prefix}</code></p>
-<p>The time between receiving new packets (in nanoseconds).</p>
+<p><code>quilkin_packet_jitter{event}</code></p>
+<p>The time between packets arriving at an I/O loop (in nanoseconds). This covers
+every session the loop serves, so it is a whole-proxy figure; for the
+distribution across players use <code>quilkin_session_jitter_seconds</code>.</p>
+<p>The series stops being exported when no packet arrived during an aggregation
+interval, rather than continuing to publish the last value the proxy saw.</p>
 </li>
 <li>
-<p><code>quilkin_errors_total{event, asn, ip_prefix}</code></p>
+<p><code>quilkin_errors_total{event, reason}</code></p>
 <p>The total number of errors encountered while reading a packet from the upstream endpoint.</p>
+<ul>
+<li>The <code>reason</code> label is a closed set, replacing the previous free-text <code>display</code>
+label. For I/O errors it names the <code>errno</code>, eg <code>invalid_input</code>,
+<code>no_buffer_space</code> or <code>message_too_long</code>, rather than interpolating the
+platform’s error string.</li>
+</ul>
 </li>
 <li>
 <p><code>quilkin_game_traffic_tasks</code></p>
@@ -2218,6 +2250,84 @@ client.</li>
 <li>
 <p><code>quilkin_session_total</code> (Counter)</p>
 <p>The total number of sessions that have been created.</p>
+</li>
+<li>
+<p><code>quilkin_sessions_closed_total{reason}</code> (Counter)</p>
+<p>The total number of sessions that have ended, by why they ended. A fall in
+session count otherwise looks the same whether players left or their endpoints
+vanished.</p>
+<ul>
+<li><code>idle_timeout</code>: no traffic within the session TTL. UDP has no close, so this
+is what a player leaving normally looks like.</li>
+<li><code>endpoint_gone</code>: the endpoint the session was routed to is no longer in the
+cluster map. Only reported for destinations that were in the cluster map when
+the session was created, so an endpoint configured by name is never
+misattributed here.</li>
+<li><code>shutdown</code>: the proxy is shutting down.</li>
+</ul>
+</li>
+</ul>
+<h2 id="connection-quality-metrics"><a class="header" href="#connection-quality-metrics">Connection Quality Metrics</a></h2>
+<p>A player’s jitter and their ISP are per-player facts, so neither can be a metric
+label: concurrent sessions and the thousands of ASNs seen in a day of traffic both
+blow up cardinality. Instead the proxy tracks quality per session internally and
+periodically exports a projection whose series count is bounded by configuration
+rather than by traffic. See the <code>--service.udp.metrics.*</code> options for the
+tunables.</p>
+<p>Note the division of labour. Whether an individual <em>session</em> is having a bad time
+is a judgement the proxy makes, because it is the only thing holding that
+session’s packet timing. Whether an <em>ISP</em> is having a bad time is left to the
+consumer of these metrics: a proxy carries on the order of a hundred concurrent
+sessions spread over thousands of ASNs, so no single one sees enough of any ASN to
+threshold on. The proxy exports the numerator and the denominator per ASN and
+expects them to be summed across the fleet before any conclusion is drawn.</p>
+<p>Interarrival jitter is measured against a monotonic clock, and gaps longer than a
+second are treated as the stream restarting rather than as jitter, so a player
+pausing doesn’t register as a player with a bad connection.</p>
+<p>Sessions the proxy saw no traffic for during an interval are counted, but
+contribute no quality judgement.</p>
+<ul>
+<li>
+<p><code>quilkin_session_jitter_seconds</code> (Histogram)</p>
+<p>The distribution of per-session interarrival jitter of downstream packets, as
+the RFC 3550 estimator. A histogram rather than a mean, because a mean of 0.5 ms
+is compatible with a few percent of players at 80 ms, and those are the players
+worth knowing about — <code>histogram_quantile</code> over this answers “what does the 99th
+percentile player at this proxy see”.</p>
+<p>Only jitter is exported per session. Loss and round-trip time on the client’s
+leg need either packet sequence numbers or a client-side timestamp, and the
+proxy has neither.</p>
+</li>
+<li>
+<p><code>quilkin_sessions_active_by_asn{asn}</code> (Gauge)</p>
+<p>Active sessions by the client’s ASN, for the largest
+<code>--service.udp.metrics.top-asns</code> ASNs at this proxy, and the denominator for the
+metric below.</p>
+<p>Sessions belonging to any other ASN are counted under <code>asn="other"</code>, so the
+breakdown always sums to the session total. Sessions whose client IP resolved to
+no ASN are counted under <code>asn="unknown"</code>. Setting <code>--top-asns</code> to 0 disables
+per-ASN reporting entirely.</p>
+</li>
+<li>
+<p><code>quilkin_client_sessions_degraded{asn, reason}</code> (Gauge)</p>
+<p>The number of sessions breaching a quality threshold, by the client’s ASN. Only
+ASNs currently breaching are exported, so a healthy proxy publishes nothing
+here and the series count follows the number of ISPs actually in trouble.</p>
+<ul>
+<li><code>reason = jitter</code>: sessions at or above <code>--service.udp.metrics.jitter-threshold-ms</code>.</li>
+</ul>
+<p>This is a count, not a verdict. For the affected share of an ISP, divide by
+<code>quilkin_sessions_active_by_asn</code> — summing both across proxies first, since one
+proxy’s view of a single ASN is too small a sample to threshold on:</p>
+<pre><code class="language-promql">sum by (asn) (quilkin_client_sessions_degraded{reason="jitter"})
+  / sum by (asn) (quilkin_sessions_active_by_asn)
+</code></pre>
+</li>
+<li>
+<p><code>quilkin_client_sessions_degraded_total{reason}</code> (Counter)</p>
+<p>The total number of times a session was observed breaching a threshold, for
+alerting on a rate without depending on a share the proxy would have to pick a
+cut-off for.</p>
 </li>
 </ul>
 <h2 id="filter-metrics"><a class="header" href="#filter-metrics">Filter Metrics</a></h2>

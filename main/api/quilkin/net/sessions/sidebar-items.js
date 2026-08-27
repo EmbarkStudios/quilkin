@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Error","SessionError"],"struct":["Session","SessionKey","SessionPool"],"trait":["SessionManager"],"type":["SessionMap"]};
+window.SIDEBAR_ITEMS = {"enum":["Error","SessionError"],"mod":["quality"],"struct":["Session","SessionKey","SessionPool"],"trait":["SessionManager"],"type":["SessionMap"]};

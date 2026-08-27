@@ -127,5 +127,9 @@
 <a href=#127 id=127 data-nosnippet>127</a>    </span><span class="kw">pub </span>data: bytes::Bytes,
 <a href=#128 id=128 data-nosnippet>128</a>    <span class="doccomment">/// The asn info for the sender, used for metrics
 <a href=#129 id=129 data-nosnippet>129</a>    </span><span class="kw">pub </span>asn_info: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::net::maxmind_db::MetricsIpNetEntry&gt;,
-<a href=#130 id=130 data-nosnippet>130</a>}
+<a href=#130 id=130 data-nosnippet>130</a>    <span class="doccomment">/// The cluster this packet belongs to, as a label value, so traffic can be
+<a href=#131 id=131 data-nosnippet>131</a>    /// attributed to a gameserver fleet. Empty when the destination didn't come
+<a href=#132 id=132 data-nosnippet>132</a>    /// from a cluster with a locality.
+<a href=#133 id=133 data-nosnippet>133</a>    </span><span class="kw">pub </span>cluster: std::sync::Arc&lt;str&gt;,
+<a href=#134 id=134 data-nosnippet>134</a>}
 </code></pre></div></section></main></body></html>

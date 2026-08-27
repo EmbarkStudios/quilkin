@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["EndpointSetUpdateAction"],"mod":["proto"],"struct":["ClusterMap","ClusterMapDeser","ClusterUpdateBatcher","EndpointSet","EndpointSetVersion","EndpointSetWriteGuard","Token"],"type":["TokenAddressMap"]};
+window.SIDEBAR_ITEMS = {"enum":["EndpointSetUpdateAction"],"mod":["proto"],"struct":["ClusterMap","ClusterMapDeser","ClusterUpdateBatcher","Destination","EndpointSet","EndpointSetVersion","EndpointSetWriteGuard","Token"],"type":["TokenAddressMap"]};
