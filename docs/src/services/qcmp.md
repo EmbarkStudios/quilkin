@@ -117,6 +117,42 @@ datacentre, and the value being the latency in nanoseconds.
 
   The amount of errors attempting to spawn the phoenix HTTP server
 
+* `quilkin_phoenix_measurement_seconds{icao, direction}` (Histogram)
+
+  The distribution of accepted latency measurements per datacentre.
+  * The `direction` label is the leg of the round trip: `incoming` is proxy to
+    datacentre, `outgoing` is datacentre back to proxy.
+
+* `quilkin_phoenix_measurement_errors_total{icao}` (Counter)
+
+  The total number of measurements that yielded no usable value, whether the peer
+  failed to answer or answered implausibly. Each one raises the node's error
+  estimate, making it less likely to be picked.
+
+* `quilkin_phoenix_measurements_rejected_total{icao, direction, reason}` (Counter)
+
+  The total number of measurements discarded because the reply's timestamps don't
+  describe a network path. Implausible measurements are discarded rather than
+  clamped, as one corrupts the histogram's `_sum` permanently and wrecks the
+  coordinate solve.
+
+  This is the subset of `quilkin_phoenix_measurement_errors_total` the peer did
+  answer, so a wrong clock is distinguishable from an unreachable datacentre.
+    * The `reason` label is a closed set:
+        * `negative`: the leg came out below zero, ie the timestamp it derives from is ahead of the clock that read it.
+        * `too_large`: the leg came out longer than any network path produces, ie a zero or badly skewed peer timestamp.
+    * The `direction` label is the leg that failed, named as in
+      `quilkin_phoenix_measurement_seconds`. Both legs cross the two clocks, so
+      skew pushes one out of range and the other towards zero; only the failing
+      leg is counted, so the counter equals the measurements discarded.
+
+  Clock skew shows up as a single `icao`, which is what separates it from a
+  network problem:
+
+  ```promql
+  sum by (icao) (rate(quilkin_phoenix_measurements_rejected_total[5m]))
+  ```
+
 * `quilkin_service_qcmp_active`
 
   Whether the QCMP service is currently running, either 1 for running or 0 for not.

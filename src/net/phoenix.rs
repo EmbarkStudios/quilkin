@@ -256,13 +256,42 @@ impl From<(i64, i64)> for DistanceMeasure {
 const MAX_PLAUSIBLE_LATENCY: Duration = Duration::from_secs(10);
 
 impl DistanceMeasure {
+    /// Why the measurement can't be true, if it can't be.
+    ///
+    /// Both legs cross the two clocks, so skew pushes one out of range and the
+    /// other towards zero; only the failing leg is reported, so a rejection
+    /// counts once.
+    #[inline]
+    pub(crate) fn rejection(
+        self,
+    ) -> Option<(
+        crate::metrics::CoordinateDirection,
+        crate::metrics::MeasurementRejection,
+    )> {
+        use crate::metrics::{CoordinateDirection, MeasurementRejection};
+
+        let max = MAX_PLAUSIBLE_LATENCY.as_nanos() as i64;
+        let leg = |nanos: i64| {
+            if nanos < 0 {
+                Some(MeasurementRejection::Negative)
+            } else if nanos > max {
+                Some(MeasurementRejection::TooLarge)
+            } else {
+                None
+            }
+        };
+
+        leg(self.incoming.nanos())
+            .map(|reason| (CoordinateDirection::Incoming, reason))
+            .or_else(|| {
+                leg(self.outgoing.nanos()).map(|reason| (CoordinateDirection::Outgoing, reason))
+            })
+    }
+
     /// Whether both legs fall in the range a network path can produce.
     #[inline]
     pub fn is_plausible(self) -> bool {
-        let max = MAX_PLAUSIBLE_LATENCY.as_nanos() as i64;
-        let leg = |nanos: i64| (0..=max).contains(&nanos);
-
-        leg(self.incoming.nanos()) && leg(self.outgoing.nanos())
+        self.rejection().is_none()
     }
 
     #[inline]
@@ -493,20 +522,36 @@ impl<M: Measurement + 'static> Phoenix<M> {
             };
 
             match result {
-                Ok(distance) if !distance.is_plausible() => {
+                Ok(distance) if let Some((direction, reason)) = distance.rejection() => {
                     tracing::warn!(
                         %address,
                         incoming_nanos = distance.incoming.nanos(),
                         outgoing_nanos = distance.outgoing.nanos(),
+                        direction = direction.label(),
+                        reason = reason.label(),
                         "discarding implausible measurement, the peer's timestamps are wrong"
                     );
+                    crate::metrics::phoenix_measurements_rejected_total(
+                        node.icao_code,
+                        direction,
+                        reason,
+                    )
+                    .inc();
                     node.increase_error_estimate();
                 }
                 Ok(distance) => {
-                    crate::metrics::phoenix_measurement_seconds(node.icao_code, "incoming")
-                        .observe(distance.incoming.duration().as_secs_f64());
-                    crate::metrics::phoenix_measurement_seconds(node.icao_code, "outgoing")
-                        .observe(distance.outgoing.duration().as_secs_f64());
+                    use crate::metrics::CoordinateDirection;
+
+                    crate::metrics::phoenix_measurement_seconds(
+                        node.icao_code,
+                        CoordinateDirection::Incoming,
+                    )
+                    .observe(distance.incoming.duration().as_secs_f64());
+                    crate::metrics::phoenix_measurement_seconds(
+                        node.icao_code,
+                        CoordinateDirection::Outgoing,
+                    )
+                    .observe(distance.outgoing.duration().as_secs_f64());
 
                     measurements.push((address, distance));
                     total_difference += distance.total_nanos();
@@ -1031,8 +1076,51 @@ mod tests {
         assert!(!DistanceMeasure::from((-1, 500_000)).is_plausible());
     }
 
+    #[test]
+    fn rejections_are_labelled_with_a_bounded_reason() {
+        // The vocabulary a rejection breakdown is built on
+        let rejection =
+            |measure: DistanceMeasure| measure.rejection().map(|(d, r)| (d.label(), r.label()));
+
+        assert_eq!(rejection(DistanceMeasure::from((500_000, 1_500_000))), None);
+
+        // A peer replying with a zero timestamp makes a leg the size of the unix
+        // epoch in nanos
+        let epoch_nanos = 1_730_000_000_000_000_000;
+        assert_eq!(
+            rejection(DistanceMeasure::from((epoch_nanos, 500_000))),
+            Some(("incoming", "too_large"))
+        );
+        assert_eq!(
+            rejection(DistanceMeasure::from((500_000, epoch_nanos))),
+            Some(("outgoing", "too_large"))
+        );
+
+        // Skew moves the legs in opposite directions, and only the failing leg
+        // is reported
+        assert_eq!(
+            rejection(DistanceMeasure::from((-1, epoch_nanos))),
+            Some(("incoming", "negative"))
+        );
+        assert_eq!(
+            rejection(DistanceMeasure::from((500_000, -1))),
+            Some(("outgoing", "negative"))
+        );
+    }
+
     #[tokio::test]
     async fn implausible_measurements_are_not_recorded() {
+        // The registry is process wide, so read the counter as a delta
+        let rejected = || {
+            crate::metrics::phoenix_measurements_rejected_total(
+                abcd(),
+                crate::metrics::CoordinateDirection::Outgoing,
+                crate::metrics::MeasurementRejection::TooLarge,
+            )
+            .get()
+        };
+        let before = rejected();
+
         // A peer replying with a zero timestamp makes a leg the size of the unix
         // epoch in nanos
         let epoch_nanos = 1_730_000_000_000_000_000;
@@ -1046,6 +1134,9 @@ mod tests {
 
         // Discarded rather than clamped, so it can't skew the coordinate solve
         assert!(phoenix.ordered_nodes_by_latency().is_empty());
+
+        // ...and is counted, not only logged
+        assert_eq!(rejected() - before, 1);
     }
 
     #[tokio::test]

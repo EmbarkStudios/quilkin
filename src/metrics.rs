@@ -530,7 +530,7 @@ pub(crate) fn game_traffic_task_closed() -> &'static IntCounter {
 
 pub(crate) fn phoenix_measurement_seconds(
     icao: crate::config::IcaoCode,
-    direction: &str,
+    direction: CoordinateDirection,
 ) -> Histogram {
     /// ~2x spacing across the range one-way inter-datacenter latency occupies,
     /// 0.5 ms to 0.5 s.
@@ -556,7 +556,7 @@ pub(crate) fn phoenix_measurement_seconds(
         .unwrap()
     });
 
-    PHOENIX_MEASUREMENT.with_label_values(&[icao.as_ref(), direction])
+    PHOENIX_MEASUREMENT.with_label_values(&[icao.as_ref(), direction.label()])
 }
 
 pub(crate) fn phoenix_measurement_errors(icao: crate::config::IcaoCode) -> IntCounter {
@@ -573,6 +573,57 @@ pub(crate) fn phoenix_measurement_errors(icao: crate::config::IcaoCode) -> IntCo
     });
 
     PHOENIX_MEASUREMENT_ERRORS.with_label_values(&[icao.as_ref()])
+}
+
+/// Why a phoenix measurement was discarded instead of recorded.
+///
+/// A closed set, as with [`DropReason`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MeasurementRejection {
+    /// Leg below zero, ie its source timestamp is ahead of the clock that read it.
+    Negative,
+    /// Leg longer than any network path produces, ie a zero or badly skewed
+    /// peer timestamp.
+    TooLarge,
+}
+
+impl MeasurementRejection {
+    #[inline]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Negative => "negative",
+            Self::TooLarge => "too_large",
+        }
+    }
+}
+
+/// Counts measurements the plausibility check discarded.
+///
+/// A rejection also raises the node's error estimate, so it is counted in
+/// `quilkin_phoenix_measurement_errors_total`; this is the subset of those the
+/// peer did answer.
+pub(crate) fn phoenix_measurements_rejected_total(
+    icao: crate::config::IcaoCode,
+    direction: CoordinateDirection,
+    reason: MeasurementRejection,
+) -> IntCounter {
+    static PHOENIX_MEASUREMENTS_REJECTED: Lazy<IntCounterVec> = Lazy::new(|| {
+        prometheus::register_int_counter_vec_with_registry! {
+            prometheus::opts! {
+                "quilkin_phoenix_measurements_rejected_total",
+                "Total number of phoenix measurements discarded as implausible, ie the peer replied but its timestamps can't be true",
+            },
+            &["icao", "direction", REASON_LABEL],
+            registry(),
+        }
+        .unwrap()
+    });
+
+    PHOENIX_MEASUREMENTS_REJECTED.with_label_values(&[
+        icao.as_ref(),
+        direction.label(),
+        reason.label(),
+    ])
 }
 
 pub(crate) fn phoenix_distance(icao: crate::config::IcaoCode) -> Gauge {
@@ -607,14 +658,15 @@ pub(crate) fn phoenix_coordinates(icao: crate::config::IcaoCode, axis: &str) -> 
     PHOENIX_COORDINATES.with_label_values(&[icao.as_ref(), axis])
 }
 
+/// Which leg of a round trip a value belongs to.
 #[derive(Clone, Copy, Debug)]
-enum CoordinateDirection {
+pub(crate) enum CoordinateDirection {
     Incoming,
     Outgoing,
 }
 
 impl CoordinateDirection {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Incoming => "incoming",
             Self::Outgoing => "outgoing",
@@ -1189,6 +1241,37 @@ mod tests {
                     && labels.get(REASON_LABEL) == Some(&"filter_drop")
                     && labels.get(FILTER_LABEL) == Some(&"firewall")
                     && labels.get(DESTINATION_LABEL) == Some(&"eu-north1")
+            });
+
+        assert!(rendered);
+    }
+
+    #[test]
+    fn rejected_measurements_carry_the_full_label_set() {
+        let icao: crate::config::IcaoCode = "ABCD".parse().unwrap();
+
+        phoenix_measurements_rejected_total(
+            icao,
+            CoordinateDirection::Incoming,
+            MeasurementRejection::TooLarge,
+        )
+        .inc();
+
+        let rendered = registry()
+            .gather()
+            .iter()
+            .filter(|mf| mf.name() == "quilkin_phoenix_measurements_rejected_total")
+            .flat_map(|mf| mf.get_metric())
+            .any(|m| {
+                let labels: std::collections::HashMap<_, _> = m
+                    .get_label()
+                    .iter()
+                    .map(|l| (l.name(), l.value()))
+                    .collect();
+
+                labels.get("icao") == Some(&"ABCD")
+                    && labels.get("direction") == Some(&"incoming")
+                    && labels.get(REASON_LABEL) == Some(&"too_large")
             });
 
         assert!(rendered);
