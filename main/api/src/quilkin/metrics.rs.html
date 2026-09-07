@@ -530,7 +530,7 @@
 <a href=#530 id=530 data-nosnippet>530</a>
 <a href=#531 id=531 data-nosnippet>531</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_measurement_seconds(
 <a href=#532 id=532 data-nosnippet>532</a>    icao: <span class="kw">crate</span>::config::IcaoCode,
-<a href=#533 id=533 data-nosnippet>533</a>    direction: <span class="kw-2">&amp;</span>str,
+<a href=#533 id=533 data-nosnippet>533</a>    direction: CoordinateDirection,
 <a href=#534 id=534 data-nosnippet>534</a>) -&gt; Histogram {
 <a href=#535 id=535 data-nosnippet>535</a>    <span class="doccomment">/// ~2x spacing across the range one-way inter-datacenter latency occupies,
 <a href=#536 id=536 data-nosnippet>536</a>    /// 0.5 ms to 0.5 s.
@@ -556,7 +556,7 @@
 <a href=#556 id=556 data-nosnippet>556</a>        .unwrap()
 <a href=#557 id=557 data-nosnippet>557</a>    });
 <a href=#558 id=558 data-nosnippet>558</a>
-<a href=#559 id=559 data-nosnippet>559</a>    PHOENIX_MEASUREMENT.with_label_values(<span class="kw-2">&amp;</span>[icao.as_ref(), direction])
+<a href=#559 id=559 data-nosnippet>559</a>    PHOENIX_MEASUREMENT.with_label_values(<span class="kw-2">&amp;</span>[icao.as_ref(), direction.label()])
 <a href=#560 id=560 data-nosnippet>560</a>}
 <a href=#561 id=561 data-nosnippet>561</a>
 <a href=#562 id=562 data-nosnippet>562</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_measurement_errors(icao: <span class="kw">crate</span>::config::IcaoCode) -&gt; IntCounter {
@@ -575,650 +575,733 @@
 <a href=#575 id=575 data-nosnippet>575</a>    PHOENIX_MEASUREMENT_ERRORS.with_label_values(<span class="kw-2">&amp;</span>[icao.as_ref()])
 <a href=#576 id=576 data-nosnippet>576</a>}
 <a href=#577 id=577 data-nosnippet>577</a>
-<a href=#578 id=578 data-nosnippet>578</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_distance(icao: <span class="kw">crate</span>::config::IcaoCode) -&gt; Gauge {
-<a href=#579 id=579 data-nosnippet>579</a>    <span class="kw">static </span>PHOENIX_DISTANCE: Lazy&lt;GaugeVec&gt; = Lazy::new(|| {
-<a href=#580 id=580 data-nosnippet>580</a>        <span class="macro">prometheus::register_gauge_vec_with_registry!</span> {
-<a href=#581 id=581 data-nosnippet>581</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#582 id=582 data-nosnippet>582</a>                <span class="string">"quilkin_phoenix_distance"</span>,
-<a href=#583 id=583 data-nosnippet>583</a>                <span class="string">"The distance from this instance to another node in the network"</span>,
-<a href=#584 id=584 data-nosnippet>584</a>            },
-<a href=#585 id=585 data-nosnippet>585</a>            <span class="kw-2">&amp;</span>[<span class="string">"icao"</span>],
-<a href=#586 id=586 data-nosnippet>586</a>            registry(),
-<a href=#587 id=587 data-nosnippet>587</a>        }
-<a href=#588 id=588 data-nosnippet>588</a>        .unwrap()
-<a href=#589 id=589 data-nosnippet>589</a>    });
-<a href=#590 id=590 data-nosnippet>590</a>
-<a href=#591 id=591 data-nosnippet>591</a>    PHOENIX_DISTANCE.with_label_values(<span class="kw-2">&amp;</span>[icao.as_ref()])
-<a href=#592 id=592 data-nosnippet>592</a>}
-<a href=#593 id=593 data-nosnippet>593</a>
-<a href=#594 id=594 data-nosnippet>594</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_coordinates(icao: <span class="kw">crate</span>::config::IcaoCode, axis: <span class="kw-2">&amp;</span>str) -&gt; Gauge {
-<a href=#595 id=595 data-nosnippet>595</a>    <span class="kw">static </span>PHOENIX_COORDINATES: Lazy&lt;GaugeVec&gt; = Lazy::new(|| {
-<a href=#596 id=596 data-nosnippet>596</a>        <span class="macro">prometheus::register_gauge_vec_with_registry!</span> {
-<a href=#597 id=597 data-nosnippet>597</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#598 id=598 data-nosnippet>598</a>                <span class="string">"quilkin_phoenix_coordinates"</span>,
-<a href=#599 id=599 data-nosnippet>599</a>                <span class="string">"The phoenix coordinates relative to this node"</span>,
-<a href=#600 id=600 data-nosnippet>600</a>            },
-<a href=#601 id=601 data-nosnippet>601</a>            <span class="kw-2">&amp;</span>[<span class="string">"icao"</span>, <span class="string">"axis"</span>],
-<a href=#602 id=602 data-nosnippet>602</a>            registry(),
-<a href=#603 id=603 data-nosnippet>603</a>        }
-<a href=#604 id=604 data-nosnippet>604</a>        .unwrap()
-<a href=#605 id=605 data-nosnippet>605</a>    });
-<a href=#606 id=606 data-nosnippet>606</a>
-<a href=#607 id=607 data-nosnippet>607</a>    PHOENIX_COORDINATES.with_label_values(<span class="kw-2">&amp;</span>[icao.as_ref(), axis])
-<a href=#608 id=608 data-nosnippet>608</a>}
-<a href=#609 id=609 data-nosnippet>609</a>
-<a href=#610 id=610 data-nosnippet>610</a><span class="attr">#[derive(Clone, Copy, Debug)]
-<a href=#611 id=611 data-nosnippet>611</a></span><span class="kw">enum </span>CoordinateDirection {
-<a href=#612 id=612 data-nosnippet>612</a>    Incoming,
-<a href=#613 id=613 data-nosnippet>613</a>    Outgoing,
-<a href=#614 id=614 data-nosnippet>614</a>}
-<a href=#615 id=615 data-nosnippet>615</a>
-<a href=#616 id=616 data-nosnippet>616</a><span class="kw">impl </span>CoordinateDirection {
-<a href=#617 id=617 data-nosnippet>617</a>    <span class="kw">fn </span>label(<span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
-<a href=#618 id=618 data-nosnippet>618</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#619 id=619 data-nosnippet>619</a>            <span class="self">Self</span>::Incoming =&gt; <span class="string">"incoming"</span>,
-<a href=#620 id=620 data-nosnippet>620</a>            <span class="self">Self</span>::Outgoing =&gt; <span class="string">"outgoing"</span>,
-<a href=#621 id=621 data-nosnippet>621</a>        }
-<a href=#622 id=622 data-nosnippet>622</a>    }
-<a href=#623 id=623 data-nosnippet>623</a>}
-<a href=#624 id=624 data-nosnippet>624</a>
-<a href=#625 id=625 data-nosnippet>625</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_nnls_outgoing_residual() -&gt; Gauge {
-<a href=#626 id=626 data-nosnippet>626</a>    phoenix_nnls_residual(CoordinateDirection::Outgoing)
+<a href=#578 id=578 data-nosnippet>578</a><span class="doccomment">/// Why a phoenix measurement was discarded instead of recorded.
+<a href=#579 id=579 data-nosnippet>579</a>///
+<a href=#580 id=580 data-nosnippet>580</a>/// A closed set, as with [`DropReason`].
+<a href=#581 id=581 data-nosnippet>581</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+<a href=#582 id=582 data-nosnippet>582</a></span><span class="kw">pub enum </span>MeasurementRejection {
+<a href=#583 id=583 data-nosnippet>583</a>    <span class="doccomment">/// Leg below zero, ie its source timestamp is ahead of the clock that read it.
+<a href=#584 id=584 data-nosnippet>584</a>    </span>Negative,
+<a href=#585 id=585 data-nosnippet>585</a>    <span class="doccomment">/// Leg longer than any network path produces, ie a zero or badly skewed
+<a href=#586 id=586 data-nosnippet>586</a>    /// peer timestamp.
+<a href=#587 id=587 data-nosnippet>587</a>    </span>TooLarge,
+<a href=#588 id=588 data-nosnippet>588</a>}
+<a href=#589 id=589 data-nosnippet>589</a>
+<a href=#590 id=590 data-nosnippet>590</a><span class="kw">impl </span>MeasurementRejection {
+<a href=#591 id=591 data-nosnippet>591</a>    <span class="attr">#[inline]
+<a href=#592 id=592 data-nosnippet>592</a>    </span><span class="kw">pub fn </span>label(<span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
+<a href=#593 id=593 data-nosnippet>593</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#594 id=594 data-nosnippet>594</a>            <span class="self">Self</span>::Negative =&gt; <span class="string">"negative"</span>,
+<a href=#595 id=595 data-nosnippet>595</a>            <span class="self">Self</span>::TooLarge =&gt; <span class="string">"too_large"</span>,
+<a href=#596 id=596 data-nosnippet>596</a>        }
+<a href=#597 id=597 data-nosnippet>597</a>    }
+<a href=#598 id=598 data-nosnippet>598</a>}
+<a href=#599 id=599 data-nosnippet>599</a>
+<a href=#600 id=600 data-nosnippet>600</a><span class="doccomment">/// Counts measurements the plausibility check discarded.
+<a href=#601 id=601 data-nosnippet>601</a>///
+<a href=#602 id=602 data-nosnippet>602</a>/// A rejection also raises the node's error estimate, so it is counted in
+<a href=#603 id=603 data-nosnippet>603</a>/// `quilkin_phoenix_measurement_errors_total`; this is the subset of those the
+<a href=#604 id=604 data-nosnippet>604</a>/// peer did answer.
+<a href=#605 id=605 data-nosnippet>605</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_measurements_rejected_total(
+<a href=#606 id=606 data-nosnippet>606</a>    icao: <span class="kw">crate</span>::config::IcaoCode,
+<a href=#607 id=607 data-nosnippet>607</a>    direction: CoordinateDirection,
+<a href=#608 id=608 data-nosnippet>608</a>    reason: MeasurementRejection,
+<a href=#609 id=609 data-nosnippet>609</a>) -&gt; IntCounter {
+<a href=#610 id=610 data-nosnippet>610</a>    <span class="kw">static </span>PHOENIX_MEASUREMENTS_REJECTED: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
+<a href=#611 id=611 data-nosnippet>611</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
+<a href=#612 id=612 data-nosnippet>612</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#613 id=613 data-nosnippet>613</a>                <span class="string">"quilkin_phoenix_measurements_rejected_total"</span>,
+<a href=#614 id=614 data-nosnippet>614</a>                <span class="string">"Total number of phoenix measurements discarded as implausible, ie the peer replied but its timestamps can't be true"</span>,
+<a href=#615 id=615 data-nosnippet>615</a>            },
+<a href=#616 id=616 data-nosnippet>616</a>            <span class="kw-2">&amp;</span>[<span class="string">"icao"</span>, <span class="string">"direction"</span>, REASON_LABEL],
+<a href=#617 id=617 data-nosnippet>617</a>            registry(),
+<a href=#618 id=618 data-nosnippet>618</a>        }
+<a href=#619 id=619 data-nosnippet>619</a>        .unwrap()
+<a href=#620 id=620 data-nosnippet>620</a>    });
+<a href=#621 id=621 data-nosnippet>621</a>
+<a href=#622 id=622 data-nosnippet>622</a>    PHOENIX_MEASUREMENTS_REJECTED.with_label_values(<span class="kw-2">&amp;</span>[
+<a href=#623 id=623 data-nosnippet>623</a>        icao.as_ref(),
+<a href=#624 id=624 data-nosnippet>624</a>        direction.label(),
+<a href=#625 id=625 data-nosnippet>625</a>        reason.label(),
+<a href=#626 id=626 data-nosnippet>626</a>    ])
 <a href=#627 id=627 data-nosnippet>627</a>}
 <a href=#628 id=628 data-nosnippet>628</a>
-<a href=#629 id=629 data-nosnippet>629</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_nnls_incoming_residual() -&gt; Gauge {
-<a href=#630 id=630 data-nosnippet>630</a>    phoenix_nnls_residual(CoordinateDirection::Incoming)
-<a href=#631 id=631 data-nosnippet>631</a>}
-<a href=#632 id=632 data-nosnippet>632</a>
-<a href=#633 id=633 data-nosnippet>633</a><span class="kw">fn </span>phoenix_nnls_residual(direction: CoordinateDirection) -&gt; Gauge {
-<a href=#634 id=634 data-nosnippet>634</a>    <span class="kw">static </span>PHOENIX_NNLS_RESIDUAL: Lazy&lt;GaugeVec&gt; = Lazy::new(|| {
-<a href=#635 id=635 data-nosnippet>635</a>        <span class="macro">prometheus::register_gauge_vec_with_registry!</span> {
-<a href=#636 id=636 data-nosnippet>636</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#637 id=637 data-nosnippet>637</a>                <span class="string">"quilkin_phoenix_nnls_residual"</span>,
-<a href=#638 id=638 data-nosnippet>638</a>                <span class="string">"The NNLS residual norm from the most recent coordinate computation"</span>,
-<a href=#639 id=639 data-nosnippet>639</a>            },
-<a href=#640 id=640 data-nosnippet>640</a>            <span class="kw-2">&amp;</span>[<span class="string">"direction"</span>],
-<a href=#641 id=641 data-nosnippet>641</a>            registry(),
-<a href=#642 id=642 data-nosnippet>642</a>        }
-<a href=#643 id=643 data-nosnippet>643</a>        .unwrap()
-<a href=#644 id=644 data-nosnippet>644</a>    });
-<a href=#645 id=645 data-nosnippet>645</a>
-<a href=#646 id=646 data-nosnippet>646</a>    PHOENIX_NNLS_RESIDUAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label()])
-<a href=#647 id=647 data-nosnippet>647</a>}
-<a href=#648 id=648 data-nosnippet>648</a>
-<a href=#649 id=649 data-nosnippet>649</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_distance_error_estimate(icao: <span class="kw">crate</span>::config::IcaoCode) -&gt; Gauge {
-<a href=#650 id=650 data-nosnippet>650</a>    <span class="kw">static </span>PHOENIX_DISTANCE_ERROR_ESTIMATE: Lazy&lt;GaugeVec&gt; = Lazy::new(|| {
-<a href=#651 id=651 data-nosnippet>651</a>        <span class="macro">prometheus::register_gauge_vec_with_registry!</span> {
-<a href=#652 id=652 data-nosnippet>652</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#653 id=653 data-nosnippet>653</a>                <span class="string">"quilkin_phoenix_distance_error_estimate"</span>,
-<a href=#654 id=654 data-nosnippet>654</a>                <span class="string">"The distance from this instance to another node in the network"</span>,
-<a href=#655 id=655 data-nosnippet>655</a>            },
-<a href=#656 id=656 data-nosnippet>656</a>            <span class="kw-2">&amp;</span>[<span class="string">"icao"</span>],
-<a href=#657 id=657 data-nosnippet>657</a>            registry(),
-<a href=#658 id=658 data-nosnippet>658</a>        }
-<a href=#659 id=659 data-nosnippet>659</a>        .unwrap()
-<a href=#660 id=660 data-nosnippet>660</a>    });
-<a href=#661 id=661 data-nosnippet>661</a>
-<a href=#662 id=662 data-nosnippet>662</a>    PHOENIX_DISTANCE_ERROR_ESTIMATE.with_label_values(<span class="kw-2">&amp;</span>[icao.as_ref()])
-<a href=#663 id=663 data-nosnippet>663</a>}
-<a href=#664 id=664 data-nosnippet>664</a>
-<a href=#665 id=665 data-nosnippet>665</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>processing_time(direction: Direction) -&gt; Histogram {
-<a href=#666 id=666 data-nosnippet>666</a>    <span class="kw">static </span>PROCESSING_TIME: Lazy&lt;HistogramVec&gt; = Lazy::new(|| {
-<a href=#667 id=667 data-nosnippet>667</a>        <span class="macro">prometheus::register_histogram_vec_with_registry!</span> {
-<a href=#668 id=668 data-nosnippet>668</a>            <span class="macro">prometheus::histogram_opts!</span> {
-<a href=#669 id=669 data-nosnippet>669</a>                <span class="string">"quilkin_packets_processing_duration_seconds"</span>,
-<a href=#670 id=670 data-nosnippet>670</a>                <span class="string">"Total processing time for a packet"</span>,
-<a href=#671 id=671 data-nosnippet>671</a>                prometheus::exponential_buckets(BUCKET_START, BUCKET_FACTOR, BUCKET_COUNT).unwrap(),
-<a href=#672 id=672 data-nosnippet>672</a>            },
-<a href=#673 id=673 data-nosnippet>673</a>            <span class="kw-2">&amp;</span>[Direction::LABEL],
-<a href=#674 id=674 data-nosnippet>674</a>            registry(),
-<a href=#675 id=675 data-nosnippet>675</a>        }
-<a href=#676 id=676 data-nosnippet>676</a>        .unwrap()
-<a href=#677 id=677 data-nosnippet>677</a>    });
-<a href=#678 id=678 data-nosnippet>678</a>
-<a href=#679 id=679 data-nosnippet>679</a>    PROCESSING_TIME.with_label_values(<span class="kw-2">&amp;</span>[direction.label()])
-<a href=#680 id=680 data-nosnippet>680</a>}
-<a href=#681 id=681 data-nosnippet>681</a>
-<a href=#682 id=682 data-nosnippet>682</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>bytes_total(
-<a href=#683 id=683 data-nosnippet>683</a>    direction: Direction,
-<a href=#684 id=684 data-nosnippet>684</a>    _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#685 id=685 data-nosnippet>685</a>    destination_locality: <span class="kw-2">&amp;</span>str,
-<a href=#686 id=686 data-nosnippet>686</a>) -&gt; IntCounter {
-<a href=#687 id=687 data-nosnippet>687</a>    <span class="kw">static </span>BYTES_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
-<a href=#688 id=688 data-nosnippet>688</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
-<a href=#689 id=689 data-nosnippet>689</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#690 id=690 data-nosnippet>690</a>                <span class="string">"quilkin_bytes_total"</span>,
-<a href=#691 id=691 data-nosnippet>691</a>                <span class="string">"total number of bytes"</span>,
-<a href=#692 id=692 data-nosnippet>692</a>            },
-<a href=#693 id=693 data-nosnippet>693</a>            <span class="kw-2">&amp;</span>[Direction::LABEL, DESTINATION_LABEL],
-<a href=#694 id=694 data-nosnippet>694</a>            registry(),
-<a href=#695 id=695 data-nosnippet>695</a>        }
-<a href=#696 id=696 data-nosnippet>696</a>        .unwrap()
-<a href=#697 id=697 data-nosnippet>697</a>    });
-<a href=#698 id=698 data-nosnippet>698</a>
-<a href=#699 id=699 data-nosnippet>699</a>    BYTES_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), destination_locality])
-<a href=#700 id=700 data-nosnippet>700</a>}
-<a href=#701 id=701 data-nosnippet>701</a>
-<a href=#702 id=702 data-nosnippet>702</a><span class="attr">#[must_use]
-<a href=#703 id=703 data-nosnippet>703</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>errors_total(direction: Direction, reason: <span class="kw-2">&amp;</span>str, _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;) -&gt; IntCounter {
-<a href=#704 id=704 data-nosnippet>704</a>    <span class="kw">static </span>ERRORS_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
-<a href=#705 id=705 data-nosnippet>705</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
-<a href=#706 id=706 data-nosnippet>706</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#707 id=707 data-nosnippet>707</a>                <span class="string">"quilkin_errors_total"</span>,
-<a href=#708 id=708 data-nosnippet>708</a>                <span class="string">"total number of errors sending packets"</span>,
-<a href=#709 id=709 data-nosnippet>709</a>            },
-<a href=#710 id=710 data-nosnippet>710</a>            <span class="kw-2">&amp;</span>[Direction::LABEL, REASON_LABEL],
-<a href=#711 id=711 data-nosnippet>711</a>            registry(),
-<a href=#712 id=712 data-nosnippet>712</a>        }
-<a href=#713 id=713 data-nosnippet>713</a>        .unwrap()
-<a href=#714 id=714 data-nosnippet>714</a>    });
-<a href=#715 id=715 data-nosnippet>715</a>
-<a href=#716 id=716 data-nosnippet>716</a>    ERRORS_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), reason])
-<a href=#717 id=717 data-nosnippet>717</a>}
-<a href=#718 id=718 data-nosnippet>718</a>
-<a href=#719 id=719 data-nosnippet>719</a><span class="kw">static </span>PACKET_JITTER: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
-<a href=#720 id=720 data-nosnippet>720</a>    <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
-<a href=#721 id=721 data-nosnippet>721</a>        <span class="macro">prometheus::opts!</span> {
-<a href=#722 id=722 data-nosnippet>722</a>            <span class="string">"quilkin_packet_jitter"</span>,
-<a href=#723 id=723 data-nosnippet>723</a>            <span class="string">"The time between new packets"</span>,
-<a href=#724 id=724 data-nosnippet>724</a>        },
-<a href=#725 id=725 data-nosnippet>725</a>        <span class="kw-2">&amp;</span>[Direction::LABEL],
-<a href=#726 id=726 data-nosnippet>726</a>        registry(),
-<a href=#727 id=727 data-nosnippet>727</a>    }
-<a href=#728 id=728 data-nosnippet>728</a>    .unwrap()
-<a href=#729 id=729 data-nosnippet>729</a>});
+<a href=#629 id=629 data-nosnippet>629</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_distance(icao: <span class="kw">crate</span>::config::IcaoCode) -&gt; Gauge {
+<a href=#630 id=630 data-nosnippet>630</a>    <span class="kw">static </span>PHOENIX_DISTANCE: Lazy&lt;GaugeVec&gt; = Lazy::new(|| {
+<a href=#631 id=631 data-nosnippet>631</a>        <span class="macro">prometheus::register_gauge_vec_with_registry!</span> {
+<a href=#632 id=632 data-nosnippet>632</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#633 id=633 data-nosnippet>633</a>                <span class="string">"quilkin_phoenix_distance"</span>,
+<a href=#634 id=634 data-nosnippet>634</a>                <span class="string">"The distance from this instance to another node in the network"</span>,
+<a href=#635 id=635 data-nosnippet>635</a>            },
+<a href=#636 id=636 data-nosnippet>636</a>            <span class="kw-2">&amp;</span>[<span class="string">"icao"</span>],
+<a href=#637 id=637 data-nosnippet>637</a>            registry(),
+<a href=#638 id=638 data-nosnippet>638</a>        }
+<a href=#639 id=639 data-nosnippet>639</a>        .unwrap()
+<a href=#640 id=640 data-nosnippet>640</a>    });
+<a href=#641 id=641 data-nosnippet>641</a>
+<a href=#642 id=642 data-nosnippet>642</a>    PHOENIX_DISTANCE.with_label_values(<span class="kw-2">&amp;</span>[icao.as_ref()])
+<a href=#643 id=643 data-nosnippet>643</a>}
+<a href=#644 id=644 data-nosnippet>644</a>
+<a href=#645 id=645 data-nosnippet>645</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_coordinates(icao: <span class="kw">crate</span>::config::IcaoCode, axis: <span class="kw-2">&amp;</span>str) -&gt; Gauge {
+<a href=#646 id=646 data-nosnippet>646</a>    <span class="kw">static </span>PHOENIX_COORDINATES: Lazy&lt;GaugeVec&gt; = Lazy::new(|| {
+<a href=#647 id=647 data-nosnippet>647</a>        <span class="macro">prometheus::register_gauge_vec_with_registry!</span> {
+<a href=#648 id=648 data-nosnippet>648</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#649 id=649 data-nosnippet>649</a>                <span class="string">"quilkin_phoenix_coordinates"</span>,
+<a href=#650 id=650 data-nosnippet>650</a>                <span class="string">"The phoenix coordinates relative to this node"</span>,
+<a href=#651 id=651 data-nosnippet>651</a>            },
+<a href=#652 id=652 data-nosnippet>652</a>            <span class="kw-2">&amp;</span>[<span class="string">"icao"</span>, <span class="string">"axis"</span>],
+<a href=#653 id=653 data-nosnippet>653</a>            registry(),
+<a href=#654 id=654 data-nosnippet>654</a>        }
+<a href=#655 id=655 data-nosnippet>655</a>        .unwrap()
+<a href=#656 id=656 data-nosnippet>656</a>    });
+<a href=#657 id=657 data-nosnippet>657</a>
+<a href=#658 id=658 data-nosnippet>658</a>    PHOENIX_COORDINATES.with_label_values(<span class="kw-2">&amp;</span>[icao.as_ref(), axis])
+<a href=#659 id=659 data-nosnippet>659</a>}
+<a href=#660 id=660 data-nosnippet>660</a>
+<a href=#661 id=661 data-nosnippet>661</a><span class="doccomment">/// Which leg of a round trip a value belongs to.
+<a href=#662 id=662 data-nosnippet>662</a></span><span class="attr">#[derive(Clone, Copy, Debug)]
+<a href=#663 id=663 data-nosnippet>663</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>CoordinateDirection {
+<a href=#664 id=664 data-nosnippet>664</a>    Incoming,
+<a href=#665 id=665 data-nosnippet>665</a>    Outgoing,
+<a href=#666 id=666 data-nosnippet>666</a>}
+<a href=#667 id=667 data-nosnippet>667</a>
+<a href=#668 id=668 data-nosnippet>668</a><span class="kw">impl </span>CoordinateDirection {
+<a href=#669 id=669 data-nosnippet>669</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>label(<span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
+<a href=#670 id=670 data-nosnippet>670</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#671 id=671 data-nosnippet>671</a>            <span class="self">Self</span>::Incoming =&gt; <span class="string">"incoming"</span>,
+<a href=#672 id=672 data-nosnippet>672</a>            <span class="self">Self</span>::Outgoing =&gt; <span class="string">"outgoing"</span>,
+<a href=#673 id=673 data-nosnippet>673</a>        }
+<a href=#674 id=674 data-nosnippet>674</a>    }
+<a href=#675 id=675 data-nosnippet>675</a>}
+<a href=#676 id=676 data-nosnippet>676</a>
+<a href=#677 id=677 data-nosnippet>677</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_nnls_outgoing_residual() -&gt; Gauge {
+<a href=#678 id=678 data-nosnippet>678</a>    phoenix_nnls_residual(CoordinateDirection::Outgoing)
+<a href=#679 id=679 data-nosnippet>679</a>}
+<a href=#680 id=680 data-nosnippet>680</a>
+<a href=#681 id=681 data-nosnippet>681</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_nnls_incoming_residual() -&gt; Gauge {
+<a href=#682 id=682 data-nosnippet>682</a>    phoenix_nnls_residual(CoordinateDirection::Incoming)
+<a href=#683 id=683 data-nosnippet>683</a>}
+<a href=#684 id=684 data-nosnippet>684</a>
+<a href=#685 id=685 data-nosnippet>685</a><span class="kw">fn </span>phoenix_nnls_residual(direction: CoordinateDirection) -&gt; Gauge {
+<a href=#686 id=686 data-nosnippet>686</a>    <span class="kw">static </span>PHOENIX_NNLS_RESIDUAL: Lazy&lt;GaugeVec&gt; = Lazy::new(|| {
+<a href=#687 id=687 data-nosnippet>687</a>        <span class="macro">prometheus::register_gauge_vec_with_registry!</span> {
+<a href=#688 id=688 data-nosnippet>688</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#689 id=689 data-nosnippet>689</a>                <span class="string">"quilkin_phoenix_nnls_residual"</span>,
+<a href=#690 id=690 data-nosnippet>690</a>                <span class="string">"The NNLS residual norm from the most recent coordinate computation"</span>,
+<a href=#691 id=691 data-nosnippet>691</a>            },
+<a href=#692 id=692 data-nosnippet>692</a>            <span class="kw-2">&amp;</span>[<span class="string">"direction"</span>],
+<a href=#693 id=693 data-nosnippet>693</a>            registry(),
+<a href=#694 id=694 data-nosnippet>694</a>        }
+<a href=#695 id=695 data-nosnippet>695</a>        .unwrap()
+<a href=#696 id=696 data-nosnippet>696</a>    });
+<a href=#697 id=697 data-nosnippet>697</a>
+<a href=#698 id=698 data-nosnippet>698</a>    PHOENIX_NNLS_RESIDUAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label()])
+<a href=#699 id=699 data-nosnippet>699</a>}
+<a href=#700 id=700 data-nosnippet>700</a>
+<a href=#701 id=701 data-nosnippet>701</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>phoenix_distance_error_estimate(icao: <span class="kw">crate</span>::config::IcaoCode) -&gt; Gauge {
+<a href=#702 id=702 data-nosnippet>702</a>    <span class="kw">static </span>PHOENIX_DISTANCE_ERROR_ESTIMATE: Lazy&lt;GaugeVec&gt; = Lazy::new(|| {
+<a href=#703 id=703 data-nosnippet>703</a>        <span class="macro">prometheus::register_gauge_vec_with_registry!</span> {
+<a href=#704 id=704 data-nosnippet>704</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#705 id=705 data-nosnippet>705</a>                <span class="string">"quilkin_phoenix_distance_error_estimate"</span>,
+<a href=#706 id=706 data-nosnippet>706</a>                <span class="string">"The distance from this instance to another node in the network"</span>,
+<a href=#707 id=707 data-nosnippet>707</a>            },
+<a href=#708 id=708 data-nosnippet>708</a>            <span class="kw-2">&amp;</span>[<span class="string">"icao"</span>],
+<a href=#709 id=709 data-nosnippet>709</a>            registry(),
+<a href=#710 id=710 data-nosnippet>710</a>        }
+<a href=#711 id=711 data-nosnippet>711</a>        .unwrap()
+<a href=#712 id=712 data-nosnippet>712</a>    });
+<a href=#713 id=713 data-nosnippet>713</a>
+<a href=#714 id=714 data-nosnippet>714</a>    PHOENIX_DISTANCE_ERROR_ESTIMATE.with_label_values(<span class="kw-2">&amp;</span>[icao.as_ref()])
+<a href=#715 id=715 data-nosnippet>715</a>}
+<a href=#716 id=716 data-nosnippet>716</a>
+<a href=#717 id=717 data-nosnippet>717</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>processing_time(direction: Direction) -&gt; Histogram {
+<a href=#718 id=718 data-nosnippet>718</a>    <span class="kw">static </span>PROCESSING_TIME: Lazy&lt;HistogramVec&gt; = Lazy::new(|| {
+<a href=#719 id=719 data-nosnippet>719</a>        <span class="macro">prometheus::register_histogram_vec_with_registry!</span> {
+<a href=#720 id=720 data-nosnippet>720</a>            <span class="macro">prometheus::histogram_opts!</span> {
+<a href=#721 id=721 data-nosnippet>721</a>                <span class="string">"quilkin_packets_processing_duration_seconds"</span>,
+<a href=#722 id=722 data-nosnippet>722</a>                <span class="string">"Total processing time for a packet"</span>,
+<a href=#723 id=723 data-nosnippet>723</a>                prometheus::exponential_buckets(BUCKET_START, BUCKET_FACTOR, BUCKET_COUNT).unwrap(),
+<a href=#724 id=724 data-nosnippet>724</a>            },
+<a href=#725 id=725 data-nosnippet>725</a>            <span class="kw-2">&amp;</span>[Direction::LABEL],
+<a href=#726 id=726 data-nosnippet>726</a>            registry(),
+<a href=#727 id=727 data-nosnippet>727</a>        }
+<a href=#728 id=728 data-nosnippet>728</a>        .unwrap()
+<a href=#729 id=729 data-nosnippet>729</a>    });
 <a href=#730 id=730 data-nosnippet>730</a>
-<a href=#731 id=731 data-nosnippet>731</a><span class="doccomment">/// Counts observations per direction so [`remove_packet_jitter`] can tell a
-<a href=#732 id=732 data-nosnippet>732</a>/// current value from one a since-idle proxy is still publishing.
-<a href=#733 id=733 data-nosnippet>733</a></span><span class="kw">static </span>PACKET_JITTER_OBSERVATIONS: [std::sync::atomic::AtomicU64; <span class="number">2</span>] =
-<a href=#734 id=734 data-nosnippet>734</a>    [<span class="kw">const </span>{ std::sync::atomic::AtomicU64::new(<span class="number">0</span>) }; <span class="number">2</span>];
-<a href=#735 id=735 data-nosnippet>735</a>
-<a href=#736 id=736 data-nosnippet>736</a><span class="doccomment">/// Sets `quilkin_packet_jitter` to the interarrival time of the packet just
-<a href=#737 id=737 data-nosnippet>737</a>/// processed, in nanoseconds.
-<a href=#738 id=738 data-nosnippet>738</a>///
-<a href=#739 id=739 data-nosnippet>739</a>/// This is the interarrival time seen by an I/O loop, which covers every session
-<a href=#740 id=740 data-nosnippet>740</a>/// it serves; for the per-session distribution see
-<a href=#741 id=741 data-nosnippet>741</a>/// `quilkin_session_jitter_seconds`.
-<a href=#742 id=742 data-nosnippet>742</a></span><span class="attr">#[inline]
-<a href=#743 id=743 data-nosnippet>743</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>set_packet_jitter(direction: Direction, _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;, nanos: i64) {
-<a href=#744 id=744 data-nosnippet>744</a>    PACKET_JITTER_OBSERVATIONS[direction.index()]
-<a href=#745 id=745 data-nosnippet>745</a>        .fetch_add(<span class="number">1</span>, std::sync::atomic::Ordering::Relaxed);
-<a href=#746 id=746 data-nosnippet>746</a>    PACKET_JITTER
-<a href=#747 id=747 data-nosnippet>747</a>        .with_label_values(<span class="kw-2">&amp;</span>[direction.label()])
-<a href=#748 id=748 data-nosnippet>748</a>        .set(nanos);
-<a href=#749 id=749 data-nosnippet>749</a>}
+<a href=#731 id=731 data-nosnippet>731</a>    PROCESSING_TIME.with_label_values(<span class="kw-2">&amp;</span>[direction.label()])
+<a href=#732 id=732 data-nosnippet>732</a>}
+<a href=#733 id=733 data-nosnippet>733</a>
+<a href=#734 id=734 data-nosnippet>734</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>bytes_total(
+<a href=#735 id=735 data-nosnippet>735</a>    direction: Direction,
+<a href=#736 id=736 data-nosnippet>736</a>    _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#737 id=737 data-nosnippet>737</a>    destination_locality: <span class="kw-2">&amp;</span>str,
+<a href=#738 id=738 data-nosnippet>738</a>) -&gt; IntCounter {
+<a href=#739 id=739 data-nosnippet>739</a>    <span class="kw">static </span>BYTES_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
+<a href=#740 id=740 data-nosnippet>740</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
+<a href=#741 id=741 data-nosnippet>741</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#742 id=742 data-nosnippet>742</a>                <span class="string">"quilkin_bytes_total"</span>,
+<a href=#743 id=743 data-nosnippet>743</a>                <span class="string">"total number of bytes"</span>,
+<a href=#744 id=744 data-nosnippet>744</a>            },
+<a href=#745 id=745 data-nosnippet>745</a>            <span class="kw-2">&amp;</span>[Direction::LABEL, DESTINATION_LABEL],
+<a href=#746 id=746 data-nosnippet>746</a>            registry(),
+<a href=#747 id=747 data-nosnippet>747</a>        }
+<a href=#748 id=748 data-nosnippet>748</a>        .unwrap()
+<a href=#749 id=749 data-nosnippet>749</a>    });
 <a href=#750 id=750 data-nosnippet>750</a>
-<a href=#751 id=751 data-nosnippet>751</a><span class="doccomment">/// Number of times `quilkin_packet_jitter` has been set for `direction`.
-<a href=#752 id=752 data-nosnippet>752</a></span><span class="attr">#[inline]
-<a href=#753 id=753 data-nosnippet>753</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packet_jitter_observations(direction: Direction) -&gt; u64 {
-<a href=#754 id=754 data-nosnippet>754</a>    PACKET_JITTER_OBSERVATIONS[direction.index()].load(std::sync::atomic::Ordering::Relaxed)
-<a href=#755 id=755 data-nosnippet>755</a>}
-<a href=#756 id=756 data-nosnippet>756</a>
-<a href=#757 id=757 data-nosnippet>757</a><span class="doccomment">/// Stops exporting `quilkin_packet_jitter` for `direction`.
-<a href=#758 id=758 data-nosnippet>758</a>///
-<a href=#759 id=759 data-nosnippet>759</a>/// The metric is a gauge set per packet, so a proxy that stops receiving would
-<a href=#760 id=760 data-nosnippet>760</a>/// otherwise keep publishing its last value indefinitely.
-<a href=#761 id=761 data-nosnippet>761</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove_packet_jitter(direction: Direction) {
-<a href=#762 id=762 data-nosnippet>762</a>    drop(PACKET_JITTER.remove_label_values(<span class="kw-2">&amp;</span>[direction.label()]));
-<a href=#763 id=763 data-nosnippet>763</a>}
-<a href=#764 id=764 data-nosnippet>764</a>
-<a href=#765 id=765 data-nosnippet>765</a><span class="doccomment">/// Per-session interarrival jitter, in seconds.
-<a href=#766 id=766 data-nosnippet>766</a>///
-<a href=#767 id=767 data-nosnippet>767</a>/// A histogram rather than a mean, because a cluster mean of 0.5 ms is
-<a href=#768 id=768 data-nosnippet>768</a>/// compatible with a few percent of players at 80 ms, and those are the players
-<a href=#769 id=769 data-nosnippet>769</a>/// worth knowing about.
-<a href=#770 id=770 data-nosnippet>770</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>session_jitter_seconds() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>Histogram {
-<a href=#771 id=771 data-nosnippet>771</a>    <span class="doccomment">/// ~2x spacing across the range player connections actually occupy, 0.1 ms
-<a href=#772 id=772 data-nosnippet>772</a>    /// to 0.5 s.
-<a href=#773 id=773 data-nosnippet>773</a>    </span><span class="kw">const </span>BUCKETS: <span class="kw-2">&amp;</span>[f64] = <span class="kw-2">&amp;</span>[
-<a href=#774 id=774 data-nosnippet>774</a>        <span class="number">0.0001</span>, <span class="number">0.00025</span>, <span class="number">0.0005</span>, <span class="number">0.001</span>, <span class="number">0.002</span>, <span class="number">0.004</span>, <span class="number">0.008</span>, <span class="number">0.015</span>, <span class="number">0.03</span>, <span class="number">0.06</span>, <span class="number">0.12</span>, <span class="number">0.25</span>, <span class="number">0.5</span>,
-<a href=#775 id=775 data-nosnippet>775</a>    ];
-<a href=#776 id=776 data-nosnippet>776</a>
-<a href=#777 id=777 data-nosnippet>777</a>    <span class="kw">static </span>SESSION_JITTER: Lazy&lt;Histogram&gt; = Lazy::new(|| {
-<a href=#778 id=778 data-nosnippet>778</a>        <span class="macro">prometheus::register_histogram_with_registry!</span> {
-<a href=#779 id=779 data-nosnippet>779</a>            <span class="macro">prometheus::histogram_opts!</span> {
-<a href=#780 id=780 data-nosnippet>780</a>                <span class="string">"quilkin_session_jitter_seconds"</span>,
-<a href=#781 id=781 data-nosnippet>781</a>                <span class="string">"Distribution of per-session interarrival jitter of downstream packets"</span>,
-<a href=#782 id=782 data-nosnippet>782</a>                BUCKETS.to_vec()
-<a href=#783 id=783 data-nosnippet>783</a>            },
-<a href=#784 id=784 data-nosnippet>784</a>            registry(),
-<a href=#785 id=785 data-nosnippet>785</a>        }
-<a href=#786 id=786 data-nosnippet>786</a>        .unwrap()
-<a href=#787 id=787 data-nosnippet>787</a>    });
-<a href=#788 id=788 data-nosnippet>788</a>
-<a href=#789 id=789 data-nosnippet>789</a>    <span class="kw-2">&amp;</span>SESSION_JITTER
-<a href=#790 id=790 data-nosnippet>790</a>}
-<a href=#791 id=791 data-nosnippet>791</a>
-<a href=#792 id=792 data-nosnippet>792</a><span class="kw">static </span>SESSIONS_ACTIVE_BY_ASN: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
-<a href=#793 id=793 data-nosnippet>793</a>    <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
-<a href=#794 id=794 data-nosnippet>794</a>        <span class="macro">prometheus::opts!</span> {
-<a href=#795 id=795 data-nosnippet>795</a>            <span class="string">"quilkin_sessions_active_by_asn"</span>,
-<a href=#796 id=796 data-nosnippet>796</a>            <span class="string">"Active sessions by client ASN, for the largest ASNs at this proxy. Sessions belonging to any other ASN are counted under `asn=\"other\"`, so the breakdown sums to the session total."</span>,
-<a href=#797 id=797 data-nosnippet>797</a>        },
-<a href=#798 id=798 data-nosnippet>798</a>        <span class="kw-2">&amp;</span>[ASN_LABEL],
-<a href=#799 id=799 data-nosnippet>799</a>        registry(),
-<a href=#800 id=800 data-nosnippet>800</a>    }
-<a href=#801 id=801 data-nosnippet>801</a>    .unwrap()
-<a href=#802 id=802 data-nosnippet>802</a>});
-<a href=#803 id=803 data-nosnippet>803</a>
-<a href=#804 id=804 data-nosnippet>804</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>sessions_active_by_asn(asn: <span class="kw-2">&amp;</span>str) -&gt; IntGauge {
-<a href=#805 id=805 data-nosnippet>805</a>    SESSIONS_ACTIVE_BY_ASN.with_label_values(<span class="kw-2">&amp;</span>[asn])
-<a href=#806 id=806 data-nosnippet>806</a>}
-<a href=#807 id=807 data-nosnippet>807</a>
-<a href=#808 id=808 data-nosnippet>808</a><span class="doccomment">/// Stops exporting `quilkin_sessions_active_by_asn` for `asn`, used when it
-<a href=#809 id=809 data-nosnippet>809</a>/// falls out of the exported set.
-<a href=#810 id=810 data-nosnippet>810</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove_sessions_active_by_asn(asn: <span class="kw-2">&amp;</span>str) {
-<a href=#811 id=811 data-nosnippet>811</a>    drop(SESSIONS_ACTIVE_BY_ASN.remove_label_values(<span class="kw-2">&amp;</span>[asn]));
-<a href=#812 id=812 data-nosnippet>812</a>}
-<a href=#813 id=813 data-nosnippet>813</a>
-<a href=#814 id=814 data-nosnippet>814</a><span class="kw">static </span>CLIENT_SESSIONS_DEGRADED: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
-<a href=#815 id=815 data-nosnippet>815</a>    <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
-<a href=#816 id=816 data-nosnippet>816</a>        <span class="macro">prometheus::opts!</span> {
-<a href=#817 id=817 data-nosnippet>817</a>            <span class="string">"quilkin_client_sessions_degraded"</span>,
-<a href=#818 id=818 data-nosnippet>818</a>            <span class="string">"Sessions breaching a connection quality threshold, by client ASN. Only ASNs currently breaching are exported, so a healthy proxy publishes nothing here. Divide by `quilkin_sessions_active_by_asn` for the affected share; do it across the fleet, since one proxy sees too few sessions of any one ASN to judge it."</span>,
-<a href=#819 id=819 data-nosnippet>819</a>        },
-<a href=#820 id=820 data-nosnippet>820</a>        <span class="kw-2">&amp;</span>[ASN_LABEL, REASON_LABEL],
-<a href=#821 id=821 data-nosnippet>821</a>        registry(),
-<a href=#822 id=822 data-nosnippet>822</a>    }
-<a href=#823 id=823 data-nosnippet>823</a>    .unwrap()
-<a href=#824 id=824 data-nosnippet>824</a>});
-<a href=#825 id=825 data-nosnippet>825</a>
-<a href=#826 id=826 data-nosnippet>826</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>client_sessions_degraded(asn: <span class="kw-2">&amp;</span>str, reason: <span class="kw-2">&amp;</span>str) -&gt; IntGauge {
-<a href=#827 id=827 data-nosnippet>827</a>    CLIENT_SESSIONS_DEGRADED.with_label_values(<span class="kw-2">&amp;</span>[asn, reason])
-<a href=#828 id=828 data-nosnippet>828</a>}
-<a href=#829 id=829 data-nosnippet>829</a>
-<a href=#830 id=830 data-nosnippet>830</a><span class="doccomment">/// Stops exporting `quilkin_client_sessions_degraded` for `asn`, used when it
-<a href=#831 id=831 data-nosnippet>831</a>/// recovers.
-<a href=#832 id=832 data-nosnippet>832</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove_client_sessions_degraded(asn: <span class="kw-2">&amp;</span>str, reason: <span class="kw-2">&amp;</span>str) {
-<a href=#833 id=833 data-nosnippet>833</a>    drop(CLIENT_SESSIONS_DEGRADED.remove_label_values(<span class="kw-2">&amp;</span>[asn, reason]));
-<a href=#834 id=834 data-nosnippet>834</a>}
-<a href=#835 id=835 data-nosnippet>835</a>
-<a href=#836 id=836 data-nosnippet>836</a><span class="doccomment">/// Counts degraded session observations, so a rate can be alerted on without
-<a href=#837 id=837 data-nosnippet>837</a>/// depending on a threshold the proxy would have to pick.
-<a href=#838 id=838 data-nosnippet>838</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>client_sessions_degraded_total(reason: <span class="kw-2">&amp;</span>str) -&gt; IntCounter {
-<a href=#839 id=839 data-nosnippet>839</a>    <span class="kw">static </span>CLIENT_SESSIONS_DEGRADED: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
-<a href=#840 id=840 data-nosnippet>840</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
-<a href=#841 id=841 data-nosnippet>841</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#842 id=842 data-nosnippet>842</a>                <span class="string">"quilkin_client_sessions_degraded_total"</span>,
-<a href=#843 id=843 data-nosnippet>843</a>                <span class="string">"Total number of times a session was observed breaching a connection quality threshold"</span>,
-<a href=#844 id=844 data-nosnippet>844</a>            },
-<a href=#845 id=845 data-nosnippet>845</a>            <span class="kw-2">&amp;</span>[REASON_LABEL],
-<a href=#846 id=846 data-nosnippet>846</a>            registry(),
-<a href=#847 id=847 data-nosnippet>847</a>        }
-<a href=#848 id=848 data-nosnippet>848</a>        .unwrap()
-<a href=#849 id=849 data-nosnippet>849</a>    });
-<a href=#850 id=850 data-nosnippet>850</a>
-<a href=#851 id=851 data-nosnippet>851</a>    CLIENT_SESSIONS_DEGRADED.with_label_values(<span class="kw-2">&amp;</span>[reason])
-<a href=#852 id=852 data-nosnippet>852</a>}
-<a href=#853 id=853 data-nosnippet>853</a>
-<a href=#854 id=854 data-nosnippet>854</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packets_total(
-<a href=#855 id=855 data-nosnippet>855</a>    direction: Direction,
-<a href=#856 id=856 data-nosnippet>856</a>    _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#857 id=857 data-nosnippet>857</a>    destination_locality: <span class="kw-2">&amp;</span>str,
-<a href=#858 id=858 data-nosnippet>858</a>) -&gt; IntCounter {
-<a href=#859 id=859 data-nosnippet>859</a>    <span class="kw">static </span>PACKETS_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
-<a href=#860 id=860 data-nosnippet>860</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
-<a href=#861 id=861 data-nosnippet>861</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#862 id=862 data-nosnippet>862</a>                <span class="string">"quilkin_packets_total"</span>,
-<a href=#863 id=863 data-nosnippet>863</a>                <span class="string">"Total number of packets"</span>,
-<a href=#864 id=864 data-nosnippet>864</a>            },
-<a href=#865 id=865 data-nosnippet>865</a>            <span class="kw-2">&amp;</span>[Direction::LABEL, DESTINATION_LABEL],
-<a href=#866 id=866 data-nosnippet>866</a>            registry(),
-<a href=#867 id=867 data-nosnippet>867</a>        }
-<a href=#868 id=868 data-nosnippet>868</a>        .unwrap()
-<a href=#869 id=869 data-nosnippet>869</a>    });
-<a href=#870 id=870 data-nosnippet>870</a>
-<a href=#871 id=871 data-nosnippet>871</a>    PACKETS_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), destination_locality])
-<a href=#872 id=872 data-nosnippet>872</a>}
-<a href=#873 id=873 data-nosnippet>873</a>
-<a href=#874 id=874 data-nosnippet>874</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packets_dropped_total(
-<a href=#875 id=875 data-nosnippet>875</a>    direction: Direction,
-<a href=#876 id=876 data-nosnippet>876</a>    reason: DropReason,
-<a href=#877 id=877 data-nosnippet>877</a>    filter: <span class="kw-2">&amp;</span>str,
-<a href=#878 id=878 data-nosnippet>878</a>    destination_locality: <span class="kw-2">&amp;</span>str,
-<a href=#879 id=879 data-nosnippet>879</a>) -&gt; IntCounter {
-<a href=#880 id=880 data-nosnippet>880</a>    <span class="kw">static </span>PACKETS_DROPPED: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
-<a href=#881 id=881 data-nosnippet>881</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
-<a href=#882 id=882 data-nosnippet>882</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#883 id=883 data-nosnippet>883</a>                <span class="string">"quilkin_packets_dropped_total"</span>,
-<a href=#884 id=884 data-nosnippet>884</a>                <span class="string">"Total number of dropped packets"</span>,
-<a href=#885 id=885 data-nosnippet>885</a>            },
-<a href=#886 id=886 data-nosnippet>886</a>            <span class="kw-2">&amp;</span>[
-<a href=#887 id=887 data-nosnippet>887</a>                Direction::LABEL,
-<a href=#888 id=888 data-nosnippet>888</a>                REASON_LABEL,
-<a href=#889 id=889 data-nosnippet>889</a>                FILTER_LABEL,
-<a href=#890 id=890 data-nosnippet>890</a>                DESTINATION_LABEL,
-<a href=#891 id=891 data-nosnippet>891</a>            ],
-<a href=#892 id=892 data-nosnippet>892</a>            registry(),
-<a href=#893 id=893 data-nosnippet>893</a>        }
-<a href=#894 id=894 data-nosnippet>894</a>        .unwrap()
-<a href=#895 id=895 data-nosnippet>895</a>    });
-<a href=#896 id=896 data-nosnippet>896</a>
-<a href=#897 id=897 data-nosnippet>897</a>    PACKETS_DROPPED.with_label_values(<span class="kw-2">&amp;</span>[
-<a href=#898 id=898 data-nosnippet>898</a>        direction.label(),
-<a href=#899 id=899 data-nosnippet>899</a>        reason.label(),
-<a href=#900 id=900 data-nosnippet>900</a>        filter,
-<a href=#901 id=901 data-nosnippet>901</a>        destination_locality,
-<a href=#902 id=902 data-nosnippet>902</a>    ])
-<a href=#903 id=903 data-nosnippet>903</a>}
-<a href=#904 id=904 data-nosnippet>904</a>
-<a href=#905 id=905 data-nosnippet>905</a><span class="doccomment">/// [`packets_dropped_total`] for drops with no filter or destination to
-<a href=#906 id=906 data-nosnippet>906</a>/// attribute, ie packets dropped before they were routed.
-<a href=#907 id=907 data-nosnippet>907</a></span><span class="attr">#[inline]
-<a href=#908 id=908 data-nosnippet>908</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packets_dropped(direction: Direction, reason: DropReason) -&gt; IntCounter {
-<a href=#909 id=909 data-nosnippet>909</a>    packets_dropped_total(direction, reason, <span class="string">""</span>, <span class="string">""</span>)
-<a href=#910 id=910 data-nosnippet>910</a>}
-<a href=#911 id=911 data-nosnippet>911</a>
-<a href=#912 id=912 data-nosnippet>912</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>provider_task_failures_total(provider_task: <span class="kw-2">&amp;</span>str) -&gt; IntCounter {
-<a href=#913 id=913 data-nosnippet>913</a>    <span class="kw">static </span>PROVIDER_TASK_FAILURES_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
-<a href=#914 id=914 data-nosnippet>914</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
-<a href=#915 id=915 data-nosnippet>915</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#916 id=916 data-nosnippet>916</a>                <span class="string">"quilkin_provider_task_failures_total"</span>,
-<a href=#917 id=917 data-nosnippet>917</a>                <span class="string">"The number of times a provider task has failed and had to be restarted"</span>,
-<a href=#918 id=918 data-nosnippet>918</a>            },
-<a href=#919 id=919 data-nosnippet>919</a>            <span class="kw-2">&amp;</span>[<span class="string">"task"</span>],
-<a href=#920 id=920 data-nosnippet>920</a>            registry(),
-<a href=#921 id=921 data-nosnippet>921</a>        }
-<a href=#922 id=922 data-nosnippet>922</a>        .unwrap()
-<a href=#923 id=923 data-nosnippet>923</a>    });
-<a href=#924 id=924 data-nosnippet>924</a>
-<a href=#925 id=925 data-nosnippet>925</a>    PROVIDER_TASK_FAILURES_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[provider_task])
-<a href=#926 id=926 data-nosnippet>926</a>}
-<a href=#927 id=927 data-nosnippet>927</a>
-<a href=#928 id=928 data-nosnippet>928</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>allocated_xdp_packets() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>IntGauge {
-<a href=#929 id=929 data-nosnippet>929</a>    <span class="kw">static </span>ALLOCATED: Lazy&lt;IntGauge&gt; = Lazy::new(|| {
-<a href=#930 id=930 data-nosnippet>930</a>        <span class="macro">prometheus::register_int_gauge_with_registry!</span> {
-<a href=#931 id=931 data-nosnippet>931</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#932 id=932 data-nosnippet>932</a>                <span class="string">"quilkin_allocated_xdp_packets"</span>,
-<a href=#933 id=933 data-nosnippet>933</a>                <span class="string">"The number of packets that are allocated from a UMEM"</span>,
-<a href=#934 id=934 data-nosnippet>934</a>            },
-<a href=#935 id=935 data-nosnippet>935</a>            registry(),
-<a href=#936 id=936 data-nosnippet>936</a>        }
-<a href=#937 id=937 data-nosnippet>937</a>        .unwrap()
-<a href=#938 id=938 data-nosnippet>938</a>    });
-<a href=#939 id=939 data-nosnippet>939</a>
-<a href=#940 id=940 data-nosnippet>940</a>    <span class="kw-2">&amp;</span>ALLOCATED
-<a href=#941 id=941 data-nosnippet>941</a>}
-<a href=#942 id=942 data-nosnippet>942</a>
-<a href=#943 id=943 data-nosnippet>943</a><span class="kw">pub struct </span>ActiveProviderMetrics {
-<a href=#944 id=944 data-nosnippet>944</a>    provider: String,
-<a href=#945 id=945 data-nosnippet>945</a>}
-<a href=#946 id=946 data-nosnippet>946</a>
-<a href=#947 id=947 data-nosnippet>947</a><span class="kw">impl </span>ActiveProviderMetrics {
-<a href=#948 id=948 data-nosnippet>948</a>    <span class="kw">pub fn </span>new(provider: String) -&gt; <span class="self">Self </span>{
-<a href=#949 id=949 data-nosnippet>949</a>        quilkin_xds::metrics::active_control_planes(<span class="kw-2">&amp;</span>provider).inc();
-<a href=#950 id=950 data-nosnippet>950</a>        active_providers(<span class="kw-2">&amp;</span>provider).inc();
-<a href=#951 id=951 data-nosnippet>951</a>
-<a href=#952 id=952 data-nosnippet>952</a>        <span class="self">Self </span>{ provider }
-<a href=#953 id=953 data-nosnippet>953</a>    }
-<a href=#954 id=954 data-nosnippet>954</a>}
-<a href=#955 id=955 data-nosnippet>955</a>
-<a href=#956 id=956 data-nosnippet>956</a><span class="kw">impl </span>Drop <span class="kw">for </span>ActiveProviderMetrics {
-<a href=#957 id=957 data-nosnippet>957</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-<a href=#958 id=958 data-nosnippet>958</a>        quilkin_xds::metrics::active_control_planes(<span class="kw-2">&amp;</span><span class="self">self</span>.provider).dec();
-<a href=#959 id=959 data-nosnippet>959</a>        active_providers(<span class="kw-2">&amp;</span><span class="self">self</span>.provider).dec();
-<a href=#960 id=960 data-nosnippet>960</a>    }
-<a href=#961 id=961 data-nosnippet>961</a>}
-<a href=#962 id=962 data-nosnippet>962</a>
-<a href=#963 id=963 data-nosnippet>963</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>active_providers(provider: <span class="kw-2">&amp;</span>str) -&gt; IntGauge {
-<a href=#964 id=964 data-nosnippet>964</a>    <span class="kw">const </span>PROVIDER_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"provider"</span>;
-<a href=#965 id=965 data-nosnippet>965</a>
-<a href=#966 id=966 data-nosnippet>966</a>    <span class="kw">static </span>ACTIVE_PROVIDERS: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
-<a href=#967 id=967 data-nosnippet>967</a>        <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
-<a href=#968 id=968 data-nosnippet>968</a>            <span class="macro">prometheus::opts!</span> {
-<a href=#969 id=969 data-nosnippet>969</a>                <span class="string">"active_providers"</span>,
-<a href=#970 id=970 data-nosnippet>970</a>                <span class="string">"Total number of active config providers"</span>,
-<a href=#971 id=971 data-nosnippet>971</a>            },
-<a href=#972 id=972 data-nosnippet>972</a>            <span class="kw-2">&amp;</span>[PROVIDER_LABEL],
-<a href=#973 id=973 data-nosnippet>973</a>            registry(),
-<a href=#974 id=974 data-nosnippet>974</a>        }
-<a href=#975 id=975 data-nosnippet>975</a>        .unwrap()
-<a href=#976 id=976 data-nosnippet>976</a>    });
-<a href=#977 id=977 data-nosnippet>977</a>
-<a href=#978 id=978 data-nosnippet>978</a>    ACTIVE_PROVIDERS.with_label_values(<span class="kw-2">&amp;</span>[provider])
-<a href=#979 id=979 data-nosnippet>979</a>}
-<a href=#980 id=980 data-nosnippet>980</a>
-<a href=#981 id=981 data-nosnippet>981</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>corrosion {
-<a href=#982 id=982 data-nosnippet>982</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#983 id=983 data-nosnippet>983</a>
-<a href=#984 id=984 data-nosnippet>984</a>    <span class="attr">#[inline]
-<a href=#985 id=985 data-nosnippet>985</a>    </span><span class="kw">pub fn </span>subscription_events(stream: <span class="kw-2">&amp;</span>str) -&gt; IntGauge {
-<a href=#986 id=986 data-nosnippet>986</a>        <span class="kw">const </span>STREAM_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"stream"</span>;
-<a href=#987 id=987 data-nosnippet>987</a>
-<a href=#988 id=988 data-nosnippet>988</a>        <span class="kw">static </span>SUB_EVENTS: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
-<a href=#989 id=989 data-nosnippet>989</a>            <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
-<a href=#990 id=990 data-nosnippet>990</a>                <span class="macro">prometheus::opts!</span> {
-<a href=#991 id=991 data-nosnippet>991</a>                    <span class="string">"corrosion_subscription_events"</span>,
-<a href=#992 id=992 data-nosnippet>992</a>                    <span class="string">"Total number of subscription events"</span>,
-<a href=#993 id=993 data-nosnippet>993</a>                },
-<a href=#994 id=994 data-nosnippet>994</a>                <span class="kw-2">&amp;</span>[STREAM_LABEL],
-<a href=#995 id=995 data-nosnippet>995</a>                registry(),
-<a href=#996 id=996 data-nosnippet>996</a>            }
-<a href=#997 id=997 data-nosnippet>997</a>            .unwrap()
-<a href=#998 id=998 data-nosnippet>998</a>        });
-<a href=#999 id=999 data-nosnippet>999</a>
-<a href=#1000 id=1000 data-nosnippet>1000</a>        SUB_EVENTS.with_label_values(<span class="kw-2">&amp;</span>[stream])
-<a href=#1001 id=1001 data-nosnippet>1001</a>    }
-<a href=#1002 id=1002 data-nosnippet>1002</a>
-<a href=#1003 id=1003 data-nosnippet>1003</a>    <span class="attr">#[inline]
-<a href=#1004 id=1004 data-nosnippet>1004</a>    </span><span class="kw">pub fn </span>subscription_failures(stream: <span class="kw-2">&amp;</span>str) -&gt; IntGauge {
-<a href=#1005 id=1005 data-nosnippet>1005</a>        <span class="kw">const </span>STREAM_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"stream"</span>;
-<a href=#1006 id=1006 data-nosnippet>1006</a>
-<a href=#1007 id=1007 data-nosnippet>1007</a>        <span class="kw">static </span>SUB_EVENTS: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
-<a href=#1008 id=1008 data-nosnippet>1008</a>            <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
-<a href=#1009 id=1009 data-nosnippet>1009</a>                <span class="macro">prometheus::opts!</span> {
-<a href=#1010 id=1010 data-nosnippet>1010</a>                    <span class="string">"corrosion_subscription_failures"</span>,
-<a href=#1011 id=1011 data-nosnippet>1011</a>                    <span class="string">"Number of errors that occurred processing events"</span>,
-<a href=#1012 id=1012 data-nosnippet>1012</a>                },
-<a href=#1013 id=1013 data-nosnippet>1013</a>                <span class="kw-2">&amp;</span>[STREAM_LABEL],
-<a href=#1014 id=1014 data-nosnippet>1014</a>                registry(),
-<a href=#1015 id=1015 data-nosnippet>1015</a>            }
-<a href=#1016 id=1016 data-nosnippet>1016</a>            .unwrap()
-<a href=#1017 id=1017 data-nosnippet>1017</a>        });
-<a href=#1018 id=1018 data-nosnippet>1018</a>
-<a href=#1019 id=1019 data-nosnippet>1019</a>        SUB_EVENTS.with_label_values(<span class="kw-2">&amp;</span>[stream])
-<a href=#1020 id=1020 data-nosnippet>1020</a>    }
-<a href=#1021 id=1021 data-nosnippet>1021</a>}
-<a href=#1022 id=1022 data-nosnippet>1022</a>
-<a href=#1023 id=1023 data-nosnippet>1023</a><span class="doccomment">/// Create a generic metrics options.
-<a href=#1024 id=1024 data-nosnippet>1024</a>/// Use `filter_opts` instead if the intended target is a filter.
-<a href=#1025 id=1025 data-nosnippet>1025</a></span><span class="kw">pub fn </span>opts(name: <span class="kw-2">&amp;</span>str, subsystem: <span class="kw-2">&amp;</span>str, description: <span class="kw-2">&amp;</span>str) -&gt; Opts {
-<a href=#1026 id=1026 data-nosnippet>1026</a>    Opts::new(name, description)
-<a href=#1027 id=1027 data-nosnippet>1027</a>        .subsystem(subsystem)
-<a href=#1028 id=1028 data-nosnippet>1028</a>        .namespace(<span class="string">"quilkin"</span>)
-<a href=#1029 id=1029 data-nosnippet>1029</a>}
-<a href=#1030 id=1030 data-nosnippet>1030</a>
-<a href=#1031 id=1031 data-nosnippet>1031</a><span class="kw">pub fn </span>histogram_opts(
-<a href=#1032 id=1032 data-nosnippet>1032</a>    name: <span class="kw-2">&amp;</span>str,
-<a href=#1033 id=1033 data-nosnippet>1033</a>    subsystem: <span class="kw-2">&amp;</span>str,
-<a href=#1034 id=1034 data-nosnippet>1034</a>    description: <span class="kw-2">&amp;</span>str,
-<a href=#1035 id=1035 data-nosnippet>1035</a>    buckets: <span class="kw">impl </span>Into&lt;<span class="prelude-ty">Option</span>&lt;Vec&lt;f64&gt;&gt;&gt;,
-<a href=#1036 id=1036 data-nosnippet>1036</a>) -&gt; HistogramOpts {
-<a href=#1037 id=1037 data-nosnippet>1037</a>    HistogramOpts {
-<a href=#1038 id=1038 data-nosnippet>1038</a>        common_opts: opts(name, subsystem, description),
-<a href=#1039 id=1039 data-nosnippet>1039</a>        buckets: buckets
-<a href=#1040 id=1040 data-nosnippet>1040</a>            .into()
-<a href=#1041 id=1041 data-nosnippet>1041</a>            .unwrap_or_else(|| Vec::from(DEFAULT_BUCKETS <span class="kw">as </span><span class="kw-2">&amp;</span><span class="lifetime">'static </span>[f64])),
-<a href=#1042 id=1042 data-nosnippet>1042</a>    }
-<a href=#1043 id=1043 data-nosnippet>1043</a>}
-<a href=#1044 id=1044 data-nosnippet>1044</a>
-<a href=#1045 id=1045 data-nosnippet>1045</a><span class="doccomment">/// Registers the current metric collector with the provided registry.
-<a href=#1046 id=1046 data-nosnippet>1046</a>///
-<a href=#1047 id=1047 data-nosnippet>1047</a>/// # Panics
-<a href=#1048 id=1048 data-nosnippet>1048</a>/// A collector with the same name has already been registered.
-<a href=#1049 id=1049 data-nosnippet>1049</a></span><span class="kw">pub fn </span>register&lt;T: Collector + Sized + Clone + <span class="lifetime">'static</span>&gt;(collector: T) -&gt; T {
-<a href=#1050 id=1050 data-nosnippet>1050</a>    <span class="kw">let </span>return_value = collector.clone();
+<a href=#751 id=751 data-nosnippet>751</a>    BYTES_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), destination_locality])
+<a href=#752 id=752 data-nosnippet>752</a>}
+<a href=#753 id=753 data-nosnippet>753</a>
+<a href=#754 id=754 data-nosnippet>754</a><span class="attr">#[must_use]
+<a href=#755 id=755 data-nosnippet>755</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>errors_total(direction: Direction, reason: <span class="kw-2">&amp;</span>str, _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;) -&gt; IntCounter {
+<a href=#756 id=756 data-nosnippet>756</a>    <span class="kw">static </span>ERRORS_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
+<a href=#757 id=757 data-nosnippet>757</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
+<a href=#758 id=758 data-nosnippet>758</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#759 id=759 data-nosnippet>759</a>                <span class="string">"quilkin_errors_total"</span>,
+<a href=#760 id=760 data-nosnippet>760</a>                <span class="string">"total number of errors sending packets"</span>,
+<a href=#761 id=761 data-nosnippet>761</a>            },
+<a href=#762 id=762 data-nosnippet>762</a>            <span class="kw-2">&amp;</span>[Direction::LABEL, REASON_LABEL],
+<a href=#763 id=763 data-nosnippet>763</a>            registry(),
+<a href=#764 id=764 data-nosnippet>764</a>        }
+<a href=#765 id=765 data-nosnippet>765</a>        .unwrap()
+<a href=#766 id=766 data-nosnippet>766</a>    });
+<a href=#767 id=767 data-nosnippet>767</a>
+<a href=#768 id=768 data-nosnippet>768</a>    ERRORS_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), reason])
+<a href=#769 id=769 data-nosnippet>769</a>}
+<a href=#770 id=770 data-nosnippet>770</a>
+<a href=#771 id=771 data-nosnippet>771</a><span class="kw">static </span>PACKET_JITTER: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
+<a href=#772 id=772 data-nosnippet>772</a>    <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
+<a href=#773 id=773 data-nosnippet>773</a>        <span class="macro">prometheus::opts!</span> {
+<a href=#774 id=774 data-nosnippet>774</a>            <span class="string">"quilkin_packet_jitter"</span>,
+<a href=#775 id=775 data-nosnippet>775</a>            <span class="string">"The time between new packets"</span>,
+<a href=#776 id=776 data-nosnippet>776</a>        },
+<a href=#777 id=777 data-nosnippet>777</a>        <span class="kw-2">&amp;</span>[Direction::LABEL],
+<a href=#778 id=778 data-nosnippet>778</a>        registry(),
+<a href=#779 id=779 data-nosnippet>779</a>    }
+<a href=#780 id=780 data-nosnippet>780</a>    .unwrap()
+<a href=#781 id=781 data-nosnippet>781</a>});
+<a href=#782 id=782 data-nosnippet>782</a>
+<a href=#783 id=783 data-nosnippet>783</a><span class="doccomment">/// Counts observations per direction so [`remove_packet_jitter`] can tell a
+<a href=#784 id=784 data-nosnippet>784</a>/// current value from one a since-idle proxy is still publishing.
+<a href=#785 id=785 data-nosnippet>785</a></span><span class="kw">static </span>PACKET_JITTER_OBSERVATIONS: [std::sync::atomic::AtomicU64; <span class="number">2</span>] =
+<a href=#786 id=786 data-nosnippet>786</a>    [<span class="kw">const </span>{ std::sync::atomic::AtomicU64::new(<span class="number">0</span>) }; <span class="number">2</span>];
+<a href=#787 id=787 data-nosnippet>787</a>
+<a href=#788 id=788 data-nosnippet>788</a><span class="doccomment">/// Sets `quilkin_packet_jitter` to the interarrival time of the packet just
+<a href=#789 id=789 data-nosnippet>789</a>/// processed, in nanoseconds.
+<a href=#790 id=790 data-nosnippet>790</a>///
+<a href=#791 id=791 data-nosnippet>791</a>/// This is the interarrival time seen by an I/O loop, which covers every session
+<a href=#792 id=792 data-nosnippet>792</a>/// it serves; for the per-session distribution see
+<a href=#793 id=793 data-nosnippet>793</a>/// `quilkin_session_jitter_seconds`.
+<a href=#794 id=794 data-nosnippet>794</a></span><span class="attr">#[inline]
+<a href=#795 id=795 data-nosnippet>795</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>set_packet_jitter(direction: Direction, _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;, nanos: i64) {
+<a href=#796 id=796 data-nosnippet>796</a>    PACKET_JITTER_OBSERVATIONS[direction.index()]
+<a href=#797 id=797 data-nosnippet>797</a>        .fetch_add(<span class="number">1</span>, std::sync::atomic::Ordering::Relaxed);
+<a href=#798 id=798 data-nosnippet>798</a>    PACKET_JITTER
+<a href=#799 id=799 data-nosnippet>799</a>        .with_label_values(<span class="kw-2">&amp;</span>[direction.label()])
+<a href=#800 id=800 data-nosnippet>800</a>        .set(nanos);
+<a href=#801 id=801 data-nosnippet>801</a>}
+<a href=#802 id=802 data-nosnippet>802</a>
+<a href=#803 id=803 data-nosnippet>803</a><span class="doccomment">/// Number of times `quilkin_packet_jitter` has been set for `direction`.
+<a href=#804 id=804 data-nosnippet>804</a></span><span class="attr">#[inline]
+<a href=#805 id=805 data-nosnippet>805</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packet_jitter_observations(direction: Direction) -&gt; u64 {
+<a href=#806 id=806 data-nosnippet>806</a>    PACKET_JITTER_OBSERVATIONS[direction.index()].load(std::sync::atomic::Ordering::Relaxed)
+<a href=#807 id=807 data-nosnippet>807</a>}
+<a href=#808 id=808 data-nosnippet>808</a>
+<a href=#809 id=809 data-nosnippet>809</a><span class="doccomment">/// Stops exporting `quilkin_packet_jitter` for `direction`.
+<a href=#810 id=810 data-nosnippet>810</a>///
+<a href=#811 id=811 data-nosnippet>811</a>/// The metric is a gauge set per packet, so a proxy that stops receiving would
+<a href=#812 id=812 data-nosnippet>812</a>/// otherwise keep publishing its last value indefinitely.
+<a href=#813 id=813 data-nosnippet>813</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove_packet_jitter(direction: Direction) {
+<a href=#814 id=814 data-nosnippet>814</a>    drop(PACKET_JITTER.remove_label_values(<span class="kw-2">&amp;</span>[direction.label()]));
+<a href=#815 id=815 data-nosnippet>815</a>}
+<a href=#816 id=816 data-nosnippet>816</a>
+<a href=#817 id=817 data-nosnippet>817</a><span class="doccomment">/// Per-session interarrival jitter, in seconds.
+<a href=#818 id=818 data-nosnippet>818</a>///
+<a href=#819 id=819 data-nosnippet>819</a>/// A histogram rather than a mean, because a cluster mean of 0.5 ms is
+<a href=#820 id=820 data-nosnippet>820</a>/// compatible with a few percent of players at 80 ms, and those are the players
+<a href=#821 id=821 data-nosnippet>821</a>/// worth knowing about.
+<a href=#822 id=822 data-nosnippet>822</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>session_jitter_seconds() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>Histogram {
+<a href=#823 id=823 data-nosnippet>823</a>    <span class="doccomment">/// ~2x spacing across the range player connections actually occupy, 0.1 ms
+<a href=#824 id=824 data-nosnippet>824</a>    /// to 0.5 s.
+<a href=#825 id=825 data-nosnippet>825</a>    </span><span class="kw">const </span>BUCKETS: <span class="kw-2">&amp;</span>[f64] = <span class="kw-2">&amp;</span>[
+<a href=#826 id=826 data-nosnippet>826</a>        <span class="number">0.0001</span>, <span class="number">0.00025</span>, <span class="number">0.0005</span>, <span class="number">0.001</span>, <span class="number">0.002</span>, <span class="number">0.004</span>, <span class="number">0.008</span>, <span class="number">0.015</span>, <span class="number">0.03</span>, <span class="number">0.06</span>, <span class="number">0.12</span>, <span class="number">0.25</span>, <span class="number">0.5</span>,
+<a href=#827 id=827 data-nosnippet>827</a>    ];
+<a href=#828 id=828 data-nosnippet>828</a>
+<a href=#829 id=829 data-nosnippet>829</a>    <span class="kw">static </span>SESSION_JITTER: Lazy&lt;Histogram&gt; = Lazy::new(|| {
+<a href=#830 id=830 data-nosnippet>830</a>        <span class="macro">prometheus::register_histogram_with_registry!</span> {
+<a href=#831 id=831 data-nosnippet>831</a>            <span class="macro">prometheus::histogram_opts!</span> {
+<a href=#832 id=832 data-nosnippet>832</a>                <span class="string">"quilkin_session_jitter_seconds"</span>,
+<a href=#833 id=833 data-nosnippet>833</a>                <span class="string">"Distribution of per-session interarrival jitter of downstream packets"</span>,
+<a href=#834 id=834 data-nosnippet>834</a>                BUCKETS.to_vec()
+<a href=#835 id=835 data-nosnippet>835</a>            },
+<a href=#836 id=836 data-nosnippet>836</a>            registry(),
+<a href=#837 id=837 data-nosnippet>837</a>        }
+<a href=#838 id=838 data-nosnippet>838</a>        .unwrap()
+<a href=#839 id=839 data-nosnippet>839</a>    });
+<a href=#840 id=840 data-nosnippet>840</a>
+<a href=#841 id=841 data-nosnippet>841</a>    <span class="kw-2">&amp;</span>SESSION_JITTER
+<a href=#842 id=842 data-nosnippet>842</a>}
+<a href=#843 id=843 data-nosnippet>843</a>
+<a href=#844 id=844 data-nosnippet>844</a><span class="kw">static </span>SESSIONS_ACTIVE_BY_ASN: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
+<a href=#845 id=845 data-nosnippet>845</a>    <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
+<a href=#846 id=846 data-nosnippet>846</a>        <span class="macro">prometheus::opts!</span> {
+<a href=#847 id=847 data-nosnippet>847</a>            <span class="string">"quilkin_sessions_active_by_asn"</span>,
+<a href=#848 id=848 data-nosnippet>848</a>            <span class="string">"Active sessions by client ASN, for the largest ASNs at this proxy. Sessions belonging to any other ASN are counted under `asn=\"other\"`, so the breakdown sums to the session total."</span>,
+<a href=#849 id=849 data-nosnippet>849</a>        },
+<a href=#850 id=850 data-nosnippet>850</a>        <span class="kw-2">&amp;</span>[ASN_LABEL],
+<a href=#851 id=851 data-nosnippet>851</a>        registry(),
+<a href=#852 id=852 data-nosnippet>852</a>    }
+<a href=#853 id=853 data-nosnippet>853</a>    .unwrap()
+<a href=#854 id=854 data-nosnippet>854</a>});
+<a href=#855 id=855 data-nosnippet>855</a>
+<a href=#856 id=856 data-nosnippet>856</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>sessions_active_by_asn(asn: <span class="kw-2">&amp;</span>str) -&gt; IntGauge {
+<a href=#857 id=857 data-nosnippet>857</a>    SESSIONS_ACTIVE_BY_ASN.with_label_values(<span class="kw-2">&amp;</span>[asn])
+<a href=#858 id=858 data-nosnippet>858</a>}
+<a href=#859 id=859 data-nosnippet>859</a>
+<a href=#860 id=860 data-nosnippet>860</a><span class="doccomment">/// Stops exporting `quilkin_sessions_active_by_asn` for `asn`, used when it
+<a href=#861 id=861 data-nosnippet>861</a>/// falls out of the exported set.
+<a href=#862 id=862 data-nosnippet>862</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove_sessions_active_by_asn(asn: <span class="kw-2">&amp;</span>str) {
+<a href=#863 id=863 data-nosnippet>863</a>    drop(SESSIONS_ACTIVE_BY_ASN.remove_label_values(<span class="kw-2">&amp;</span>[asn]));
+<a href=#864 id=864 data-nosnippet>864</a>}
+<a href=#865 id=865 data-nosnippet>865</a>
+<a href=#866 id=866 data-nosnippet>866</a><span class="kw">static </span>CLIENT_SESSIONS_DEGRADED: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
+<a href=#867 id=867 data-nosnippet>867</a>    <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
+<a href=#868 id=868 data-nosnippet>868</a>        <span class="macro">prometheus::opts!</span> {
+<a href=#869 id=869 data-nosnippet>869</a>            <span class="string">"quilkin_client_sessions_degraded"</span>,
+<a href=#870 id=870 data-nosnippet>870</a>            <span class="string">"Sessions breaching a connection quality threshold, by client ASN. Only ASNs currently breaching are exported, so a healthy proxy publishes nothing here. Divide by `quilkin_sessions_active_by_asn` for the affected share; do it across the fleet, since one proxy sees too few sessions of any one ASN to judge it."</span>,
+<a href=#871 id=871 data-nosnippet>871</a>        },
+<a href=#872 id=872 data-nosnippet>872</a>        <span class="kw-2">&amp;</span>[ASN_LABEL, REASON_LABEL],
+<a href=#873 id=873 data-nosnippet>873</a>        registry(),
+<a href=#874 id=874 data-nosnippet>874</a>    }
+<a href=#875 id=875 data-nosnippet>875</a>    .unwrap()
+<a href=#876 id=876 data-nosnippet>876</a>});
+<a href=#877 id=877 data-nosnippet>877</a>
+<a href=#878 id=878 data-nosnippet>878</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>client_sessions_degraded(asn: <span class="kw-2">&amp;</span>str, reason: <span class="kw-2">&amp;</span>str) -&gt; IntGauge {
+<a href=#879 id=879 data-nosnippet>879</a>    CLIENT_SESSIONS_DEGRADED.with_label_values(<span class="kw-2">&amp;</span>[asn, reason])
+<a href=#880 id=880 data-nosnippet>880</a>}
+<a href=#881 id=881 data-nosnippet>881</a>
+<a href=#882 id=882 data-nosnippet>882</a><span class="doccomment">/// Stops exporting `quilkin_client_sessions_degraded` for `asn`, used when it
+<a href=#883 id=883 data-nosnippet>883</a>/// recovers.
+<a href=#884 id=884 data-nosnippet>884</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove_client_sessions_degraded(asn: <span class="kw-2">&amp;</span>str, reason: <span class="kw-2">&amp;</span>str) {
+<a href=#885 id=885 data-nosnippet>885</a>    drop(CLIENT_SESSIONS_DEGRADED.remove_label_values(<span class="kw-2">&amp;</span>[asn, reason]));
+<a href=#886 id=886 data-nosnippet>886</a>}
+<a href=#887 id=887 data-nosnippet>887</a>
+<a href=#888 id=888 data-nosnippet>888</a><span class="doccomment">/// Counts degraded session observations, so a rate can be alerted on without
+<a href=#889 id=889 data-nosnippet>889</a>/// depending on a threshold the proxy would have to pick.
+<a href=#890 id=890 data-nosnippet>890</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>client_sessions_degraded_total(reason: <span class="kw-2">&amp;</span>str) -&gt; IntCounter {
+<a href=#891 id=891 data-nosnippet>891</a>    <span class="kw">static </span>CLIENT_SESSIONS_DEGRADED: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
+<a href=#892 id=892 data-nosnippet>892</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
+<a href=#893 id=893 data-nosnippet>893</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#894 id=894 data-nosnippet>894</a>                <span class="string">"quilkin_client_sessions_degraded_total"</span>,
+<a href=#895 id=895 data-nosnippet>895</a>                <span class="string">"Total number of times a session was observed breaching a connection quality threshold"</span>,
+<a href=#896 id=896 data-nosnippet>896</a>            },
+<a href=#897 id=897 data-nosnippet>897</a>            <span class="kw-2">&amp;</span>[REASON_LABEL],
+<a href=#898 id=898 data-nosnippet>898</a>            registry(),
+<a href=#899 id=899 data-nosnippet>899</a>        }
+<a href=#900 id=900 data-nosnippet>900</a>        .unwrap()
+<a href=#901 id=901 data-nosnippet>901</a>    });
+<a href=#902 id=902 data-nosnippet>902</a>
+<a href=#903 id=903 data-nosnippet>903</a>    CLIENT_SESSIONS_DEGRADED.with_label_values(<span class="kw-2">&amp;</span>[reason])
+<a href=#904 id=904 data-nosnippet>904</a>}
+<a href=#905 id=905 data-nosnippet>905</a>
+<a href=#906 id=906 data-nosnippet>906</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packets_total(
+<a href=#907 id=907 data-nosnippet>907</a>    direction: Direction,
+<a href=#908 id=908 data-nosnippet>908</a>    _asn: <span class="kw-2">&amp;</span>AsnInfo&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#909 id=909 data-nosnippet>909</a>    destination_locality: <span class="kw-2">&amp;</span>str,
+<a href=#910 id=910 data-nosnippet>910</a>) -&gt; IntCounter {
+<a href=#911 id=911 data-nosnippet>911</a>    <span class="kw">static </span>PACKETS_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
+<a href=#912 id=912 data-nosnippet>912</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
+<a href=#913 id=913 data-nosnippet>913</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#914 id=914 data-nosnippet>914</a>                <span class="string">"quilkin_packets_total"</span>,
+<a href=#915 id=915 data-nosnippet>915</a>                <span class="string">"Total number of packets"</span>,
+<a href=#916 id=916 data-nosnippet>916</a>            },
+<a href=#917 id=917 data-nosnippet>917</a>            <span class="kw-2">&amp;</span>[Direction::LABEL, DESTINATION_LABEL],
+<a href=#918 id=918 data-nosnippet>918</a>            registry(),
+<a href=#919 id=919 data-nosnippet>919</a>        }
+<a href=#920 id=920 data-nosnippet>920</a>        .unwrap()
+<a href=#921 id=921 data-nosnippet>921</a>    });
+<a href=#922 id=922 data-nosnippet>922</a>
+<a href=#923 id=923 data-nosnippet>923</a>    PACKETS_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[direction.label(), destination_locality])
+<a href=#924 id=924 data-nosnippet>924</a>}
+<a href=#925 id=925 data-nosnippet>925</a>
+<a href=#926 id=926 data-nosnippet>926</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packets_dropped_total(
+<a href=#927 id=927 data-nosnippet>927</a>    direction: Direction,
+<a href=#928 id=928 data-nosnippet>928</a>    reason: DropReason,
+<a href=#929 id=929 data-nosnippet>929</a>    filter: <span class="kw-2">&amp;</span>str,
+<a href=#930 id=930 data-nosnippet>930</a>    destination_locality: <span class="kw-2">&amp;</span>str,
+<a href=#931 id=931 data-nosnippet>931</a>) -&gt; IntCounter {
+<a href=#932 id=932 data-nosnippet>932</a>    <span class="kw">static </span>PACKETS_DROPPED: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
+<a href=#933 id=933 data-nosnippet>933</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
+<a href=#934 id=934 data-nosnippet>934</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#935 id=935 data-nosnippet>935</a>                <span class="string">"quilkin_packets_dropped_total"</span>,
+<a href=#936 id=936 data-nosnippet>936</a>                <span class="string">"Total number of dropped packets"</span>,
+<a href=#937 id=937 data-nosnippet>937</a>            },
+<a href=#938 id=938 data-nosnippet>938</a>            <span class="kw-2">&amp;</span>[
+<a href=#939 id=939 data-nosnippet>939</a>                Direction::LABEL,
+<a href=#940 id=940 data-nosnippet>940</a>                REASON_LABEL,
+<a href=#941 id=941 data-nosnippet>941</a>                FILTER_LABEL,
+<a href=#942 id=942 data-nosnippet>942</a>                DESTINATION_LABEL,
+<a href=#943 id=943 data-nosnippet>943</a>            ],
+<a href=#944 id=944 data-nosnippet>944</a>            registry(),
+<a href=#945 id=945 data-nosnippet>945</a>        }
+<a href=#946 id=946 data-nosnippet>946</a>        .unwrap()
+<a href=#947 id=947 data-nosnippet>947</a>    });
+<a href=#948 id=948 data-nosnippet>948</a>
+<a href=#949 id=949 data-nosnippet>949</a>    PACKETS_DROPPED.with_label_values(<span class="kw-2">&amp;</span>[
+<a href=#950 id=950 data-nosnippet>950</a>        direction.label(),
+<a href=#951 id=951 data-nosnippet>951</a>        reason.label(),
+<a href=#952 id=952 data-nosnippet>952</a>        filter,
+<a href=#953 id=953 data-nosnippet>953</a>        destination_locality,
+<a href=#954 id=954 data-nosnippet>954</a>    ])
+<a href=#955 id=955 data-nosnippet>955</a>}
+<a href=#956 id=956 data-nosnippet>956</a>
+<a href=#957 id=957 data-nosnippet>957</a><span class="doccomment">/// [`packets_dropped_total`] for drops with no filter or destination to
+<a href=#958 id=958 data-nosnippet>958</a>/// attribute, ie packets dropped before they were routed.
+<a href=#959 id=959 data-nosnippet>959</a></span><span class="attr">#[inline]
+<a href=#960 id=960 data-nosnippet>960</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>packets_dropped(direction: Direction, reason: DropReason) -&gt; IntCounter {
+<a href=#961 id=961 data-nosnippet>961</a>    packets_dropped_total(direction, reason, <span class="string">""</span>, <span class="string">""</span>)
+<a href=#962 id=962 data-nosnippet>962</a>}
+<a href=#963 id=963 data-nosnippet>963</a>
+<a href=#964 id=964 data-nosnippet>964</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>provider_task_failures_total(provider_task: <span class="kw-2">&amp;</span>str) -&gt; IntCounter {
+<a href=#965 id=965 data-nosnippet>965</a>    <span class="kw">static </span>PROVIDER_TASK_FAILURES_TOTAL: Lazy&lt;IntCounterVec&gt; = Lazy::new(|| {
+<a href=#966 id=966 data-nosnippet>966</a>        <span class="macro">prometheus::register_int_counter_vec_with_registry!</span> {
+<a href=#967 id=967 data-nosnippet>967</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#968 id=968 data-nosnippet>968</a>                <span class="string">"quilkin_provider_task_failures_total"</span>,
+<a href=#969 id=969 data-nosnippet>969</a>                <span class="string">"The number of times a provider task has failed and had to be restarted"</span>,
+<a href=#970 id=970 data-nosnippet>970</a>            },
+<a href=#971 id=971 data-nosnippet>971</a>            <span class="kw-2">&amp;</span>[<span class="string">"task"</span>],
+<a href=#972 id=972 data-nosnippet>972</a>            registry(),
+<a href=#973 id=973 data-nosnippet>973</a>        }
+<a href=#974 id=974 data-nosnippet>974</a>        .unwrap()
+<a href=#975 id=975 data-nosnippet>975</a>    });
+<a href=#976 id=976 data-nosnippet>976</a>
+<a href=#977 id=977 data-nosnippet>977</a>    PROVIDER_TASK_FAILURES_TOTAL.with_label_values(<span class="kw-2">&amp;</span>[provider_task])
+<a href=#978 id=978 data-nosnippet>978</a>}
+<a href=#979 id=979 data-nosnippet>979</a>
+<a href=#980 id=980 data-nosnippet>980</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>allocated_xdp_packets() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>IntGauge {
+<a href=#981 id=981 data-nosnippet>981</a>    <span class="kw">static </span>ALLOCATED: Lazy&lt;IntGauge&gt; = Lazy::new(|| {
+<a href=#982 id=982 data-nosnippet>982</a>        <span class="macro">prometheus::register_int_gauge_with_registry!</span> {
+<a href=#983 id=983 data-nosnippet>983</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#984 id=984 data-nosnippet>984</a>                <span class="string">"quilkin_allocated_xdp_packets"</span>,
+<a href=#985 id=985 data-nosnippet>985</a>                <span class="string">"The number of packets that are allocated from a UMEM"</span>,
+<a href=#986 id=986 data-nosnippet>986</a>            },
+<a href=#987 id=987 data-nosnippet>987</a>            registry(),
+<a href=#988 id=988 data-nosnippet>988</a>        }
+<a href=#989 id=989 data-nosnippet>989</a>        .unwrap()
+<a href=#990 id=990 data-nosnippet>990</a>    });
+<a href=#991 id=991 data-nosnippet>991</a>
+<a href=#992 id=992 data-nosnippet>992</a>    <span class="kw-2">&amp;</span>ALLOCATED
+<a href=#993 id=993 data-nosnippet>993</a>}
+<a href=#994 id=994 data-nosnippet>994</a>
+<a href=#995 id=995 data-nosnippet>995</a><span class="kw">pub struct </span>ActiveProviderMetrics {
+<a href=#996 id=996 data-nosnippet>996</a>    provider: String,
+<a href=#997 id=997 data-nosnippet>997</a>}
+<a href=#998 id=998 data-nosnippet>998</a>
+<a href=#999 id=999 data-nosnippet>999</a><span class="kw">impl </span>ActiveProviderMetrics {
+<a href=#1000 id=1000 data-nosnippet>1000</a>    <span class="kw">pub fn </span>new(provider: String) -&gt; <span class="self">Self </span>{
+<a href=#1001 id=1001 data-nosnippet>1001</a>        quilkin_xds::metrics::active_control_planes(<span class="kw-2">&amp;</span>provider).inc();
+<a href=#1002 id=1002 data-nosnippet>1002</a>        active_providers(<span class="kw-2">&amp;</span>provider).inc();
+<a href=#1003 id=1003 data-nosnippet>1003</a>
+<a href=#1004 id=1004 data-nosnippet>1004</a>        <span class="self">Self </span>{ provider }
+<a href=#1005 id=1005 data-nosnippet>1005</a>    }
+<a href=#1006 id=1006 data-nosnippet>1006</a>}
+<a href=#1007 id=1007 data-nosnippet>1007</a>
+<a href=#1008 id=1008 data-nosnippet>1008</a><span class="kw">impl </span>Drop <span class="kw">for </span>ActiveProviderMetrics {
+<a href=#1009 id=1009 data-nosnippet>1009</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#1010 id=1010 data-nosnippet>1010</a>        quilkin_xds::metrics::active_control_planes(<span class="kw-2">&amp;</span><span class="self">self</span>.provider).dec();
+<a href=#1011 id=1011 data-nosnippet>1011</a>        active_providers(<span class="kw-2">&amp;</span><span class="self">self</span>.provider).dec();
+<a href=#1012 id=1012 data-nosnippet>1012</a>    }
+<a href=#1013 id=1013 data-nosnippet>1013</a>}
+<a href=#1014 id=1014 data-nosnippet>1014</a>
+<a href=#1015 id=1015 data-nosnippet>1015</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>active_providers(provider: <span class="kw-2">&amp;</span>str) -&gt; IntGauge {
+<a href=#1016 id=1016 data-nosnippet>1016</a>    <span class="kw">const </span>PROVIDER_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"provider"</span>;
+<a href=#1017 id=1017 data-nosnippet>1017</a>
+<a href=#1018 id=1018 data-nosnippet>1018</a>    <span class="kw">static </span>ACTIVE_PROVIDERS: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
+<a href=#1019 id=1019 data-nosnippet>1019</a>        <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
+<a href=#1020 id=1020 data-nosnippet>1020</a>            <span class="macro">prometheus::opts!</span> {
+<a href=#1021 id=1021 data-nosnippet>1021</a>                <span class="string">"active_providers"</span>,
+<a href=#1022 id=1022 data-nosnippet>1022</a>                <span class="string">"Total number of active config providers"</span>,
+<a href=#1023 id=1023 data-nosnippet>1023</a>            },
+<a href=#1024 id=1024 data-nosnippet>1024</a>            <span class="kw-2">&amp;</span>[PROVIDER_LABEL],
+<a href=#1025 id=1025 data-nosnippet>1025</a>            registry(),
+<a href=#1026 id=1026 data-nosnippet>1026</a>        }
+<a href=#1027 id=1027 data-nosnippet>1027</a>        .unwrap()
+<a href=#1028 id=1028 data-nosnippet>1028</a>    });
+<a href=#1029 id=1029 data-nosnippet>1029</a>
+<a href=#1030 id=1030 data-nosnippet>1030</a>    ACTIVE_PROVIDERS.with_label_values(<span class="kw-2">&amp;</span>[provider])
+<a href=#1031 id=1031 data-nosnippet>1031</a>}
+<a href=#1032 id=1032 data-nosnippet>1032</a>
+<a href=#1033 id=1033 data-nosnippet>1033</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>corrosion {
+<a href=#1034 id=1034 data-nosnippet>1034</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#1035 id=1035 data-nosnippet>1035</a>
+<a href=#1036 id=1036 data-nosnippet>1036</a>    <span class="attr">#[inline]
+<a href=#1037 id=1037 data-nosnippet>1037</a>    </span><span class="kw">pub fn </span>subscription_events(stream: <span class="kw-2">&amp;</span>str) -&gt; IntGauge {
+<a href=#1038 id=1038 data-nosnippet>1038</a>        <span class="kw">const </span>STREAM_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"stream"</span>;
+<a href=#1039 id=1039 data-nosnippet>1039</a>
+<a href=#1040 id=1040 data-nosnippet>1040</a>        <span class="kw">static </span>SUB_EVENTS: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
+<a href=#1041 id=1041 data-nosnippet>1041</a>            <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
+<a href=#1042 id=1042 data-nosnippet>1042</a>                <span class="macro">prometheus::opts!</span> {
+<a href=#1043 id=1043 data-nosnippet>1043</a>                    <span class="string">"corrosion_subscription_events"</span>,
+<a href=#1044 id=1044 data-nosnippet>1044</a>                    <span class="string">"Total number of subscription events"</span>,
+<a href=#1045 id=1045 data-nosnippet>1045</a>                },
+<a href=#1046 id=1046 data-nosnippet>1046</a>                <span class="kw-2">&amp;</span>[STREAM_LABEL],
+<a href=#1047 id=1047 data-nosnippet>1047</a>                registry(),
+<a href=#1048 id=1048 data-nosnippet>1048</a>            }
+<a href=#1049 id=1049 data-nosnippet>1049</a>            .unwrap()
+<a href=#1050 id=1050 data-nosnippet>1050</a>        });
 <a href=#1051 id=1051 data-nosnippet>1051</a>
-<a href=#1052 id=1052 data-nosnippet>1052</a>    <span class="self">self</span>::registry()
-<a href=#1053 id=1053 data-nosnippet>1053</a>        .register(Box::from(collector))
-<a href=#1054 id=1054 data-nosnippet>1054</a>        .map(|<span class="kw">_</span>| return_value)
-<a href=#1055 id=1055 data-nosnippet>1055</a>        .unwrap()
-<a href=#1056 id=1056 data-nosnippet>1056</a>}
-<a href=#1057 id=1057 data-nosnippet>1057</a>
-<a href=#1058 id=1058 data-nosnippet>1058</a><span class="kw">pub trait </span>CollectorExt: Collector + Clone + Sized + <span class="lifetime">'static </span>{
-<a href=#1059 id=1059 data-nosnippet>1059</a>    <span class="doccomment">/// Registers the current metric collector with the provided registry
-<a href=#1060 id=1060 data-nosnippet>1060</a>    /// if not already registered.
-<a href=#1061 id=1061 data-nosnippet>1061</a>    </span><span class="kw">fn </span>register_if_not_exists(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
-<a href=#1062 id=1062 data-nosnippet>1062</a>        <span class="kw">match </span>registry().register(Box::from(<span class="self">self</span>.clone())) {
-<a href=#1063 id=1063 data-nosnippet>1063</a>            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) | <span class="prelude-val">Err</span>(prometheus::Error::AlreadyReg) =&gt; <span class="prelude-val">Ok</span>(<span class="self">self</span>),
-<a href=#1064 id=1064 data-nosnippet>1064</a>            <span class="prelude-val">Err</span>(err) =&gt; <span class="prelude-val">Err</span>(err),
-<a href=#1065 id=1065 data-nosnippet>1065</a>        }
-<a href=#1066 id=1066 data-nosnippet>1066</a>    }
-<a href=#1067 id=1067 data-nosnippet>1067</a>}
-<a href=#1068 id=1068 data-nosnippet>1068</a>
-<a href=#1069 id=1069 data-nosnippet>1069</a><span class="kw">impl</span>&lt;C: Collector + Clone + <span class="lifetime">'static</span>&gt; CollectorExt <span class="kw">for </span>C {}
+<a href=#1052 id=1052 data-nosnippet>1052</a>        SUB_EVENTS.with_label_values(<span class="kw-2">&amp;</span>[stream])
+<a href=#1053 id=1053 data-nosnippet>1053</a>    }
+<a href=#1054 id=1054 data-nosnippet>1054</a>
+<a href=#1055 id=1055 data-nosnippet>1055</a>    <span class="attr">#[inline]
+<a href=#1056 id=1056 data-nosnippet>1056</a>    </span><span class="kw">pub fn </span>subscription_failures(stream: <span class="kw-2">&amp;</span>str) -&gt; IntGauge {
+<a href=#1057 id=1057 data-nosnippet>1057</a>        <span class="kw">const </span>STREAM_LABEL: <span class="kw-2">&amp;</span>str = <span class="string">"stream"</span>;
+<a href=#1058 id=1058 data-nosnippet>1058</a>
+<a href=#1059 id=1059 data-nosnippet>1059</a>        <span class="kw">static </span>SUB_EVENTS: Lazy&lt;IntGaugeVec&gt; = Lazy::new(|| {
+<a href=#1060 id=1060 data-nosnippet>1060</a>            <span class="macro">prometheus::register_int_gauge_vec_with_registry!</span> {
+<a href=#1061 id=1061 data-nosnippet>1061</a>                <span class="macro">prometheus::opts!</span> {
+<a href=#1062 id=1062 data-nosnippet>1062</a>                    <span class="string">"corrosion_subscription_failures"</span>,
+<a href=#1063 id=1063 data-nosnippet>1063</a>                    <span class="string">"Number of errors that occurred processing events"</span>,
+<a href=#1064 id=1064 data-nosnippet>1064</a>                },
+<a href=#1065 id=1065 data-nosnippet>1065</a>                <span class="kw-2">&amp;</span>[STREAM_LABEL],
+<a href=#1066 id=1066 data-nosnippet>1066</a>                registry(),
+<a href=#1067 id=1067 data-nosnippet>1067</a>            }
+<a href=#1068 id=1068 data-nosnippet>1068</a>            .unwrap()
+<a href=#1069 id=1069 data-nosnippet>1069</a>        });
 <a href=#1070 id=1070 data-nosnippet>1070</a>
-<a href=#1071 id=1071 data-nosnippet>1071</a><span class="attr">#[inline]
-<a href=#1072 id=1072 data-nosnippet>1072</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>apply_clusters(clusters: <span class="kw-2">&amp;</span><span class="kw">crate</span>::config::Watch&lt;<span class="kw">crate</span>::net::ClusterMap&gt;) {
-<a href=#1073 id=1073 data-nosnippet>1073</a>    <span class="comment">// The localities set by the previous call, used to remove series for
-<a href=#1074 id=1074 data-nosnippet>1074</a>    // localities that no longer exist
-<a href=#1075 id=1075 data-nosnippet>1075</a>    </span><span class="kw">static </span>PREV_LOCALITIES: Lazy&lt;parking_lot::Mutex&lt;std::collections::HashSet&lt;String&gt;&gt;&gt; =
-<a href=#1076 id=1076 data-nosnippet>1076</a>        Lazy::new(&lt;<span class="kw">_</span>&gt;::default);
-<a href=#1077 id=1077 data-nosnippet>1077</a>
-<a href=#1078 id=1078 data-nosnippet>1078</a>    <span class="kw">let </span>clusters = clusters.read();
-<a href=#1079 id=1079 data-nosnippet>1079</a>    <span class="kw">crate</span>::net::cluster::active_clusters().set(clusters.len() <span class="kw">as </span>i64);
-<a href=#1080 id=1080 data-nosnippet>1080</a>
-<a href=#1081 id=1081 data-nosnippet>1081</a>    <span class="kw">let </span><span class="kw-2">mut </span>current = std::collections::HashSet::with_capacity(clusters.len());
-<a href=#1082 id=1082 data-nosnippet>1082</a>    <span class="kw">for </span>entry <span class="kw">in </span>clusters.iter() {
-<a href=#1083 id=1083 data-nosnippet>1083</a>        <span class="kw">let </span>label = entry
-<a href=#1084 id=1084 data-nosnippet>1084</a>            .key()
-<a href=#1085 id=1085 data-nosnippet>1085</a>            .as_ref()
-<a href=#1086 id=1086 data-nosnippet>1086</a>            .map(|key| key.to_string())
-<a href=#1087 id=1087 data-nosnippet>1087</a>            .unwrap_or_default();
-<a href=#1088 id=1088 data-nosnippet>1088</a>        <span class="kw">crate</span>::net::cluster::active_endpoints(<span class="kw-2">&amp;</span>label).set(entry.value().len() <span class="kw">as </span>i64);
-<a href=#1089 id=1089 data-nosnippet>1089</a>        current.insert(label);
-<a href=#1090 id=1090 data-nosnippet>1090</a>    }
-<a href=#1091 id=1091 data-nosnippet>1091</a>
-<a href=#1092 id=1092 data-nosnippet>1092</a>    <span class="kw">let </span><span class="kw-2">mut </span>prev = PREV_LOCALITIES.lock();
-<a href=#1093 id=1093 data-nosnippet>1093</a>    <span class="kw">for </span>stale <span class="kw">in </span>prev.difference(<span class="kw-2">&amp;</span>current) {
-<a href=#1094 id=1094 data-nosnippet>1094</a>        <span class="kw">crate</span>::net::cluster::remove_active_endpoints(stale);
-<a href=#1095 id=1095 data-nosnippet>1095</a>    }
-<a href=#1096 id=1096 data-nosnippet>1096</a>    <span class="kw-2">*</span>prev = current;
-<a href=#1097 id=1097 data-nosnippet>1097</a>}
-<a href=#1098 id=1098 data-nosnippet>1098</a>
-<a href=#1099 id=1099 data-nosnippet>1099</a><span class="attr">#[cfg(test)]
-<a href=#1100 id=1100 data-nosnippet>1100</a></span><span class="kw">mod </span>tests {
-<a href=#1101 id=1101 data-nosnippet>1101</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#1102 id=1102 data-nosnippet>1102</a>
-<a href=#1103 id=1103 data-nosnippet>1103</a>    <span class="kw">fn </span>has_active_endpoints_series(label: <span class="kw-2">&amp;</span>str) -&gt; bool {
-<a href=#1104 id=1104 data-nosnippet>1104</a>        registry()
-<a href=#1105 id=1105 data-nosnippet>1105</a>            .gather()
-<a href=#1106 id=1106 data-nosnippet>1106</a>            .iter()
-<a href=#1107 id=1107 data-nosnippet>1107</a>            .filter(|mf| mf.name() == <span class="string">"quilkin_active_endpoints"</span>)
-<a href=#1108 id=1108 data-nosnippet>1108</a>            .flat_map(|mf| mf.get_metric())
-<a href=#1109 id=1109 data-nosnippet>1109</a>            .any(|m| m.get_label().iter().any(|l| l.value() == label))
-<a href=#1110 id=1110 data-nosnippet>1110</a>    }
-<a href=#1111 id=1111 data-nosnippet>1111</a>
-<a href=#1112 id=1112 data-nosnippet>1112</a>    <span class="attr">#[test]
-<a href=#1113 id=1113 data-nosnippet>1113</a>    </span><span class="kw">fn </span>drops_are_labelled_with_a_bounded_reason() {
-<a href=#1114 id=1114 data-nosnippet>1114</a>        <span class="kw">use </span><span class="kw">crate</span>::filters::FilterError;
-<a href=#1115 id=1115 data-nosnippet>1115</a>        <span class="kw">use </span><span class="kw">crate</span>::net::PipelineError;
-<a href=#1116 id=1116 data-nosnippet>1116</a>
-<a href=#1117 id=1117 data-nosnippet>1117</a>        <span class="comment">// The vocabulary a drop breakdown is built on, which must not shift when
-<a href=#1118 id=1118 data-nosnippet>1118</a>        // a filter is renamed or an errno differs
-<a href=#1119 id=1119 data-nosnippet>1119</a>        </span><span class="macro">assert_eq!</span>(
-<a href=#1120 id=1120 data-nosnippet>1120</a>            PipelineError::NoUpstreamEndpoints.drop_reason(),
-<a href=#1121 id=1121 data-nosnippet>1121</a>            DropReason::NoEndpointMatch
-<a href=#1122 id=1122 data-nosnippet>1122</a>        );
-<a href=#1123 id=1123 data-nosnippet>1123</a>        <span class="macro">assert_eq!</span>(
-<a href=#1124 id=1124 data-nosnippet>1124</a>            PipelineError::Filter(FilterError::Dropped).drop_reason(),
-<a href=#1125 id=1125 data-nosnippet>1125</a>            DropReason::FilterDrop
-<a href=#1126 id=1126 data-nosnippet>1126</a>        );
-<a href=#1127 id=1127 data-nosnippet>1127</a>        <span class="macro">assert_eq!</span>(
-<a href=#1128 id=1128 data-nosnippet>1128</a>            PipelineError::Filter(FilterError::NoValueCaptured).drop_reason(),
-<a href=#1129 id=1129 data-nosnippet>1129</a>            DropReason::FilterError
-<a href=#1130 id=1130 data-nosnippet>1130</a>        );
-<a href=#1131 id=1131 data-nosnippet>1131</a>        <span class="macro">assert_eq!</span>(
-<a href=#1132 id=1132 data-nosnippet>1132</a>            PipelineError::Filter(FilterError::Custom(<span class="string">"anything at all"</span>)).drop_reason(),
-<a href=#1133 id=1133 data-nosnippet>1133</a>            DropReason::FilterError
-<a href=#1134 id=1134 data-nosnippet>1134</a>        );
-<a href=#1135 id=1135 data-nosnippet>1135</a>        <span class="macro">assert_eq!</span>(
-<a href=#1136 id=1136 data-nosnippet>1136</a>            PipelineError::Io(std::io::Error::from_raw_os_error(<span class="number">22</span>)).drop_reason(),
-<a href=#1137 id=1137 data-nosnippet>1137</a>            DropReason::SocketError
-<a href=#1138 id=1138 data-nosnippet>1138</a>        );
-<a href=#1139 id=1139 data-nosnippet>1139</a>
-<a href=#1140 id=1140 data-nosnippet>1140</a>        <span class="comment">// A filter's identity is a separate label, so it never widens the reasons
-<a href=#1141 id=1141 data-nosnippet>1141</a>        </span><span class="macro">assert_eq!</span>(
-<a href=#1142 id=1142 data-nosnippet>1142</a>            PipelineError::Filter(FilterError::FirewallDenied).filter_name(),
-<a href=#1143 id=1143 data-nosnippet>1143</a>            <span class="string">"firewall"
-<a href=#1144 id=1144 data-nosnippet>1144</a>        </span>);
-<a href=#1145 id=1145 data-nosnippet>1145</a>        <span class="macro">assert_eq!</span>(
-<a href=#1146 id=1146 data-nosnippet>1146</a>            PipelineError::Io(std::io::Error::from_raw_os_error(<span class="number">22</span>)).filter_name(),
-<a href=#1147 id=1147 data-nosnippet>1147</a>            <span class="string">""
-<a href=#1148 id=1148 data-nosnippet>1148</a>        </span>);
-<a href=#1149 id=1149 data-nosnippet>1149</a>
-<a href=#1150 id=1150 data-nosnippet>1150</a>        <span class="comment">// EINVAL, which used to reach the label as "Invalid argument (os error 22)"
-<a href=#1151 id=1151 data-nosnippet>1151</a>        </span><span class="macro">assert_eq!</span>(
-<a href=#1152 id=1152 data-nosnippet>1152</a>            io_error_kind(<span class="kw-2">&amp;</span>std::io::Error::from_raw_os_error(<span class="number">22</span>)),
-<a href=#1153 id=1153 data-nosnippet>1153</a>            <span class="string">"invalid_input"
-<a href=#1154 id=1154 data-nosnippet>1154</a>        </span>);
-<a href=#1155 id=1155 data-nosnippet>1155</a>
-<a href=#1156 id=1156 data-nosnippet>1156</a>        <span class="comment">// The errnos a UDP send fails with under load. `ErrorKind` puts both in
-<a href=#1157 id=1157 data-nosnippet>1157</a>        // its uncategorised bucket, so without naming them the most common real
-<a href=#1158 id=1158 data-nosnippet>1158</a>        // send failures would be indistinguishable.
-<a href=#1159 id=1159 data-nosnippet>1159</a>        </span><span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)]
-<a href=#1160 id=1160 data-nosnippet>1160</a>        </span>{
-<a href=#1161 id=1161 data-nosnippet>1161</a>            <span class="macro">assert_eq!</span>(
-<a href=#1162 id=1162 data-nosnippet>1162</a>                io_error_kind(<span class="kw-2">&amp;</span>std::io::Error::from_raw_os_error(libc::ENOBUFS)),
-<a href=#1163 id=1163 data-nosnippet>1163</a>                <span class="string">"no_buffer_space"
-<a href=#1164 id=1164 data-nosnippet>1164</a>            </span>);
-<a href=#1165 id=1165 data-nosnippet>1165</a>            <span class="macro">assert_eq!</span>(
-<a href=#1166 id=1166 data-nosnippet>1166</a>                io_error_kind(<span class="kw-2">&amp;</span>std::io::Error::from_raw_os_error(libc::EMSGSIZE)),
-<a href=#1167 id=1167 data-nosnippet>1167</a>                <span class="string">"message_too_long"
-<a href=#1168 id=1168 data-nosnippet>1168</a>            </span>);
-<a href=#1169 id=1169 data-nosnippet>1169</a>        }
-<a href=#1170 id=1170 data-nosnippet>1170</a>    }
-<a href=#1171 id=1171 data-nosnippet>1171</a>
-<a href=#1172 id=1172 data-nosnippet>1172</a>    <span class="attr">#[test]
-<a href=#1173 id=1173 data-nosnippet>1173</a>    </span><span class="kw">fn </span>dropped_packets_carry_the_full_label_set() {
-<a href=#1174 id=1174 data-nosnippet>1174</a>        packets_dropped_total(READ, DropReason::FilterDrop, <span class="string">"firewall"</span>, <span class="string">"eu-north1"</span>).inc();
-<a href=#1175 id=1175 data-nosnippet>1175</a>
-<a href=#1176 id=1176 data-nosnippet>1176</a>        <span class="kw">let </span>rendered = registry()
-<a href=#1177 id=1177 data-nosnippet>1177</a>            .gather()
-<a href=#1178 id=1178 data-nosnippet>1178</a>            .iter()
-<a href=#1179 id=1179 data-nosnippet>1179</a>            .filter(|mf| mf.name() == <span class="string">"quilkin_packets_dropped_total"</span>)
-<a href=#1180 id=1180 data-nosnippet>1180</a>            .flat_map(|mf| mf.get_metric())
-<a href=#1181 id=1181 data-nosnippet>1181</a>            .any(|m| {
-<a href=#1182 id=1182 data-nosnippet>1182</a>                <span class="kw">let </span>labels: std::collections::HashMap&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt; = m
-<a href=#1183 id=1183 data-nosnippet>1183</a>                    .get_label()
-<a href=#1184 id=1184 data-nosnippet>1184</a>                    .iter()
-<a href=#1185 id=1185 data-nosnippet>1185</a>                    .map(|l| (l.name(), l.value()))
-<a href=#1186 id=1186 data-nosnippet>1186</a>                    .collect();
-<a href=#1187 id=1187 data-nosnippet>1187</a>
-<a href=#1188 id=1188 data-nosnippet>1188</a>                labels.get(DIRECTION_LABEL) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="string">"read"</span>)
-<a href=#1189 id=1189 data-nosnippet>1189</a>                    &amp;&amp; labels.get(REASON_LABEL) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="string">"filter_drop"</span>)
-<a href=#1190 id=1190 data-nosnippet>1190</a>                    &amp;&amp; labels.get(FILTER_LABEL) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="string">"firewall"</span>)
-<a href=#1191 id=1191 data-nosnippet>1191</a>                    &amp;&amp; labels.get(DESTINATION_LABEL) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="string">"eu-north1"</span>)
-<a href=#1192 id=1192 data-nosnippet>1192</a>            });
-<a href=#1193 id=1193 data-nosnippet>1193</a>
-<a href=#1194 id=1194 data-nosnippet>1194</a>        <span class="macro">assert!</span>(rendered);
-<a href=#1195 id=1195 data-nosnippet>1195</a>    }
-<a href=#1196 id=1196 data-nosnippet>1196</a>
-<a href=#1197 id=1197 data-nosnippet>1197</a>    <span class="attr">#[test]
-<a href=#1198 id=1198 data-nosnippet>1198</a>    </span><span class="kw">fn </span>apply_clusters_prunes_removed_localities() {
-<a href=#1199 id=1199 data-nosnippet>1199</a>        <span class="kw">let </span>clusters = <span class="kw">crate</span>::config::Watch::new(<span class="kw">crate</span>::net::ClusterMap::default());
-<a href=#1200 id=1200 data-nosnippet>1200</a>        <span class="kw">let </span>locality = <span class="kw">crate</span>::net::endpoint::Locality::with_region(<span class="string">"metrics-prune-test"</span>);
-<a href=#1201 id=1201 data-nosnippet>1201</a>        <span class="kw">let </span>label = locality.to_string();
-<a href=#1202 id=1202 data-nosnippet>1202</a>        clusters.read().insert(
-<a href=#1203 id=1203 data-nosnippet>1203</a>            <span class="prelude-val">None</span>,
-<a href=#1204 id=1204 data-nosnippet>1204</a>            <span class="prelude-val">Some</span>(locality.clone()),
-<a href=#1205 id=1205 data-nosnippet>1205</a>            [<span class="kw">crate</span>::net::endpoint::Endpoint::new(
-<a href=#1206 id=1206 data-nosnippet>1206</a>                (std::net::Ipv4Addr::LOCALHOST, <span class="number">7777</span>).into(),
-<a href=#1207 id=1207 data-nosnippet>1207</a>            )]
-<a href=#1208 id=1208 data-nosnippet>1208</a>            .into(),
-<a href=#1209 id=1209 data-nosnippet>1209</a>        );
-<a href=#1210 id=1210 data-nosnippet>1210</a>
-<a href=#1211 id=1211 data-nosnippet>1211</a>        <span class="comment">// Retried since a concurrent test triggering `apply_clusters` can
-<a href=#1212 id=1212 data-nosnippet>1212</a>        // prune this series between the apply and the gather
-<a href=#1213 id=1213 data-nosnippet>1213</a>        </span><span class="kw">let </span>present = (<span class="number">0</span>..<span class="number">3</span>).any(|<span class="kw">_</span>| {
-<a href=#1214 id=1214 data-nosnippet>1214</a>            apply_clusters(<span class="kw-2">&amp;</span>clusters);
-<a href=#1215 id=1215 data-nosnippet>1215</a>            has_active_endpoints_series(<span class="kw-2">&amp;</span>label)
-<a href=#1216 id=1216 data-nosnippet>1216</a>        });
-<a href=#1217 id=1217 data-nosnippet>1217</a>        <span class="macro">assert!</span>(present);
-<a href=#1218 id=1218 data-nosnippet>1218</a>
-<a href=#1219 id=1219 data-nosnippet>1219</a>        clusters.read().remove_locality(<span class="prelude-val">None</span>, <span class="kw-2">&amp;</span><span class="prelude-val">Some</span>(locality));
-<a href=#1220 id=1220 data-nosnippet>1220</a>        apply_clusters(<span class="kw-2">&amp;</span>clusters);
-<a href=#1221 id=1221 data-nosnippet>1221</a>        <span class="macro">assert!</span>(!has_active_endpoints_series(<span class="kw-2">&amp;</span>label));
+<a href=#1071 id=1071 data-nosnippet>1071</a>        SUB_EVENTS.with_label_values(<span class="kw-2">&amp;</span>[stream])
+<a href=#1072 id=1072 data-nosnippet>1072</a>    }
+<a href=#1073 id=1073 data-nosnippet>1073</a>}
+<a href=#1074 id=1074 data-nosnippet>1074</a>
+<a href=#1075 id=1075 data-nosnippet>1075</a><span class="doccomment">/// Create a generic metrics options.
+<a href=#1076 id=1076 data-nosnippet>1076</a>/// Use `filter_opts` instead if the intended target is a filter.
+<a href=#1077 id=1077 data-nosnippet>1077</a></span><span class="kw">pub fn </span>opts(name: <span class="kw-2">&amp;</span>str, subsystem: <span class="kw-2">&amp;</span>str, description: <span class="kw-2">&amp;</span>str) -&gt; Opts {
+<a href=#1078 id=1078 data-nosnippet>1078</a>    Opts::new(name, description)
+<a href=#1079 id=1079 data-nosnippet>1079</a>        .subsystem(subsystem)
+<a href=#1080 id=1080 data-nosnippet>1080</a>        .namespace(<span class="string">"quilkin"</span>)
+<a href=#1081 id=1081 data-nosnippet>1081</a>}
+<a href=#1082 id=1082 data-nosnippet>1082</a>
+<a href=#1083 id=1083 data-nosnippet>1083</a><span class="kw">pub fn </span>histogram_opts(
+<a href=#1084 id=1084 data-nosnippet>1084</a>    name: <span class="kw-2">&amp;</span>str,
+<a href=#1085 id=1085 data-nosnippet>1085</a>    subsystem: <span class="kw-2">&amp;</span>str,
+<a href=#1086 id=1086 data-nosnippet>1086</a>    description: <span class="kw-2">&amp;</span>str,
+<a href=#1087 id=1087 data-nosnippet>1087</a>    buckets: <span class="kw">impl </span>Into&lt;<span class="prelude-ty">Option</span>&lt;Vec&lt;f64&gt;&gt;&gt;,
+<a href=#1088 id=1088 data-nosnippet>1088</a>) -&gt; HistogramOpts {
+<a href=#1089 id=1089 data-nosnippet>1089</a>    HistogramOpts {
+<a href=#1090 id=1090 data-nosnippet>1090</a>        common_opts: opts(name, subsystem, description),
+<a href=#1091 id=1091 data-nosnippet>1091</a>        buckets: buckets
+<a href=#1092 id=1092 data-nosnippet>1092</a>            .into()
+<a href=#1093 id=1093 data-nosnippet>1093</a>            .unwrap_or_else(|| Vec::from(DEFAULT_BUCKETS <span class="kw">as </span><span class="kw-2">&amp;</span><span class="lifetime">'static </span>[f64])),
+<a href=#1094 id=1094 data-nosnippet>1094</a>    }
+<a href=#1095 id=1095 data-nosnippet>1095</a>}
+<a href=#1096 id=1096 data-nosnippet>1096</a>
+<a href=#1097 id=1097 data-nosnippet>1097</a><span class="doccomment">/// Registers the current metric collector with the provided registry.
+<a href=#1098 id=1098 data-nosnippet>1098</a>///
+<a href=#1099 id=1099 data-nosnippet>1099</a>/// # Panics
+<a href=#1100 id=1100 data-nosnippet>1100</a>/// A collector with the same name has already been registered.
+<a href=#1101 id=1101 data-nosnippet>1101</a></span><span class="kw">pub fn </span>register&lt;T: Collector + Sized + Clone + <span class="lifetime">'static</span>&gt;(collector: T) -&gt; T {
+<a href=#1102 id=1102 data-nosnippet>1102</a>    <span class="kw">let </span>return_value = collector.clone();
+<a href=#1103 id=1103 data-nosnippet>1103</a>
+<a href=#1104 id=1104 data-nosnippet>1104</a>    <span class="self">self</span>::registry()
+<a href=#1105 id=1105 data-nosnippet>1105</a>        .register(Box::from(collector))
+<a href=#1106 id=1106 data-nosnippet>1106</a>        .map(|<span class="kw">_</span>| return_value)
+<a href=#1107 id=1107 data-nosnippet>1107</a>        .unwrap()
+<a href=#1108 id=1108 data-nosnippet>1108</a>}
+<a href=#1109 id=1109 data-nosnippet>1109</a>
+<a href=#1110 id=1110 data-nosnippet>1110</a><span class="kw">pub trait </span>CollectorExt: Collector + Clone + Sized + <span class="lifetime">'static </span>{
+<a href=#1111 id=1111 data-nosnippet>1111</a>    <span class="doccomment">/// Registers the current metric collector with the provided registry
+<a href=#1112 id=1112 data-nosnippet>1112</a>    /// if not already registered.
+<a href=#1113 id=1113 data-nosnippet>1113</a>    </span><span class="kw">fn </span>register_if_not_exists(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#1114 id=1114 data-nosnippet>1114</a>        <span class="kw">match </span>registry().register(Box::from(<span class="self">self</span>.clone())) {
+<a href=#1115 id=1115 data-nosnippet>1115</a>            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) | <span class="prelude-val">Err</span>(prometheus::Error::AlreadyReg) =&gt; <span class="prelude-val">Ok</span>(<span class="self">self</span>),
+<a href=#1116 id=1116 data-nosnippet>1116</a>            <span class="prelude-val">Err</span>(err) =&gt; <span class="prelude-val">Err</span>(err),
+<a href=#1117 id=1117 data-nosnippet>1117</a>        }
+<a href=#1118 id=1118 data-nosnippet>1118</a>    }
+<a href=#1119 id=1119 data-nosnippet>1119</a>}
+<a href=#1120 id=1120 data-nosnippet>1120</a>
+<a href=#1121 id=1121 data-nosnippet>1121</a><span class="kw">impl</span>&lt;C: Collector + Clone + <span class="lifetime">'static</span>&gt; CollectorExt <span class="kw">for </span>C {}
+<a href=#1122 id=1122 data-nosnippet>1122</a>
+<a href=#1123 id=1123 data-nosnippet>1123</a><span class="attr">#[inline]
+<a href=#1124 id=1124 data-nosnippet>1124</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>apply_clusters(clusters: <span class="kw-2">&amp;</span><span class="kw">crate</span>::config::Watch&lt;<span class="kw">crate</span>::net::ClusterMap&gt;) {
+<a href=#1125 id=1125 data-nosnippet>1125</a>    <span class="comment">// The localities set by the previous call, used to remove series for
+<a href=#1126 id=1126 data-nosnippet>1126</a>    // localities that no longer exist
+<a href=#1127 id=1127 data-nosnippet>1127</a>    </span><span class="kw">static </span>PREV_LOCALITIES: Lazy&lt;parking_lot::Mutex&lt;std::collections::HashSet&lt;String&gt;&gt;&gt; =
+<a href=#1128 id=1128 data-nosnippet>1128</a>        Lazy::new(&lt;<span class="kw">_</span>&gt;::default);
+<a href=#1129 id=1129 data-nosnippet>1129</a>
+<a href=#1130 id=1130 data-nosnippet>1130</a>    <span class="kw">let </span>clusters = clusters.read();
+<a href=#1131 id=1131 data-nosnippet>1131</a>    <span class="kw">crate</span>::net::cluster::active_clusters().set(clusters.len() <span class="kw">as </span>i64);
+<a href=#1132 id=1132 data-nosnippet>1132</a>
+<a href=#1133 id=1133 data-nosnippet>1133</a>    <span class="kw">let </span><span class="kw-2">mut </span>current = std::collections::HashSet::with_capacity(clusters.len());
+<a href=#1134 id=1134 data-nosnippet>1134</a>    <span class="kw">for </span>entry <span class="kw">in </span>clusters.iter() {
+<a href=#1135 id=1135 data-nosnippet>1135</a>        <span class="kw">let </span>label = entry
+<a href=#1136 id=1136 data-nosnippet>1136</a>            .key()
+<a href=#1137 id=1137 data-nosnippet>1137</a>            .as_ref()
+<a href=#1138 id=1138 data-nosnippet>1138</a>            .map(|key| key.to_string())
+<a href=#1139 id=1139 data-nosnippet>1139</a>            .unwrap_or_default();
+<a href=#1140 id=1140 data-nosnippet>1140</a>        <span class="kw">crate</span>::net::cluster::active_endpoints(<span class="kw-2">&amp;</span>label).set(entry.value().len() <span class="kw">as </span>i64);
+<a href=#1141 id=1141 data-nosnippet>1141</a>        current.insert(label);
+<a href=#1142 id=1142 data-nosnippet>1142</a>    }
+<a href=#1143 id=1143 data-nosnippet>1143</a>
+<a href=#1144 id=1144 data-nosnippet>1144</a>    <span class="kw">let </span><span class="kw-2">mut </span>prev = PREV_LOCALITIES.lock();
+<a href=#1145 id=1145 data-nosnippet>1145</a>    <span class="kw">for </span>stale <span class="kw">in </span>prev.difference(<span class="kw-2">&amp;</span>current) {
+<a href=#1146 id=1146 data-nosnippet>1146</a>        <span class="kw">crate</span>::net::cluster::remove_active_endpoints(stale);
+<a href=#1147 id=1147 data-nosnippet>1147</a>    }
+<a href=#1148 id=1148 data-nosnippet>1148</a>    <span class="kw-2">*</span>prev = current;
+<a href=#1149 id=1149 data-nosnippet>1149</a>}
+<a href=#1150 id=1150 data-nosnippet>1150</a>
+<a href=#1151 id=1151 data-nosnippet>1151</a><span class="attr">#[cfg(test)]
+<a href=#1152 id=1152 data-nosnippet>1152</a></span><span class="kw">mod </span>tests {
+<a href=#1153 id=1153 data-nosnippet>1153</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#1154 id=1154 data-nosnippet>1154</a>
+<a href=#1155 id=1155 data-nosnippet>1155</a>    <span class="kw">fn </span>has_active_endpoints_series(label: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#1156 id=1156 data-nosnippet>1156</a>        registry()
+<a href=#1157 id=1157 data-nosnippet>1157</a>            .gather()
+<a href=#1158 id=1158 data-nosnippet>1158</a>            .iter()
+<a href=#1159 id=1159 data-nosnippet>1159</a>            .filter(|mf| mf.name() == <span class="string">"quilkin_active_endpoints"</span>)
+<a href=#1160 id=1160 data-nosnippet>1160</a>            .flat_map(|mf| mf.get_metric())
+<a href=#1161 id=1161 data-nosnippet>1161</a>            .any(|m| m.get_label().iter().any(|l| l.value() == label))
+<a href=#1162 id=1162 data-nosnippet>1162</a>    }
+<a href=#1163 id=1163 data-nosnippet>1163</a>
+<a href=#1164 id=1164 data-nosnippet>1164</a>    <span class="attr">#[test]
+<a href=#1165 id=1165 data-nosnippet>1165</a>    </span><span class="kw">fn </span>drops_are_labelled_with_a_bounded_reason() {
+<a href=#1166 id=1166 data-nosnippet>1166</a>        <span class="kw">use </span><span class="kw">crate</span>::filters::FilterError;
+<a href=#1167 id=1167 data-nosnippet>1167</a>        <span class="kw">use </span><span class="kw">crate</span>::net::PipelineError;
+<a href=#1168 id=1168 data-nosnippet>1168</a>
+<a href=#1169 id=1169 data-nosnippet>1169</a>        <span class="comment">// The vocabulary a drop breakdown is built on, which must not shift when
+<a href=#1170 id=1170 data-nosnippet>1170</a>        // a filter is renamed or an errno differs
+<a href=#1171 id=1171 data-nosnippet>1171</a>        </span><span class="macro">assert_eq!</span>(
+<a href=#1172 id=1172 data-nosnippet>1172</a>            PipelineError::NoUpstreamEndpoints.drop_reason(),
+<a href=#1173 id=1173 data-nosnippet>1173</a>            DropReason::NoEndpointMatch
+<a href=#1174 id=1174 data-nosnippet>1174</a>        );
+<a href=#1175 id=1175 data-nosnippet>1175</a>        <span class="macro">assert_eq!</span>(
+<a href=#1176 id=1176 data-nosnippet>1176</a>            PipelineError::Filter(FilterError::Dropped).drop_reason(),
+<a href=#1177 id=1177 data-nosnippet>1177</a>            DropReason::FilterDrop
+<a href=#1178 id=1178 data-nosnippet>1178</a>        );
+<a href=#1179 id=1179 data-nosnippet>1179</a>        <span class="macro">assert_eq!</span>(
+<a href=#1180 id=1180 data-nosnippet>1180</a>            PipelineError::Filter(FilterError::NoValueCaptured).drop_reason(),
+<a href=#1181 id=1181 data-nosnippet>1181</a>            DropReason::FilterError
+<a href=#1182 id=1182 data-nosnippet>1182</a>        );
+<a href=#1183 id=1183 data-nosnippet>1183</a>        <span class="macro">assert_eq!</span>(
+<a href=#1184 id=1184 data-nosnippet>1184</a>            PipelineError::Filter(FilterError::Custom(<span class="string">"anything at all"</span>)).drop_reason(),
+<a href=#1185 id=1185 data-nosnippet>1185</a>            DropReason::FilterError
+<a href=#1186 id=1186 data-nosnippet>1186</a>        );
+<a href=#1187 id=1187 data-nosnippet>1187</a>        <span class="macro">assert_eq!</span>(
+<a href=#1188 id=1188 data-nosnippet>1188</a>            PipelineError::Io(std::io::Error::from_raw_os_error(<span class="number">22</span>)).drop_reason(),
+<a href=#1189 id=1189 data-nosnippet>1189</a>            DropReason::SocketError
+<a href=#1190 id=1190 data-nosnippet>1190</a>        );
+<a href=#1191 id=1191 data-nosnippet>1191</a>
+<a href=#1192 id=1192 data-nosnippet>1192</a>        <span class="comment">// A filter's identity is a separate label, so it never widens the reasons
+<a href=#1193 id=1193 data-nosnippet>1193</a>        </span><span class="macro">assert_eq!</span>(
+<a href=#1194 id=1194 data-nosnippet>1194</a>            PipelineError::Filter(FilterError::FirewallDenied).filter_name(),
+<a href=#1195 id=1195 data-nosnippet>1195</a>            <span class="string">"firewall"
+<a href=#1196 id=1196 data-nosnippet>1196</a>        </span>);
+<a href=#1197 id=1197 data-nosnippet>1197</a>        <span class="macro">assert_eq!</span>(
+<a href=#1198 id=1198 data-nosnippet>1198</a>            PipelineError::Io(std::io::Error::from_raw_os_error(<span class="number">22</span>)).filter_name(),
+<a href=#1199 id=1199 data-nosnippet>1199</a>            <span class="string">""
+<a href=#1200 id=1200 data-nosnippet>1200</a>        </span>);
+<a href=#1201 id=1201 data-nosnippet>1201</a>
+<a href=#1202 id=1202 data-nosnippet>1202</a>        <span class="comment">// EINVAL, which used to reach the label as "Invalid argument (os error 22)"
+<a href=#1203 id=1203 data-nosnippet>1203</a>        </span><span class="macro">assert_eq!</span>(
+<a href=#1204 id=1204 data-nosnippet>1204</a>            io_error_kind(<span class="kw-2">&amp;</span>std::io::Error::from_raw_os_error(<span class="number">22</span>)),
+<a href=#1205 id=1205 data-nosnippet>1205</a>            <span class="string">"invalid_input"
+<a href=#1206 id=1206 data-nosnippet>1206</a>        </span>);
+<a href=#1207 id=1207 data-nosnippet>1207</a>
+<a href=#1208 id=1208 data-nosnippet>1208</a>        <span class="comment">// The errnos a UDP send fails with under load. `ErrorKind` puts both in
+<a href=#1209 id=1209 data-nosnippet>1209</a>        // its uncategorised bucket, so without naming them the most common real
+<a href=#1210 id=1210 data-nosnippet>1210</a>        // send failures would be indistinguishable.
+<a href=#1211 id=1211 data-nosnippet>1211</a>        </span><span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)]
+<a href=#1212 id=1212 data-nosnippet>1212</a>        </span>{
+<a href=#1213 id=1213 data-nosnippet>1213</a>            <span class="macro">assert_eq!</span>(
+<a href=#1214 id=1214 data-nosnippet>1214</a>                io_error_kind(<span class="kw-2">&amp;</span>std::io::Error::from_raw_os_error(libc::ENOBUFS)),
+<a href=#1215 id=1215 data-nosnippet>1215</a>                <span class="string">"no_buffer_space"
+<a href=#1216 id=1216 data-nosnippet>1216</a>            </span>);
+<a href=#1217 id=1217 data-nosnippet>1217</a>            <span class="macro">assert_eq!</span>(
+<a href=#1218 id=1218 data-nosnippet>1218</a>                io_error_kind(<span class="kw-2">&amp;</span>std::io::Error::from_raw_os_error(libc::EMSGSIZE)),
+<a href=#1219 id=1219 data-nosnippet>1219</a>                <span class="string">"message_too_long"
+<a href=#1220 id=1220 data-nosnippet>1220</a>            </span>);
+<a href=#1221 id=1221 data-nosnippet>1221</a>        }
 <a href=#1222 id=1222 data-nosnippet>1222</a>    }
-<a href=#1223 id=1223 data-nosnippet>1223</a>}
+<a href=#1223 id=1223 data-nosnippet>1223</a>
+<a href=#1224 id=1224 data-nosnippet>1224</a>    <span class="attr">#[test]
+<a href=#1225 id=1225 data-nosnippet>1225</a>    </span><span class="kw">fn </span>dropped_packets_carry_the_full_label_set() {
+<a href=#1226 id=1226 data-nosnippet>1226</a>        packets_dropped_total(READ, DropReason::FilterDrop, <span class="string">"firewall"</span>, <span class="string">"eu-north1"</span>).inc();
+<a href=#1227 id=1227 data-nosnippet>1227</a>
+<a href=#1228 id=1228 data-nosnippet>1228</a>        <span class="kw">let </span>rendered = registry()
+<a href=#1229 id=1229 data-nosnippet>1229</a>            .gather()
+<a href=#1230 id=1230 data-nosnippet>1230</a>            .iter()
+<a href=#1231 id=1231 data-nosnippet>1231</a>            .filter(|mf| mf.name() == <span class="string">"quilkin_packets_dropped_total"</span>)
+<a href=#1232 id=1232 data-nosnippet>1232</a>            .flat_map(|mf| mf.get_metric())
+<a href=#1233 id=1233 data-nosnippet>1233</a>            .any(|m| {
+<a href=#1234 id=1234 data-nosnippet>1234</a>                <span class="kw">let </span>labels: std::collections::HashMap&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt; = m
+<a href=#1235 id=1235 data-nosnippet>1235</a>                    .get_label()
+<a href=#1236 id=1236 data-nosnippet>1236</a>                    .iter()
+<a href=#1237 id=1237 data-nosnippet>1237</a>                    .map(|l| (l.name(), l.value()))
+<a href=#1238 id=1238 data-nosnippet>1238</a>                    .collect();
+<a href=#1239 id=1239 data-nosnippet>1239</a>
+<a href=#1240 id=1240 data-nosnippet>1240</a>                labels.get(DIRECTION_LABEL) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="string">"read"</span>)
+<a href=#1241 id=1241 data-nosnippet>1241</a>                    &amp;&amp; labels.get(REASON_LABEL) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="string">"filter_drop"</span>)
+<a href=#1242 id=1242 data-nosnippet>1242</a>                    &amp;&amp; labels.get(FILTER_LABEL) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="string">"firewall"</span>)
+<a href=#1243 id=1243 data-nosnippet>1243</a>                    &amp;&amp; labels.get(DESTINATION_LABEL) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="string">"eu-north1"</span>)
+<a href=#1244 id=1244 data-nosnippet>1244</a>            });
+<a href=#1245 id=1245 data-nosnippet>1245</a>
+<a href=#1246 id=1246 data-nosnippet>1246</a>        <span class="macro">assert!</span>(rendered);
+<a href=#1247 id=1247 data-nosnippet>1247</a>    }
+<a href=#1248 id=1248 data-nosnippet>1248</a>
+<a href=#1249 id=1249 data-nosnippet>1249</a>    <span class="attr">#[test]
+<a href=#1250 id=1250 data-nosnippet>1250</a>    </span><span class="kw">fn </span>rejected_measurements_carry_the_full_label_set() {
+<a href=#1251 id=1251 data-nosnippet>1251</a>        <span class="kw">let </span>icao: <span class="kw">crate</span>::config::IcaoCode = <span class="string">"ABCD"</span>.parse().unwrap();
+<a href=#1252 id=1252 data-nosnippet>1252</a>
+<a href=#1253 id=1253 data-nosnippet>1253</a>        phoenix_measurements_rejected_total(
+<a href=#1254 id=1254 data-nosnippet>1254</a>            icao,
+<a href=#1255 id=1255 data-nosnippet>1255</a>            CoordinateDirection::Incoming,
+<a href=#1256 id=1256 data-nosnippet>1256</a>            MeasurementRejection::TooLarge,
+<a href=#1257 id=1257 data-nosnippet>1257</a>        )
+<a href=#1258 id=1258 data-nosnippet>1258</a>        .inc();
+<a href=#1259 id=1259 data-nosnippet>1259</a>
+<a href=#1260 id=1260 data-nosnippet>1260</a>        <span class="kw">let </span>rendered = registry()
+<a href=#1261 id=1261 data-nosnippet>1261</a>            .gather()
+<a href=#1262 id=1262 data-nosnippet>1262</a>            .iter()
+<a href=#1263 id=1263 data-nosnippet>1263</a>            .filter(|mf| mf.name() == <span class="string">"quilkin_phoenix_measurements_rejected_total"</span>)
+<a href=#1264 id=1264 data-nosnippet>1264</a>            .flat_map(|mf| mf.get_metric())
+<a href=#1265 id=1265 data-nosnippet>1265</a>            .any(|m| {
+<a href=#1266 id=1266 data-nosnippet>1266</a>                <span class="kw">let </span>labels: std::collections::HashMap&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt; = m
+<a href=#1267 id=1267 data-nosnippet>1267</a>                    .get_label()
+<a href=#1268 id=1268 data-nosnippet>1268</a>                    .iter()
+<a href=#1269 id=1269 data-nosnippet>1269</a>                    .map(|l| (l.name(), l.value()))
+<a href=#1270 id=1270 data-nosnippet>1270</a>                    .collect();
+<a href=#1271 id=1271 data-nosnippet>1271</a>
+<a href=#1272 id=1272 data-nosnippet>1272</a>                labels.get(<span class="string">"icao"</span>) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="string">"ABCD"</span>)
+<a href=#1273 id=1273 data-nosnippet>1273</a>                    &amp;&amp; labels.get(<span class="string">"direction"</span>) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="string">"incoming"</span>)
+<a href=#1274 id=1274 data-nosnippet>1274</a>                    &amp;&amp; labels.get(REASON_LABEL) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="string">"too_large"</span>)
+<a href=#1275 id=1275 data-nosnippet>1275</a>            });
+<a href=#1276 id=1276 data-nosnippet>1276</a>
+<a href=#1277 id=1277 data-nosnippet>1277</a>        <span class="macro">assert!</span>(rendered);
+<a href=#1278 id=1278 data-nosnippet>1278</a>    }
+<a href=#1279 id=1279 data-nosnippet>1279</a>
+<a href=#1280 id=1280 data-nosnippet>1280</a>    <span class="attr">#[test]
+<a href=#1281 id=1281 data-nosnippet>1281</a>    </span><span class="kw">fn </span>apply_clusters_prunes_removed_localities() {
+<a href=#1282 id=1282 data-nosnippet>1282</a>        <span class="kw">let </span>clusters = <span class="kw">crate</span>::config::Watch::new(<span class="kw">crate</span>::net::ClusterMap::default());
+<a href=#1283 id=1283 data-nosnippet>1283</a>        <span class="kw">let </span>locality = <span class="kw">crate</span>::net::endpoint::Locality::with_region(<span class="string">"metrics-prune-test"</span>);
+<a href=#1284 id=1284 data-nosnippet>1284</a>        <span class="kw">let </span>label = locality.to_string();
+<a href=#1285 id=1285 data-nosnippet>1285</a>        clusters.read().insert(
+<a href=#1286 id=1286 data-nosnippet>1286</a>            <span class="prelude-val">None</span>,
+<a href=#1287 id=1287 data-nosnippet>1287</a>            <span class="prelude-val">Some</span>(locality.clone()),
+<a href=#1288 id=1288 data-nosnippet>1288</a>            [<span class="kw">crate</span>::net::endpoint::Endpoint::new(
+<a href=#1289 id=1289 data-nosnippet>1289</a>                (std::net::Ipv4Addr::LOCALHOST, <span class="number">7777</span>).into(),
+<a href=#1290 id=1290 data-nosnippet>1290</a>            )]
+<a href=#1291 id=1291 data-nosnippet>1291</a>            .into(),
+<a href=#1292 id=1292 data-nosnippet>1292</a>        );
+<a href=#1293 id=1293 data-nosnippet>1293</a>
+<a href=#1294 id=1294 data-nosnippet>1294</a>        <span class="comment">// Retried since a concurrent test triggering `apply_clusters` can
+<a href=#1295 id=1295 data-nosnippet>1295</a>        // prune this series between the apply and the gather
+<a href=#1296 id=1296 data-nosnippet>1296</a>        </span><span class="kw">let </span>present = (<span class="number">0</span>..<span class="number">3</span>).any(|<span class="kw">_</span>| {
+<a href=#1297 id=1297 data-nosnippet>1297</a>            apply_clusters(<span class="kw-2">&amp;</span>clusters);
+<a href=#1298 id=1298 data-nosnippet>1298</a>            has_active_endpoints_series(<span class="kw-2">&amp;</span>label)
+<a href=#1299 id=1299 data-nosnippet>1299</a>        });
+<a href=#1300 id=1300 data-nosnippet>1300</a>        <span class="macro">assert!</span>(present);
+<a href=#1301 id=1301 data-nosnippet>1301</a>
+<a href=#1302 id=1302 data-nosnippet>1302</a>        clusters.read().remove_locality(<span class="prelude-val">None</span>, <span class="kw-2">&amp;</span><span class="prelude-val">Some</span>(locality));
+<a href=#1303 id=1303 data-nosnippet>1303</a>        apply_clusters(<span class="kw-2">&amp;</span>clusters);
+<a href=#1304 id=1304 data-nosnippet>1304</a>        <span class="macro">assert!</span>(!has_active_endpoints_series(<span class="kw-2">&amp;</span>label));
+<a href=#1305 id=1305 data-nosnippet>1305</a>    }
+<a href=#1306 id=1306 data-nosnippet>1306</a>}
 </code></pre></div></section></main></body></html>

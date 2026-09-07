@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-32b77bed.js";
+            window.path_to_searchindex_js = "searchindex-b3067f57.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-270f104f.js"></script>
@@ -1120,6 +1120,45 @@ datacentre, and the value being the latency in nanoseconds.</p>
 <li>
 <p><code>quilkin_phoenix_server_errors</code></p>
 <p>The amount of errors attempting to spawn the phoenix HTTP server</p>
+</li>
+<li>
+<p><code>quilkin_phoenix_measurement_seconds{icao, direction}</code> (Histogram)</p>
+<p>The distribution of accepted latency measurements per datacentre.</p>
+<ul>
+<li>The <code>direction</code> label is the leg of the round trip: <code>incoming</code> is proxy to
+datacentre, <code>outgoing</code> is datacentre back to proxy.</li>
+</ul>
+</li>
+<li>
+<p><code>quilkin_phoenix_measurement_errors_total{icao}</code> (Counter)</p>
+<p>The total number of measurements that yielded no usable value, whether the peer
+failed to answer or answered implausibly. Each one raises the node’s error
+estimate, making it less likely to be picked.</p>
+</li>
+<li>
+<p><code>quilkin_phoenix_measurements_rejected_total{icao, direction, reason}</code> (Counter)</p>
+<p>The total number of measurements discarded because the reply’s timestamps don’t
+describe a network path. Implausible measurements are discarded rather than
+clamped, as one corrupts the histogram’s <code>_sum</code> permanently and wrecks the
+coordinate solve.</p>
+<p>This is the subset of <code>quilkin_phoenix_measurement_errors_total</code> the peer did
+answer, so a wrong clock is distinguishable from an unreachable datacentre.</p>
+<ul>
+<li>The <code>reason</code> label is a closed set:
+<ul>
+<li><code>negative</code>: the leg came out below zero, ie the timestamp it derives from is ahead of the clock that read it.</li>
+<li><code>too_large</code>: the leg came out longer than any network path produces, ie a zero or badly skewed peer timestamp.</li>
+</ul>
+</li>
+<li>The <code>direction</code> label is the leg that failed, named as in
+<code>quilkin_phoenix_measurement_seconds</code>. Both legs cross the two clocks, so
+skew pushes one out of range and the other towards zero; only the failing
+leg is counted, so the counter equals the measurements discarded.</li>
+</ul>
+<p>Clock skew shows up as a single <code>icao</code>, which is what separates it from a
+network problem:</p>
+<pre><code class="language-promql">sum by (icao) (rate(quilkin_phoenix_measurements_rejected_total[5m]))
+</code></pre>
 </li>
 <li>
 <p><code>quilkin_service_qcmp_active</code></p>
