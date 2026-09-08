@@ -1,12 +1,4 @@
 #include "shared.h"
-#include <bpf/bpf_helpers.h>
-
-struct {
-    __uint(type, BPF_MAP_TYPE_XSKMAP);
-    __type(key, u32);
-    __type(value, u32);
-    __uint(max_entries, 128);
-} XSK SEC(".maps");
 
 typedef u8 IP[16];
 typedef u8 MAC[6];
@@ -29,7 +21,7 @@ typedef struct {
     u8 sender_hardware_address[6];
     u8 sender_protocol_address[4];
     u8 target_hardware_address[6];
-    u8 target_protocol_address[6];
+    u8 target_protocol_address[4];
 } ArpHdr;
 
 const u16 HTYPE_ETHER = ntohs(1);
@@ -37,21 +29,24 @@ const u16 PTYPE_IPV4 = ntohs(0x0800);
 const u8 HLEN_MAC = 6;
 const u8 PLEN_IPV4 = 4;
 
-typedef struct {
-    u8 kind;
-    u8 code;
-    u8 checksum[2];
-} Icmpv6Hdr;
-
 const u8 ECHO_REPLYV4 = 0;
 const u8 ECHO_REPLYV6 = 129;
+// https://datatracker.ietf.org/doc/html/rfc4861#section-4.4
 const u8 NEIGHBOR_ADVERTISEMENT = 136;
+
+// https://datatracker.ietf.org/doc/html/rfc4861#section-4.6
+const u8 NA_TARGET_LL_ADDR = 2;
 
 typedef struct {
     u32 reserved : 5, override : 1, solicited : 1, router : 1, reserved2 : 24;
     u8 target_addr[16];
-    u8 ll_addr[6];
 } NeighAdvert;
+
+typedef struct {
+    u8 type;
+    u8 length;
+    u8 ll_addr[6];
+} AdvertOptions;
 
 typedef struct {
     u8 kind;
@@ -90,8 +85,11 @@ inline void send_mac_to_userspace(const IP ip, const MAC mac, u16 kind) {
         bpf_ringbuf_reserve(&IP_TO_MAC, sizeof(RingBufEntry), 0);
 
     if (!entry) {
-        // Just print for now, but really this should be a counter
-        bpf_printk("failed to reserve space for ringbuf entry\n");
+        // TODO: Counter? Note that we can't print using bpf_printk as that
+        // function is GPL and the kernel won't load our program if it's not GPL
+        // as well, but maybe that's not a big deal? dunno
+        // <https://github.com/nyrahul/ebpf-guide/blob/master/docs/gpl_license_ebpf.rst>
+        // bpf_printk("failed to reserve space for ringbuf entry\n");
         return;
     }
 
@@ -99,7 +97,7 @@ inline void send_mac_to_userspace(const IP ip, const MAC mac, u16 kind) {
     __builtin_memcpy(entry->mac, mac, 6);
     entry->kind = kind;
 
-    bpf_ringbuf_submit(entry, 0);
+    bpf_ringbuf_submit(entry, BPF_RB_ADAPTIVE);
 }
 
 inline XdpAction redirect_ipv4(struct xdp_md* ctx) {
@@ -109,8 +107,18 @@ inline XdpAction redirect_ipv4(struct xdp_md* ctx) {
 
     switch (v4->proto) {
     case UDP:
-        MUTE valid_or_pass(udp, UdpHdr, offset);
-        return redirect_udp(udp);
+        // Ignore IPv4 packets that have options, no packets Quilkin is meant to
+        // process will have them ipv4 header without options is 20 bytes (5 *
+        // WORD_SIZE)
+        if ((v4->vihl & 0xf) == 5) {
+            // Ignore fragmented packets, we don't support them, but ignore the
+            // Don't Fragment flag
+            if ((((u16)v4->frags[0] << 8 | (u16)v4->frags[1]) ^ 0x4000) == 0) {
+                MUTE valid_or_pass(udp, UdpHdr, offset);
+                return redirect_udp(udp);
+            }
+        }
+        break;
     case ICMP:
         MUTE valid_or_pass(icmp, IcmpHeader, offset);
         if (icmp->kind == ECHO_REPLYV4) {
@@ -145,7 +153,7 @@ inline XdpAction redirect_ipv4(struct xdp_md* ctx) {
     return XDP_PASS;
 }
 
-inline XdpAction redirect_ipv6(struct xdp_md* ctx) {
+XdpAction redirect_ipv6(struct xdp_md* ctx) {
     size_t offset = sizeof(EthHdr);
     valid_or_pass(v6, Ipv6Hdr, offset);
     offset += sizeof(Ipv6Hdr);
@@ -155,20 +163,33 @@ inline XdpAction redirect_ipv6(struct xdp_md* ctx) {
         MUTE valid_or_pass(udp, UdpHdr, offset);
         return redirect_udp(udp);
     case ICMPv6:
-        MUTE valid_or_pass(icmp, Icmpv6Hdr, offset);
-        offset += sizeof(Icmpv6Hdr);
+        MUTE valid_or_pass(icmp, IcmpHeader, offset);
+        offset += sizeof(IcmpHeader);
 
         if (icmp->kind == NEIGHBOR_ADVERTISEMENT) {
             MUTE valid_or_pass(na, NeighAdvert, offset);
 
             // For now, only update the mapping if we (ie the kernel) explicitly
-            // asked for the neighbor, as it already has all the logic around
-            // caching, though we need to confirm if it continues to update
-            // neighbors after we take over all sending and receiving from the
-            // target
+            // solicited this this neighbor, as it already has all the logic
+            // around caching
             if (na->solicited) {
-                send_mac_to_userspace(v6->src_addr, na->ll_addr,
-                                      NEIGHBOR_ADVERTISEMENT);
+                AdvertOptions* opts = (AdvertOptions*)ptr_at(
+                    ctx, offset + sizeof(NeighAdvert), sizeof(AdvertOptions));
+
+                // According to
+                // https://datatracker.ietf.org/doc/html/rfc2461#section-4.4,
+                // the target link layer address SHOULD be included for unicast
+                // (ie the kernel already has the link laye address), but at
+                // least testing with my local router, it doesn't do that
+                if (opts && opts->type == NA_TARGET_LL_ADDR &&
+                    opts->length == 1) {
+                    send_mac_to_userspace(v6->src_addr, opts->ll_addr,
+                                          NEIGHBOR_ADVERTISEMENT);
+                } else {
+                    MUTE valid_or_pass(eth, EthHdr, 0);
+                    send_mac_to_userspace(v6->src_addr, eth->src_addr,
+                                          NEIGHBOR_ADVERTISEMENT);
+                }
             }
         } else if (icmp->kind == ECHO_REPLYV6) {
             MUTE valid_or_pass(eth, EthHdr, 0);
@@ -228,8 +249,7 @@ XdpAction redirect_packet(struct xdp_md* ctx) {
     case IPv6:
         return redirect_ipv6(ctx);
     case Arp:
-        handle_arp(ctx);
-        break;
+        return handle_arp(ctx);
     default:
         break;
     }
@@ -239,13 +259,14 @@ XdpAction redirect_packet(struct xdp_md* ctx) {
 
 SEC("xdp")
 XdpAction all_queues(struct xdp_md* ctx) {
-    if (redirect_packet(ctx) == XDP_REDIRECT) {
-        __u32 index = ctx->rx_queue_index;
+    XdpAction action = redirect_packet(ctx);
+    if (action == XDP_REDIRECT) {
+        u32 index = ctx->rx_queue_index;
 
         if (bpf_map_lookup_elem(&XSK, &index)) {
             return bpf_redirect_map(&XSK, index, 0);
         }
     }
 
-    return XDP_PASS;
+    return action;
 }

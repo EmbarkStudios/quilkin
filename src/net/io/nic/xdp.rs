@@ -6,6 +6,7 @@ use quilkin_xdp::{
     xdp::{
         self,
         nic::{NicIndex, NicName},
+        packet::net_types::MacAddress,
     },
 };
 use std::sync::Arc;
@@ -350,14 +351,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     )?;
 
     let ip_to_mac = if config.cache_layer2 {
-        // Theoretically it's possible to have a non-utf8 nic name, but until someone actually files a bug it's such a
-        // niche case it's not worth considering
-        let gateway_mac = super::cache::determine_gateway_mac(
-            name.as_str()
-                .expect("the chosen NIC does not have a utf-8 name"),
-        )?;
-        let ring = ebpf_prog.layer2_ring()?;
-        Some((ring, gateway_mac))
+        Some(ebpf_prog.layer2_ring()?)
     } else {
         None
     };
@@ -463,18 +457,10 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     })
 }
 
-trait LinkLayer {
-    fn try_fill<const N: usize>(
-        &mut self,
-        packet: xdp::Packet,
-        tx_slab: &mut xdp::slab::StackSlab<N>,
-    );
-    fn update<const N: usize>(&mut self, tx_slab: &mut xdp::slab::StackSlab<N>);
-}
-
 pub struct XdpLoop {
     threads: Vec<std::thread::JoinHandle<()>>,
     ebpf_prog: quilkin_xdp::EbpfProgram,
+    xdp_link: quilkin_xdp::aya::programs::xdp::XdpLinkId,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
     terminate: Arc<std::sync::atomic::AtomicBool>,
     sessions: Arc<process::SessionState>,
@@ -601,7 +587,12 @@ where
 /// # Errors
 ///
 /// This can fail if threads can not be spawned for some reason (unlikely)
-pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoop, XdpSpawnError> {
+pub fn spawn(
+    mut workers: XdpWorkers,
+    config: process::ConfigState,
+) -> Result<XdpLoop, XdpSpawnError> {
+    use super::cache;
+
     let nic = workers.nic;
     let ebpf_prog = workers.ebpf_prog;
     let xdp_link = workers.xdp_link;
@@ -615,6 +606,30 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
 
     let queue_count = workers.workers.len();
     let mut threads = Vec::with_capacity(queue_count);
+
+    let mut rxs = Vec::with_capacity(if workers.ip_to_mac.is_some() {
+        workers.workers.len()
+    } else {
+        0
+    });
+
+    let l2_cache = if let Some(ring) = workers.ip_to_mac.take() {
+        let mut txs = Vec::with_capacity(workers.workers.len());
+
+        for _ in 0..workers.workers.len() {
+            let (tx, rx) = crossbeam_channel::bounded(128);
+            txs.push(tx);
+            rxs.push(rx);
+        }
+
+        // We pop receivers off the vec, but they need to align on the index
+        txs.reverse();
+
+        Some(cache::L2Cache::with_channels(txs, ring)?)
+    } else {
+        None
+    };
+
     for (i, mut worker) in workers.workers.into_iter().enumerate() {
         let cfg = config.clone();
         let ss = session_state.clone();
@@ -656,6 +671,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
     Ok(XdpLoop {
         threads,
         ebpf_prog,
+        xdp_link,
         shutdown,
         terminate,
         sessions: session_state,
@@ -754,8 +770,7 @@ fn io_loop<LL: LinkLayer>(
                 }
             }
 
-            // Process each of the packets that we received, potentially queuing
-            // packets to be sent
+            // Process each of the packets that we received, potentially queuing packets to be sent
             process::process_packets(
                 &mut rx_slab,
                 &mut umem,
@@ -764,6 +779,10 @@ fn io_loop<LL: LinkLayer>(
                 &mut state,
                 &mut ll,
             );
+
+            // For the normal ethernet swap (packets are received or sent via a gateway) this does nothing, but for
+            // layer 2 caching this will attempt to enqueue packets that have had their destination ethernet address acquired
+            ll.update(&mut tx_slab, &mut umem);
 
             let before = tx_slab.len();
             let enqueued_sends = match tx.send(&mut tx_slab, true) {

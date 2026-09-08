@@ -125,6 +125,7 @@ pub fn read_echo_reply(buf: &[u8]) -> io::Result<u16> {
         ));
     }
 
+    // SAFETY: We ensure the size above
     let echo_response: IcmpEchoMsg = unsafe { std::ptr::read_unaligned(buf.as_ptr().cast()) };
 
     if echo_response.header.kind != ECHO_REPLY {

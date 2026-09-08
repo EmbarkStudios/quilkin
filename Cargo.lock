@@ -4144,6 +4144,7 @@ dependencies = [
  "aya",
  "aya-log",
  "aya-obj",
+ "etherparse",
  "libc",
  "thiserror 2.0.20",
  "xdp",

@@ -3,7 +3,7 @@ use std::{
     sync::atomic::{AtomicU16, Ordering},
 };
 
-pub(super) struct Mmap {
+pub(crate) struct Mmap {
     pub(crate) buf: *mut u8,
     len: usize,
 }

@@ -1,13 +1,4 @@
-#include <linux/bpf.h>
-
-#include <bpf/bpf_helpers.h>
-
-typedef unsigned char u8;
-typedef unsigned short u16;
-typedef __signed__ int i32;
-typedef unsigned int u32;
-typedef __SIZE_TYPE__ size_t;
-typedef unsigned long long u64;
+#include "bpf.h"
 
 typedef i32 XdpAction;
 
@@ -18,7 +9,7 @@ typedef struct {
 } EthHdr;
 
 enum EtherType : u16 {
-    IPv4 = 0x0800,
+    IPv4 = 0x0008,
     Arp = 0x0608,
     IPv6 = 0xdd86,
 };
@@ -83,3 +74,10 @@ inline const void* ptr_at(struct xdp_md* ctx, size_t offset, size_t len) {
 // clang-format off
 #define MUTE {}
 // clang-format on
+
+struct {
+    __uint(type, BPF_MAP_TYPE_XSKMAP);
+    __type(key, u32);
+    __type(value, u32);
+    __uint(max_entries, 128);
+} XSK SEC(".maps");

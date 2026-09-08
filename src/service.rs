@@ -1090,6 +1090,7 @@ impl Service {
                 thread_priority: self.xdp.thread_priority as _,
                 pin_threads: self.xdp.pin_to_core,
             },
+            cache_layer2: self.xdp.same_physical_network,
         })
         .context("failed to setup XDP")?;
 
@@ -1726,6 +1727,16 @@ pub struct XdpOptions {
         env = "QUILKIN_SERVICE_UDP_XDP_PIN_TO_CORE"
     )]
     pub pin_to_core: bool,
+    /// Enables caching of layer 2 (ethernet) addresses when proxies are located on the same physical network as the servers
+    /// they are proxying
+    ///
+    /// When servers and proxies are on separate networks this isn't needed as all packets from both clients and servers
+    /// are routed through a gateway
+    #[clap(
+        long = "service.udp.xdp.same-physical-network",
+        env = "QUILKIN_SERVICE_UDP_XDP_SAME_PHYSICAL_NETWORK"
+    )]
+    pub same_physical_network: bool,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -1739,6 +1750,7 @@ impl Default for XdpOptions {
             schedule_policy: None,
             thread_priority: 99,
             pin_to_core: false,
+            same_physical_network: false,
         }
     }
 }
