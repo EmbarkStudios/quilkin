@@ -34,14 +34,16 @@ static ALIGNED_MAIN: &AlignedTo<u64, [u8]> = &AlignedTo {
     bytes: *include_bytes!("../bin/main.bin"),
 };
 
-static PROGRAM_MAIN: &[u8] = &ALIGNED_MAIN.bytes;
+/// The normal eBPF program used when proxying to a different physical network
+pub static PROGRAM_MAIN: &[u8] = &ALIGNED_MAIN.bytes;
 
 static ALIGNED_L2: &AlignedTo<u64, [u8]> = &AlignedTo {
     _align: [],
     bytes: *include_bytes!("../bin/layer2.bin"),
 };
 
-static PROGRAM_L2: &[u8] = &ALIGNED_L2.bytes;
+/// The eBPF program used when proxying to the same physical network, requiring resolution of layer 2 (ethernet) addresses
+pub static PROGRAM_L2: &[u8] = &ALIGNED_L2.bytes;
 
 #[derive(thiserror::Error, Debug)]
 pub enum BindError {
@@ -90,7 +92,7 @@ pub struct XdpWorker {
 }
 
 pub struct EbpfProgram {
-    bpf: aya::Ebpf,
+    pub bpf: aya::Ebpf,
     /// The external port is a variable that we modify at load time so the eBPF
     /// program can filter out which packets it is interested in. This needs to
     /// be the same port used in the I/O loop to determine if the packet is sent
@@ -98,8 +100,6 @@ pub struct EbpfProgram {
     pub external_port: xdp::packet::net_types::NetworkU16,
     /// The port QCMP packets are sent to
     pub qcmp_port: xdp::packet::net_types::NetworkU16,
-    /// The ID of our linked program, if we are currently attached to an interface
-    link_id: Option<aya::programs::xdp::XdpLinkId>,
 }
 
 impl EbpfProgram {
@@ -111,7 +111,9 @@ impl EbpfProgram {
     /// If `cache_layer2` is set, we load a program that keeps updates a mapping of IP -> MAC addresses so that we can set
     /// the proper destination MAC address for the outgoing packet
     pub fn load(external_port: u16, qcmp_port: u16, cache_layer2: bool) -> Result<Self, LoadError> {
-        Self::load_inner(
+        Self::validate_port_range()?;
+
+        Self::load_program(
             external_port,
             qcmp_port,
             if cache_layer2 {
@@ -122,13 +124,16 @@ impl EbpfProgram {
         )
     }
 
-    fn load_inner(
+    /// The eBPF load itself, [`Self::load`] additionally validates the assumption
+    /// the port mapping relies on
+    ///
+    /// This is public, but really only for integration tests
+    #[doc(hidden)]
+    pub fn load_program(
         external_port: u16,
         qcmp_port: u16,
         program: &'static [u8],
     ) -> Result<Self, LoadError> {
-        Self::validate_port_range()?;
-
         let mut loader = aya::EbpfLoader::new();
         let external_port_no = external_port.to_be_bytes();
         loader.override_global("EXTERNAL_PORT_NO", &external_port_no, true);
@@ -142,7 +147,6 @@ impl EbpfProgram {
             bpf,
             external_port: xdp::packet::net_types::NetworkU16(u16::from_ne_bytes(external_port_no)),
             qcmp_port: xdp::packet::net_types::NetworkU16(u16::from_ne_bytes(qcmp_port_no)),
-            link_id: None,
         })
     }
 
@@ -178,24 +182,7 @@ impl EbpfProgram {
             return Err(LoadError::DefaultPortRangeModified(start, end));
         }
 
-        Ok(Self::load_program(external_port, qcmp_port)?)
-    }
-
-    /// The eBPF load itself, [`Self::load`] additionally validates the assumption
-    /// the port mapping relies on
-    fn load_program(external_port: u16, qcmp_port: u16) -> Result<Self, aya::EbpfError> {
-        let mut loader = aya::EbpfLoader::new();
-        let external_port_no = external_port.to_be();
-        loader.override_global("EXTERNAL_PORT_NO", &external_port_no, true);
-
-        let qcmp_port_no = qcmp_port.to_be();
-        loader.override_global("QCMP_PORT_NO", &qcmp_port_no, true);
-
-        Ok(Self {
-            bpf: loader.load(PROGRAM)?,
-            external_port: xdp::packet::net_types::NetworkU16(external_port_no),
-            qcmp_port: xdp::packet::net_types::NetworkU16(qcmp_port_no),
-        })
+        Ok(())
     }
 
     /// Creates and binds sockets
@@ -214,8 +201,10 @@ impl EbpfProgram {
                 .ok_or(BindError::MissingMap("XSK"))?,
         )?;
 
-        let mut entries = Vec::with_capacity(device_caps.queue_count as _);
-        for i in 0..device_caps.queue_count {
+        let queue_count = device_caps.queues.rx_count();
+
+        let mut entries = Vec::with_capacity(queue_count as _);
+        for i in 0..queue_count {
             let umem = xdp::Umem::map(umem_cfg)?;
             let mut sb = xdp::socket::XdpSocketBuilder::new()?;
             let (rings, mut bind_flags) = sb.build_wakable_rings(&umem, ring_cfg)?;
@@ -240,6 +229,17 @@ impl EbpfProgram {
         Ok(entries)
     }
 
+    /// We use this entrypoint for now, but in the future we could also use
+    /// a round robin mode when the xdp lib supports shared Umem
+    #[doc(hidden)]
+    pub fn program_mut(&mut self) -> &mut aya::programs::Xdp {
+        self.bpf
+            .program_mut("all_queues")
+            .expect("failed to locate 'all_queues' program")
+            .try_into()
+            .expect("'all_queues' is not an xdp program")
+    }
+
     /// Returns the ring buffer of IP + MAC entries that is written to by eBPF when receiving an ICMP or ARP packet
     pub fn layer2_ring(&mut self) -> Result<aya::maps::RingBuf<aya::maps::MapData>, BindError> {
         let map = self
@@ -250,6 +250,18 @@ impl EbpfProgram {
             .ok_or(BindError::MissingMap("IP_TO_MAC"))?;
 
         Ok(aya::maps::RingBuf::try_from(map)?)
+    }
+
+    /// Verifies and loads the program into the kernel; call once, before [`Self::attach`].
+    pub fn load_into_kernel(&mut self) -> Result<(), aya::programs::ProgramError> {
+        if let Err(_error) = aya_log::EbpfLogger::init(&mut self.bpf) {
+            // Would be good to enable this if we do end up adding log messages to
+            // the eBPF program, right now we don't so this will error as the ring
+            // buffer used to transfer log messages is not created if there are none
+            //tracing::warn!(%error, "failed to initialize eBPF logging");
+        }
+
+        self.program_mut().load()
     }
 
     /// Attaches the eBPF program to the specified interface
@@ -279,43 +291,5 @@ impl EbpfProgram {
         link_id: aya::programs::xdp::XdpLinkId,
     ) -> Result<(), aya::programs::ProgramError> {
         self.program_mut().detach(link_id)
-    }
-}
-
-/// The eBPF object is committed rather than built, so these validate it still
-/// has what [`EbpfProgram::load`] expects.
-///
-/// Loading a program requires `CAP_BPF` + `CAP_NET_ADMIN`, so the tests that
-/// need the kernel are `#[ignore]`d. Run the built test binary under sudo rather
-/// than cargo, which would leave root owned artifacts in `target`:
-///
-/// ```sh
-/// BIN=$(cargo test -p quilkin-xdp --no-run 2>&1 | grep -oE '\(target/[^)]+\)' | tr -d '()')
-/// sudo "$BIN" --ignored --test-threads 1
-/// ```
-#[cfg(test)]
-mod tests {
-    use super::{EbpfProgram, PROGRAM};
-    use aya::programs::{TestRun as _, TestRunOptions};
-
-    const EXTERNAL_PORT: u16 = 7777;
-    const QCMP_PORT: u16 = 7600;
-
-    /// The action the kernel reports the program returned
-    const XDP_PASS: u32 = 2;
-    const XDP_REDIRECT: u32 = 4;
-
-    fn parse() -> aya_obj::Object {
-        aya_obj::Object::parse(PROGRAM).expect("failed to parse eBPF program")
-    }
-}
-
-impl Drop for EbpfProgram {
-    fn drop(&mut self) {
-        if self.link_id.is_some()
-            && let Err(error) = self.detach()
-        {
-            tracing::error!(%error, "failed to detach eBPF program");
-        }
     }
 }

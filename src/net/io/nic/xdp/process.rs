@@ -4,6 +4,7 @@ use crate::{
     metrics::{self, AsnInfo},
     net::{
         error::PipelineError,
+        io::nic::cache::{self, types::LinkLayerAddr},
         maxmind_db::{self, IpNetEntry},
         sessions::{inner_metrics as session_metrics, quality as session_quality},
     },
@@ -14,7 +15,7 @@ use quilkin_xdp::xdp::{
     Umem,
     packet::{
         Packet, PacketError, csum,
-        net_types::{IpAddresses, IpHdr, Ipv4Hdr, NetworkU16, UdpHdr, UdpHeaders},
+        net_types::{IpAddresses, MacAddress, NetworkU16, UdpHdr, UdpHeaders},
     },
     slab::{Slab, StackSlab},
 };
@@ -30,7 +31,7 @@ use std::{
 
 /// Wrapper around the actual packet buffer and the UDP metadata it parsed to
 /// so that we can satisify the filter traits
-struct PacketWrapper {
+pub struct PacketWrapper {
     buffer: Packet,
     headers: UdpHeaders,
     /// A modification a filter requested that couldn't be applied, the packet is
@@ -546,10 +547,6 @@ impl SessionState {
     }
 }
 
-/// The minimum ethernet frame size, the 4 byte frame check sequence is stripped
-/// before we see it
-const MIN_ETHERNET_FRAME: usize = 60;
-
 /// Parses the headers of a received frame, returning the reason it couldn't be
 /// parsed, which is used as the drop metric label.
 ///
@@ -559,50 +556,22 @@ const MIN_ETHERNET_FRAME: usize = 60;
 /// couldn't rule out, eg. a truncated frame, is rejected.
 #[inline]
 fn parse_headers(buffer: &mut Packet) -> Result<UdpHeaders, &'static str> {
-    // Two iterations at most, the reparse is against an exactly sized frame
-    for _ in 0..2 {
-        let error = match UdpHeaders::parse_packet(buffer) {
-            // Both the parse above and the checksums we calculate read the UDP
-            // header at the offset a 20 byte ipv4 header puts it at, which the
-            // parse itself doesn't validate
-            Ok(Some(headers)) => {
-                return match &headers.ip {
-                    IpHdr::V4(v4) if usize::from(v4.internet_header_length()) != Ipv4Hdr::LEN => {
-                        Err("ipv4 header length")
-                    }
-                    _ => Ok(headers),
-                };
+    match UdpHeaders::parse_packet(buffer) {
+        Ok(Some(hdrs)) => {
+            // ignore packets that have ip options/extensions traffic we care about should not have these
+            if hdrs.ip.not_minimum_sized() {
+                Err(if hdrs.is_ipv4() {
+                    "ipv4 header length"
+                } else {
+                    "ipv6 header length"
+                })
+            } else {
+                Ok(hdrs)
             }
-            Ok(None) => return Err("non-UDP packet"),
-            Err(error) => error,
-        };
-
-        // `offset` is where the UDP header starts and `size` the datagram length,
-        // so anything past their sum is padding
-        let PacketError::InsufficientData {
-            offset,
-            size,
-            length,
-        } = error
-        else {
-            return Err(error.discriminant());
-        };
-
-        let Some(padding) = length.checked_sub(offset + size) else {
-            return Err("truncated packet");
-        };
-
-        // Padding only ever exists to reach the minimum frame size
-        if padding == 0 || length > MIN_ETHERNET_FRAME {
-            return Err("trailing data");
         }
-
-        if let Err(error) = buffer.adjust_tail(-(padding as i32)) {
-            return Err(error.discriminant());
-        }
+        Err(err) => Err(err.discriminant()),
+        Ok(None) => Err("non-UDP packet"),
     }
-
-    Err("malformed packet")
 }
 
 /// Returns the frame to be dropped if a filter failed, or requested a
@@ -660,20 +629,21 @@ pub fn process_packets<const RXN: usize, const TXN: usize, LL: LinkLayer>(
             }
         };
 
-        if headers.udp.destination == state.qcmp_port {
-            process_qcmp_packet(buffer, headers, umem, tx_slab);
+        let packet = PacketWrapper::new(buffer, headers);
+
+        if packet.headers.udp.destination == state.qcmp_port {
+            process_qcmp_packet(packet, umem, tx_slab);
             continue;
         }
 
-        let is_client = headers.udp.destination == state.external_port;
+        let is_client = packet.headers.udp.destination == state.external_port;
         let direction = if is_client {
             had_read = true;
+            ll.update_gateway(packet.headers.eth.source, packet.headers.is_ipv4());
             metrics::READ
         } else {
             metrics::WRITE
         };
-
-        let packet = PacketWrapper::new(buffer, headers);
 
         let res = {
             let _timer = metrics::processing_time(direction).start_timer();
@@ -681,7 +651,7 @@ pub fn process_packets<const RXN: usize, const TXN: usize, LL: LinkLayer>(
             if is_client {
                 process_client_packet(packet, umem, filters, &cm, state, tx_slab, ll)
             } else {
-                process_server_packet(packet, umem, filters, state, tx_slab, jitter)
+                process_server_packet(packet, umem, filters, state, tx_slab, jitter, ll)
             }
         };
 
@@ -714,28 +684,33 @@ pub fn process_packets<const RXN: usize, const TXN: usize, LL: LinkLayer>(
 #[allow(clippy::too_many_arguments)]
 fn push_packet<const TXN: usize>(
     direction: metrics::Direction,
-    packet: Packet,
+    packet: PacketWrapper,
     asn: AsnInfo<'_>,
     cluster: &str,
-    data_length: usize,
     res: Result<(), PacketError>,
     tx_slab: &mut StackSlab<TXN>,
     umem: &mut Umem,
+    ll: &mut LL,
 ) {
     match res {
         Ok(()) => {
-            if let Some(packet) = tx_slab.push_front(packet) {
-                metrics::packets_dropped(direction, metrics::DropReason::QueueFull).inc();
+            let len = packet.headers.data_length();
+            if let Some((packet, reason)) = ll.try_fill(
+                packet,
+                tx_slab,
+                matches!(direction, metrics::Direction::Read),
+            ) {
+                metrics::packets_dropped_total(direction, reason).inc();
                 umem.free_packet(packet);
             } else {
                 metrics::packets_total(direction, &asn, cluster).inc();
-                metrics::bytes_total(direction, &asn, cluster).inc_by(data_length as u64);
+                metrics::bytes_total(direction, &asn, cluster).inc_by(len as u64);
             }
         }
         Err(err) => {
             metrics::errors_total(direction, err.discriminant(), &metrics::EMPTY).inc();
-            metrics::packets_dropped(direction, metrics::DropReason::SocketError).inc();
-            umem.free_packet(packet);
+            metrics::packets_dropped_total(direction, metrics::DropReason::SocketError).inc();
+            umem.free_packet(packet.buffer);
         }
     }
 }
@@ -769,9 +744,6 @@ fn process_client_packet<const TXN: usize, LL: LinkLayer>(
     // as the packet data is modified by the filters, but for now we just do the
     // full checksum for the sake of simplicity
     let data_checksum = csum::DataChecksum::calculate_if_needed(data, &packet.buffer);
-    let data_length = data.len();
-
-    let eth = packet.headers.eth.swapped();
 
     // If we have more than 1 destination we need to clone the packet data to
     // a new packet for each destination, only modifying the headers
@@ -784,7 +756,7 @@ fn process_client_packet<const TXN: usize, LL: LinkLayer>(
             let (source, asn, ips) = state.session(source_addr, dest_addr, cluster);
 
             let mut headers = UdpHeaders {
-                eth,
+                eth: packet.headers.eth,
                 ip: ips.with_header(&packet.headers.ip),
                 udp: UdpHdr {
                     source,
@@ -806,13 +778,17 @@ fn process_client_packet<const TXN: usize, LL: LinkLayer>(
             let res = fill_packet(&mut headers, data, data_checksum, &mut new_packet);
             push_packet(
                 metrics::Direction::Read,
-                new_packet,
+                PacketWrapper {
+                    buffer: new_packet,
+                    headers,
+                    failure: None,
+                },
                 asn,
                 cluster,
-                data_length,
                 res,
                 tx_slab,
                 umem,
+                ll,
             );
         }
     }
@@ -824,7 +800,7 @@ fn process_client_packet<const TXN: usize, LL: LinkLayer>(
     let (source, asn, ips) = state.session(source_addr, dest_addr, cluster);
 
     let mut headers = UdpHeaders {
-        eth,
+        eth: packet.headers.eth,
         ip: ips.with_header(&packet.headers.ip),
         udp: UdpHdr {
             source,
@@ -837,29 +813,30 @@ fn process_client_packet<const TXN: usize, LL: LinkLayer>(
 
     headers.calc_checksum(data_checksum);
 
-    let res = modify_packet_headers(&packet.headers, &mut headers, &mut packet.buffer);
+    let res = modify_packet_headers(headers, &mut packet);
     push_packet(
         metrics::Direction::Read,
-        packet.buffer,
+        packet,
         asn,
         cluster,
-        data_length,
         res,
         tx_slab,
         umem,
+        ll,
     );
 
     Ok(None)
 }
 
 #[inline]
-fn process_server_packet<const TXN: usize>(
+fn process_server_packet<const TXN: usize, LL: LinkLayer>(
     packet: PacketWrapper,
     umem: &mut Umem,
     filters: &crate::filters::FilterChain,
     state: &mut State,
     tx_slab: &mut StackSlab<TXN>,
     jitter: i64,
+    ll: &mut LL,
 ) -> Result<Option<Packet>, (PipelineError, Packet)> {
     let mut server_addr = packet.headers.source_address();
     server_addr.set_ip(server_addr.ip().to_canonical());
@@ -878,8 +855,8 @@ fn process_server_packet<const TXN: usize>(
     let result = filters.write(&mut ctx);
     let mut packet = filtered(result, ctx.contents)?;
 
-    let mut headers = UdpHeaders {
-        eth: packet.headers.eth.swapped(),
+    let headers = UdpHeaders {
+        eth: packet.headers.eth,
         ip: state.ips(client_addr.ip()).with_header(&packet.headers.ip),
         udp: UdpHdr {
             source: state.external_port,
@@ -890,20 +867,20 @@ fn process_server_packet<const TXN: usize>(
         data: packet.headers.data,
     };
 
-    let res = modify_packet_headers(&packet.headers, &mut headers, &mut packet.buffer);
+    let res = modify_packet_headers(headers, &mut packet);
     if res.is_ok() {
         let _ = packet.buffer.calc_udp_checksum();
     }
 
     push_packet(
         metrics::Direction::Write,
-        packet.buffer,
+        packet,
         asn,
         &cluster,
-        packet.headers.data_length(),
         res,
         tx_slab,
         umem,
+        ll,
     );
     Ok(None)
 }
@@ -912,17 +889,17 @@ fn process_server_packet<const TXN: usize>(
 /// resizing the header portion as needed if changing between ipv4 and ipv6
 #[inline]
 fn modify_packet_headers(
-    original: &UdpHeaders,
-    new: &mut UdpHeaders,
-    packet: &mut Packet,
+    mut new: UdpHeaders,
+    packet: &mut PacketWrapper,
 ) -> Result<(), PacketError> {
-    match (original.is_ipv4(), new.is_ipv4()) {
-        (true, false) => packet.adjust_head(-20)?,
-        (false, true) => packet.adjust_head(20)?,
+    match (packet.headers.is_ipv4(), new.is_ipv4()) {
+        (true, false) => packet.buffer.adjust_head(-20)?,
+        (false, true) => packet.buffer.adjust_head(20)?,
         (_, _) => {}
     }
 
-    new.set_packet_headers(packet)?;
+    new.set_packet_headers(&mut packet.buffer)?;
+    packet.headers = new;
     Ok(())
 }
 
@@ -942,16 +919,18 @@ fn fill_packet(
 }
 
 fn process_qcmp_packet<const TXN: usize>(
-    mut packet: Packet,
-    headers: UdpHeaders,
+    mut packet: PacketWrapper,
     umem: &mut Umem,
     tx_slab: &mut StackSlab<TXN>,
 ) {
     use crate::{codec::qcmp, time::UtcTimestamp};
 
-    fn inner(packet: &mut Packet, headers: UdpHeaders) -> bool {
+    fn inner(packet: &mut PacketWrapper) -> bool {
         let received_at = UtcTimestamp::now();
-        let Some(data) = packet.get(headers.data.start..headers.data.end) else {
+        let Some(data) = packet
+            .buffer
+            .get(packet.headers.data.start..packet.headers.data.end)
+        else {
             tracing::debug!("corrupt UDP packet, data payload is out of range");
             return false;
         };
@@ -979,30 +958,33 @@ fn process_qcmp_packet<const TXN: usize>(
         let mut ob = qcmp::QcmpPacket::default();
         let buf = qcmp::Protocol::ping_reply(nonce, client_timestamp, received_at).encode(&mut ob);
 
-        if let Err(error) = packet.adjust_tail(-(headers.data_length() as i32)) {
+        if let Err(error) = packet
+            .buffer
+            .adjust_tail(-(packet.headers.data_length() as i32))
+        {
             tracing::debug!(%error, "unable to trim QCMP ping data");
             return false;
         }
 
-        if let Err(error) = packet.insert(headers.data.start, buf) {
+        if let Err(error) = packet.buffer.insert(packet.headers.data.start, buf) {
             tracing::debug!(%error, "unable to write QCMP pong data");
             return false;
         }
 
         let mut new = UdpHeaders::new(
-            headers.eth.swapped(),
-            headers.ip.swapped(),
-            headers.udp.swapped(),
-            headers.data.start..headers.data.start + buf.len(),
+            packet.headers.eth.swapped(),
+            packet.headers.ip.swapped(),
+            packet.headers.udp.swapped(),
+            packet.headers.data.start..packet.headers.data.start + buf.len(),
         );
         new.decrement_hop();
 
-        if let Err(error) = modify_packet_headers(&headers, &mut new, packet) {
+        if let Err(error) = modify_packet_headers(new, packet) {
             tracing::debug!(%error, "unable to modify QCMP packet headers");
             return false;
         }
 
-        if let Err(error) = packet.calc_udp_checksum() {
+        if let Err(error) = packet.buffer.calc_udp_checksum() {
             tracing::debug!(%error, "failed to calculate QCMP packet checksum");
             return false;
         }
@@ -1010,20 +992,168 @@ fn process_qcmp_packet<const TXN: usize>(
         true
     }
 
-    let packet = if inner(&mut packet, headers) {
+    let packet = if inner(&mut packet) {
         tracing::debug!("sending QCMP pong");
 
-        if let Some(packet) = tx_slab.push_front(packet) {
+        if let Some(packet) = tx_slab.push_front(packet.buffer) {
             tracing::debug!("tx slab full, unable to send QCMP pong");
             packet
         } else {
             return;
         }
     } else {
-        packet
+        packet.buffer
     };
 
     umem.free_packet(packet);
+}
+
+pub struct Swap;
+
+impl LinkLayer for Swap {
+    #[inline]
+    fn try_fill<const N: usize>(
+        &mut self,
+        mut packet: PacketWrapper,
+        tx_slab: &mut xdp::slab::StackSlab<N>,
+        _to_client: bool,
+    ) -> Option<Packet> {
+        packet.headers.eth = packet.headers.eth.swapped();
+        // All the packet headers have been written, so we only update the eth header here
+        packet
+            .buffer
+            .write(0, packet.headers.eth)
+            .expect("unreachable");
+        tx_slab.push_front(packet.buffer)
+    }
+}
+
+pub(super) struct Local {
+    cache: Arc<cache::L2Cache>,
+    rx: cache::CacheRx,
+    queued: Vec<PacketWrapper>,
+    overflow: Vec<Packet>,
+    ipv6_gateway: MacAddress,
+    ipv4_gateway: MacAddress,
+    rxid: u8,
+}
+
+impl Local {
+    pub(super) fn new(cache: Arc<cache::L2Cache>, rx: cache::CacheRx, rxid: u8) -> Self {
+        Self {
+            cache,
+            rx,
+            rxid,
+            queued: Vec::new(),
+            overflow: Vec::new(),
+            ipv4_gateway: MacAddress([0; 6]),
+            ipv6_gateway: MacAddress([0; 6]),
+        }
+    }
+
+    #[inline]
+    fn set_destination(packet: &mut PacketWrapper, dest: MacAddress) {
+        packet.headers.eth.source = packet.headers.eth.destination;
+        packet.headers.eth.destination = dest;
+        // All the packet headers have been written, so we only update the eth header here
+        packet
+            .buffer
+            .write(0, packet.headers.eth)
+            .expect("unreachable");
+    }
+}
+
+impl LinkLayer for Local {
+    #[inline]
+    fn update_gateway(&mut self, addr: MacAddress, v4: bool) {
+        if v4 {
+            self.ipv4_gateway = addr;
+        } else {
+            self.ipv6_gateway = addr;
+        }
+    }
+
+    fn try_fill<const N: usize>(
+        &mut self,
+        mut packet: PacketWrapper,
+        tx_slab: &mut xdp::slab::StackSlab<N>,
+        to_client: bool,
+    ) -> Option<xdp::Packet> {
+        if to_client {
+            let addr = if packet.headers.is_ipv4() {
+                self.ipv4_gateway
+            } else {
+                self.ipv6_gateway
+            };
+            Self::set_destination(&mut packet, addr);
+            return tx_slab.push_front(packet.buffer);
+        }
+
+        if let Some(ll) = self
+            .cache
+            .mac_for_ip(packet.headers.ip.destination_addr(), self.rxid)
+        {
+            let cache::types::LinkLayerAddr::Known(mac) = ll else {
+                return Some(packet.buffer);
+            };
+
+            Self::set_destination(&mut packet, mac);
+
+            tx_slab.push_front(packet.buffer)
+        } else {
+            self.queued.push(packet);
+            None
+        }
+    }
+
+    fn update<const N: usize>(&mut self, tx_slab: &mut xdp::slab::StackSlab<N>, umem: &mut Umem) {
+        if !self.overflow.is_empty() && tx_slab.available() > 0 {
+            while let Some(of) = self.overflow.pop() {
+                if let Some(nospace) = tx_slab.push_front(of) {
+                    self.overflow.push(nospace);
+                    break;
+                }
+            }
+        }
+
+        // Even if we don't have space in the slab for sends we want to dequeue all of the items currently in the channel
+        // to avoid filling it
+        while let Ok((ip, addr)) = self.rx.try_recv() {
+            let addr = if let LinkLayerAddr::Known(mac) = addr {
+                Some(mac)
+            } else {
+                None
+            };
+            let mut off = 0;
+
+            while let Some(pos) = self
+                .queued
+                .iter()
+                .skip(off)
+                .position(|pw| ip == pw.headers.ip.destination_addr())
+            {
+                let mut packet = self.queued.swap_remove(pos + off);
+
+                if let Some(dest) = addr {
+                    Self::set_destination(&mut packet, dest);
+
+                    if let Some(buff) = tx_slab.push_front(packet.buffer) {
+                        self.overflow.push(buff);
+                    }
+                } else {
+                    metrics::packets_dropped_total(
+                        metrics::Direction::Write,
+                        "ip unreachable",
+                        &metrics::EMPTY,
+                    )
+                    .inc();
+                    umem.free_packet(packet.buffer);
+                }
+
+                off += pos;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1101,12 +1231,12 @@ mod test {
         let mut data = [0u8; 2048];
         let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &payload, 1);
 
-        assert_eq!(packet.len(), MIN_ETHERNET_FRAME);
+        assert_eq!(packet.len(), nt::MIN_ETHERNET_FRAME);
         let headers = parse_headers(&mut packet).expect("failed to parse padded packet");
 
         assert_eq!(headers.data_length(), payload.len());
         assert_eq!(&packet[headers.data], &payload[..]);
-        assert_eq!(packet.len(), MIN_ETHERNET_FRAME - 1);
+        assert_eq!(packet.len(), nt::MIN_ETHERNET_FRAME - 1);
     }
 
     #[test]

@@ -16,9 +16,14 @@ BIN="$ROOT/crates/xdp/bin"
 
 mkdir -p "$TARGET"
 
+if ! command -v clang > /dev/null; then
+    echo "clang is required to build the eBPF code"
+    exit 1
+fi
+
 clang -target bpf -Wall -O2 -c "$EBPF_ROOT/src/dummy.c" -o "$TARGET/dummy"
-clang -target bpf -Wall -O2 -c "$EBPF_ROOT/src/main.c" -o "$TARGET/main"
-clang -target bpf -Wall -O2 -c "$EBPF_ROOT/src/layer2.c" -o "$TARGET/layer2"
+clang -target bpf -Wall -O2 -c -g "$EBPF_ROOT/src/main.c" -o "$TARGET/main"
+clang -target bpf -Wall -O2 -c -g "$EBPF_ROOT/src/layer2.c" -o "$TARGET/layer2"
 
 if [[ $1 == '--update' ]]; then
     cp "$TARGET/dummy" "$BIN/dummy.bin"

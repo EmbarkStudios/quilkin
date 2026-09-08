@@ -135,6 +135,7 @@ impl Harness {
             &mut tx,
             &mut self.cfg,
             &mut self.state,
+            &mut process::Swap,
         );
 
         assert!(rx.is_empty(), "a received packet wasn't processed");

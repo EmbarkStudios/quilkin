@@ -66,14 +66,14 @@ pub(super) fn cache_io_loop(
 
     // SAFETY: the eventfd lives as long as the io ring
     unsafe {
-        sq.push(&mut req.event.io_uring_entry().user_data(code::REQUEST))
+        sq.push(&req.event.io_uring_entry().user_data(code::REQUEST))
             .context("failed to enqueue eventfd IORING_OP_READ")?;
     }
 
     let mut enqueue_ebpf = |sq: &mut SubmissionQueue<'_>| -> eyre::Result<()> {
         // SAFETY: the eBPF ring buffer lives as long as the io ring
         unsafe {
-            sq.push(&mut ebpf_ring.entry().user_data(code::EBPF))
+            sq.push(&ebpf_ring.entry().user_data(code::EBPF))
                 .context("failed to enqueue IORING_OP_EPOLL_WAIT")
         }
     };
@@ -97,6 +97,7 @@ pub(super) fn cache_io_loop(
 
     enqueue_interval(&mut sq)?;
 
+    // SAFETY: The shutdown lives as long as the uring
     unsafe {
         sq.push(&shutdown.io_uring_entry().user_data(code::SHUTDOWN))
             .context("failed to enqueue shutdown event")?;
@@ -128,17 +129,17 @@ pub(super) fn cache_io_loop(
                     code::RECV => {
                         let ret = cqe.result();
 
-                        if ret < 0 {
-                            let error = std::io::Error::from_raw_os_error(-ret);
-                            tracing::error!(%error, "error receiving ICMP packet");
-                            continue;
-                        }
-
                         let flags = cqe.flags();
 
                         // Requeue the recv if needed
                         if flags & flags::IORING_CQE_F_MORE == 0 {
                             enqueue_recv(&mut sq)?;
+                        }
+
+                        if ret < 0 {
+                            let error = std::io::Error::from_raw_os_error(-ret);
+                            tracing::error!(%error, "error receiving ICMP packet");
+                            continue;
                         }
 
                         // This _should_ theoretically never happen
@@ -186,7 +187,7 @@ pub(super) fn cache_io_loop(
 
                         // Requeue the interval if needed
                         if flags & flags::IORING_CQE_F_MORE == 0 {
-                            enqueue_interval(&mut sq);
+                            enqueue_interval(&mut sq)?;
                         }
 
                         pings.process_timeouts(&mut sq);

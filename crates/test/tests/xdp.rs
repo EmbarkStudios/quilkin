@@ -66,7 +66,7 @@ async fn simple_forwarding() {
 
     let mut client_packet = unsafe { umem.alloc().unwrap() };
 
-    etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+    etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
         .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
         .udp(CLIENT.port(), PROXY.port())
         .write(&mut client_packet, &data)
@@ -81,6 +81,7 @@ async fn simple_forwarding() {
         &mut tx_slab,
         &mut cfg_state,
         &mut state,
+        &mut process::Swap,
     );
 
     assert!(rx_slab.is_empty());
@@ -152,7 +153,7 @@ async fn changes_ip_version() {
     let port = {
         let mut client_packet = unsafe { umem.alloc().unwrap() };
 
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(CLIENT.ip().octets(), PROXY4.ip().octets(), 64)
             .udp(CLIENT.port(), PROXY4.port())
             .write(&mut client_packet, &data)
@@ -165,11 +166,12 @@ async fn changes_ip_version() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
 
         assert!(rx_slab.is_empty());
-        let server_packet = tx_slab.pop_back().unwrap();
 
+        let server_packet = tx_slab.pop_back().unwrap();
         let mut packet_headers = etherparse::PacketHeaders::from_ethernet_slice(&server_packet)
             .expect("failed to parse packet");
 
@@ -191,7 +193,7 @@ async fn changes_ip_version() {
 
     let mut server_packet = unsafe { umem.alloc().unwrap() };
 
-    etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+    etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
         .ipv6(SERVER.ip().octets(), PROXY6.ip().octets(), 64)
         .udp(SERVER.port(), port)
         .write(&mut server_packet, &data)
@@ -204,6 +206,7 @@ async fn changes_ip_version() {
         &mut tx_slab,
         &mut cfg_state,
         &mut state,
+        &mut process::Swap,
     );
 
     assert!(rx_slab.is_empty());
@@ -275,7 +278,7 @@ async fn packet_manipulation() {
         while len > 0 {
             let mut client_packet = unsafe { umem.alloc().unwrap() };
 
-            etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+            etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
                 .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
                 .udp(CLIENT.port(), PROXY.port())
                 .write(&mut client_packet, &data[..len])
@@ -288,12 +291,15 @@ async fn packet_manipulation() {
                 &mut tx_slab,
                 &mut cfg_state,
                 &mut state,
+                &mut process::Swap,
             );
 
             assert!(rx_slab.is_empty());
-            let server_packet = tx_slab.pop_back().unwrap();
 
-            let udp = UdpHeaders::parse_packet(&server_packet).unwrap().unwrap();
+            let mut server_packet = tx_slab.pop_back().unwrap();
+            let udp = UdpHeaders::parse_packet(&mut server_packet)
+                .unwrap()
+                .unwrap();
             len -= 1;
             assert_eq!(&server_packet[udp.data], &data[..len]);
 
@@ -331,7 +337,7 @@ async fn packet_manipulation() {
         while len > 0 {
             let mut client_packet = unsafe { umem.alloc().unwrap() };
 
-            etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+            etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
                 .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
                 .udp(CLIENT.port(), PROXY.port())
                 .write(&mut client_packet, &data[..len])
@@ -344,12 +350,15 @@ async fn packet_manipulation() {
                 &mut tx_slab,
                 &mut cfg_state,
                 &mut state,
+                &mut process::Swap,
             );
 
             assert!(rx_slab.is_empty());
-            let server_packet = tx_slab.pop_back().unwrap();
 
-            let udp = UdpHeaders::parse_packet(&server_packet).unwrap().unwrap();
+            let mut server_packet = tx_slab.pop_back().unwrap();
+            let udp = UdpHeaders::parse_packet(&mut server_packet)
+                .unwrap()
+                .unwrap();
             len -= 1;
             assert_eq!(&server_packet[udp.data], &data[..len]);
 
@@ -390,7 +399,7 @@ async fn packet_manipulation() {
 
         let mut client_packet = unsafe { umem.alloc().unwrap() };
 
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
             .udp(CLIENT.port(), PROXY.port())
             .write(&mut client_packet, &data)
@@ -403,18 +412,20 @@ async fn packet_manipulation() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
 
-        let server_packet = tx_slab.pop_back().unwrap();
-
-        let udp = UdpHeaders::parse_packet(&server_packet).unwrap().unwrap();
+        let mut server_packet = tx_slab.pop_back().unwrap();
+        let udp = UdpHeaders::parse_packet(&mut server_packet)
+            .unwrap()
+            .unwrap();
         let pdata = server_packet[udp.data].to_vec();
         assert_eq!(&pdata[..2], &data[..2]);
         assert_eq!(&pdata[2..], &concat_data,);
 
         umem.free_packet(server_packet);
         let mut server_packet = unsafe { umem.alloc().unwrap() };
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(SERVER.ip().octets(), PROXY.ip().octets(), 64)
             .udp(SERVER.port(), udp.udp.source.host())
             .write(&mut server_packet, &pdata)
@@ -427,10 +438,13 @@ async fn packet_manipulation() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
-        let server_packet = tx_slab.pop_back().unwrap();
 
-        let udp = UdpHeaders::parse_packet(&server_packet).unwrap().unwrap();
+        let mut server_packet = tx_slab.pop_back().unwrap();
+        let udp = UdpHeaders::parse_packet(&mut server_packet)
+            .unwrap()
+            .unwrap();
         let pdata = &server_packet[udp.data];
         assert_eq!(&pdata[..concat_data.len()], &concat_data,);
         assert_eq!(&pdata[concat_data.len()..concat_data.len() + 2], &data[..2]);
@@ -505,7 +519,7 @@ async fn multiple_servers() {
 
     let mut client_packet = unsafe { umem.alloc().unwrap() };
 
-    etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+    etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
         .ipv6(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
         .udp(CLIENT.port(), PROXY.port())
         .write(&mut client_packet, tok[0])
@@ -518,10 +532,11 @@ async fn multiple_servers() {
         &mut tx_slab,
         &mut cfg_state,
         &mut state,
+        &mut process::Swap,
     );
 
-    while let Some(sp) = tx_slab.pop_back() {
-        let udp = UdpHeaders::parse_packet(&sp).unwrap().unwrap();
+    while let Some(mut sp) = tx_slab.pop_back() {
+        let udp = UdpHeaders::parse_packet(&mut sp).unwrap().unwrap();
 
         let dip = udp.destination_address().ip();
 
@@ -592,7 +607,7 @@ async fn many_sessions() {
     for i in 1..10000u32 {
         let mut client_packet = unsafe { umem.alloc().unwrap() };
 
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(i.to_ne_bytes(), PROXY.ip().octets(), 64)
             .udp(i as u16, PROXY.port())
             .write(&mut client_packet, &data)
@@ -605,6 +620,7 @@ async fn many_sessions() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
 
         let mut server_packet = tx_slab.pop_back().unwrap();
@@ -618,11 +634,13 @@ async fn many_sessions() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
 
-        let client_packet = tx_slab.pop_back().unwrap();
-
-        let udp = UdpHeaders::parse_packet(&client_packet).unwrap().unwrap();
+        let mut client_packet = tx_slab.pop_back().unwrap();
+        let udp = UdpHeaders::parse_packet(&mut client_packet)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(&client_packet[udp.data], &data);
         assert_eq!(udp.eth.destination.0, [3; 6]);
@@ -701,7 +719,7 @@ async fn frees_dropped_packets() {
     {
         let mut client_packet = unsafe { umem.alloc().unwrap() };
 
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv6(CLIENT.ip().octets(), PROXY6.ip().octets(), 64)
             .udp(CLIENT.port(), PROXY6.port())
             .write(&mut client_packet, &[1])
@@ -714,6 +732,7 @@ async fn frees_dropped_packets() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
 
         assert!(tx_slab.is_empty());
@@ -724,7 +743,7 @@ async fn frees_dropped_packets() {
         // If this fails, the dropped packet wasn't freed
         let mut client_packet = unsafe { umem.alloc().expect("umem has no available packets") };
 
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv6(CLIENT.ip().octets(), PROXY6.ip().octets(), 64)
             .udp(CLIENT.port(), PROXY6.port())
             .write(&mut client_packet, &data)
@@ -737,6 +756,7 @@ async fn frees_dropped_packets() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
 
         let server_packet = tx_slab.pop_back().unwrap();
@@ -747,7 +767,7 @@ async fn frees_dropped_packets() {
     {
         let mut server_packet = unsafe { umem.alloc().expect("umem has no available packets") };
 
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(SERVER.ip().octets(), PROXY4.ip().octets(), 64)
             .udp(CLIENT.port(), PROXY4.port())
             .write(&mut server_packet, &[1, 2, 3])
@@ -760,6 +780,7 @@ async fn frees_dropped_packets() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
 
         assert!(tx_slab.is_empty());
@@ -826,7 +847,7 @@ async fn qcmp() {
 
         ping.encode(&mut qp);
 
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
             .udp(CLIENT.port(), PROXY.port())
             .write(&mut ping_packet, &qp)
@@ -839,10 +860,11 @@ async fn qcmp() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
 
-        let pong_packet = tx_slab.pop_back().unwrap();
-        let udp = UdpHeaders::parse_packet(&pong_packet).unwrap().unwrap();
+        let mut pong_packet = tx_slab.pop_back().unwrap();
+        let udp = UdpHeaders::parse_packet(&mut pong_packet).unwrap().unwrap();
         let pong = qcmp::Protocol::parse(&pong_packet[udp.data])
             .unwrap()
             .unwrap();
@@ -873,7 +895,7 @@ async fn qcmp() {
 
         ping.encode(&mut qp);
 
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
             .udp(CLIENT.port(), PROXY.port())
             .write(&mut ping_packet, &qp)
@@ -889,10 +911,11 @@ async fn qcmp() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
 
-        let pong_packet = tx_slab.pop_back().expect("padded ping packet was dropped");
-        let udp = UdpHeaders::parse_packet(&pong_packet).unwrap().unwrap();
+        let mut pong_packet = tx_slab.pop_back().expect("padded ping packet was dropped");
+        let udp = UdpHeaders::parse_packet(&mut pong_packet).unwrap().unwrap();
         let pong = qcmp::Protocol::parse(&pong_packet[udp.data])
             .unwrap()
             .unwrap();
@@ -913,7 +936,7 @@ async fn qcmp() {
         };
         pong.encode(&mut qp);
 
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
             .udp(CLIENT.port(), PROXY.port())
             .write(&mut bad_packet, &qp)
@@ -926,6 +949,7 @@ async fn qcmp() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
 
         assert!(tx_slab.is_empty());
@@ -973,7 +997,7 @@ async fn trims_ethernet_padding() {
 
     let mut client_packet = unsafe { umem.alloc().unwrap() };
 
-    etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+    etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
         .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
         .udp(CLIENT.port(), PROXY.port())
         .write(&mut client_packet, &data)
@@ -992,10 +1016,13 @@ async fn trims_ethernet_padding() {
         &mut tx_slab,
         &mut cfg_state,
         &mut state,
+        &mut process::Swap,
     );
 
-    let server_packet = tx_slab.pop_back().expect("padded packet was dropped");
-    let udp = UdpHeaders::parse_packet(&server_packet).unwrap().unwrap();
+    let mut server_packet = tx_slab.pop_back().expect("padded packet was dropped");
+    let udp = UdpHeaders::parse_packet(&mut server_packet)
+        .unwrap()
+        .unwrap();
 
     assert_eq!(udp.destination_address(), SERVER.into());
     assert_eq!(&server_packet[udp.data], &data[..]);
@@ -1043,7 +1070,14 @@ async fn drops_unparsable_packets() {
     // The umem has a single frame, so a packet that wasn't freed fails the next alloc
     let mut process = |umem: &mut xdp::Umem, packet: xdp::Packet| {
         rx_slab.push_front(packet);
-        process::process_packets(&mut rx_slab, umem, &mut tx_slab, &mut cfg_state, &mut state);
+        process::process_packets(
+            &mut rx_slab,
+            umem,
+            &mut tx_slab,
+            &mut cfg_state,
+            &mut state,
+            &mut process::Swap,
+        );
         assert!(rx_slab.is_empty());
         assert!(tx_slab.is_empty(), "an unparsable packet was forwarded");
     };
@@ -1058,7 +1092,7 @@ async fn drops_unparsable_packets() {
     // A TCP packet
     {
         let mut packet = unsafe { umem.alloc().expect("umem has no available packets") };
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
             .tcp(CLIENT.port(), PROXY.port(), 0, 4096)
             .write(&mut packet, &[0xf0; 20])
@@ -1069,7 +1103,7 @@ async fn drops_unparsable_packets() {
     // A datagram larger than the frame that holds it
     {
         let mut packet = unsafe { umem.alloc().expect("umem has no available packets") };
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
             .udp(CLIENT.port(), PROXY.port())
             .write(&mut packet, &[0xf0; 20])
@@ -1081,7 +1115,7 @@ async fn drops_unparsable_packets() {
     // Trailing data on a frame that is too large to have been padded
     {
         let mut packet = unsafe { umem.alloc().expect("umem has no available packets") };
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
             .udp(CLIENT.port(), PROXY.port())
             .write(&mut packet, &[0xf0; 20])
@@ -1148,7 +1182,7 @@ async fn drops_packets_filters_cant_modify() {
         // If this fails, the previously dropped packet wasn't freed
         let mut client_packet = unsafe { umem.alloc().expect("umem has no available packets") };
 
-        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+        etherparse::PacketBuilder::ethernet2([3; 6], [4; 6])
             .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
             .udp(CLIENT.port(), PROXY.port())
             .write(&mut client_packet, &data)
@@ -1161,6 +1195,7 @@ async fn drops_packets_filters_cant_modify() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
+            &mut process::Swap,
         );
 
         assert!(tx_slab.is_empty(), "forwarded a partially modified packet");

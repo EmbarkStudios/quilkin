@@ -961,6 +961,25 @@ pub(crate) fn packets_dropped(direction: Direction, reason: DropReason) -> IntCo
     packets_dropped_total(direction, reason, "", "")
 }
 
+/// Failed to ping a server IP to retrieve its layer 2 address
+///
+/// Due to cardinality issues that could arise, the IP itself is not part of the metric, but present in the logs
+#[inline]
+pub(crate) fn unreachable_ip() -> &'static IntCounter {
+    static UNREACHABLE_IP: Lazy<IntCounter> = Lazy::new(|| {
+        prometheus::register_int_counter_with_registry! {
+            prometheus::opts! {
+                "quilkin_unreachable_ip",
+                "Total number of unreachable IPs",
+            },
+            registry(),
+        }
+        .unwrap()
+    });
+
+    &UNREACHABLE_IP
+}
+
 pub(crate) fn provider_task_failures_total(provider_task: &str) -> IntCounter {
     static PROVIDER_TASK_FAILURES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::register_int_counter_vec_with_registry! {

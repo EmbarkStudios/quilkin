@@ -68,7 +68,7 @@ pub fn spawn_listener(
 
     let socket = crate::net::DualStackLocalSocket::new(port).context("failed to bind socket")?;
 
-    let io_loop = IoUringLoop::new(512, socket)?;
+    let io_loop = IoUringLoop::new(recv_ring_len, socket)?;
     io_loop
         .spawn_io_loop(
             format!("packet-router-{worker_id}"),
@@ -513,7 +513,7 @@ impl IoUringLoop {
 
                             let op = (ud >> 56) as u8;
                             match op {
-                                IORING_OP_RECVMSG => {
+                                ops::IORING_OP_RECVMSG => {
                                     let packet = match loop_ctx.pop_recv(cqe, &rb) {
                                         Ok(Some(packet)) => packet,
                                         Ok(None) => {
@@ -552,10 +552,10 @@ impl IoUringLoop {
                                     // to be available for receiving new packets
                                     re.enqueue_by_id(id);
                                 }
-                                IORING_OP_READ => {
+                                ops::IORING_OP_READ => {
                                     double_pending_sends = pending_sends.swap(double_pending_sends);
                                     loop_ctx.push(
-                                        pending_sends_event.io_uring_entry().user_data((IORING_OP_READ as u64) << 56)
+                                        pending_sends_event.io_uring_entry().user_data((ops::IORING_OP_READ as u64) << 56)
                                     );
 
                                     for pending in
@@ -564,7 +564,7 @@ impl IoUringLoop {
                                         loop_ctx.enqueue_send(pending);
                                     }
                                 }
-                                IORING_OP_SEND_ZC => {
+                                ops::IORING_OP_SEND_ZC => {
                                     let flags = cqe.flags();
 
                                     if flags & flags::IORING_CQE_F_NOTIF == 0 {

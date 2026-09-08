@@ -4,68 +4,18 @@ use io_uring::{
     opcode, squeue,
     types::{Fd, Timespec},
 };
-use quilkin_xdp::aya;
+pub use quilkin_xdp::ip_to_mac::Ip;
+use quilkin_xdp::{
+    aya,
+    ip_to_mac::{self, RingEntry, Source},
+    xdp::packet::net_types::MacAddress,
+};
 use std::{
     fmt,
-    net::{IpAddr, Ipv6Addr},
+    net::Ipv6Addr,
     os::fd::{AsRawFd, FromRawFd},
     time::{Duration, Instant},
 };
-
-#[derive(Hash, Copy, Clone, PartialEq, Eq)]
-pub struct Ip(pub Ipv6Addr);
-
-impl fmt::Display for Ip {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0.octets() {
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
-                write!(f, "{a}.{b}.{c}.{d}")
-            }
-            _ => {
-                write!(f, "{}", self.0)
-            }
-        }
-    }
-}
-
-impl From<IpAddr> for Ip {
-    #[inline]
-    fn from(value: IpAddr) -> Self {
-        match value {
-            IpAddr::V6(v6) => Self(v6),
-            IpAddr::V4(v4) => Self(v4.to_ipv6_mapped()),
-        }
-    }
-}
-
-#[derive(Copy, Clone, PartialEq)]
-#[repr(transparent)]
-pub struct MacAddr(pub [u8; 6]);
-
-impl fmt::Display for MacAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5]
-        )
-    }
-}
-
-#[derive(Copy, Clone, PartialEq)]
-pub enum LinkLayerAddr {
-    Known(MacAddr),
-    Unreachable,
-}
-
-impl fmt::Display for LinkLayerAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Known(mac) => write!(f, "{mac}"),
-            Self::Unreachable => f.write_str("<unreachable>"),
-        }
-    }
-}
 
 pub(super) struct RequestSender {
     pub(super) sender: crossbeam_channel::Sender<Ip>,
@@ -95,13 +45,6 @@ pub(super) struct EbpfRing {
     events: libc::epoll_event,
 }
 
-#[repr(C)]
-struct RingEntry {
-    ip: Ip,
-    mac: MacAddr,
-    kind: u16,
-}
-
 impl EbpfRing {
     pub(super) fn new(rb: aya::maps::RingBuf<aya::maps::MapData>) -> Result<Self, CacheSpawnError> {
         // SAFETY: syscalls. We setup an epoll instance as (I don't believe) we can use a regular `read` on an eBPF ring
@@ -111,6 +54,7 @@ impl EbpfRing {
             u64: 0,
         };
 
+        // SAFETY: syscalls
         let epoll = unsafe {
             let fd = libc::epoll_create1(libc::EPOLL_CLOEXEC);
             if fd < 0 {
@@ -135,17 +79,7 @@ impl EbpfRing {
 
     #[inline]
     pub(super) fn read(&mut self) -> Option<RingEntry> {
-        if let Some(item) = self.inner.next() {
-            // We're the ones inserting from eBPF, there should never be anything else in here
-            if item.len() != std::mem::size_of::<RingEntry>() {
-                return None;
-            }
-
-            // SAFETY: we've verified the size, the caller is responsible for validating the actual contents
-            Some(unsafe { std::ptr::read_unaligned(item.as_ptr().cast()) })
-        } else {
-            None
-        }
+        ip_to_mac::read_entry(&mut self.inner)
     }
 
     #[inline]
@@ -159,31 +93,10 @@ impl EbpfRing {
     }
 }
 
-enum Source {
-    Arp,
-    Icmp,
-    Icmpv6,
-    Neighbor,
-    Unknown,
-}
-
-impl From<u16> for Source {
-    #[inline]
-    fn from(value: u16) -> Self {
-        match value {
-            0x0608 => Self::Arp,
-            1 => Self::Icmp,
-            136 => Self::Neighbor,
-            58 => Self::Icmpv6,
-            _ => Self::Unknown,
-        }
-    }
-}
-
 enum PingState {
     Sending,
     Sent,
-    Mac { mac: MacAddr, src: Source },
+    Mac { mac: MacAddress, src: Source },
 }
 
 const PING_ATTEMPTS: usize = 3;
@@ -214,8 +127,9 @@ impl Ping {
         icmp::make_echo_request(seq, &mut self.payload);
         let ip = ip.0.octets();
 
+        // SAFETY: Address manipulation within bounds
         unsafe {
-            if &ip[..12] == &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff] {
+            if ip[..12] == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff] {
                 let addr = &mut *self.addr.as_mut_ptr().cast::<libc::sockaddr_in>();
                 addr.sin_family = libc::AF_INET as _;
                 addr.sin_addr.s_addr = u32::from_ne_bytes([ip[12], ip[13], ip[14], ip[15]]);
@@ -255,6 +169,21 @@ impl Ping {
                 }
                 _ => unreachable!(),
             }
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum LinkLayerAddr {
+    Known(MacAddress),
+    Unreachable,
+}
+
+impl fmt::Display for LinkLayerAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Known(mac) => write!(f, "{mac}"),
+            Self::Unreachable => f.write_str("<unreachable>"),
         }
     }
 }
@@ -308,7 +237,7 @@ impl InflightPings {
             });
         }
 
-        // SAFETY:
+        // SAFETY: The pings live as long as the uring
         unsafe {
             if sq
                 .push_multiple(&[
@@ -392,9 +321,7 @@ impl InflightPings {
             return;
         };
 
-        let src = Source::from(entry.kind);
-
-        if matches!(src, Source::Arp | Source::Neighbor)
+        if matches!(entry.source, Source::Arp | Source::NeighbourAdvertisement)
             || matches!(self.v[i].state, PingState::Sent)
         {
             let _ping = self.v.swap_remove(i);
@@ -405,7 +332,7 @@ impl InflightPings {
             item.time = Instant::now();
             item.state = PingState::Mac {
                 mac: entry.mac,
-                src,
+                src: entry.source,
             };
         }
     }
@@ -417,7 +344,7 @@ impl InflightPings {
             return;
         };
 
-        match icmp::read_echo_reply(&rb) {
+        match icmp::read_echo_reply(rb) {
             Ok(seq) => {
                 // This should realistically never happen
                 if !self.v[i].seq.contains(&seq) {

@@ -5,6 +5,7 @@ use quilkin_xdp::{
     xdp::{
         self,
         nic::{NicIndex, NicName},
+        packet::net_types::MacAddress,
     },
 };
 use std::sync::Arc;
@@ -80,10 +81,7 @@ pub struct XdpWorkers {
     qcmp_port: NetworkU16,
     ipv6: std::net::Ipv6Addr,
     ipv4: std::net::Ipv4Addr,
-    ip_to_mac: Option<(
-        aya::maps::RingBuf<aya::maps::MapData>,
-        super::cache::types::MacAddr,
-    )>,
+    ip_to_mac: Option<aya::maps::RingBuf<aya::maps::MapData>>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -367,14 +365,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     )?;
 
     let ip_to_mac = if config.cache_layer2 {
-        // Theoretically it's possible to have a non-utf8 nic name, but until someone actually files a bug it's such a
-        // niche case it's not worth considering
-        let gateway_mac = super::cache::determine_gateway_mac(
-            name.as_str()
-                .expect("the chosen NIC does not have a utf-8 name"),
-        )?;
-        let ring = ebpf_prog.layer2_ring()?;
-        Some((ring, gateway_mac))
+        Some(ebpf_prog.layer2_ring()?)
     } else {
         None
     };
@@ -416,18 +407,10 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     })
 }
 
-trait LinkLayer {
-    fn try_fill<const N: usize>(
-        &mut self,
-        packet: xdp::Packet,
-        tx_slab: &mut xdp::slab::StackSlab<N>,
-    );
-    fn update<const N: usize>(&mut self, tx_slab: &mut xdp::slab::StackSlab<N>);
-}
-
 pub struct XdpLoop {
     threads: Vec<std::thread::JoinHandle<()>>,
     ebpf_prog: quilkin_xdp::EbpfProgram,
+    xdp_link: quilkin_xdp::aya::programs::xdp::XdpLinkId,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
     nic_index: NicIndex,
     l2_cache: Option<(Arc<super::cache::L2Cache>, std::thread::JoinHandle<()>)>,
@@ -437,7 +420,7 @@ impl XdpLoop {
     /// Detaches the eBPF program from the attacked NIC and cancels all I/O
     /// threads, waiting for them to exit
     pub fn shutdown(mut self, wait: bool) {
-        if let Err(error) = self.ebpf_prog.detach() {
+        if let Err(error) = self.ebpf_prog.detach(self.xdp_link) {
             tracing::error!(%error, "failed to detach eBPF program");
         }
 
@@ -460,8 +443,6 @@ impl XdpLoop {
                 } else {
                     tracing::error!(?error, "XDP I/O thread encountered error");
                 };
-
-                tracing::error!(error, "XDP I/O thread enountered error");
             }
         }
 
@@ -470,6 +451,24 @@ impl XdpLoop {
         {
             tracing::error!(?error, "layer2 cache thread encountered error");
         }
+    }
+}
+
+pub trait LinkLayer {
+    #[inline]
+    fn update_gateway(&mut self, _addr: MacAddress, _v4: bool) {}
+    fn try_fill<const N: usize>(
+        &mut self,
+        packet: process::PacketWrapper,
+        tx_slab: &mut xdp::slab::StackSlab<N>,
+        to_client: bool,
+    ) -> Option<xdp::Packet>;
+    #[inline]
+    fn update<const N: usize>(
+        &mut self,
+        _tx_slab: &mut xdp::slab::StackSlab<N>,
+        _umem: &mut xdp::Umem,
+    ) {
     }
 }
 
@@ -483,7 +482,12 @@ impl XdpLoop {
 /// # Errors
 ///
 /// This can fail if threads can not be spawned for some reason (unlikely)
-pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoop, XdpSpawnError> {
+pub fn spawn(
+    mut workers: XdpWorkers,
+    config: process::ConfigState,
+) -> Result<XdpLoop, XdpSpawnError> {
+    use super::cache;
+
     let nic = workers.nic;
     let ebpf_prog = workers.ebpf_prog;
     let xdp_link = workers.xdp_link;
@@ -496,35 +500,90 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
 
     let queue_count = workers.workers.len();
     let mut threads = Vec::with_capacity(queue_count);
+
+    let mut rxs = Vec::with_capacity(if workers.ip_to_mac.is_some() {
+        workers.workers.len()
+    } else {
+        0
+    });
+
+    let l2_cache = if let Some(ring) = workers.ip_to_mac.take() {
+        let mut txs = Vec::with_capacity(workers.workers.len());
+
+        for _ in 0..workers.workers.len() {
+            let (tx, rx) = crossbeam_channel::bounded(128);
+            txs.push(tx);
+            rxs.push(rx);
+        }
+
+        // We pop receivers off the vec, but they need to align on the index
+        txs.reverse();
+
+        Some(cache::L2Cache::with_channels(txs, ring)?)
+    } else {
+        None
+    };
+
     for (i, mut worker) in workers.workers.into_iter().enumerate() {
         let cfg = config.clone();
         let ss = session_state.clone();
         let shutdown = shutdown.clone();
 
-        let jh = std::thread::Builder::new()
-            .name(format!("xdp-io-{i}"))
-            .spawn(move || {
-                // Enqueue buffers to the fill ring to ensure that we don't miss any packets directly after we've attached
-                // SAFETY: we keep the umem alive for as long as the socket is alive
-                unsafe {
-                    if let Err(error) = worker.fill.enqueue(&mut worker.umem, BATCH_SIZE * 2, true)
-                    {
-                        tracing::error!(%error, "failed to kick fill ring during initial spinup");
-                    }
-                };
+        let jh =        if let Some(cache) = l2_cache.as_ref().map(|(c, _)| c.clone()) {
+            let rx = rxs.pop().expect("invalid number of cache receivers");
 
-                io_loop(
-                    worker,
-                    external_port,
-                    qcmp_port,
-                    cfg,
-                    ss,
-                    ipv4,
-                    ipv6,
-                    shutdown.clone(),
-                );
-            })
-            .map_err(XdpSpawnError::Thread)?;
+            std::thread::Builder::new()
+                .name(format!("xdp-io-{i}"))
+                .spawn(move || {
+                    // Enqueue buffers to the fill ring to ensure that we don't miss any packets directly after we've attached
+                    // SAFETY: we keep the umem alive for as long as the socket is alive
+                    unsafe {
+                        if let Err(error) = worker.fill.enqueue(&mut worker.umem, BATCH_SIZE * 2, true)
+                        {
+                            tracing::error!(%error, "failed to kick fill ring during initial spinup");
+                        }
+                    };
+
+                    let ll = process::Local::new(cache, rx, i as u8);
+
+                    io_loop(
+                        worker,
+                        external_port,
+                        qcmp_port,
+                        cfg,
+                        ss,
+                        ipv4,
+                        ipv6,
+                        shutdown.clone(),
+                        ll,
+                    );
+                })
+        } else {
+            std::thread::Builder::new()
+                .name(format!("xdp-io-{i}"))
+                .spawn(move || {
+                    // Enqueue buffers to the fill ring to ensure that we don't miss any packets directly after we've attached
+                    // SAFETY: we keep the umem alive for as long as the socket is alive
+                    unsafe {
+                        if let Err(error) = worker.fill.enqueue(&mut worker.umem, BATCH_SIZE * 2, true)
+                        {
+                            tracing::error!(%error, "failed to kick fill ring during initial spinup");
+                        }
+                    };
+
+                    io_loop(
+                        worker,
+                        external_port,
+                        qcmp_port,
+                        cfg,
+                        ss,
+                        ipv4,
+                        ipv6,
+                        shutdown.clone(),
+                        process::Swap,
+                    );
+                })
+        }.map_err(XdpSpawnError::Thread)?;
 
         threads.push(jh);
     }
@@ -534,6 +593,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
     Ok(XdpLoop {
         threads,
         ebpf_prog,
+        xdp_link,
         shutdown,
         nic_index: workers.nic,
         l2_cache,
@@ -625,8 +685,7 @@ fn io_loop<LL: LinkLayer>(
                 }
             }
 
-            // Process each of the packets that we received, potentially queuing
-            // packets to be sent
+            // Process each of the packets that we received, potentially queuing packets to be sent
             process::process_packets(
                 &mut rx_slab,
                 &mut umem,
@@ -635,6 +694,10 @@ fn io_loop<LL: LinkLayer>(
                 &mut state,
                 &mut ll,
             );
+
+            // For the normal ethernet swap (packets are received or sent via a gateway) this does nothing, but for
+            // layer 2 caching this will attempt to enqueue packets that have had their destination ethernet address acquired
+            ll.update(&mut tx_slab, &mut umem);
 
             let before = tx_slab.len();
             let enqueued_sends = match tx.send(&mut tx_slab, true) {

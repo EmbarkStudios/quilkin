@@ -221,7 +221,7 @@ bytes = { version = "1.11.1", features = ["serde"] }
 compact_str = "0.7"
 corrosion = { path = "crates/corrosion", version = "0.1.0", package = "quilkin-corrosion" }
 data-encoding = "2.10"
-ethtool = { version = "0.2.9", default-features = false, features = ["tokio_socket"] }
+etherparse = "0.21"
 eyre = "0.6.12"
 fixedstr = { version = "0.5", features = ["flex-str"] }
 futures = "0.3.31"
@@ -306,3 +306,6 @@ tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
+
+[patch.crates-io]
+xdp = { path = "../xdp" }

@@ -113,7 +113,7 @@ impl SimpleLoop {
         pb.udp(src_port, self.state.external_port.host())
             .write(&mut packet, payload)
             .unwrap();
-        let udp_headers = UdpHeaders::parse_packet(&packet).unwrap().unwrap();
+        let udp_headers = UdpHeaders::parse_packet(&mut packet).unwrap().unwrap();
         Some(TestPacket {
             inner: Some(packet),
             udp_headers,
@@ -138,7 +138,7 @@ impl SimpleLoop {
         };
 
         pb.udp(src, dest).write(&mut packet, payload).unwrap();
-        let udp_headers = UdpHeaders::parse_packet(&packet).unwrap().unwrap();
+        let udp_headers = UdpHeaders::parse_packet(&mut packet).unwrap().unwrap();
         Some(TestPacket {
             inner: Some(packet),
             udp_headers,
@@ -190,10 +190,11 @@ impl SimpleLoop {
             &mut tx,
             &mut self.cfg,
             &mut self.state,
+            &mut process::Swap,
         );
 
-        let packet = tx.pop_back()?;
-        let udp_headers = UdpHeaders::parse_packet(&packet)
+        let mut packet = tx.pop_back()?;
+        let udp_headers = UdpHeaders::parse_packet(&mut packet)
             .expect("failed to parse packet")
             .expect("not a UDP packet");
         Some(TestPacket {
@@ -220,12 +221,13 @@ impl SimpleLoop {
             &mut tx,
             &mut self.cfg,
             &mut self.state,
+            &mut process::Swap,
         );
 
         let mut send = [const { None }; N];
         let mut i = 0;
-        while let Some(packet) = tx.pop_back() {
-            let udp_headers = xdp::packet::net_types::UdpHeaders::parse_packet(&packet)
+        while let Some(mut packet) = tx.pop_back() {
+            let udp_headers = xdp::packet::net_types::UdpHeaders::parse_packet(&mut packet)
                 .expect("failed to parse packet")
                 .expect("not a UDP packet");
             send[i] = Some(TestPacket {
