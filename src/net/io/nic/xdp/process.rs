@@ -4,20 +4,23 @@ use crate::{
     metrics::{self, AsnInfo},
     net::{
         error::PipelineError,
-        io::nic::cache::{self, types::LinkLayerAddr},
         maxmind_db::{self, IpNetEntry},
         sessions::{inner_metrics as session_metrics, quality as session_quality},
     },
     time::UtcTimestamp,
 };
 pub use quilkin_xdp::xdp;
-use quilkin_xdp::xdp::{
-    Umem,
-    packet::{
-        Packet, PacketError, csum,
-        net_types::{IpAddresses, MacAddress, NetworkU16, UdpHdr, UdpHeaders},
-    },
+use quilkin_xdp::{
+    l2_cache::{self as cache, types::LinkLayerAddr},
     slab::{HeapSlab, Slab},
+    xdp::{
+        Umem,
+        packet::{
+            Packet, PacketError, csum,
+            net_types::{IpAddresses, MacAddress, NetworkU16, UdpHdr, UdpHeaders},
+        },
+        slab::{Slab, StackSlab},
+    },
 };
 use std::{
     collections::hash_map::Entry,

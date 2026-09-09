@@ -12,7 +12,7 @@ pub struct EventFd {
 
 impl EventFd {
     #[inline]
-    pub(crate) fn new() -> std::io::Result<Self> {
+    pub fn new() -> std::io::Result<Self> {
         // SAFETY: We have no invariants to uphold, but we do need to check the
         // return value
         let fd = unsafe { libc::eventfd(0, 0) };
@@ -32,7 +32,7 @@ impl EventFd {
     }
 
     #[inline]
-    pub(crate) fn writer(&self) -> EventFdWriter {
+    pub fn writer(&self) -> EventFdWriter {
         EventFdWriter {
             fd: self.fd.as_raw_fd(),
         }
@@ -40,24 +40,24 @@ impl EventFd {
 
     /// Constructs an io-uring entry to read (ie wait) on this eventfd
     #[inline]
-    pub(crate) fn io_uring_entry(&mut self) -> Entry {
+    pub fn io_uring_entry(&mut self) -> Entry {
         io_uring::opcode::Read::new(self.fd(), (&mut self.val as *mut u64).cast(), 8).build()
     }
 
     #[inline]
-    pub(crate) fn fd(&self) -> io_uring::types::Fd {
+    pub fn fd(&self) -> io_uring::types::Fd {
         io_uring::types::Fd(self.fd.as_raw_fd())
     }
 }
 
 #[derive(Clone)]
-pub(crate) struct EventFdWriter {
+pub struct EventFdWriter {
     fd: i32,
 }
 
 impl EventFdWriter {
     #[inline]
-    pub(crate) fn write(&self, val: u64) {
+    pub fn write(&self, val: u64) {
         // SAFETY: we have a valid descriptor, and most of the errors that apply
         // to the general write call that eventfd_write wraps are not applicable
         //

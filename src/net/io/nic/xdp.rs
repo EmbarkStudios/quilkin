@@ -156,7 +156,7 @@ pub enum XdpSpawnError {
     #[error("Failed to spawn worker thread: {0}")]
     Thread(#[source] std::io::Error),
     #[error("Failed to spawn layer 2 cache thread: {0}")]
-    L2Cache(#[from] super::cache::CacheSpawnError),
+    L2Cache(#[from] quilkin_xdp::l2_cache::CacheSpawnError),
 }
 
 /// Attempts to setup XDP by querying NIC support and allocating ring buffers
@@ -465,7 +465,10 @@ pub struct XdpLoop {
     terminate: Arc<std::sync::atomic::AtomicBool>,
     sessions: Arc<process::SessionState>,
     nic_index: NicIndex,
-    l2_cache: Option<(Arc<super::cache::L2Cache>, std::thread::JoinHandle<()>)>,
+    l2_cache: Option<(
+        Arc<quilkin_xdp::l2_cache::L2Cache>,
+        std::thread::JoinHandle<()>,
+    )>,
 }
 
 impl XdpLoop {
@@ -591,7 +594,7 @@ pub fn spawn(
     mut workers: XdpWorkers,
     config: process::ConfigState,
 ) -> Result<XdpLoop, XdpSpawnError> {
-    use super::cache;
+    use quilkin_xdp::l2_cache;
 
     let nic = workers.nic;
     let ebpf_prog = workers.ebpf_prog;
@@ -617,7 +620,7 @@ pub fn spawn(
         let mut txs = Vec::with_capacity(workers.workers.len());
 
         for _ in 0..workers.workers.len() {
-            let (tx, rx) = crossbeam_channel::bounded(128);
+            let (tx, rx) = l2_cache::crossbeam_channel::bounded(128);
             txs.push(tx);
             rxs.push(rx);
         }
@@ -625,7 +628,7 @@ pub fn spawn(
         // We pop receivers off the vec, but they need to align on the index
         txs.reverse();
 
-        Some(cache::L2Cache::with_channels(txs, ring)?)
+        Some(l2_cache::L2Cache::with_channels(txs, ring)?)
     } else {
         None
     };

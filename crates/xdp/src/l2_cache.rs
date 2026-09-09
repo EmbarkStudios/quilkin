@@ -2,8 +2,9 @@ pub mod icmp;
 pub mod io;
 pub mod types;
 
-use crate::net::io::completion::{self as comp, eventfd};
-use quilkin_xdp::aya;
+pub use crossbeam_channel;
+
+use quilkin_uring::eventfd;
 use std::{io::Error, sync::Arc};
 use types::{Ip, LinkLayerAddr};
 
@@ -63,7 +64,7 @@ impl L2Cache {
         // requests to resolve the L2 Ethernet MAC addresses
         let icmp = icmp::IcmpSocket::new().map_err(CacheSpawnError::Icmp)?;
 
-        let br = comp::ring::BufferRing::new(
+        let br = quilkin_uring::ring::BufferRing::new(
             QUEUE_SIZE as u16,
             // we only deal with ICMP echo responses
             64,
@@ -72,7 +73,7 @@ impl L2Cache {
 
         const QUEUE_SIZE: u32 = 256;
 
-        let ring = io_uring::IoUring::builder()
+        let ring = quilkin_uring::io_uring::IoUring::builder()
             .setup_cqsize(QUEUE_SIZE)
             .build(QUEUE_SIZE >> 1)
             .map_err(CacheSpawnError::IoRing)?;
@@ -150,10 +151,10 @@ impl L2Cache {
                 return;
             };
 
-            if matches!(lladdr, LinkLayerAddr::Unreachable) {
-                crate::metrics::unreachable_ip().inc();
-                tracing::error!(ip = %ip.0, "IP is unreachable");
-            }
+            // if matches!(lladdr, LinkLayerAddr::Unreachable) {
+            //     crate::metrics::unreachable_ip().inc();
+            //     tracing::error!(ip = %ip.0, "IP is unreachable");
+            // }
 
             match entry.value_mut() {
                 CacheEntry::Known { interested, addr } => {

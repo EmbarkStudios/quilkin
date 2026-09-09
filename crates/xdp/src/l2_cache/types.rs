@@ -1,21 +1,119 @@
 use super::{CacheSpawnError, icmp, io};
-use crate::net::io::completion::eventfd;
-use io_uring::{
-    opcode, squeue,
-    types::{Fd, Timespec},
-};
-pub use quilkin_xdp::ip_to_mac::Ip;
-use quilkin_xdp::{
-    aya,
-    ip_to_mac::{self, RingEntry, Source},
-    xdp::packet::net_types::MacAddress,
+use quilkin_uring::{
+    eventfd,
+    io_uring::{
+        opcode, squeue,
+        types::{Fd, Timespec},
+    },
+    slab,
 };
 use std::{
     fmt,
-    net::Ipv6Addr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     os::fd::{AsRawFd, FromRawFd},
     time::{Duration, Instant},
 };
+use xdp::packet::net_types::MacAddress;
+
+#[derive(Hash, Copy, Clone, PartialEq, Eq)]
+pub struct Ip(pub Ipv6Addr);
+
+impl fmt::Display for Ip {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0.octets() {
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
+                write!(f, "{a}.{b}.{c}.{d}")
+            }
+            _ => {
+                write!(f, "{}", self.0)
+            }
+        }
+    }
+}
+
+impl PartialEq<IpAddr> for Ip {
+    #[inline]
+    fn eq(&self, other: &IpAddr) -> bool {
+        let octs = self.0.octets();
+        match other {
+            IpAddr::V4(v4) => {
+                octs[12..] == v4.octets()
+                    && octs[..12] == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff]
+            }
+            IpAddr::V6(v6) => octs == v6.octets(),
+        }
+    }
+}
+
+impl PartialEq<Ipv4Addr> for Ip {
+    #[inline]
+    fn eq(&self, other: &Ipv4Addr) -> bool {
+        let octs = self.0.octets();
+        octs[12..] == other.octets() && octs[..12] == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff]
+    }
+}
+
+impl PartialEq<Ipv6Addr> for Ip {
+    #[inline]
+    fn eq(&self, other: &Ipv6Addr) -> bool {
+        &self.0 == other
+    }
+}
+
+impl fmt::Debug for Ip {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self}")
+    }
+}
+
+impl From<IpAddr> for Ip {
+    #[inline]
+    fn from(value: IpAddr) -> Self {
+        match value {
+            IpAddr::V6(v6) => Self(v6),
+            IpAddr::V4(v4) => Self(v4.to_ipv6_mapped()),
+        }
+    }
+}
+
+impl From<Ipv4Addr> for Ip {
+    #[inline]
+    fn from(value: Ipv4Addr) -> Self {
+        Self(value.to_ipv6_mapped())
+    }
+}
+
+impl From<Ipv6Addr> for Ip {
+    #[inline]
+    fn from(value: Ipv6Addr) -> Self {
+        Self(value)
+    }
+}
+
+#[repr(u16)]
+pub enum Source {
+    Icmp = 1,
+    Icmpv6 = 58,
+    NeighbourAdvertisement = 136,
+    Arp = 0x0608,
+}
+
+#[repr(C)]
+pub struct RingEntry {
+    pub ip: Ip,
+    pub mac: xdp::packet::net_types::MacAddress,
+    pub source: Source,
+}
+
+#[inline]
+pub fn read_entry(ring: &mut aya::maps::RingBuf<aya::maps::MapData>) -> Option<RingEntry> {
+    ring.next().and_then(|item| {
+        // We're the ones inserting from eBPF, there should never be anything else in here
+        // SAFETY: we've verified the size, the caller is responsible for validating the actual contents
+        (item.len() == std::mem::size_of::<RingEntry>())
+            .then_some(unsafe { std::ptr::read_unaligned(item.as_ptr().cast()) })
+    })
+}
 
 pub(super) struct RequestSender {
     pub(super) sender: crossbeam_channel::Sender<Ip>,
@@ -79,7 +177,7 @@ impl EbpfRing {
 
     #[inline]
     pub(super) fn read(&mut self) -> Option<RingEntry> {
-        ip_to_mac::read_entry(&mut self.inner)
+        read_entry(&mut self.inner)
     }
 
     #[inline]
@@ -93,6 +191,7 @@ impl EbpfRing {
     }
 }
 
+#[allow(dead_code)]
 enum PingState {
     Sending,
     Sent,
@@ -102,7 +201,7 @@ enum PingState {
 const PING_ATTEMPTS: usize = 3;
 
 pub(super) struct InflightPing {
-    seq: corrosion::SmallVec<[u16; PING_ATTEMPTS]>,
+    seq: smallvec::SmallVec<[u16; PING_ATTEMPTS]>,
     dst: Ip,
     state: PingState,
     time: Instant,
@@ -151,11 +250,11 @@ impl Ping {
 
     #[inline]
     fn ip(&self) -> Ip {
-        // SAFETY: byte reinterpretation
+        // SAFETY: byte reinterpretation within bounds
         unsafe {
-            let sas = &*self.addr.as_ptr().cast::<libc::sockaddr_storage>();
+            let family = self.addr.as_ptr().cast::<u16>().read_unaligned();
 
-            match sas.ss_family as i32 {
+            match family as i32 {
                 libc::AF_INET => {
                     let v4 = &*self.addr.as_ptr().cast::<libc::sockaddr_in>();
                     let [a, b, c, d] = v4.sin_addr.s_addr.to_ne_bytes();
@@ -230,7 +329,7 @@ impl InflightPings {
             ping.time = time;
         } else {
             self.v.push(InflightPing {
-                seq: corrosion::SmallVec::from_buf_and_len([seq, 0, 0], 1),
+                seq: smallvec::SmallVec::from_buf_and_len([seq, 0, 0], 1),
                 dst: ip,
                 state: PingState::Sending,
                 time,
@@ -266,7 +365,7 @@ impl InflightPings {
     }
 
     #[inline]
-    pub(super) fn process_send(&mut self, cqe: io_uring::cqueue::Entry) {
+    pub(super) fn process_send(&mut self, cqe: quilkin_uring::io_uring::cqueue::Entry) {
         let ud = cqe.user_data();
         let key = (ud >> 32) as usize;
         let seq = (ud >> 16) as u16;
