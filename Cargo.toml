@@ -72,10 +72,9 @@ base64-serde = "0.8.0"
 bytes.workspace = true
 camino.workspace = true
 chacha20 = { version = "0.10", default-features = false, features = ["cipher"] }
-crossbeam-channel = "0.5"
 crossbeam-utils = { version = "0.8", optional = true }
 clap = { version = "4.5.54", features = ["cargo", "derive", "env"] }
-dashmap = { version = "6.1", features = ["serde"] }
+dashmap.workspace = true
 either = "1.15.0"
 eyre.workspace = true
 fixedstr.workspace = true
@@ -150,11 +149,10 @@ tikv-jemallocator = { workspace = true, optional = true }
 tikv-jemalloc-ctl = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-io-uring = { version = "0.7", default-features = false }
+quilkin-uring.workspace = true
 libc.workspace = true
 pprof = { version = "0.13.1", package = "pprof2" }
 quilkin-xdp = { version = "0.1.0", path = "crates/xdp" }
-slab = "0.4"
 sys-info = "0.9.1"
 
 [dev-dependencies]
@@ -201,6 +199,7 @@ members = [
     "crates/system",
     "crates/test",
     "crates/types",
+    "crates/uring",
     "crates/xdp",
     "crates/xds",
     "fuzz",
@@ -220,6 +219,7 @@ base64 = "0.22.1"
 bytes = { version = "1.11.1", features = ["serde"] }
 compact_str = "0.7"
 corrosion = { path = "crates/corrosion", version = "0.1.0", package = "quilkin-corrosion" }
+dashmap = { version = "6.1", features = ["serde"] }
 data-encoding = "2.10"
 etherparse = "0.21"
 eyre = "0.6.12"
@@ -251,12 +251,14 @@ quilkin = { path = "." }
 quilkin-proto = { version = "0.10.1", path = "crates/quilkin-proto" }
 quilkin-system = { version = "0.10.1", path = "crates/system" }
 quilkin-types = { version = "0.10.1", path = "crates/types" }
+quilkin-uring = { version = "0.10.1", path = "crates/uring" }
 quilkin-xds = { version = "0.10.1", path = "crates/xds" }
 rand = "0.9"
 regex = "1.12.2"
 schemars = { version = "1.2", features = ["bytes1", "url2"] }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.149"
+smallvec = "1.15"
 socket2 = { version = "0.6", features = ["all"] }
 tempfile = "3.24.0"
 thiserror = "2.0.17"

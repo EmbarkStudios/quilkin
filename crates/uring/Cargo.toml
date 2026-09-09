@@ -1,0 +1,14 @@
+[package]
+name = "quilkin-uring"
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+eyre.workspace = true
+io-uring = { version = "0.7", default-features = false }
+libc.workspace = true
+slab = "0.4"
+
+[lints]
+workspace = true

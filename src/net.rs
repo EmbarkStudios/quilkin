@@ -173,9 +173,9 @@ impl DualStackLocalSocket {
     cfg_select! {
         target_os = "linux" => {
             #[inline]
-            pub fn raw_fd(&self) -> ::io_uring::types::Fd {
+            pub fn raw_fd(&self) -> quilkin_uring::io_uring::types::Fd {
                 use std::os::fd::AsRawFd;
-                ::io_uring::types::Fd(self.socket.as_raw_fd())
+                quilkin_uring::io_uring::types::Fd(self.socket.as_raw_fd())
             }
         }
         _ => {

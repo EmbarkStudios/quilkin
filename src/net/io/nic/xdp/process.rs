@@ -4,20 +4,22 @@ use crate::{
     metrics::{self, AsnInfo},
     net::{
         error::PipelineError,
-        io::nic::cache::{self, types::LinkLayerAddr},
         maxmind_db::{self, IpNetEntry},
         sessions::{inner_metrics as session_metrics, quality as session_quality},
     },
     time::UtcTimestamp,
 };
 pub use quilkin_xdp::xdp;
-use quilkin_xdp::xdp::{
-    Umem,
-    packet::{
-        Packet, PacketError, csum,
-        net_types::{IpAddresses, MacAddress, NetworkU16, UdpHdr, UdpHeaders},
+use quilkin_xdp::{
+    l2_cache::{self as cache, types::LinkLayerAddr},
+    xdp::{
+        Umem,
+        packet::{
+            Packet, PacketError, csum,
+            net_types::{IpAddresses, MacAddress, NetworkU16, UdpHdr, UdpHeaders},
+        },
+        slab::{Slab, StackSlab},
     },
-    slab::{Slab, StackSlab},
 };
 use std::{
     collections::hash_map::Entry,
@@ -1250,7 +1252,7 @@ mod test {
         // A datagram larger than the frame that holds it
         let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &[0xfd; 17], 0);
         packet.adjust_tail(-4).unwrap();
-        assert_eq!(parse_headers(&mut packet).err(), Some("truncated packet"));
+        assert_eq!(parse_headers(&mut packet).err(), Some("insufficient data"));
 
         // Trailing data on a frame too large to have been padded
         let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &[0xfd; 32], 4);
@@ -1261,13 +1263,13 @@ mod test {
         for ihl in [4, 6] {
             let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &[0xfd; 17], 0);
             packet[nt::EthHdr::LEN] = 0x40 | ihl;
-            assert_eq!(parse_headers(&mut packet).err(), Some("ipv4 header length"));
+            assert_eq!(parse_headers(&mut packet).err(), Some("insufficient data"));
         }
 
         // Too small to even hold the ethernet header
         let mut packet = xdp::Packet::testing_new(&mut data);
         packet.append(&[0xab; 8]).unwrap();
-        assert_eq!(parse_headers(&mut packet).err(), Some("truncated packet"));
+        assert_eq!(parse_headers(&mut packet).err(), Some("insufficient data"));
     }
 
     #[test]

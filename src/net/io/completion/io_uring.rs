@@ -23,7 +23,11 @@
 use std::sync::Arc;
 
 use eyre::Context as _;
-use io_uring::{squeue::Entry, types::Fd};
+use quilkin_uring::{
+    flags,
+    io_uring::{self, squeue::Entry, types::Fd},
+    ops, slab,
+};
 
 use crate::{
     config::filter::CachedFilterChain,
@@ -209,8 +213,6 @@ struct LoopCtx<'uring> {
     /// individual recvmsg into the buffer itself, followed by the actual payload
     recv_hdr: libc::msghdr,
 }
-
-use super::{flags, ops};
 
 impl<'uring> LoopCtx<'uring> {
     #[inline]

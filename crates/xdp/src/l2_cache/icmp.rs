@@ -101,7 +101,7 @@ impl AsFd for IcmpSocket {
 /// field to map echo responses back to this particular socket, so we have no control over it
 #[inline]
 pub fn make_echo_request(sequence: u16, req: &mut [u8; 8]) {
-    use quilkin_xdp::xdp::packet::csum;
+    use xdp::packet::csum;
 
     // SAFETY: the array is valid and it's fine to be 0 initialized2
     unsafe {

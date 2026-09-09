@@ -411,11 +411,12 @@ fn handles_ping_responses(loaded: &mut Loaded) {
             XdpAction::Pass
         );
 
-        let entry = quilkin_xdp::ip_to_mac::read_entry(&mut rb).expect("expected entry via ARP");
+        let entry =
+            quilkin_xdp::l2_cache::types::read_entry(&mut rb).expect("expected entry via ARP");
 
         assert_entry!(entry, Ipv4Addr::new(192, 168, 1, 1), [0, 2, 4, 8, 16, 32]);
         assert!(
-            matches!(entry.source, quilkin_xdp::ip_to_mac::Source::Arp),
+            matches!(entry.source, quilkin_xdp::l2_cache::types::Source::Arp),
             "expected source as an ARP packet"
         );
     }
@@ -435,11 +436,12 @@ fn handles_ping_responses(loaded: &mut Loaded) {
             XdpAction::Pass
         );
 
-        let entry = quilkin_xdp::ip_to_mac::read_entry(&mut rb).expect("expected entry via ICMPv4");
+        let entry =
+            quilkin_xdp::l2_cache::types::read_entry(&mut rb).expect("expected entry via ICMPv4");
 
         assert_entry!(entry, Ipv4Addr::new(192, 168, 1, 100), [1, 2, 3, 4, 5, 6]);
         assert!(
-            matches!(entry.source, quilkin_xdp::ip_to_mac::Source::Icmp),
+            matches!(entry.source, quilkin_xdp::l2_cache::types::Source::Icmp),
             "expected source as an ICMPv4 packet"
         );
     }
@@ -460,11 +462,12 @@ fn handles_ping_responses(loaded: &mut Loaded) {
             XdpAction::Pass
         );
 
-        let entry = quilkin_xdp::ip_to_mac::read_entry(&mut rb).expect("expected entry via ICMPv6");
+        let entry =
+            quilkin_xdp::l2_cache::types::read_entry(&mut rb).expect("expected entry via ICMPv6");
 
         assert_entry!(entry, src_ip, [7; 6]);
         assert!(
-            matches!(entry.source, quilkin_xdp::ip_to_mac::Source::Icmpv6),
+            matches!(entry.source, quilkin_xdp::l2_cache::types::Source::Icmpv6),
             "expected source as an ICMPv6 packet"
         );
     }
@@ -503,21 +506,21 @@ fn handles_ping_responses(loaded: &mut Loaded) {
 
         assert_eq!(run(&mut loaded.program, &v,), XdpAction::Pass);
 
-        let entry = quilkin_xdp::ip_to_mac::read_entry(&mut rb)
+        let entry = quilkin_xdp::l2_cache::types::read_entry(&mut rb)
             .expect("expected entry via neighbor advertisement");
 
         assert_entry!(entry, src_ip, src_mac);
         assert!(
             matches!(
                 entry.source,
-                quilkin_xdp::ip_to_mac::Source::NeighbourAdvertisement
+                quilkin_xdp::l2_cache::types::Source::NeighbourAdvertisement
             ),
             "expected source as an ICMP packet"
         );
 
         let pb = ep::PacketBuilder::ethernet2(
-            // this purposely mismatches, as we set the target link layer address, which we want the eBPF to use as the MAC
-            // address if it exists
+            // this purposely mismatches, as we set the target link layer address, in the neighbor discovery header,
+            // which we want the eBPF to use as the MAC address if it exists
             [0xbb; 6],
             [0x04, 0xf4, 0x1c, 0xea, 0x7f, 0x17],
         )
@@ -564,14 +567,14 @@ fn handles_ping_responses(loaded: &mut Loaded) {
 
         assert_eq!(run(&mut loaded.program, &v,), XdpAction::Pass);
 
-        let entry = quilkin_xdp::ip_to_mac::read_entry(&mut rb)
+        let entry = quilkin_xdp::l2_cache::types::read_entry(&mut rb)
             .expect("expected entry via neighbor advertisement");
 
         assert_entry!(entry, src_ip, src_mac);
         assert!(
             matches!(
                 entry.source,
-                quilkin_xdp::ip_to_mac::Source::NeighbourAdvertisement
+                quilkin_xdp::l2_cache::types::Source::NeighbourAdvertisement
             ),
             "expected source as an ICMP packet"
         );

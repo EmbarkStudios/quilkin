@@ -904,7 +904,7 @@ impl Service {
                 // Validate explicit Completion selection on Linux
                 #[cfg(target_os = "linux")]
                 if matches!(explicit, crate::net::io::UdpBackend::Completion)
-                    && let Err(err) = io_uring::IoUring::new(2)
+                    && let Err(err) = quilkin_uring::io_uring::IoUring::new(2)
                 {
                     fn in_container() -> bool {
                         let sched = match std::fs::read_to_string("/proc/1/sched") {

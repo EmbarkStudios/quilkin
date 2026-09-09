@@ -3885,7 +3885,6 @@ dependencies = [
  "chacha20",
  "clap",
  "criterion",
- "crossbeam-channel",
  "crossbeam-utils",
  "dashmap",
  "either",
@@ -3901,7 +3900,6 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-util",
- "io-uring",
  "ipnetwork",
  "jemalloc_pprof",
  "k8s-openapi",
@@ -3930,6 +3928,7 @@ dependencies = [
  "quilkin-proto",
  "quilkin-system",
  "quilkin-types",
+ "quilkin-uring",
  "quilkin-xdp",
  "quilkin-xds",
  "rand 0.9.4",
@@ -3940,7 +3939,6 @@ dependencies = [
  "serde_json",
  "serde_regex",
  "serde_yaml",
- "slab",
  "socket2",
  "stable-eyre",
  "strum",
@@ -4066,15 +4064,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "quilkin-uring"
+version = "0.10.1"
+dependencies = [
+ "eyre",
+ "io-uring",
+ "libc",
+ "slab",
+]
+
+[[package]]
 name = "quilkin-xdp"
 version = "0.1.0"
 dependencies = [
  "aya",
  "aya-log",
  "aya-obj",
+ "crossbeam-channel",
+ "dashmap",
  "etherparse",
+ "eyre",
  "libc",
+ "quilkin-uring",
+ "smallvec",
  "thiserror 2.0.18",
+ "tracing",
  "xdp",
 ]
 

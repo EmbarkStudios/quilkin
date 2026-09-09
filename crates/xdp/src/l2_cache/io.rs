@@ -1,6 +1,6 @@
 use super::{icmp::IcmpSocket, types::*};
-use crate::net::io::completion::{self, eventfd, flags};
 use eyre::WrapErr;
+use quilkin_uring::{eventfd, flags, io_uring, ring};
 use std::os::fd::AsRawFd;
 
 pub mod code {
@@ -18,11 +18,11 @@ pub(super) fn cache_io_loop(
     mut req: RequestReceiver,
     mut io_ring: io_uring::IoUring,
     mut ebpf_ring: EbpfRing,
-    br: completion::ring::BufferRing,
+    br: ring::BufferRing,
     cache: std::sync::Arc<super::L2Cache>,
     mut shutdown: eventfd::EventFd,
 ) -> eyre::Result<()> {
-    use io_uring::{opcode, squeue::SubmissionQueue, types::Fd};
+    use quilkin_uring::io_uring::{opcode, squeue::SubmissionQueue, types::Fd};
 
     const BUFFER_RING: u16 = 0xfeed;
 
