@@ -193,7 +193,7 @@ impl SimpleLoop {
             &mut tx,
             &mut self.cfg,
             &mut self.state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         let mut packet = tx.pop_back()?;
@@ -222,7 +222,7 @@ impl SimpleLoop {
             &mut tx,
             &mut self.cfg,
             &mut self.state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         let mut send = [const { None }; N];

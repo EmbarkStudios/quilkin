@@ -51,7 +51,7 @@ impl CacheQueue {
         mut packet: Packet,
         mut headers: UdpHeaders,
         tx_slab: &mut xdp::slab::StackSlab<N>,
-    ) -> Option<(Rejected, Packet)> {
+    ) -> Option<(Rejected, Packet, UdpHeaders)> {
         let Some(ll) = self
             .cache
             .mac_for_ip(headers.ip.destination_addr(), self.rxid)
@@ -61,12 +61,14 @@ impl CacheQueue {
         };
 
         let LinkLayerAddr::Known(mac) = ll else {
-            return Some((Rejected::Unreachable, packet));
+            return Some((Rejected::Unreachable, packet, headers));
         };
 
         Self::set_destination(&mut packet, &mut headers.eth, mac);
 
-        tx_slab.push_front(packet).map(|p| (Rejected::Full, p))
+        tx_slab
+            .push_front(packet)
+            .map(|p| (Rejected::Full, p, headers))
     }
 
     /// Dequeues notifications from the cache of resolved layer 2 addresses, attempting to enqueue packets for send that
@@ -80,8 +82,8 @@ impl CacheQueue {
         &mut self,
         tx_slab: &mut xdp::slab::StackSlab<N>,
         umem: &mut xdp::Umem,
-        overflow: impl Fn(Packet, UdpHeaders),
-        failed: impl Fn(Ip, usize),
+        mut overflow: impl FnMut(Packet, UdpHeaders),
+        mut failed: impl FnMut(Ip, usize),
     ) {
         // Even if we don't have space in the slab for sends we want to dequeue all of the items currently in the channel
         // to avoid filling it

@@ -13,6 +13,7 @@ pub use quilkin_xdp::xdp;
 use quilkin_xdp::{
     l2_cache::{self as cache, types::LinkLayerAddr},
     slab::{HeapSlab, Slab},
+    slab::{Slab, StackSlab},
     xdp::{
         Umem,
         packet::{
@@ -619,7 +620,7 @@ pub fn process_packets(
 
 #[inline]
 #[allow(clippy::too_many_arguments)]
-fn push_packet(
+fn push_packet<LL: LinkLayer>(
     direction: metrics::Direction,
     packet: PacketWrapper,
     asn: AsnInfo<'_>,
@@ -637,7 +638,7 @@ fn push_packet(
                 tx_slab,
                 matches!(direction, metrics::Direction::Read),
             ) {
-                metrics::packets_dropped_total(direction, reason).inc();
+                metrics::packets_dropped(direction, reason).inc();
                 umem.free_packet(packet);
             } else {
                 metrics::packets_total(direction, &asn, cluster).inc();
@@ -646,7 +647,7 @@ fn push_packet(
         }
         Err(err) => {
             metrics::errors_total(direction, err.discriminant(), &metrics::EMPTY).inc();
-            metrics::packets_dropped_total(direction, metrics::DropReason::SocketError).inc();
+            metrics::packets_dropped(direction, metrics::DropReason::SocketError).inc();
             umem.free_packet(packet.buffer);
         }
     }

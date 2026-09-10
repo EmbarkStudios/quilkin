@@ -11,7 +11,7 @@ use quilkin_xdp::{
 };
 use std::sync::Arc;
 pub mod diagnostics;
-mod ll;
+pub mod ll;
 mod packet;
 pub mod process;
 pub use packet::PacketWrapper;

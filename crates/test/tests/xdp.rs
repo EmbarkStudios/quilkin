@@ -4,9 +4,9 @@
 use qt::xdp_util::{endpoints, make_config};
 use quilkin::{
     filters,
-    net::io::nic::xdp::process::{
-        self,
-        xdp::{
+    net::io::nic::xdp::{
+        ll::Swap,
+        process::{
             self,
             packet::net_types::{self as nt, UdpHeaders},
             slab::{HeapSlab, Slab},
@@ -83,7 +83,7 @@ async fn simple_forwarding() {
         &mut tx_slab,
         &mut cfg_state,
         &mut state,
-        &mut process::Swap,
+        &mut Swap,
     );
 
     assert!(rx_slab.is_empty());
@@ -167,7 +167,7 @@ async fn changes_ip_version() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         assert!(rx_slab.is_empty());
@@ -207,7 +207,7 @@ async fn changes_ip_version() {
         &mut tx_slab,
         &mut cfg_state,
         &mut state,
-        &mut process::Swap,
+        &mut Swap,
     );
 
     assert!(rx_slab.is_empty());
@@ -291,7 +291,7 @@ async fn packet_manipulation() {
                 &mut tx_slab,
                 &mut cfg_state,
                 &mut state,
-                &mut process::Swap,
+                &mut Swap,
             );
 
             assert!(rx_slab.is_empty());
@@ -350,7 +350,7 @@ async fn packet_manipulation() {
                 &mut tx_slab,
                 &mut cfg_state,
                 &mut state,
-                &mut process::Swap,
+                &mut Swap,
             );
 
             assert!(rx_slab.is_empty());
@@ -412,7 +412,7 @@ async fn packet_manipulation() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         let mut server_packet = tx_slab.pop_back().unwrap();
@@ -438,7 +438,7 @@ async fn packet_manipulation() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         let mut server_packet = tx_slab.pop_back().unwrap();
@@ -532,7 +532,7 @@ async fn multiple_servers() {
         &mut tx_slab,
         &mut cfg_state,
         &mut state,
-        &mut process::Swap,
+        &mut Swap,
     );
 
     while let Some(mut sp) = tx_slab.pop_back() {
@@ -621,7 +621,7 @@ async fn many_sessions() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         let mut server_packet = tx_slab.pop_back().unwrap();
@@ -635,7 +635,7 @@ async fn many_sessions() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         let mut client_packet = tx_slab.pop_back().unwrap();
@@ -732,7 +732,7 @@ async fn frees_dropped_packets() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         assert!(tx_slab.is_empty());
@@ -756,7 +756,7 @@ async fn frees_dropped_packets() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         let server_packet = tx_slab.pop_back().unwrap();
@@ -780,7 +780,7 @@ async fn frees_dropped_packets() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         assert!(tx_slab.is_empty());
@@ -859,7 +859,7 @@ async fn qcmp() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         let mut pong_packet = tx_slab.pop_back().unwrap();
@@ -910,7 +910,7 @@ async fn qcmp() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         let mut pong_packet = tx_slab.pop_back().expect("padded ping packet was dropped");
@@ -948,7 +948,7 @@ async fn qcmp() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         assert!(tx_slab.is_empty());
@@ -1014,7 +1014,7 @@ async fn trims_ethernet_padding() {
         &mut tx_slab,
         &mut cfg_state,
         &mut state,
-        &mut process::Swap,
+        &mut Swap,
     );
 
     let mut server_packet = tx_slab.pop_back().expect("padded packet was dropped");
@@ -1073,7 +1073,7 @@ async fn drops_unparsable_packets() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
         assert!(rx_slab.is_empty());
         assert!(tx_slab.is_empty(), "an unparsable packet was forwarded");
@@ -1191,7 +1191,7 @@ async fn drops_packets_filters_cant_modify() {
             &mut tx_slab,
             &mut cfg_state,
             &mut state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         assert!(tx_slab.is_empty(), "forwarded a partially modified packet");
