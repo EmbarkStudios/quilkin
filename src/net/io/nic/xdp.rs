@@ -10,7 +10,10 @@ use quilkin_xdp::{
 };
 use std::sync::Arc;
 pub mod diagnostics;
+mod ll;
+mod packet;
 pub mod process;
+pub use packet::PacketWrapper;
 
 pub enum NicConfig<'n> {
     /// Specifies a NIC by name, setup will fail if a NIC with that name doesn't exist
@@ -465,7 +468,7 @@ pub trait LinkLayer {
         packet: process::PacketWrapper,
         tx_slab: &mut xdp::slab::StackSlab<N>,
         to_client: bool,
-    ) -> Option<xdp::Packet>;
+    ) -> Option<(xdp::Packet, &'static str)>;
     #[inline]
     fn update<const N: usize>(
         &mut self,

@@ -1,4 +1,4 @@
-use super::LinkLayer;
+use super::{LinkLayer, PacketWrapper};
 use crate::{
     filters::{self, Filter as _},
     metrics::{self, AsnInfo},
@@ -30,110 +30,6 @@ use std::{
     },
     time::Instant,
 };
-
-/// Wrapper around the actual packet buffer and the UDP metadata it parsed to
-/// so that we can satisify the filter traits
-pub struct PacketWrapper {
-    buffer: Packet,
-    headers: UdpHeaders,
-    /// A modification a filter requested that couldn't be applied, the packet is
-    /// dropped rather than forwarded partially modified
-    failure: Option<&'static str>,
-}
-
-impl PacketWrapper {
-    #[inline]
-    fn new(buffer: Packet, headers: UdpHeaders) -> Self {
-        Self {
-            buffer,
-            headers,
-            failure: None,
-        }
-    }
-
-    /// Records a modification that couldn't be applied, keeping the first
-    #[inline]
-    fn fail(&mut self, failure: &'static str) {
-        self.failure.get_or_insert(failure);
-    }
-
-    /// Shrinks the data payload, recording `failure` if that would move the tail
-    /// into the headers
-    #[inline]
-    fn trim(&mut self, length: usize, failure: &'static str) {
-        if length > self.headers.data_length() || self.buffer.adjust_tail(-(length as i32)).is_err()
-        {
-            self.fail(failure);
-            return;
-        }
-
-        self.headers.data.end -= length;
-    }
-}
-
-impl filters::Packet for PacketWrapper {
-    #[inline]
-    fn as_slice(&self) -> &[u8] {
-        &self.buffer[self.headers.data.start..self.headers.data.end]
-    }
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.headers.data_length()
-    }
-}
-
-impl filters::PacketMut for PacketWrapper {
-    #[inline]
-    fn extend_head(&mut self, bytes: &[u8]) {
-        if self.buffer.insert(self.headers.data.start, bytes).is_err() {
-            self.fail("filter::extend head");
-            return;
-        }
-
-        self.headers.data.end += bytes.len();
-    }
-
-    #[inline]
-    fn extend_tail(&mut self, bytes: &[u8]) {
-        if self.buffer.append(bytes).is_err() {
-            self.fail("filter::extend tail");
-            return;
-        }
-
-        self.headers.data.end += bytes.len();
-    }
-
-    #[inline]
-    fn remove_head(&mut self, length: usize) {
-        if length == 0 {
-            return;
-        }
-
-        if length > self.headers.data_length() || self.headers.data.end > self.buffer.len() {
-            self.fail("filter::remove head");
-            return;
-        }
-
-        // Shift the payload down over the removed bytes, the headers are rewritten
-        // before the packet is sent
-        self.buffer.copy_within(
-            self.headers.data.start + length..self.headers.data.end,
-            self.headers.data.start,
-        );
-        self.trim(length, "filter::remove head");
-    }
-
-    #[inline]
-    fn remove_tail(&mut self, length: usize) {
-        self.trim(length, "filter::remove tail");
-    }
-
-    // Only used in the io-uring/reference implementations
-    fn freeze(self) -> bytes::Bytes {
-        unreachable!();
-    }
-}
 
 use crate::config;
 
@@ -834,7 +730,7 @@ fn process_client_packet<const TXN: usize, LL: LinkLayer>(
 fn process_server_packet<const TXN: usize, LL: LinkLayer>(
     packet: PacketWrapper,
     umem: &mut Umem,
-    filters: &crate::filters::FilterChain,
+    filters: &filters::FilterChain,
     state: &mut State,
     tx_slab: &mut StackSlab<TXN>,
     jitter: i64,
@@ -1010,154 +906,6 @@ fn process_qcmp_packet<const TXN: usize>(
     umem.free_packet(packet);
 }
 
-pub struct Swap;
-
-impl LinkLayer for Swap {
-    #[inline]
-    fn try_fill<const N: usize>(
-        &mut self,
-        mut packet: PacketWrapper,
-        tx_slab: &mut xdp::slab::StackSlab<N>,
-        _to_client: bool,
-    ) -> Option<Packet> {
-        packet.headers.eth = packet.headers.eth.swapped();
-        // All the packet headers have been written, so we only update the eth header here
-        packet
-            .buffer
-            .write(0, packet.headers.eth)
-            .expect("unreachable");
-        tx_slab.push_front(packet.buffer)
-    }
-}
-
-pub(super) struct Local {
-    cache: Arc<cache::L2Cache>,
-    rx: cache::CacheRx,
-    queued: Vec<PacketWrapper>,
-    overflow: Vec<Packet>,
-    ipv6_gateway: MacAddress,
-    ipv4_gateway: MacAddress,
-    rxid: u8,
-}
-
-impl Local {
-    pub(super) fn new(cache: Arc<cache::L2Cache>, rx: cache::CacheRx, rxid: u8) -> Self {
-        Self {
-            cache,
-            rx,
-            rxid,
-            queued: Vec::new(),
-            overflow: Vec::new(),
-            ipv4_gateway: MacAddress([0; 6]),
-            ipv6_gateway: MacAddress([0; 6]),
-        }
-    }
-
-    #[inline]
-    fn set_destination(packet: &mut PacketWrapper, dest: MacAddress) {
-        packet.headers.eth.source = packet.headers.eth.destination;
-        packet.headers.eth.destination = dest;
-        // All the packet headers have been written, so we only update the eth header here
-        packet
-            .buffer
-            .write(0, packet.headers.eth)
-            .expect("unreachable");
-    }
-}
-
-impl LinkLayer for Local {
-    #[inline]
-    fn update_gateway(&mut self, addr: MacAddress, v4: bool) {
-        if v4 {
-            self.ipv4_gateway = addr;
-        } else {
-            self.ipv6_gateway = addr;
-        }
-    }
-
-    fn try_fill<const N: usize>(
-        &mut self,
-        mut packet: PacketWrapper,
-        tx_slab: &mut xdp::slab::StackSlab<N>,
-        to_client: bool,
-    ) -> Option<xdp::Packet> {
-        if to_client {
-            let addr = if packet.headers.is_ipv4() {
-                self.ipv4_gateway
-            } else {
-                self.ipv6_gateway
-            };
-            Self::set_destination(&mut packet, addr);
-            return tx_slab.push_front(packet.buffer);
-        }
-
-        if let Some(ll) = self
-            .cache
-            .mac_for_ip(packet.headers.ip.destination_addr(), self.rxid)
-        {
-            let cache::types::LinkLayerAddr::Known(mac) = ll else {
-                return Some(packet.buffer);
-            };
-
-            Self::set_destination(&mut packet, mac);
-
-            tx_slab.push_front(packet.buffer)
-        } else {
-            self.queued.push(packet);
-            None
-        }
-    }
-
-    fn update<const N: usize>(&mut self, tx_slab: &mut xdp::slab::StackSlab<N>, umem: &mut Umem) {
-        if !self.overflow.is_empty() && tx_slab.available() > 0 {
-            while let Some(of) = self.overflow.pop() {
-                if let Some(nospace) = tx_slab.push_front(of) {
-                    self.overflow.push(nospace);
-                    break;
-                }
-            }
-        }
-
-        // Even if we don't have space in the slab for sends we want to dequeue all of the items currently in the channel
-        // to avoid filling it
-        while let Ok((ip, addr)) = self.rx.try_recv() {
-            let addr = if let LinkLayerAddr::Known(mac) = addr {
-                Some(mac)
-            } else {
-                None
-            };
-            let mut off = 0;
-
-            while let Some(pos) = self
-                .queued
-                .iter()
-                .skip(off)
-                .position(|pw| ip == pw.headers.ip.destination_addr())
-            {
-                let mut packet = self.queued.swap_remove(pos + off);
-
-                if let Some(dest) = addr {
-                    Self::set_destination(&mut packet, dest);
-
-                    if let Some(buff) = tx_slab.push_front(packet.buffer) {
-                        self.overflow.push(buff);
-                    }
-                } else {
-                    metrics::packets_dropped_total(
-                        metrics::Direction::Write,
-                        "ip unreachable",
-                        &metrics::EMPTY,
-                    )
-                    .inc();
-                    umem.free_packet(packet.buffer);
-                }
-
-                off += pos;
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1306,7 +1054,7 @@ mod test {
 
         let mut wrapper = PacketWrapper::new(buffer, headers);
 
-        use crate::filters::{Packet, PacketMut};
+        use filters::{Packet, PacketMut};
 
         assert_eq!(wrapper.as_slice(), payload);
 
