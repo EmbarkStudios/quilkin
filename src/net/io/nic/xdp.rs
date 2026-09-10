@@ -10,7 +10,7 @@ use quilkin_xdp::{
 };
 use std::sync::Arc;
 pub mod diagnostics;
-mod ll;
+pub mod ll;
 mod packet;
 pub mod process;
 pub use packet::PacketWrapper;
@@ -465,10 +465,10 @@ pub trait LinkLayer {
     fn update_gateway(&mut self, _addr: MacAddress, _v4: bool) {}
     fn try_fill<const N: usize>(
         &mut self,
-        packet: process::PacketWrapper,
+        packet: PacketWrapper,
         tx_slab: &mut xdp::slab::StackSlab<N>,
         to_client: bool,
-    ) -> Option<(xdp::Packet, &'static str)>;
+    ) -> Option<(xdp::Packet, crate::metrics::DropReason)>;
     #[inline]
     fn update<const N: usize>(
         &mut self,
@@ -550,7 +550,7 @@ pub fn spawn(
                         }
                     };
 
-                    let ll = process::Local::new(cache, rx, i as u8);
+                    let ll = ll::Local::new(cache, rx, i as u8);
 
                     io_loop(
                         worker,
@@ -586,7 +586,7 @@ pub fn spawn(
                         ipv4,
                         ipv6,
                         shutdown.clone(),
-                        process::Swap,
+                        ll::Swap,
                     );
                 })
         }.map_err(XdpSpawnError::Thread)?;

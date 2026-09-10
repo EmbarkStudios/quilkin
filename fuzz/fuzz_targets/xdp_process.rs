@@ -13,9 +13,12 @@
 use libfuzzer_sys::fuzz_target;
 use quilkin::{
     filters,
-    net::io::nic::xdp::process::{
-        self,
-        xdp::{self, slab::Slab},
+    net::io::nic::xdp::{
+        ll,
+        process::{
+            self,
+            xdp::{self, slab::Slab},
+        },
     },
 };
 use std::{cell::RefCell, net::Ipv4Addr, net::Ipv6Addr};
@@ -135,7 +138,7 @@ impl Harness {
             &mut tx,
             &mut self.cfg,
             &mut self.state,
-            &mut process::Swap,
+            &mut ll::Swap,
         );
 
         assert!(rx.is_empty(), "a received packet wasn't processed");

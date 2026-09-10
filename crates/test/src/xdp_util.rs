@@ -1,4 +1,4 @@
-use quilkin::net::io::nic::xdp::process;
+use quilkin::net::io::nic::xdp::{ll::Swap, process};
 use xdp::{Packet, packet::net_types::UdpHeaders};
 
 #[inline]
@@ -190,7 +190,7 @@ impl SimpleLoop {
             &mut tx,
             &mut self.cfg,
             &mut self.state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         let mut packet = tx.pop_back()?;
@@ -221,7 +221,7 @@ impl SimpleLoop {
             &mut tx,
             &mut self.cfg,
             &mut self.state,
-            &mut process::Swap,
+            &mut Swap,
         );
 
         let mut send = [const { None }; N];

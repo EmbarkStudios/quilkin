@@ -1,5 +1,5 @@
 use quilkin_xdp::{
-    l2_cache::types::LinkLayerAddr,
+    l2_cache,
     xdp::{self, packet::net_types as nt},
 };
 use std::{
@@ -98,6 +98,7 @@ const QCMP_PORT: u16 = 7600;
 
 #[test]
 #[ignore = "requires sudo privileges"]
+#[tracing_test::traced_test]
 fn layer2_caching() {
     use std::fs::File;
 
@@ -113,6 +114,9 @@ fn layer2_caching() {
 
     let shutdown = std::sync::Arc::<std::sync::atomic::AtomicBool>::default();
 
+    let started =
+        |tx: crossbeam_channel::Sender<()>| tx.send(()).expect("failed to signal startup complete");
+
     const PACKET_SIZE: usize = 128;
 
     let client = std::thread::Builder::new()
@@ -126,16 +130,20 @@ fn layer2_caching() {
             let sock = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 1111))
                 .expect("failed to bind client socket");
 
+            tracing::info!(addr = %sock.local_addr().unwrap(), "client bound");
+
             // Set an aggressive timeout, this is all local
-            sock.set_read_timeout(Some(std::time::Duration::from_millis(10)))
-                .expect("failed to set read timeout");
+            // sock.set_read_timeout(Some(std::time::Duration::from_millis(1000)))
+            //     .expect("failed to set read timeout");
 
             // Wait for the other threads to finish spinning up
+            tracing::info!("client waiting for other threads...");
             while spinup_rx.recv().is_ok() {}
 
             let proxy = net::SocketAddr::new(NAMESPACES[1].1.unwrap().into(), EXTERNAL_PORT);
 
             for i in 0..100u8 {
+                tracing::info!(id = i, "client sending packet");
                 let mut data = [i; PACKET_SIZE];
 
                 assert_eq!(
@@ -143,6 +151,8 @@ fn layer2_caching() {
                     PACKET_SIZE
                 );
                 let (len, from) = sock.recv_from(&mut data).expect("failed to recv packet");
+                tracing::info!(id = i, "client received packet");
+
                 assert_eq!(len, PACKET_SIZE);
                 assert_eq!(from, proxy);
 
@@ -156,7 +166,9 @@ fn layer2_caching() {
         })
         .expect("failed to spawn client thread");
 
-    let ipv4 = std::thread::Builder::new()
+    let stx = spinup_tx.clone();
+    let srx = shutdown.clone();
+    let proxy = std::thread::Builder::new()
         .name("proxy".into())
         .spawn(move || {
             let ns = File::open("/var/run/netns/proxy").expect("failed to open proxy namespace");
@@ -170,14 +182,17 @@ fn layer2_caching() {
                 quilkin_xdp::PROGRAM_L2,
             )
             .expect("failed to load program");
-            prog.load_into_kernel()
-                .expect("the kernel rejected the program");
 
             let nic = xdp::nic::NicIndex::lookup_by_name(c"proxyvlan")
                 .expect("failed to lookup NIC")
                 .expect("failed to find expected nic");
 
-            let umem = xdp::Umem::map(
+            // Note we can't query the queues counts for the virtual interface as the ioctl isn't supported for at least
+            // macvlan, eg. even ethtool can't:
+            // $ ip netns exec proxy ethtool -l proxyvlan
+            // $ netlink error: Operation not supported
+
+            let mut umem = xdp::Umem::map(
                 xdp::umem::UmemCfgBuilder {
                     frame_size: xdp::umem::FrameSize::TwoK,
                     frame_count: 64,
@@ -219,8 +234,12 @@ fn layer2_caching() {
                 .and_then(|i2m| aya::maps::RingBuf::try_from(i2m).ok())
                 .expect("failed to get eBPF ring buffer");
 
-            // Signal we are done
-            spinup_tx.send(()).expect("failed to signal");
+            let link_id = prog
+                .attach(nic, Default::default())
+                .expect("failed to attach");
+
+            tracing::info!(nic = ?nic, "proxy attached");
+            started(stx);
 
             const POLL_TIMEOUT: xdp::socket::PollTimeout =
                 xdp::socket::PollTimeout::new(Some(std::time::Duration::from_millis(100)));
@@ -231,12 +250,13 @@ fn layer2_caching() {
             let mut rx_slab = xdp::slab::StackSlab::<BATCH_SIZE>::new();
             let mut tx_slab = xdp::slab::StackSlab::<{ BATCH_SIZE << 2 }>::new();
             let mut pending_sends = 0;
-            let mut outstanding = umem.outstanding() as i64;
 
             let mut fill = rings.fill_ring;
             let mut rx = rings.rx_ring.unwrap();
             let mut tx = rings.tx_ring.unwrap();
             let mut completion = rings.completion_ring;
+
+            let ipv4_client = NAMESPACES[0].1.unwrap();
 
             let ipv4_proxy = NAMESPACES[1].1.unwrap();
             let ipv6_proxy = NAMESPACES[1].2.unwrap();
@@ -251,17 +271,13 @@ fn layer2_caching() {
             let (cache, _jh) = quilkin_xdp::l2_cache::L2Cache::with_channels(vec![ctx], ip_to_mac)
                 .expect("failed to initialize cache");
 
-            let mut queued = Vec::new();
+            let mut queue = l2_cache::queue::CacheQueue::new(cache, crx, 0);
 
             // SAFETY: the cases of unsafe in this code block all concern the relationship
             // between frames and the Umem, the frames cannot outlive the Umem which is
             // the owner of the actual memory map
             unsafe {
-                while !shutdown.load(std::sync::atomic::Ordering::Relaxed) {
-                    // Wait for packets to be received, note that
-                    // [poll](https://www.man7.org/linux/man-pages/man2/poll.2.html) also acts
-                    // as a [cancellation point](https://www.man7.org/linux/man-pages/man7/pthreads.7.html),
-                    // so shutdown will cause the thread to exit here
+                while !srx.load(std::sync::atomic::Ordering::Relaxed) {
                     let Ok(true) = socket.poll_read(POLL_TIMEOUT) else {
                         continue;
                     };
@@ -278,7 +294,9 @@ fn layer2_caching() {
                             .expect("failed to parse packet")
                             .expect("expected UDP packet");
 
-                        match udp.udp.destination.host() {
+                        let dest_port = udp.udp.destination.host();
+
+                        match dest_port {
                             EXTERNAL_PORT => {
                                 client_mac = udp.eth.source;
 
@@ -304,16 +322,20 @@ fn layer2_caching() {
 
                                 udp.ip = ips.with_header(&udp.ip);
                             }
-                            4444 => {}
-                            6666 => {
-                                packet.adjust_head(-20).unwrap();
+                            4444 | 6666 => {
+                                if dest_port == 6666 {
+                                    packet.adjust_head(-20).unwrap();
+                                }
+
+                                udp.eth.source = udp.eth.destination;
+                                udp.eth.destination = client_mac;
+                                udp.ip = nt::IpAddresses::V4 {
+                                    source: ipv4_proxy,
+                                    destination: ipv4_client,
+                                }
+                                .with_header(&udp.ip);
                             }
                             _ => unreachable!("unexpected UDP destination port"),
-                        }
-
-                        if udp.udp.destination.host() == 1111 {
-                            udp.eth.source = udp.eth.destination;
-                            udp.eth.destination = client_mac;
                         }
 
                         udp.set_packet_headers(&mut packet)
@@ -324,50 +346,52 @@ fn layer2_caching() {
 
                         if udp.udp.destination.host() == 1111 {
                             assert!(tx_slab.push_front(packet).is_none(), "tx slab was full");
-                        } else if let Some(ll) = cache.mac_for_ip(udp.ip.destination_addr(), 0) {
-                            let LinkLayerAddr::Known(mac) = ll else {
-                                panic!(
-                                    "we failed to find a mac address for {}",
-                                    udp.ip.destination_addr()
-                                );
-                            };
-
-                            udp.eth.source = udp.eth.destination;
-                            udp.eth.destination = mac;
-
-                            packet.write(0, udp.eth).expect("failed to write ethernet");
-                            assert!(tx_slab.push_front(packet).is_none(), "tx slab was full");
                         } else {
-                            queued.push((packet, udp));
+                            if let Some((rejected, _packet, headers)) =
+                                queue.try_fill(packet, udp, &mut tx_slab)
+                            {
+                                match rejected {
+                                    l2_cache::queue::Rejected::Full => panic!("tx slab full"),
+                                    l2_cache::queue::Rejected::Unreachable => {
+                                        panic!("IP {} unreachable", headers.ip.destination_addr());
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    while let Ok((ip, ll)) = crx.try_recv() {}
+                    queue.update(
+                        &mut tx_slab,
+                        &mut umem,
+                        |_packet, hdrs| {
+                            panic!(
+                                "{} - cache queue overflowed tx slab!",
+                                hdrs.ip.destination_addr()
+                            );
+                        },
+                        |ip, count| {
+                            panic!("IP {ip} unreachable - {count}");
+                        },
+                    );
 
                     let before = tx_slab.len();
                     let enqueued_sends = match tx.send(&mut tx_slab, true) {
                         Ok(es) => es,
-                        Err(error) => {
-                            // EAGAIN means the wakeup wasn't delivered, but the packets are
-                            // already enqueued in the ring, so the kernel will send them on
-                            // the next successful wakeup or its own polling; not an error.
-                            if error.raw_os_error() != Some(libc::EAGAIN) {}
-
-                            before - tx_slab.len()
-                        }
+                        Err(_) => before - tx_slab.len(),
                     };
 
                     // Return frames that have completed sending
                     pending_sends += enqueued_sends;
                     pending_sends -= completion.dequeue(&mut umem, pending_sends);
-
-                    let new = umem.outstanding() as i64;
-                    outstanding = new;
                 }
+
+                prog.detach(link_id).expect("failed to detach");
             }
         })
         .expect("failed to spawn client thread");
 
+    let stx = spinup_tx.clone();
+    let srx = shutdown.clone();
     let ipv4 = std::thread::Builder::new()
         .name("ipv4".into())
         .spawn(move || {
@@ -379,13 +403,14 @@ fn layer2_caching() {
             let sock =
                 UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 4444)).expect("failed to bind ipv4 socket");
 
-            // Signal we are done
-            spinup_tx.send(()).expect("failed to signal");
+            started(stx);
 
             let mut packet = [0u8; PACKET_SIZE];
 
-            loop {
+            while !srx.load(std::sync::atomic::Ordering::Relaxed) {
                 let (len, from) = sock.recv_from(&mut packet).expect("ipv4 failed to recv");
+
+                assert_eq!(len, PACKET_SIZE);
 
                 let np = [packet[0].wrapping_add(44); PACKET_SIZE];
 
@@ -397,6 +422,7 @@ fn layer2_caching() {
         })
         .expect("failed to spawn client thread");
 
+    let srx = shutdown.clone();
     let ipv6 = std::thread::Builder::new()
         .name("ipv6".into())
         .spawn(move || {
@@ -408,11 +434,30 @@ fn layer2_caching() {
             let sock =
                 UdpSocket::bind((Ipv6Addr::UNSPECIFIED, 6666)).expect("failed to bind ipv6 socket");
 
-            // Signal we are done
-            spinup_tx.send(()).expect("failed to signal");
+            started(spinup_tx);
+
+            let mut packet = [0u8; PACKET_SIZE];
+
+            while !srx.load(std::sync::atomic::Ordering::Relaxed) {
+                let (len, from) = sock.recv_from(&mut packet).expect("ipv6 failed to recv");
+
+                assert_eq!(len, PACKET_SIZE);
+
+                let np = [packet[0].wrapping_add(66); PACKET_SIZE];
+
+                assert_eq!(
+                    sock.send_to(&np, from).expect("ipv6 failed to send"),
+                    PACKET_SIZE
+                );
+            }
         })
         .expect("failed to spawn client thread");
 
-    // Drop this so we don't spin forever waiting
-    drop(spinup_tx);
+    client.join().expect("failed to join client");
+
+    shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    ipv4.join().expect("failed to join ipv4");
+    ipv6.join().expect("failed to join ipv6");
+    proxy.join().expect("failed to join proxy");
 }

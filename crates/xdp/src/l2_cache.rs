@@ -67,8 +67,9 @@ impl L2Cache {
 
         let br = quilkin_uring::ring::BufferRing::new(
             QUEUE_SIZE as u16,
-            // we only deal with ICMP echo responses
-            64,
+            // we only deal with the minimal 8 byte ICMP echo request/reply packets, but we need to handle the case that
+            // for SOCK_RAW IPv4 sockets, receives will include the 20 byte IPv4 header
+            32,
         )
         .map_err(CacheSpawnError::BufferRing)?;
 
@@ -151,11 +152,6 @@ impl L2Cache {
                 tracing::warn!(ip = %ip.0, %lladdr, "attempted to update link layer address for an entry not in the map");
                 return;
             };
-
-            // if matches!(lladdr, LinkLayerAddr::Unreachable) {
-            //     crate::metrics::unreachable_ip().inc();
-            //     tracing::error!(ip = %ip.0, "IP is unreachable");
-            // }
 
             match entry.value_mut() {
                 CacheEntry::Known { interested, addr } => {

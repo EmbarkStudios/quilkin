@@ -222,8 +222,7 @@ impl Ping {
     }
 
     #[inline]
-    fn build(&mut self, ip: Ip, seq: u16) -> u32 {
-        icmp::make_echo_request(seq, &mut self.payload);
+    fn build(&mut self, ip: Ip, seq: u16) -> (u32, bool) {
         let ip = ip.0.octets();
 
         // SAFETY: Address manipulation within bounds
@@ -232,18 +231,20 @@ impl Ping {
                 let addr = &mut *self.addr.as_mut_ptr().cast::<libc::sockaddr_in>();
                 addr.sin_family = libc::AF_INET as _;
                 addr.sin_addr.s_addr = u32::from_ne_bytes([ip[12], ip[13], ip[14], ip[15]]);
-                addr.sin_port = 7u16.to_be();
+                addr.sin_port = 0;
 
-                std::mem::size_of::<libc::sockaddr_in>() as _
+                icmp::make_echo_request(seq, &mut self.payload, true);
+                (std::mem::size_of::<libc::sockaddr_in>() as _, true)
             } else {
                 let addr = &mut *self.addr.as_mut_ptr().cast::<libc::sockaddr_in6>();
                 addr.sin6_family = libc::AF_INET6 as _;
                 addr.sin6_addr.s6_addr = ip;
-                addr.sin6_port = 7u16.to_be();
+                addr.sin6_port = 0;
                 addr.sin6_flowinfo = 0;
                 addr.sin6_scope_id = 0;
 
-                std::mem::size_of::<libc::sockaddr_in6>() as _
+                icmp::make_echo_request(seq, &mut self.payload, false);
+                (std::mem::size_of::<libc::sockaddr_in6>() as _, false)
             }
         }
     }
@@ -291,19 +292,24 @@ pub(super) struct InflightPings {
     v: Vec<InflightPing>,
     s: slab::Slab<Ping>,
     cache: std::sync::Arc<super::L2Cache>,
-    socket: Fd,
+    in4: Fd,
+    in6: Fd,
     seq: u16,
 }
 
 const SEND_TIMEOUT: Timespec = Timespec::new().sec(2);
 
 impl InflightPings {
-    pub(super) fn new(socket: Fd, cache: std::sync::Arc<super::L2Cache>) -> Self {
+    pub(super) fn new(
+        icmp: &super::icmp::IcmpSocket,
+        cache: std::sync::Arc<super::L2Cache>,
+    ) -> Self {
         Self {
             v: Vec::with_capacity(32),
             s: slab::Slab::with_capacity(16),
             cache,
-            socket,
+            in4: Fd(icmp.in4.as_raw_fd()),
+            in6: Fd(icmp.in6.as_raw_fd()),
             seq: 0,
         }
     }
@@ -320,7 +326,8 @@ impl InflightPings {
         let key = key as u32;
 
         let ping = entry.insert(Ping::new());
-        let addr_len = ping.build(ip, seq);
+        let (addr_len, is_v4) = ping.build(ip, seq);
+        let socket = if is_v4 { self.in4 } else { self.in6 };
 
         let time = Instant::now();
 
@@ -340,7 +347,7 @@ impl InflightPings {
         unsafe {
             if sq
                 .push_multiple(&[
-                    opcode::Send::new(self.socket, ping.payload.as_ptr(), ping.payload.len() as _)
+                    opcode::Send::new(socket, ping.payload.as_ptr(), ping.payload.len() as _)
                         .dest_addr(ping.addr.as_ptr().cast())
                         .dest_addr_len(addr_len)
                         .build()
@@ -437,13 +444,13 @@ impl InflightPings {
     }
 
     #[inline]
-    pub(super) fn process_reply(&mut self, ip: Ip, rb: &[u8]) {
+    pub(super) fn process_reply(&mut self, ip: Ip, rb: &[u8], is_v4: bool) {
         let Some(i) = self.v.iter().position(|i| i.dst == ip) else {
             // We've (probably) already gotten the L2 information from eBPF
             return;
         };
 
-        match icmp::read_echo_reply(rb) {
+        match icmp::read_echo_reply(rb, is_v4) {
             Ok(seq) => {
                 // This should realistically never happen
                 if !self.v[i].seq.contains(&seq) {

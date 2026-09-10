@@ -12,7 +12,7 @@ pub struct PacketWrapper {
 
 impl PacketWrapper {
     #[inline]
-    fn new(buffer: Packet, headers: UdpHeaders) -> Self {
+    pub(super) fn new(buffer: Packet, headers: UdpHeaders) -> Self {
         Self {
             buffer,
             headers,

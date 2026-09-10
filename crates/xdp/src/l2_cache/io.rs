@@ -4,13 +4,14 @@ use quilkin_uring::{eventfd, flags, io_uring, ring};
 use std::os::fd::AsRawFd;
 
 pub mod code {
-    pub const RECV: u64 = 0;
-    pub const SEND: u64 = 1;
-    pub const REQUEST: u64 = 2;
-    pub const EBPF: u64 = 3;
-    pub const INTERVAL: u64 = 4;
-    pub const TIMEOUT: u64 = 5;
-    pub const SHUTDOWN: u64 = 6;
+    pub const RECV4: u64 = 0;
+    pub const RECV6: u64 = 1;
+    pub const SEND: u64 = 2;
+    pub const REQUEST: u64 = 4;
+    pub const EBPF: u64 = 5;
+    pub const INTERVAL: u64 = 6;
+    pub const TIMEOUT: u64 = 7;
+    pub const SHUTDOWN: u64 = 8;
 }
 
 pub(super) fn cache_io_loop(
@@ -50,19 +51,24 @@ pub(super) fn cache_io_loop(
         msg_flags: 0,
     };
 
-    let enqueue_recv = |sq: &mut SubmissionQueue<'_>| -> eyre::Result<()> {
+    let enqueue_recv = |sq: &mut SubmissionQueue<'_>, v4: bool| -> eyre::Result<()> {
+        let (sock, code) = (
+            Fd(if v4 { &icmp.in4 } else { &icmp.in6 }.as_raw_fd()),
+            if v4 { code::RECV4 } else { code::RECV6 },
+        );
         // SAFETY: the socket and buffer ring live as long as the io ring
         unsafe {
             sq.push(
-                &opcode::RecvMsgMulti::new(Fd(icmp.as_raw_fd()), &recv_hdr, BUFFER_RING)
+                &opcode::RecvMsgMulti::new(sock, &recv_hdr, BUFFER_RING)
                     .build()
-                    .user_data(code::RECV),
+                    .user_data(code),
             )
             .context("failed to enqueue multishot IORING_OP_RECVMSG")
         }
     };
 
-    enqueue_recv(&mut sq)?;
+    enqueue_recv(&mut sq, true)?;
+    enqueue_recv(&mut sq, false)?;
 
     // SAFETY: the eventfd lives as long as the io ring
     unsafe {
@@ -103,7 +109,7 @@ pub(super) fn cache_io_loop(
             .context("failed to enqueue shutdown event")?;
     }
 
-    let mut pings = InflightPings::new(Fd(icmp.as_raw_fd()), cache);
+    let mut pings = InflightPings::new(&icmp, cache);
 
     loop {
         match submitter.submit_and_wait(1) {
@@ -116,6 +122,7 @@ pub(super) fn cache_io_loop(
             }
         }
 
+        tracing::info!("got here");
         cq.sync();
 
         {
@@ -124,16 +131,15 @@ pub(super) fn cache_io_loop(
             for cqe in &mut cq {
                 let ud = cqe.user_data();
 
-                match ud & 0xff {
+                match dbg!(ud & 0xff) {
                     // We've received a response to an ICMP echo request
-                    code::RECV => {
+                    code::RECV4 | code::RECV6 => {
                         let ret = cqe.result();
-
                         let flags = cqe.flags();
 
                         // Requeue the recv if needed
                         if flags & flags::IORING_CQE_F_MORE == 0 {
-                            enqueue_recv(&mut sq)?;
+                            enqueue_recv(&mut sq, ud & 0xff == code::RECV4)?;
                         }
 
                         if ret < 0 {
@@ -161,7 +167,7 @@ pub(super) fn cache_io_loop(
                             }
                         };
 
-                        pings.process_reply(addr.ip().into(), &rb);
+                        pings.process_reply(addr.ip().into(), &rb, addr.is_ipv4());
 
                         bre.enqueue_by_id(id);
                     }

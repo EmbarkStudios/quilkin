@@ -281,7 +281,11 @@ impl EbpfProgram {
             .expect("failed to locate 'all_queues' program")
             .try_into()
             .expect("'all_queues' is not an xdp program");
-        program.load()?;
+        if let Err(err) = program.load()
+            && !matches!(err, aya::programs::ProgramError::AlreadyLoaded)
+        {
+            return Err(err);
+        }
 
         program.attach_to_if_index(nic.into(), mode)
     }

@@ -392,6 +392,8 @@ pub enum DropReason {
     SessionLimit,
     /// Quilkin lost track of state it needs to forward the packet.
     Internal,
+    /// We were unable to resolve the layer 2 address of an IP
+    UnreachableIp,
 }
 
 impl DropReason {
@@ -406,6 +408,7 @@ impl DropReason {
             Self::InvalidPacket => "invalid_packet",
             Self::SessionLimit => "session_limit",
             Self::Internal => "internal",
+            Self::UnreachableIp => "unreachable_ip",
         }
     }
 }
@@ -959,25 +962,6 @@ pub(crate) fn packets_dropped_total(
 #[inline]
 pub(crate) fn packets_dropped(direction: Direction, reason: DropReason) -> IntCounter {
     packets_dropped_total(direction, reason, "", "")
-}
-
-/// Failed to ping a server IP to retrieve its layer 2 address
-///
-/// Due to cardinality issues that could arise, the IP itself is not part of the metric, but present in the logs
-#[inline]
-pub(crate) fn unreachable_ip() -> &'static IntCounter {
-    static UNREACHABLE_IP: Lazy<IntCounter> = Lazy::new(|| {
-        prometheus::register_int_counter_with_registry! {
-            prometheus::opts! {
-                "quilkin_unreachable_ip",
-                "Total number of unreachable IPs",
-            },
-            registry(),
-        }
-        .unwrap()
-    });
-
-    &UNREACHABLE_IP
 }
 
 pub(crate) fn provider_task_failures_total(provider_task: &str) -> IntCounter {

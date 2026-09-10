@@ -28,6 +28,7 @@ xdp.workspace = true
 # Validates the committed eBPF object, must be the same revision as `aya`
 aya-obj = { git = "https://github.com/aya-rs/aya", rev = "2453204" }
 etherparse.workspace = true
+tracing-test = "0.2.5"
 
 [lints]
 workspace = true
