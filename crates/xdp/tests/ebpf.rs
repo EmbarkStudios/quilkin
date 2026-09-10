@@ -2,17 +2,6 @@ use aya::programs::{TestRun as _, TestRunOptions};
 use etherparse as ep;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-/// The eBPF object is committed rather than built, so these validate it still
-/// has what [`EbpfProgram::load`] expects.
-///
-/// Loading a program requires `CAP_BPF` + `CAP_NET_ADMIN`, so the tests that
-/// need the kernel are `#[ignore]`d. Run the built test binary under sudo rather
-/// than cargo, which would leave root owned artifacts in `target`:
-///
-/// ```sh
-/// BIN=$(cargo test -p quilkin-xdp --no-run 2>&1 | grep -oE '\(target/[^)]+\)' | tr -d '()')
-/// sudo "$BIN" --ignored --test-threads 1
-/// ```
 use quilkin_xdp::{EbpfProgram, PROGRAM_L2, PROGRAM_MAIN};
 
 const EXTERNAL_PORT: u16 = 7777;

@@ -11,7 +11,10 @@ use quilkin_xdp::{
 };
 use std::sync::Arc;
 pub mod diagnostics;
+mod ll;
+mod packet;
 pub mod process;
+pub use packet::PacketWrapper;
 
 pub enum NicConfig<'n> {
     /// Specifies a NIC by name, setup will fail if a NIC with that name doesn't exist

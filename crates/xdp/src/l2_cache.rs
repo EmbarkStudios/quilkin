@@ -1,5 +1,6 @@
 pub mod icmp;
 pub mod io;
+pub mod queue;
 pub mod types;
 
 pub use crossbeam_channel;
@@ -195,69 +196,3 @@ impl L2Cache {
         }
     }
 }
-
-// enum GatewayMac {
-//     /// The gateway MAC is the same for IPv4 and IPv6
-//     Same(types::MacAddr),
-//     Different {
-//         ipv4: Option<types::MacAddr>,
-//         ipv6: Option<types::MacAddr>,
-//     },
-// }
-
-// impl GatewayMac {
-//     /// Retrieves the MAC address of the default gateway
-//     pub fn request(nic: &str) -> eyre::Result<Self> {
-//         use eyre::{ContextCompat, WrapErr};
-
-//         // This is extremely ugly, but netlink is even uglier, this issues an arp command, to get the default gateway address's
-//         // link layer address. This uses the special `_gateway` identifier which is systemd specific, so this would need to be
-//         // modified if people want to run it on non-systemd systems
-//         fn get(nic: &str) -> eyre::Result<Option<types::MacAddr>> {
-//             let output = std::process::Command::new("arp")
-//                 .args(["-i", nic, "-n", "_gateway"])
-//                 .output()
-//                 .context("failed to resolve link layer address of default gateway")?;
-
-//             eyre::ensure!(
-//                 output.status.success(),
-//                 "arp returned failure status {}",
-//                 output.status
-//             );
-
-//             let out = String::from_utf8(output.stdout).context("arp output was not utf-8")?;
-//             let Some(l) = out.lines().nth(1) else {
-//                 return Ok(None);
-//             };
-//             let lladdr = l
-//                 .split_whitespace()
-//                 .nth(2)
-//                 .context("arp output didn't have a standard line")?;
-
-//             let mut la = [0u8; 6];
-//             let mut i = 0;
-//             for c in lladdr.split(':') {
-//                 eyre::ensure!(i < la.len(), "mac address contained too many components");
-
-//                 la[i] =
-//                     u8::from_str_radix(c, 16).with_context(|| format!("failed to parse {c}"))?;
-
-//                 i += 1;
-//             }
-
-//             eyre::ensure!(i == 6, "mac address did not contain enough components");
-//             Ok(Some(types::MacAddr(la)))
-//         }
-//     }
-// }
-
-// #[cfg(test)]
-// mod test {
-//     #[test]
-//     fn gateway() {
-//         assert_eq!(
-//             super::GatewayMac::request("enp5s0").unwrap(),
-//             [0x04, 0xf4, 0x1c, 0xea, 0x7f, 0x17]
-//         );
-//     }
-// }
