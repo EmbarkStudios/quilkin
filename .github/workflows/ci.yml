@@ -33,6 +33,26 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # cargo-deny only looks at the dependency graph, so we only run it when the graph can actually
+  # have changed. Time based failures (new advisories, newly yanked crates) are handled by the
+  # scheduled `Dependencies` workflow instead of blocking unrelated PRs.
+  changes:
+    name: Detect dependency changes
+    runs-on: ubuntu-24.04
+    outputs:
+      deps: ${{ steps.filter.outputs.deps }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            deps:
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+              - 'deny.toml'
+              - '.github/workflows/ci.yml'
+
   lint:
     name: Lint
     runs-on: ubuntu-24.04
@@ -127,6 +147,9 @@ jobs:
       - run: cargo build
 
   deny-check:
+    name: Deny check
+    needs: changes
+    if: needs.changes.outputs.deps == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -135,6 +158,14 @@ jobs:
 
   test_success:
     runs-on: ubuntu-24.04
-    needs: [lint, test, build, build-aarch64, deny-check, validate-proto-bufs]
+    needs: [changes, lint, test, build, build-aarch64, deny-check, validate-proto-bufs]
+    # `deny-check` is skipped for changes that can't affect the dependency graph, which would
+    # otherwise skip this job as well, so the results are checked explicitly
+    if: always()
     steps:
+      - name: Check job results
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "::error ::one or more required jobs did not pass"
+          exit 1
       - run: echo "All test jobs passed"
