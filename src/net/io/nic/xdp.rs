@@ -204,6 +204,8 @@ fn attach_xdp_program(
     }
 }
 
+const BATCH_SIZE: usize = 1024;
+
 /// a socket is bound to every available queue on the NIC, and when [`spawn`]
 /// is invoked, each socket is processed in its own thread
 ///
@@ -341,7 +343,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
 
         packet_count as u32
     } else {
-        2 * 1024
+        (BATCH_SIZE << 1) as u32
     };
 
     let mut ebpf_prog = quilkin_xdp::EbpfProgram::load(config.external_port, config.qcmp_port)?;
@@ -367,7 +369,15 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     }
     .build()?;
 
-    let ring_cfg = xdp::RingConfigBuilder::default().build()?;
+    let ring_size = BATCH_SIZE as u32;
+
+    let ring_cfg = xdp::RingConfigBuilder {
+        rx_count: ring_size,
+        tx_count: ring_size,
+        fill_count: ring_size,
+        completion_count: ring_size,
+    }
+    .build()?;
     let workers = ebpf_prog.create_and_bind_sockets(nic, umem_cfg, &device_caps, ring_cfg)?;
 
     Ok(XdpWorkers {
@@ -452,8 +462,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
                 // Enqueue buffers to the fill ring to ensure that we don't miss any packets
                 // SAFETY: we keep the umem alive for as long as the socket is alive
                 unsafe {
-                    if let Err(error) = worker.fill.enqueue(&mut worker.umem, BATCH_SIZE * 2, true)
-                    {
+                    if let Err(error) = worker.fill.enqueue(&mut worker.umem, BATCH_SIZE, true) {
                         tracing::error!(%error, "failed to kick fill ring during initial spinup");
                     }
                 };
@@ -484,7 +493,6 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
     })
 }
 
-const BATCH_SIZE: usize = 64;
 use xdp::packet::net_types::NetworkU16;
 
 use crate::time::UtcTimestamp;
@@ -531,7 +539,7 @@ fn io_loop(
     use xdp::slab::Slab;
 
     let mut rx_slab = xdp::slab::StackSlab::<BATCH_SIZE>::new();
-    let mut tx_slab = xdp::slab::StackSlab::<{ BATCH_SIZE << 2 }>::new();
+    let mut tx_slab = xdp::slab::StackSlab::<BATCH_SIZE>::new();
     let mut pending_sends = 0;
     let mut outstanding = umem.outstanding() as i64;
 
@@ -553,7 +561,7 @@ fn io_loop(
             let recvd = rx.recv(&umem, &mut rx_slab);
 
             // Ensure the fill ring doesn't get starved, which could drop packets
-            if let Err(error) = fill.enqueue(&mut umem, BATCH_SIZE * 2 - recvd, true) {
+            if let Err(error) = fill.enqueue(&mut umem, BATCH_SIZE - recvd, true) {
                 // EAGAIN means the wakeup wasn't delivered, but the buffers are
                 // already enqueued in the ring, so the kernel will pick them up
                 // on the next successful wakeup or its own polling; not an error.

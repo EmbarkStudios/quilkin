@@ -30,6 +30,22 @@ ip link add veth-cs type veth peer name veth-proxy
 ip link set veth-cs netns cs
 ip link set veth-proxy netns proxy
 
+regex="Pre-set maximums:\s+RX:\s+([0-9]+)"
+
+channels=$(ip netns exec cs ethtool -l veth-cs)
+
+if [[ $channels =~ $regex ]]; then
+  max=${BASH_REMATCH[1]}
+
+  echo "::notice file=$source,line=$LINENO::Adjusting veth pair to maximum of $max"
+
+  ip netns exec cs ethtool -L veth-cs rx $max tx $max
+  ip netns exec proxy ethtool -L veth-proxy rx $max tx $max
+else
+    echo "::error file=$source,line=$LINENO::failed to acquire veth channel max"
+    exit 3
+fi
+
 PROXY_IP="10.0.0.2"
 OUTSIDE_IP="10.0.0.1"
 
@@ -49,11 +65,13 @@ echo "Adding dummy program"
 ip -n cs link set veth-cs xdpgeneric obj "$ROOT/crates/xdp/bin/dummy.bin" sec xdp
 
 ip netns exec cs fortio udp-echo&
-ip netns exec proxy ./target/debug/quilkin --service.udp --service.qcmp --provider.static.endpoints=$OUTSIDE_IP:8078 --service.udp.backend kernel --service.udp.xdp.network-interface veth-proxy&
+ip netns exec proxy ./target/release/quilkin --service.udp --service.qcmp --provider.static.endpoints=$OUTSIDE_IP:8078 --service.udp.backend kernel --service.udp.xdp.network-interface veth-proxy&
 
 echo "::notice file=$source,line=$LINENO::Launching client"
-ip netns exec cs fortio load -n 10 udp://$PROXY_IP:7777 2> ./target/logs.txt
+ip netns exec cs fortio load -gomaxprocs 64 -qps 0 -n 10000 udp://$PROXY_IP:7777 2> ./target/logs.txt
 logs=$(cat ./target/logs.txt)
+
+ip netns exec proxy ethtool -S veth-proxy | grep -oE 'rx_queue_[0-9]+_drops: ([0-9]+)' - | awk -v source=$source -v line=$LINENO '{total += $NF} END { printf("::notice file=%s,line=%d::dropped %d packets\n", source, line, total) }' -
 
 regex="Total Bytes sent: ([0-9]+), received: ([0-9]+)"
 
@@ -66,7 +84,7 @@ if [[ $logs =~ $regex ]]; then
     echo "::notice file=$source,line=$LINENO::Successfully sent ${send}B and received ${recv}B"
 
     # Now test QCMP pings which was also enabled in the proxy
-    ip netns exec cs ./target/debug/quilkin qcmp ping $PROXY_IP:7600
+    ip netns exec cs ./target/release/quilkin qcmp ping $PROXY_IP:7600
 
     exit 0
   fi
