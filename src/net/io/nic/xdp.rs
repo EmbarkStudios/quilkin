@@ -4,7 +4,7 @@ use quilkin_xdp::xdp::{
     self,
     nic::{NicIndex, NicName},
 };
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 pub mod diagnostics;
 pub mod process;
 
@@ -16,6 +16,58 @@ pub enum NicConfig<'n> {
     /// The NIC will be determined from the set of available NICs, setup will fail
     /// if more than one NIC is found that could be used for handling traffic
     Default,
+}
+
+/// Different scheduling policies that can be used for XDP worker threads
+///
+/// Note there are other scheduling policies, but these are the only ones relevant for quilkin
+#[derive(Copy, Clone)]
+#[repr(i32)]
+pub enum ThreadPolicy {
+    /// `SCHED_OTHER` default scheduling policy in Linux
+    Default = libc::SCHED_OTHER,
+    /// [`SCHED_FIFO`](https://man.archlinux.org/man/sched.7.en#SCHED_FIFO:_First_in-first_out_scheduling) real time scheduling policy
+    Fifo = libc::SCHED_FIFO,
+    /// [`SCHED_RR`](https://man.archlinux.org/man/sched.7.en#SCHED_RR:_Round-robin_scheduling), FIFO but with time slicing
+    RoundRobin = libc::SCHED_RR,
+}
+
+impl fmt::Debug for ThreadPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self}")
+    }
+}
+
+impl fmt::Display for ThreadPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Default => f.write_str("SCHED_OTHER"),
+            Self::Fifo => f.write_str("SCHED_FIFO"),
+            Self::RoundRobin => f.write_str("SCHED_RR"),
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct WorkerThreadScheduling {
+    /// The thread priority
+    ///
+    /// This value is automatically constrained between the minimum and maximum allowed based on the scheduling policy
+    pub thread_priority: i32,
+    /// The scheduling policy, see [sched](https://man.archlinux.org/man/sched.7.en)
+    pub thread_policy: ThreadPolicy,
+    /// If true, each worker is pinned to its own core
+    pub pin_threads: bool,
+}
+
+impl Default for WorkerThreadScheduling {
+    fn default() -> Self {
+        Self {
+            thread_priority: 99,
+            thread_policy: ThreadPolicy::Default,
+            pin_threads: false,
+        }
+    }
 }
 
 /// User supplied configuration
@@ -46,6 +98,8 @@ pub struct XdpConfig<'n> {
     /// Requires that the chosen NIC supports [`XDP_TXMD_FLAGS_TIMESTAMP`](https://docs.kernel.org/6.8/networking/xsk-tx-metadata.html)
     /// which allows [internet checksum]() calculation to be offloaded to the NIC
     pub require_tx_checksum: bool,
+    /// Worker thread scheduling configuration
+    pub worker_thread_scheduling: WorkerThreadScheduling,
 }
 
 impl Default for XdpConfig<'_> {
@@ -57,6 +111,7 @@ impl Default for XdpConfig<'_> {
             maximum_packet_memory: None,
             require_zero_copy: false,
             require_tx_checksum: false,
+            worker_thread_scheduling: WorkerThreadScheduling::default(),
         }
     }
 }
@@ -70,6 +125,7 @@ pub struct XdpWorkers {
     qcmp_port: NetworkU16,
     ipv6: std::net::Ipv6Addr,
     ipv4: std::net::Ipv4Addr,
+    worker_thread_scheduling: WorkerThreadScheduling,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -115,6 +171,8 @@ pub enum XdpSetupError {
     XdpAttach(#[from] quilkin_xdp::aya::programs::ProgramError),
     #[error("bind error: {0}")]
     BindError(#[from] quilkin_xdp::BindError),
+    #[error("failed to clamp thread priority for policy `{0}`: {1}")]
+    ThreadPriorityClamp(ThreadPolicy, #[source] std::io::Error),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -369,16 +427,34 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     }
     .build()?;
 
-    let ring_size = BATCH_SIZE as u32;
+    // let ring_size = BATCH_SIZE as u32;
 
-    let ring_cfg = xdp::RingConfigBuilder {
-        rx_count: ring_size,
-        tx_count: ring_size,
-        fill_count: ring_size,
-        completion_count: ring_size,
-    }
-    .build()?;
+    // let ring_cfg = xdp::RingConfigBuilder {
+    //     rx_count: ring_size,
+    //     tx_count: ring_size,
+    //     fill_count: ring_size,
+    //     completion_count: ring_size,
+    // }
+    let ring_cfg = xdp::RingConfigBuilder::default().build()?;
     let workers = ebpf_prog.create_and_bind_sockets(nic, umem_cfg, &device_caps, ring_cfg)?;
+
+    let mut worker_thread_scheduling = config.worker_thread_scheduling;
+
+    // SAFETY: syscalls
+    unsafe {
+        let min = libc::sched_get_priority_min(worker_thread_scheduling.thread_policy as _);
+        let max = libc::sched_get_priority_max(worker_thread_scheduling.thread_policy as _);
+
+        if min < 0 || max < 0 {
+            return Err(XdpSetupError::ThreadPriorityClamp(
+                worker_thread_scheduling.thread_policy,
+                std::io::Error::last_os_error(),
+            ));
+        }
+
+        worker_thread_scheduling.thread_priority =
+            worker_thread_scheduling.thread_priority.clamp(min, max);
+    }
 
     Ok(XdpWorkers {
         ebpf_prog,
@@ -389,6 +465,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         qcmp_port: config.qcmp_port.into(),
         ipv4,
         ipv6,
+        worker_thread_scheduling,
     })
 }
 
@@ -428,6 +505,44 @@ impl XdpLoop {
     }
 }
 
+fn spawn_worker<F, T>(
+    i: usize,
+    scheduling: WorkerThreadScheduling,
+    f: F,
+) -> std::io::Result<std::thread::JoinHandle<T>>
+where
+    F: FnOnce() -> T,
+    F: Send + 'static,
+    T: Send + 'static,
+{
+    std::thread::Builder::new()
+        .name(format!("xdp-io-{i}"))
+        .spawn(move || {
+            'ts: {
+                // SAFETY: syscalls
+                unsafe {
+                    if libc::sched_setscheduler(0, scheduling.thread_policy as _, &libc::sched_param {
+                        sched_priority: scheduling.thread_priority,
+                    }) != 0 {
+                        tracing::warn!(thread = std::thread::current().name(), error = %std::io::Error::last_os_error(), "failed to set XDP thread scheduler");
+                    }
+
+                    if !scheduling.pin_threads {
+                        break 'ts;
+                    }
+
+                    let mut set: libc::cpu_set_t = std::mem::zeroed();
+                    libc::CPU_SET(i, &mut set);
+                    if libc::pthread_setaffinity_np(libc::pthread_self(), std::mem::size_of::<libc::cpu_set_t>(), &set) != 0 {
+                        tracing::warn!(thread = std::thread::current().name(), error = %std::io::Error::last_os_error(), "failed to pin XDP worker to core");
+                    }
+                }
+            }
+
+            f()
+        })
+}
+
 /// The entrypoint into the XDP I/O loop.
 ///
 /// This spawns a named thread for each configured XDP socket to run the packet
@@ -456,29 +571,27 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
         let ss = session_state.clone();
         let shutdown = shutdown.clone();
 
-        let jh = std::thread::Builder::new()
-            .name(format!("xdp-io-{i}"))
-            .spawn(move || {
-                // Enqueue buffers to the fill ring to ensure that we don't miss any packets
-                // SAFETY: we keep the umem alive for as long as the socket is alive
-                unsafe {
-                    if let Err(error) = worker.fill.enqueue(&mut worker.umem, BATCH_SIZE, true) {
-                        tracing::error!(%error, "failed to kick fill ring during initial spinup");
-                    }
-                };
+        let jh = spawn_worker(i, workers.worker_thread_scheduling, move || {
+            // Enqueue buffers to the fill ring to ensure that we don't miss any packets
+            // SAFETY: we keep the umem alive for as long as the socket is alive
+            unsafe {
+                if let Err(error) = worker.fill.enqueue(&mut worker.umem, BATCH_SIZE, true) {
+                    tracing::error!(%error, "failed to kick fill ring during initial spinup");
+                }
+            };
 
-                io_loop(
-                    worker,
-                    external_port,
-                    qcmp_port,
-                    cfg,
-                    ss,
-                    ipv4,
-                    ipv6,
-                    shutdown.clone(),
-                );
-            })
-            .map_err(XdpSpawnError::Thread)?;
+            io_loop(
+                worker,
+                external_port,
+                qcmp_port,
+                cfg,
+                ss,
+                ipv4,
+                ipv6,
+                shutdown.clone(),
+            );
+        })
+        .map_err(XdpSpawnError::Thread)?;
 
         threads.push(jh);
     }

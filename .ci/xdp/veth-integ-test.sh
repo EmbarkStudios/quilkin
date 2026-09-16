@@ -4,7 +4,7 @@ set -e
 source="${BASH_SOURCE[0]}"
 
 # Print kernel version just for confirmation in CI
-echo "$(uname -r)"
+echo "::notice file=$source,line=$LINENO::Kernel $(uname -r)"
 
 cleanup() {
     echo "Cleaning up"
@@ -17,8 +17,8 @@ cleanup() {
 
 trap cleanup EXIT
 
-ip netns del cs || true
-ip netns del proxy || true
+ip netns del cs &> /dev/nul || true
+ip netns del proxy &> /dev/nul || true
 
 echo "::notice file=$source,line=$LINENO::Creating network namespaces"
 ip netns add cs
@@ -30,8 +30,9 @@ ip link add veth-cs type veth peer name veth-proxy
 ip link set veth-cs netns cs
 ip link set veth-proxy netns proxy
 
+# By default, veth interfaces only get 1 queue, even though they can scale up to the core count on the host, so manually
+# set it after creation
 regex="Pre-set maximums:\s+RX:\s+([0-9]+)"
-
 channels=$(ip netns exec cs ethtool -l veth-cs)
 
 if [[ $channels =~ $regex ]]; then
@@ -68,7 +69,7 @@ ip netns exec cs fortio udp-echo&
 ip netns exec proxy ./target/release/quilkin --service.udp --service.qcmp --provider.static.endpoints=$OUTSIDE_IP:8078 --service.udp.backend kernel --service.udp.xdp.network-interface veth-proxy&
 
 echo "::notice file=$source,line=$LINENO::Launching client"
-ip netns exec cs fortio load -gomaxprocs 64 -qps 0 -n 10000 udp://$PROXY_IP:7777 2> ./target/logs.txt
+ip netns exec cs fortio load -gomaxprocs $(getconf _NPROCESSORS_ONLN) -qps 0 -n 10000 udp://$PROXY_IP:7777 2> ./target/logs.txt
 logs=$(cat ./target/logs.txt)
 
 ip netns exec proxy ethtool -S veth-proxy | grep -oE 'rx_queue_[0-9]+_drops: ([0-9]+)' - | awk -v source=$source -v line=$LINENO '{total += $NF} END { printf("::notice file=%s,line=%d::dropped %d packets\n", source, line, total) }' -
@@ -81,7 +82,7 @@ if [[ $logs =~ $regex ]]; then
   # We could be more strict here and require they are exactly equal, but I can't
   # even consistently get that on my local machine so I doubt CI will fair better
   if [[ $recv -ne "0" ]]; then
-    echo "::notice file=$source,line=$LINENO::Successfully sent ${send}B and received ${recv}B"
+    echo "::notice file=$source,line=$LINENO::Successfully sent $(numfmt --format='%.2f' --to=iec-i $send) and received $(numfmt --format='%.2f' --to=iec-i $recv)"
 
     # Now test QCMP pings which was also enabled in the proxy
     ip netns exec cs ./target/release/quilkin qcmp ping $PROXY_IP:7600
