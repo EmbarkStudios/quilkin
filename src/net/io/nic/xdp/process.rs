@@ -15,7 +15,7 @@ use quilkin_xdp::xdp::{
         Packet, PacketError, csum,
         net_types::{IpAddresses, IpHdr, Ipv4Hdr, NetworkU16, UdpHdr, UdpHeaders},
     },
-    slab::{Slab, StackSlab},
+    slab::{HeapSlab, Slab},
 };
 use std::{
     collections::hash_map::Entry,
@@ -623,10 +623,10 @@ fn filtered(
 }
 
 #[inline]
-pub fn process_packets<const RXN: usize, const TXN: usize>(
-    rx_slab: &mut StackSlab<RXN>,
+pub fn process_packets(
+    rx_slab: &mut HeapSlab,
     umem: &mut Umem,
-    tx_slab: &mut StackSlab<TXN>,
+    tx_slab: &mut HeapSlab,
     config_state: &mut ConfigState,
     state: &mut State,
 ) {
@@ -710,14 +710,14 @@ pub fn process_packets<const RXN: usize, const TXN: usize>(
 
 #[inline]
 #[allow(clippy::too_many_arguments)]
-fn push_packet<const TXN: usize>(
+fn push_packet(
     direction: metrics::Direction,
     packet: Packet,
     asn: AsnInfo<'_>,
     cluster: &str,
     data_length: usize,
     res: Result<(), PacketError>,
-    tx_slab: &mut StackSlab<TXN>,
+    tx_slab: &mut HeapSlab,
     umem: &mut Umem,
 ) {
     match res {
@@ -739,13 +739,13 @@ fn push_packet<const TXN: usize>(
 }
 
 #[inline]
-fn process_client_packet<const TXN: usize>(
+fn process_client_packet(
     packet: PacketWrapper,
     umem: &mut Umem,
     filters: &filters::FilterChain,
     cm: &crate::net::ClusterMap,
     state: &mut State,
-    tx_slab: &mut StackSlab<TXN>,
+    tx_slab: &mut HeapSlab,
 ) -> Result<Option<Packet>, (PipelineError, Packet)> {
     let mut source_addr = packet.headers.source_address();
     source_addr.set_ip(source_addr.ip().to_canonical());
@@ -850,12 +850,12 @@ fn process_client_packet<const TXN: usize>(
 }
 
 #[inline]
-fn process_server_packet<const TXN: usize>(
+fn process_server_packet(
     packet: PacketWrapper,
     umem: &mut Umem,
     filters: &crate::filters::FilterChain,
     state: &mut State,
-    tx_slab: &mut StackSlab<TXN>,
+    tx_slab: &mut HeapSlab,
     jitter: i64,
 ) -> Result<Option<Packet>, (PipelineError, Packet)> {
     let mut server_addr = packet.headers.source_address();
@@ -938,11 +938,11 @@ fn fill_packet(
     Ok(())
 }
 
-fn process_qcmp_packet<const TXN: usize>(
+fn process_qcmp_packet(
     mut packet: Packet,
     headers: UdpHeaders,
     umem: &mut Umem,
-    tx_slab: &mut StackSlab<TXN>,
+    tx_slab: &mut HeapSlab,
 ) {
     use crate::{codec::qcmp, time::UtcTimestamp};
 

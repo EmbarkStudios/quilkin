@@ -1,10 +1,11 @@
 #![allow(dead_code)]
 
+use super::ThreadPolicy;
 use quilkin_xdp::xdp::{
     self,
     nic::{NicIndex, NicName},
 };
-use std::{fmt, sync::Arc};
+use std::sync::Arc;
 pub mod diagnostics;
 pub mod process;
 
@@ -18,41 +19,11 @@ pub enum NicConfig<'n> {
     Default,
 }
 
-/// Different scheduling policies that can be used for XDP worker threads
-///
-/// Note there are other scheduling policies, but these are the only ones relevant for quilkin
-#[derive(Copy, Clone)]
-#[repr(i32)]
-pub enum ThreadPolicy {
-    /// `SCHED_OTHER` default scheduling policy in Linux
-    Default = libc::SCHED_OTHER,
-    /// [`SCHED_FIFO`](https://man.archlinux.org/man/sched.7.en#SCHED_FIFO:_First_in-first_out_scheduling) real time scheduling policy
-    Fifo = libc::SCHED_FIFO,
-    /// [`SCHED_RR`](https://man.archlinux.org/man/sched.7.en#SCHED_RR:_Round-robin_scheduling), FIFO but with time slicing
-    RoundRobin = libc::SCHED_RR,
-}
-
-impl fmt::Debug for ThreadPolicy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self}")
-    }
-}
-
-impl fmt::Display for ThreadPolicy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Default => f.write_str("SCHED_OTHER"),
-            Self::Fifo => f.write_str("SCHED_FIFO"),
-            Self::RoundRobin => f.write_str("SCHED_RR"),
-        }
-    }
-}
-
 #[derive(Copy, Clone)]
 pub struct WorkerThreadScheduling {
     /// The thread priority
     ///
-    /// This value is automatically constrained between the minimum and maximum allowed based on the scheduling policy
+    /// This value is automatically clamped within the range of the scheduling policy
     pub thread_priority: i32,
     /// The scheduling policy, see [sched](https://man.archlinux.org/man/sched.7.en)
     pub thread_policy: ThreadPolicy,
@@ -78,18 +49,6 @@ pub struct XdpConfig<'n> {
     pub external_port: u16,
     /// The port QCMP packets can be sent to
     pub qcmp_port: u16,
-    /// The maximum amount of memory, in bytes, that the memory mappings used for
-    /// packet buffers will be allowed to take.
-    ///
-    /// Quilkin currently uses one [`UMEM`](https://www.kernel.org/doc/html/latest/networking/af_xdp.html#umem)
-    /// for each socket, and there is one socket per NIC queue. Setup will fail
-    /// if this option is set at a too low value.
-    ///
-    /// By default we use 4MiB per queue, eg. 128 MiB on a 32 queue NIC
-    ///
-    /// Note that there are other ring buffers allocated that aren't counted
-    /// under this allocation, but they are much smaller
-    pub maximum_packet_memory: Option<u64>,
     /// Requires that the chosen NIC supports [`XDP_ZEROCOPY`](https://www.kernel.org/doc/html/latest/networking/af_xdp.html#xdp-copy-and-xdp-zerocopy-bind-flags)
     ///
     /// If this is false, zero copy will be used if the NIC supports it, but will
@@ -98,6 +57,8 @@ pub struct XdpConfig<'n> {
     /// Requires that the chosen NIC supports [`XDP_TXMD_FLAGS_TIMESTAMP`](https://docs.kernel.org/6.8/networking/xsk-tx-metadata.html)
     /// which allows [internet checksum]() calculation to be offloaded to the NIC
     pub require_tx_checksum: bool,
+    /// Total amount of packets per UMEM, which is used to determine the size of each ring
+    pub packets_per_queue: u32,
     /// Worker thread scheduling configuration
     pub worker_thread_scheduling: WorkerThreadScheduling,
 }
@@ -108,9 +69,9 @@ impl Default for XdpConfig<'_> {
             nic: NicConfig::Default,
             external_port: 7777,
             qcmp_port: 7600,
-            maximum_packet_memory: None,
             require_zero_copy: false,
             require_tx_checksum: false,
+            packets_per_queue: 8 * 1024,
             worker_thread_scheduling: WorkerThreadScheduling::default(),
         }
     }
@@ -262,14 +223,15 @@ fn attach_xdp_program(
     }
 }
 
-const BATCH_SIZE: usize = 1024;
-
-/// a socket is bound to every available queue on the NIC, and when [`spawn`]
+/// Binds an `AF_XDP` socket to every available queue on the NIC, and when [`spawn`]
 /// is invoked, each socket is processed in its own thread
-///
-/// Binding to fewer queues is possible in the future but requires additional
-/// work in the `xdp` crate
 pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> {
+    // This is validated when parsing arguments, but sanity check just in case eg. tests
+    assert!(
+        config.packets_per_queue.is_power_of_two(),
+        "packets per queue was not a power of 2"
+    );
+
     let nic = match config.nic {
         NicConfig::Default => {
             let mut chosen = None;
@@ -337,8 +299,6 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         })
         .map_err(|err| XdpSetupError::AddressQuery(name, err))?;
 
-    // Bit arbitrary, but set the floor at 128 packets per umem
-    const MINIMUM_UMEM_COUNT: u64 = 128;
     // We don't support unaligned chunks, so this size can only be 2k or 4k,
     // and we only need 2k since we only care about non-fragmented UDP packets
     const PACKET_SIZE: u64 = 2 * 1024;
@@ -367,48 +327,16 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         }
     }
 
-    let queue_count = device_caps.queues.rx_count();
-
-    let packet_count = if let Some(max) = config.maximum_packet_memory {
-        let bytes_per_socket = max / queue_count as u64;
-        let packet_count = (bytes_per_socket / PACKET_SIZE).next_power_of_two();
-        if MINIMUM_UMEM_COUNT > packet_count {
-            fn byte_units(b: u64) -> (f64, &'static str) {
-                let mut units = b as f64;
-                let mut unit = 0;
-                const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB"];
-
-                while units > 1024.0 && unit + 1 < UNITS.len() {
-                    units /= 1024.0;
-                    unit += 1;
-                }
-
-                (units, UNITS[unit])
-            }
-
-            let (max, xunit) = byte_units(max);
-            let (min, nunit) = byte_units(MINIMUM_UMEM_COUNT * PACKET_SIZE * queue_count as u64);
-
-            return Err(XdpSetupError::MinimumMemoryRequirementsExceeded {
-                max,
-                xunit,
-                min,
-                nunit,
-                nic: name,
-                queue_count,
-            });
-        }
-
-        packet_count as u32
-    } else {
-        (BATCH_SIZE << 1) as u32
-    };
-
     let mut ebpf_prog = quilkin_xdp::EbpfProgram::load(config.external_port, config.qcmp_port)?;
 
     // Attach before binding: some drivers (eg gve) need XDP already enabled
     // before a socket can bind a queue with `XDP_ZEROCOPY`.
     let xdp_link = attach_xdp_program(&mut ebpf_prog, nic, &mut device_caps.queues)?;
+
+    // In GCP, and possibly (probably?) other virtualized environments, the NIC will report the full theoretical speed
+    // even if in reality the amount of bandwidth will be shared among multiple tenants, maybe even other instances of
+    // this proxy, so rather than try to account for the amount of variation between clouds/virtualized/physical capabilities,
+    // we just require the operator to specify the number of packets they want to support
 
     let umem_cfg = xdp::umem::UmemCfgBuilder {
         frame_size: xdp::umem::FrameSize::TwoK,
@@ -418,7 +346,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         // data payload
         head_room: (xdp::packet::net_types::Ipv6Hdr::LEN - xdp::packet::net_types::Ipv4Hdr::LEN)
             as u32,
-        frame_count: packet_count,
+        frame_count: config.packets_per_queue,
         // TODO: This should be done in the type system so we can avoid logic
         // that doesn't change during the course of operation, but for now just
         // do it at runtime
@@ -427,16 +355,48 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     }
     .build()?;
 
-    // let ring_size = BATCH_SIZE as u32;
+    let ring_size = config.packets_per_queue >> 2;
 
-    // let ring_cfg = xdp::RingConfigBuilder {
-    //     rx_count: ring_size,
-    //     tx_count: ring_size,
-    //     fill_count: ring_size,
-    //     completion_count: ring_size,
-    // }
-    let ring_cfg = xdp::RingConfigBuilder::default().build()?;
-    let workers = ebpf_prog.create_and_bind_sockets(nic, umem_cfg, &device_caps, ring_cfg)?;
+    let ring_cfg = xdp::RingConfigBuilder {
+        rx_count: ring_size,
+        tx_count: ring_size,
+        fill_count: ring_size,
+        completion_count: ring_size,
+    }
+    .build()?;
+    let ring_heap = ring_cfg.heap_size();
+    let workers =
+        ebpf_prog.create_and_bind_sockets(nic, umem_cfg, &device_caps, ring_cfg, ring_size)?;
+
+    // Report the amount of heap memory we're using specifically for XDP
+    fn byte_units(b: u64) -> String {
+        let mut units = b as f64;
+        let mut unit = 0;
+        const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB"];
+
+        while units > 1024.0 && unit + 1 < UNITS.len() {
+            units /= 1024.0;
+            unit += 1;
+        }
+
+        format!("{units:.02}{}", UNITS[unit])
+    }
+
+    let total_heap_memory = byte_units(
+        (
+            // The amount of memory mapped for each of the rings shared between the kernel and userspace
+            ring_heap as u64
+            // The amount of memory mapped in each Umem
+            + config.packets_per_queue as u64 * PACKET_SIZE
+            // The amount of memory allocated for the RX and TX slabs
+            + ring_size as u64 * std::mem::size_of::<xdp::Packet>() as u64
+        ) * workers.len() as u64,
+    );
+    tracing::info!(
+        queue_count = workers.len(),
+        total_heap_memory,
+        "total heap memory used by XDP workers"
+    );
 
     let mut worker_thread_scheduling = config.worker_thread_scheduling;
 
@@ -480,9 +440,13 @@ impl XdpLoop {
     /// Detaches the eBPF program from the attacked NIC and cancels all I/O
     /// threads, waiting for them to exit
     pub fn shutdown(mut self, wait: bool) {
-        if let Err(error) = self.ebpf_prog.detach(self.xdp_link) {
-            tracing::error!(%error, "failed to detach eBPF program");
-        }
+        // if let Err(error) = self.ebpf_prog.detach(self.xdp_link) {
+        //     panic!("FAIL! {error}");
+
+        //     tracing::error!(%error, "failed to detach eBPF program");
+        // }
+
+        // panic!("detached?");
 
         self.shutdown
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -490,6 +454,9 @@ impl XdpLoop {
         if !wait {
             return;
         }
+
+        tracing::info!("waiting on XDP workers");
+        let start = std::time::Instant::now();
 
         for jh in self.threads {
             if let Err(error) = jh.join() {
@@ -502,7 +469,24 @@ impl XdpLoop {
                 };
             }
         }
+
+        tracing::info!(elapsed = ?start.elapsed(), "finished shutting down XDP workers");
     }
+}
+
+static mut THREAD_DESTRUCTOR_KEY: libc::pthread_key_t = 0;
+
+struct ThreadStats {
+    total: u64,
+    time: f64,
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn report_pps(data: *mut core::ffi::c_void) {
+    let ts = unsafe { &*data.cast::<ThreadStats>() };
+    panic!("{}pps", (ts.time / ts.total as f64));
+
+    //tracing::warn!(pps = (ts.time / ts.total as f64), "processed packets");
 }
 
 fn spawn_worker<F, T>(
@@ -515,12 +499,29 @@ where
     F: Send + 'static,
     T: Send + 'static,
 {
+    static INIT: parking_lot::Once = parking_lot::Once::new();
+
+    // Finds the real pthread_create and specifies the pthread_key that is
+    // used to uninstall and unmap the alternate stack
+    INIT.call_once(|| unsafe {
+        libc::pthread_key_create(
+            std::ptr::addr_of_mut!(THREAD_DESTRUCTOR_KEY),
+            Some(report_pps),
+        );
+    });
+
     std::thread::Builder::new()
         .name(format!("xdp-io-{i}"))
         .spawn(move || {
             'ts: {
                 // SAFETY: syscalls
                 unsafe {
+                    let ptr = std::alloc::alloc(std::alloc::Layout::new::<ThreadStats>());
+                    let ts = &mut *(ptr.cast::<ThreadStats>());
+                    ts.time = 0.0;
+                    ts.total = 0;
+                    libc::pthread_setspecific(THREAD_DESTRUCTOR_KEY, ptr.cast());
+
                     if libc::sched_setscheduler(0, scheduling.thread_policy as _, &libc::sched_param {
                         sched_priority: scheduling.thread_priority,
                     }) != 0 {
@@ -575,7 +576,11 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
             // Enqueue buffers to the fill ring to ensure that we don't miss any packets
             // SAFETY: we keep the umem alive for as long as the socket is alive
             unsafe {
-                if let Err(error) = worker.fill.enqueue(&mut worker.umem, BATCH_SIZE, true) {
+                if let Err(error) =
+                    worker
+                        .fill
+                        .enqueue(&mut worker.umem, worker.ring_len >> 2, true)
+                {
                     tracing::error!(%error, "failed to kick fill ring during initial spinup");
                 }
             };
@@ -633,6 +638,7 @@ fn io_loop(
         mut rx,
         mut tx,
         mut completion,
+        ring_len,
     } = worker;
 
     const POLL_TIMEOUT: xdp::socket::PollTimeout =
@@ -649,10 +655,10 @@ fn io_loop(
         last_receive: UtcTimestamp::now(),
     };
 
-    use xdp::slab::Slab;
+    use xdp::slab::{HeapSlab, Slab};
 
-    let mut rx_slab = xdp::slab::StackSlab::<BATCH_SIZE>::new();
-    let mut tx_slab = xdp::slab::StackSlab::<BATCH_SIZE>::new();
+    let mut rx_slab = HeapSlab::with_capacity(ring_len);
+    let mut tx_slab = HeapSlab::with_capacity(ring_len);
     let mut pending_sends = 0;
     let mut outstanding = umem.outstanding() as i64;
 
@@ -662,6 +668,8 @@ fn io_loop(
     // between frames and the Umem, the frames cannot outlive the Umem which is
     // the owner of the actual memory map
     unsafe {
+        let ts = &mut *libc::pthread_getspecific(THREAD_DESTRUCTOR_KEY).cast::<ThreadStats>();
+
         while !shutdown.load(std::sync::atomic::Ordering::Relaxed) {
             // Wait for packets to be received, note that
             // [poll](https://www.man7.org/linux/man-pages/man2/poll.2.html) also acts
@@ -671,10 +679,11 @@ fn io_loop(
                 continue;
             };
 
+            let start = std::time::Instant::now();
             let recvd = rx.recv(&umem, &mut rx_slab);
 
             // Ensure the fill ring doesn't get starved, which could drop packets
-            if let Err(error) = fill.enqueue(&mut umem, BATCH_SIZE - recvd, true) {
+            if let Err(error) = fill.enqueue(&mut umem, ring_len - recvd, true) {
                 // EAGAIN means the wakeup wasn't delivered, but the buffers are
                 // already enqueued in the ring, so the kernel will pick them up
                 // on the next successful wakeup or its own polling; not an error.
@@ -723,6 +732,9 @@ fn io_loop(
             // Return frames that have completed sending
             pending_sends += enqueued_sends;
             pending_sends -= completion.dequeue(&mut umem, pending_sends);
+
+            ts.total += recvd as u64;
+            ts.time += start.elapsed().as_secs_f64();
 
             let new = umem.outstanding() as i64;
             crate::metrics::allocated_xdp_packets().add(new - outstanding);

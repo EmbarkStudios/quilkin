@@ -234,6 +234,7 @@ impl Cli {
         tracing::info!(
             version = crate_version!(),
             commit = crate::net::endpoint::metadata::build::GIT_COMMIT_HASH,
+            args = ?std::env::args().collect::<Vec<_>>(),
             "Starting Quilkin"
         );
 
