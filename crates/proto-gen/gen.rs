@@ -226,6 +226,7 @@ fn execute(which: &str) {
                 "filters/debug/v1alpha1/debug",
                 "filters/drop/v1alpha1/drop",
                 "filters/firewall/v1alpha1/firewall",
+                "filters/game_protocol/v1alpha1/game_protocol",
                 "filters/load_balancer/v1alpha1/load_balancer",
                 "filters/local_rate_limit/v1alpha1/local_rate_limit",
                 "filters/match/v1alpha1/match",

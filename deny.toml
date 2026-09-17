@@ -87,6 +87,8 @@ exceptions = [
     { crate = "notify", allow = ["CC0-1.0"] },
     { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
     { crate = "foca", allow = ["MPL-2.0"] },
+    # Never seen this one before, but it seems fine I guess
+    { crate = "minicbor", allow = ["BlueOak-1.0.0"] },
 ]
 
 [[licenses.clarify]]
