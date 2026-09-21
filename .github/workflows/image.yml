@@ -8,34 +8,52 @@ on:
       - '*'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: write
+
+# Each arch occupies a runner for the length of an LTO build, so don't let
+# superseded pushes to main pile up. Tags get their own group and are never
+# cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
+env:
+  REGISTRY_IMAGE: ghcr.io/embarkstudios/quilkin
+
 jobs:
   build-image:
     runs-on: ${{ matrix.runner }}
+    # A cold-cache LTO build on the 4-core arm64 runners is a lot slower than on
+    # amd64; fail before burning the 6h default.
+    timeout-minutes: 180
     strategy:
+      # Build every arch even when one is broken, so a run reports the state of
+      # all of them rather than just the first to fail.
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04
             platform: linux/amd64
             cache_tag: amd64
-          # - runner: ubuntu-24.04-arm
-          #  platform: linux/arm64
-          #  cache_tag: arm64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            cache_tag: arm64
     steps:
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
       - name: Gather information
         id: info
         run: |
-          echo "toolchain_version=$(yq '.toolchain.channel' rust-toolchain.toml)" >> $GITHUB_OUTPUT
           echo "git_timestamp=$(git log -1 --pretty=%ct)" >> $GITHUB_OUTPUT
 
           echo "## Build information (${{ matrix.platform }})" >> $GITHUB_STEP_SUMMARY
@@ -43,11 +61,11 @@ jobs:
           echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
           cat $GITHUB_OUTPUT | sed 's/\(.*\)=\(.*\)/| \1 | \2 |/' >> $GITHUB_STEP_SUMMARY
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build and push by digest
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: ${{ matrix.platform }}
@@ -55,10 +73,9 @@ jobs:
           # https://docs.docker.com/reference/dockerfile/#buildkit-built-in-build-args
           build-args: |
             BUILDKIT_CONTEXT_KEEP_GIT_DIR=1
-            RUST_TOOLCHAIN=${{ steps.info.outputs.toolchain_version }}
-          cache-from: type=registry,ref=ghcr.io/embarkstudios/quilkin-buildcache:${{ matrix.cache_tag }}
-          cache-to: type=registry,ref=ghcr.io/embarkstudios/quilkin-buildcache:${{ matrix.cache_tag }},mode=max
-          outputs: type=image,name=ghcr.io/embarkstudios/quilkin,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=${{ env.REGISTRY_IMAGE }}-buildcache:${{ matrix.cache_tag }}
+          cache-to: type=registry,ref=${{ env.REGISTRY_IMAGE }}-buildcache:${{ matrix.cache_tag }},mode=max
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
         env:
           # Set the build timestamp to the commit timestamp, so we can
           # hopefully get reproducible builds when built from the same commit
@@ -71,7 +88,7 @@ jobs:
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: digest-${{ matrix.cache_tag }}
           path: /tmp/digests/*
@@ -79,16 +96,16 @@ jobs:
           retention-days: 1
 
   merge:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-image
     steps:
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: false
 
@@ -97,20 +114,20 @@ jobs:
         run: |
           echo "crate_version=$(yq '.workspace.package.version' Cargo.toml)" >> $GITHUB_OUTPUT
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
           pattern: digest-*
           merge-multiple: true
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Gather image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
-            ghcr.io/embarkstudios/quilkin
+            ${{ env.REGISTRY_IMAGE }}
           tags: |
             type=ref,event=tag
             type=sha,prefix=${{ steps.info.outputs.crate_version }}-
@@ -120,7 +137,23 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/embarkstudios/quilkin@sha256:%s ' *)
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
 
       - name: Inspect image
         run: docker buildx imagetools inspect $(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+
+      # `imagetools create` happily produces a single-platform manifest list when
+      # a build leg is missing, which is indistinguishable from a multi-arch one
+      # unless you inspect it. Fail instead of publishing a tag that silently
+      # dropped an arch.
+      - name: Verify manifest list is multi-arch
+        run: |
+          tag=$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          platforms=$(docker buildx imagetools inspect "$tag" --raw \
+            | jq -r '.manifests[].platform | select(.architecture != "unknown") | .os + "/" + .architecture')
+          for expected in linux/amd64 linux/arm64; do
+            if ! grep -qxF "$expected" <<< "$platforms"; then
+              echo "::error::$tag is missing $expected (has: $(tr '\n' ' ' <<< "$platforms"))"
+              exit 1
+            fi
+          done

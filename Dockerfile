@@ -21,11 +21,21 @@ ENV MISE_CACHE_DIR="/mise/cache"
 ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
 ENV PATH="/mise/shims:$PATH"
 RUN curl https://mise.run | sh
+
+# rust-toolchain.toml is the single source of truth for the toolchain version.
+# This stage runs before the workspace is copied, so the pin is read here and
+# passed to mise explicitly; copying the file on its own keeps the layer from
+# busting on unrelated source changes.
+COPY rust-toolchain.toml /tmp/rust-toolchain.toml
 RUN --mount=type=secret,id=github_token \
+    set -eu && \
     if [ -f /run/secrets/github_token ]; then \
       export GITHUB_API_TOKEN=$(cat /run/secrets/github_token); \
     fi && \
-    mise use -g github:LukeMathWalker/cargo-chef rust github:EmbarkStudios/cargo-about
+    rust_version="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' /tmp/rust-toolchain.toml)" && \
+    test -n "${rust_version}" && \
+    mise use -g github:LukeMathWalker/cargo-chef "rust@${rust_version}" github:EmbarkStudios/cargo-about && \
+    rustc --version | grep -qF "${rust_version}"
 
 # --- Plan: extract dependency recipe ---
 FROM chef AS planner
