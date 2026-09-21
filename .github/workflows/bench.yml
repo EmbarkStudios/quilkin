@@ -16,13 +16,13 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.1
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
       - name: Download main baseline
         if: github.event_name == 'pull_request'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: criterion-baseline-main
           path: target/criterion
@@ -39,7 +39,7 @@ jobs:
       - name: Cache critcmp
         if: github.event_name == 'pull_request'
         id: cache-critcmp
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/critcmp
           key: ${{ runner.os }}-critcmp
@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload main baseline
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: criterion-baseline-main
           path: target/criterion

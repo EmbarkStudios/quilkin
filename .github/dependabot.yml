@@ -9,3 +9,10 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "daily"
+  - package-ecosystem: "github-actions"
+    directory: "/" # Covers every workflow under .github/workflows
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]

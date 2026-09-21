@@ -15,7 +15,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -23,7 +23,7 @@ jobs:
         name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
-        uses: release-plz/action@v0.5.129
+        uses: release-plz/action@v0.5.139
         with:
           command: release
         env:
@@ -42,12 +42,12 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - *install-rust
       - name: Run release-plz
-        uses: release-plz/action@v0.5.129
+        uses: release-plz/action@v0.5.139
         with:
           command: release-pr
         env:

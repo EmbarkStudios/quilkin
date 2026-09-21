@@ -10,12 +10,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v7
         with:
             submodules: true
       - run: echo docs_dir=docs-build/${{ github.ref_name }} >> $GITHUB_ENV
       - run: echo documentation directory=${{ env.docs_dir }}
-      - uses: jdx/mise-action@v3
+      - uses: jdx/mise-action@v4
       - run: mise install rust mdbook cargo:mdbook-variables github:badboy/mdbook-mermaid
       - run: mkdir -p ${{ env.docs_dir }}
       - run: |
@@ -28,7 +28,7 @@ jobs:
           mise x -- mdbook build -d ../${{ env.docs_dir }}/book
       - run: mise x -- cargo doc --workspace --no-deps
       - run: mv target/doc ${{ env.docs_dir }}/api
-      - uses: JamesIves/github-pages-deploy-action@4.1.4
+      - uses: JamesIves/github-pages-deploy-action@v4.9.0
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: gh-pages
