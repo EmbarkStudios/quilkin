@@ -5,7 +5,7 @@
     bcast_write: &amp;mut <a class="struct" href="struct.MatcherCache.html" title="struct quilkin_corrosion::pubsub::MatcherCache">MatcherCache</a>,
     params: <a class="struct" href="struct.SubParamsv1.html" title="struct quilkin_corrosion::pubsub::SubParamsv1">SubParamsv1</a>,
     tx: Sender&lt;<a class="struct" href="struct.SubscriptionEvent.html" title="struct quilkin_corrosion::pubsub::SubscriptionEvent">SubscriptionEvent</a>&gt;,
-) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.0/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="https://docs.rs/uuid/1.23.2/uuid/struct.Uuid.html" title="struct uuid::Uuid">Uuid</a>, <a class="enum" href="enum.MatcherUpsertError.html" title="enum quilkin_corrosion::pubsub::MatcherUpsertError">MatcherUpsertError</a>&gt;</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Upserts a subscription</p>
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.0/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="https://docs.rs/uuid/1.26.1/uuid/struct.Uuid.html" title="struct uuid::Uuid">Uuid</a>, <a class="enum" href="enum.MatcherUpsertError.html" title="enum quilkin_corrosion::pubsub::MatcherUpsertError">MatcherUpsertError</a>&gt;</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Upserts a subscription</p>
 <p>If this is a subscription to a new query, a task is created for funneling
 mpsc events though a broadcaster in case new subscribers are made for the same
 query</p>

@@ -281,7 +281,7 @@
 <a href=#281 id=281 data-nosnippet>281</a>    }
 <a href=#282 id=282 data-nosnippet>282</a>
 <a href=#283 id=283 data-nosnippet>283</a>    <span class="kw">let </span><span class="kw-2">mut </span>table = Table::new();
-<a href=#284 id=284 data-nosnippet>284</a>    table.load_preset(UTF8_FULL);
+<a href=#284 id=284 data-nosnippet>284</a>    table.load_style(UTF8_FULL);
 <a href=#285 id=285 data-nosnippet>285</a>
 <a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">let </span><span class="kw-2">mut </span>header = <span class="macro">vec!</span>[<span class="string">""</span>.to_string()];
 <a href=#287 id=287 data-nosnippet>287</a>    header.extend(scenarios.iter().map(|s| s.name.clone()));
@@ -322,7 +322,7 @@
 <a href=#322 id=322 data-nosnippet>322</a><span class="kw">fn </span>print_corrosion_table(r: <span class="kw-2">&amp;</span>runner::corrosion::CorrosionResults) {
 <a href=#323 id=323 data-nosnippet>323</a>    <span class="kw">use </span>comfy_table::{Cell, Color, Table, presets::UTF8_FULL};
 <a href=#324 id=324 data-nosnippet>324</a>    <span class="kw">let </span><span class="kw-2">mut </span>table = Table::new();
-<a href=#325 id=325 data-nosnippet>325</a>    table.load_preset(UTF8_FULL);
+<a href=#325 id=325 data-nosnippet>325</a>    table.load_style(UTF8_FULL);
 <a href=#326 id=326 data-nosnippet>326</a>    table.set_header([<span class="string">"Metric"</span>, <span class="string">"Value"</span>]);
 <a href=#327 id=327 data-nosnippet>327</a>
 <a href=#328 id=328 data-nosnippet>328</a>    <span class="kw">let </span>failed = r.failed();
@@ -482,7 +482,7 @@
 <a href=#482 id=482 data-nosnippet>482</a>        <span class="kw">use </span>comfy_table::{Cell, Color, Table, presets::UTF8_FULL};
 <a href=#483 id=483 data-nosnippet>483</a>        <span class="macro">println!</span>(<span class="string">"\n{name}"</span>);
 <a href=#484 id=484 data-nosnippet>484</a>        <span class="kw">let </span><span class="kw-2">mut </span>table = Table::new();
-<a href=#485 id=485 data-nosnippet>485</a>        table.load_preset(UTF8_FULL);
+<a href=#485 id=485 data-nosnippet>485</a>        table.load_style(UTF8_FULL);
 <a href=#486 id=486 data-nosnippet>486</a>        table.set_header([<span class="string">"Metric"</span>, <span class="string">"main"</span>, <span class="string">"PR"</span>, <span class="string">"Δ"</span>]);
 <a href=#487 id=487 data-nosnippet>487</a>        <span class="kw">for </span>(metric, base_val, pr_val, (delta_s, good)) <span class="kw">in </span><span class="kw-2">&amp;</span>rows {
 <a href=#488 id=488 data-nosnippet>488</a>            table.add_row([
