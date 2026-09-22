@@ -13,7 +13,7 @@ type CorrosionAddrs = Vec<crate::net::EndpointAddress>;
 type HealthCheck = Arc<atomic::AtomicBool>;
 type State = Arc<crate::config::Config>;
 
-use rand::Rng as _;
+use rand::RngExt as _;
 use tryhard::backoff_strategies::{BackoffStrategy as _, ExponentialBackoff};
 
 const BACKOFF_INITIAL_DELAY: Duration = Duration::from_millis(500);

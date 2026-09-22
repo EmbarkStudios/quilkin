@@ -86,7 +86,7 @@ impl HttpHarness {
         let config = quilkin::Config::new(None, Default::default(), &providers, &mut service);
         let fc = FiltersAndClusters::new(&config).unwrap();
         Self {
-            server: axum_test::TestServer::new(quilkin::providers::http::make_router(fc)).unwrap(),
+            server: axum_test::TestServer::new(quilkin::providers::http::make_router(fc)),
         }
     }
 }
@@ -233,7 +233,7 @@ impl CombinedHarness {
 
         let fc = FiltersAndClusters::new(&config).unwrap();
         Self {
-            server: axum_test::TestServer::new(quilkin::providers::http::make_router(fc)).unwrap(),
+            server: axum_test::TestServer::new(quilkin::providers::http::make_router(fc)),
             _shutdown_tx: shutdown_tx,
         }
     }

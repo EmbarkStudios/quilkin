@@ -416,7 +416,7 @@ mod tests {
             health,
         };
 
-        let server = axum_test::TestServer::new(admin.router()).unwrap();
+        let server = axum_test::TestServer::new(admin.router());
 
         server.get("/live").expect_success().await;
 

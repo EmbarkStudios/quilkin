@@ -5,10 +5,9 @@
 //! - poll: using the polling backend.
 
 use bytes::BytesMut;
-use criterion::{
-    BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
-};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::{
+    hint::black_box,
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
     time::Duration,

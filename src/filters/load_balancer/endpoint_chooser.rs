@@ -16,7 +16,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use rand::Rng;
+use rand::RngExt;
 
 use std::{
     collections::hash_map::DefaultHasher,

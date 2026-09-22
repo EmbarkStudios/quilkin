@@ -281,7 +281,7 @@ fn print_multi_table(scenarios: &[runner::udp::ScenarioResult]) {
     }
 
     let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
+    table.load_style(UTF8_FULL);
 
     let mut header = vec!["".to_string()];
     header.extend(scenarios.iter().map(|s| s.name.clone()));
@@ -322,7 +322,7 @@ fn print_multi_table(scenarios: &[runner::udp::ScenarioResult]) {
 fn print_corrosion_table(r: &runner::corrosion::CorrosionResults) {
     use comfy_table::{Cell, Color, Table, presets::UTF8_FULL};
     let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
+    table.load_style(UTF8_FULL);
     table.set_header(["Metric", "Value"]);
 
     let failed = r.failed();
@@ -482,7 +482,7 @@ fn compare_scenario(
         use comfy_table::{Cell, Color, Table, presets::UTF8_FULL};
         println!("\n{name}");
         let mut table = Table::new();
-        table.load_preset(UTF8_FULL);
+        table.load_style(UTF8_FULL);
         table.set_header(["Metric", "main", "PR", "Δ"]);
         for (metric, base_val, pr_val, (delta_s, good)) in &rows {
             table.add_row([

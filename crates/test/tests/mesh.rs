@@ -20,10 +20,7 @@ trace_test!(relay_routing, {
             use rand::prelude::IndexedRandom;
 
             let mut inner = [0; 3];
-            for (v, slot) in CHARS
-                .choose_multiple(rng, inner.len())
-                .zip(inner.iter_mut())
-            {
+            for (v, slot) in CHARS.sample(rng, inner.len()).zip(inner.iter_mut()) {
                 *slot = *v;
             }
 

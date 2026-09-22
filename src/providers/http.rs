@@ -238,7 +238,7 @@ mod tests {
             filters: fc.filters,
             clusters: fc.clusters,
         };
-        let server = TestServer::new(state.router()).unwrap();
+        let server = TestServer::new(state.router());
         (server, config)
     }
 

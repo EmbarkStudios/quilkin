@@ -22,7 +22,7 @@ use std::{
 
 use eyre::ContextCompat;
 use futures::StreamExt;
-use rand::Rng;
+use rand::RngExt;
 use tonic::transport::{Endpoint, channel::Channel as TonicChannel};
 use tracing::Instrument;
 use tryhard::{

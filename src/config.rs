@@ -202,10 +202,12 @@ mod test_impls {
             ds.field("version", &self.version);
             ds.field("icao_code", &self.icao_code.load());
 
-            let tm = self.typemap.clone();
+            // SAFETY: the map is only read, so the key/value type invariant
+            // is upheld.
+            let tm = unsafe { self.typemap.data() };
             ds.field(
                 "typemap",
-                &tm.into_iter().collect::<std::collections::BTreeMap<_, _>>(),
+                &tm.iter().collect::<std::collections::BTreeMap<_, _>>(),
             );
 
             ds.finish()
