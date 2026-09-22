@@ -80,7 +80,7 @@ pub(crate) async fn update_leader_lock(
     lease_name: impl Into<String>,
     holder_id: impl Into<String>,
     leader_lock: config::LeaderLock,
-    mut shutdown: tokio::sync::watch::Receiver<()>,
+    shutdown: quilkin_graceful::ChildToken,
 ) -> crate::Result<()> {
     let manager = kube_lease_manager::LeaseManagerBuilder::new(client, lease_name)
         .with_namespace(namespace.as_ref())
@@ -102,7 +102,7 @@ pub(crate) async fn update_leader_lock(
                     },
                 }
             }
-            _ = shutdown.changed() => {
+            _ = shutdown.cancelled() => {
                 // Release lock gracefully
                 leader_lock.store(false);
                 if let Err(error) = manager.release().await {

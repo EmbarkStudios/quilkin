@@ -32,8 +32,8 @@ use axum::{
 };
 
 use crate::{
-    config,
-    config::filter::FilterChainConfig,
+    components::admin::SHUTDOWN_TIMEOUT,
+    config::{self, filter::FilterChainConfig},
     filters::FilterChain,
     net::{ClusterMap, endpoint::Endpoint},
     providers::FiltersAndClusters,
@@ -204,6 +204,7 @@ pub async fn serve(
     fc: FiltersAndClusters,
     address: SocketAddr,
     health_check: Arc<AtomicBool>,
+    shutdown: quilkin_graceful::ChildToken,
 ) -> crate::Result<()> {
     let state = HttpState {
         filters: fc.filters,
@@ -215,9 +216,15 @@ pub async fn serve(
     tracing::info!(%address, "HTTP provider listening");
     health_check.store(true, Ordering::SeqCst);
 
-    quilkin_system::net::http::serve("http_provider", listener, router, std::future::pending())
-        .await
-        .map_err(eyre::Error::from)
+    quilkin_system::net::http::serve(
+        "http_provider",
+        listener,
+        router,
+        shutdown.into(),
+        SHUTDOWN_TIMEOUT,
+    )
+    .await
+    .map_err(eyre::Error::from)
 }
 
 #[cfg(test)]

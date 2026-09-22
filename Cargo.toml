@@ -56,6 +56,7 @@ workspace = true
 
 [dependencies]
 # Local
+quilkin-graceful.workspace = true
 quilkin-macros = { version = "0.10.1", path = "./crates/macros" }
 quilkin-proto.workspace = true
 quilkin-system.workspace = true
@@ -194,6 +195,7 @@ members = [
     "crates/agones",
     "crates/corrosion",
     "crates/corrosion-tests",
+    "crates/graceful",
     "crates/macros",
     "crates/proto-gen",
     "crates/quilkin-proto",
@@ -247,6 +249,7 @@ prometheus-client = { version = "0.24" }
 prost = "0.14"
 prost-types = "0.14"
 quilkin = { path = "." }
+quilkin-graceful = { path = "crates/graceful" }
 quilkin-proto = { version = "0.10.1", path = "crates/quilkin-proto" }
 quilkin-system = { version = "0.10.1", path = "crates/system" }
 quilkin-types = { version = "0.10.1", path = "crates/types" }
@@ -271,7 +274,7 @@ tokio = { version = "1.49.0", features = [
     "tracing",
 ] }
 tokio-stream = { version = "0.1.18", features = ["net", "sync"] }
-tokio-util = "0.7.18"
+tokio-util = { version = "0.7.18", default-features = false, features = ["rt"] }
 tonic = { version = "0.14", default-features = false, features = ["codegen", "router", "tls-ring", "transport"] }
 tonic-prost = "0.14"
 tower = "0.5"

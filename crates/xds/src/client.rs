@@ -261,7 +261,7 @@ impl MdsClient {
         self,
         config: Arc<C>,
         health: impl HealthState + Send + 'static,
-        mut shutdown: crate::ShutdownSignal,
+        shutdown: crate::ShutdownSignal,
     ) -> Result<tokio::task::JoinHandle<Result<()>>, Self> {
         const LEADERSHIP_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
         let identifier = String::from(&*self.identifier);
@@ -349,7 +349,7 @@ impl MdsClient {
                                     }
                                 }
                             }
-                            _ = shutdown.changed() => {
+                            _ = shutdown.cancelled() => {
                                 return Ok(());
                             }
                         }
@@ -359,7 +359,7 @@ impl MdsClient {
 
                     tracing::info!("Lost connection to mDS, retrying");
                     loop {
-                        if shutdown.has_changed().is_ok_and(|b| b) {
+                        if shutdown.is_cancelled() {
                             // We are shutting down, just quit
                             return Ok(());
                         }

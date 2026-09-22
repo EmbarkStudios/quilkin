@@ -569,10 +569,7 @@ impl Service {
         mut self,
         config: &Arc<Config>,
         mut shutdown: ShutdownHandler,
-    ) -> crate::Result<(
-        tokio::task::JoinHandle<(ShutdownHandler, crate::Result<()>)>,
-        ServicePorts,
-    )> {
+    ) -> crate::Result<(tokio::task::JoinHandle<crate::Result<()>>, ServicePorts)> {
         let mut ports = ServicePorts {
             mds: None,
             phoenix: None,
@@ -595,7 +592,7 @@ impl Service {
 
         Ok((
             tokio::spawn(async move {
-                let (tx, rx, results) = shutdown.await_any_then_shutdown().await;
+                let results = shutdown.await_any_then_shutdown().await;
 
                 let mut errors = 0;
                 for (task, res) in &results {
@@ -610,7 +607,7 @@ impl Service {
                     }
                 }
 
-                let res = match errors {
+                match errors {
                     0 => Ok(()),
                     1 => Err(results.into_iter().find_map(|(_, res)| res.err()).unwrap()),
                     _ => {
@@ -626,9 +623,7 @@ impl Service {
 
                         Err(eyre::Report::msg(err_str))
                     }
-                };
-
-                (ShutdownHandler::new(tx, rx), res)
+                }
             }),
             ports,
         ))
@@ -668,23 +663,14 @@ impl Service {
         ))?;
         let port = listener.local_addr()?.port();
 
-        let finalizer = crate::net::phoenix::spawn(
-            listener,
-            datacenters.clone(),
-            phoenix,
-            shutdown.shutdown_rx(),
-        )?;
+        let finalizer =
+            crate::net::phoenix::spawn(listener, datacenters.clone(), phoenix, shutdown.child())?;
 
         ports.phoenix = Some(port);
 
-        let finished = shutdown.push("phoenix");
-        let mut srx = shutdown.shutdown_rx();
-        tokio::spawn(async move {
-            let _ = srx.changed().await;
-
+        shutdown.push_sync("phoenix", || {
             finalizer();
-
-            drop(finished.send(Ok(())));
+            Ok(())
         });
 
         Ok(())
@@ -733,20 +719,14 @@ impl Service {
         let listener = crate::net::TcpListener::bind(Some(self.xds_port))?;
         ports.xds = Some(listener.port());
 
-        let finished = shutdown.push("xds");
-        let srx = shutdown.shutdown_rx();
-
         let xds_server = crate::net::xds::server::ControlPlane::from_arc(
             config.clone(),
             crate::components::admin::IDLE_REQUEST_INTERVAL,
-            srx,
+            shutdown.child(),
         )
         .management_server(listener, self.tls_identity()?)?;
 
-        tokio::spawn(async move {
-            let res = xds_server.await;
-            drop(finished.send(res));
-        });
+        shutdown.push_async("xds", async move { xds_server.await });
 
         Ok(())
     }
@@ -775,20 +755,13 @@ impl Service {
         let listener = crate::net::TcpListener::bind(Some(self.mds_port))?;
         ports.mds = Some(listener.port());
 
-        let finished = shutdown.push("mds");
-        let srx = shutdown.shutdown_rx();
-
         let mds_server = crate::net::xds::server::ControlPlane::from_arc(
             config.clone(),
             crate::components::admin::IDLE_REQUEST_INTERVAL,
-            srx,
+            shutdown.child(),
         )
         .relay_server(listener, self.tls_identity()?)?;
-
-        tokio::spawn(async move {
-            let res = mds_server.await;
-            drop(finished.send(res));
-        });
+        shutdown.push_async("mds", async move { mds_server.await });
 
         Ok(())
     }
@@ -838,16 +811,9 @@ impl Service {
                         ports.qcmp = Some(self.qcmp_port);
                         ports.udp = Some(self.udp_port);
 
-                        let finished = shutdown.push("xdp");
-                        let mut srx = shutdown.shutdown_rx();
-                        tokio::spawn(async move {
-                            drop(srx.changed().await);
-
-                            tokio::task::block_in_place(|| {
-                                xdp();
-                            });
-
-                            drop(finished.send(Ok(())));
+                        shutdown.push_sync("xdp", || {
+                            xdp();
+                            Ok(())
                         });
 
                         return Ok(());
@@ -977,17 +943,15 @@ impl Service {
             self.udp_ring_buffer,
         )?;
 
-        let finished = shutdown.push("udp");
-        let mut srx = shutdown.shutdown_rx();
+        let cancelled = shutdown.child();
         let testing = self.testing;
         let termination_timeout = self.termination_timeout;
 
-        tokio::spawn(async move {
-            drop(srx.changed().await);
+        shutdown.push_async("udp", async move {
+            cancelled.cancelled().await;
 
             if testing {
-                drop(finished.send(Ok(())));
-                return;
+                return Ok(());
             }
 
             tracing::info!(sessions = %sessions.sessions().len(), "waiting for active sessions to expire");
@@ -1014,7 +978,7 @@ impl Service {
                 }
             }
 
-            drop(finished.send(Ok(())));
+            Ok(())
         });
 
         Ok(())
@@ -1155,11 +1119,6 @@ impl Service {
             .cached_filter_chain()
             .zip(config.dyn_cfg.subscribe_filter_changes())
         {
-            let finished = shutdown.push("corrosion_filter_mutator");
-            let mut srx = shutdown.shutdown_rx();
-
-            let btx = btx.clone();
-
             async fn update_filters(btx: &BroadcastingTransactor, filters: &mut CachedFilterChain) {
                 let filters = filters.load();
                 let serialized =
@@ -1196,7 +1155,9 @@ impl Service {
                 }
             }
 
-            tokio::spawn(async move {
+            let srx = shutdown.child();
+            let btx = btx.clone();
+            shutdown.push_async("corrosion_filter_mutator", async move {
                 // Set the initial state, at this early stage we _probably_ won't
                 // have subscribers, but we do the full DB + publish just in case
                 update_filters(&btx, &mut filters).await;
@@ -1206,28 +1167,17 @@ impl Service {
                         _fc = filters_sub.recv() => {
                             update_filters(&btx, &mut filters).await;
                         }
-                        _ = srx.changed() => {
+                        _ = srx.cancelled() => {
                             break;
                         }
                     }
                 }
 
-                drop(finished.send(Ok(())));
+                Ok(())
             });
         }
 
-        // We explicitly set this up in init_config so it's a bug if that is not called
         {
-            let mut rx = self
-                .xds_to_corrosion
-                .take()
-                .expect("init_config was not called");
-
-            let finished = shutdown.push("corrosion_mutator");
-            let mut srx = shutdown.shutdown_rx();
-
-            let btx = btx.clone();
-
             async fn update_db(
                 btx: &BroadcastingTransactor,
                 statements: Vec<corrosion::api::Statement>,
@@ -1259,7 +1209,15 @@ impl Service {
                 }
             }
 
-            tokio::spawn(async move {
+            // We explicitly set this up in init_config so it's a bug if that is not called
+            let mut rx = self
+                .xds_to_corrosion
+                .take()
+                .expect("init_config was not called");
+
+            let srx = shutdown.child();
+            let btx = btx.clone();
+            shutdown.push_async("corrosion_mutator", async move {
                 loop {
                     tokio::select! {
                         change = rx.recv() => {
@@ -1270,13 +1228,13 @@ impl Service {
 
                             update_db(&btx, statements).await;
                         }
-                        _ = srx.changed() => {
+                        _ = srx.cancelled() => {
                             break;
                         }
                     }
                 }
 
-                drop(finished.send(Ok(())));
+                Ok(())
             });
         }
 
@@ -1289,12 +1247,9 @@ impl Service {
             let check_interval = std::time::Duration::from_secs(reap_time / 2);
             let reap_time = std::time::Duration::from_secs(reap_time);
 
-            let finished = shutdown.push("corrosion_reaper");
-            let mut srx = shutdown.shutdown_rx();
-
+            let srx = shutdown.child();
             let btx = btx.clone();
-
-            tokio::spawn(async move {
+            shutdown.push_async("corrosion_reaper", async move {
                 let mut interval = tokio::time::interval(check_interval);
 
                 loop {
@@ -1324,21 +1279,19 @@ impl Service {
                                 }
                             }
                         }
-                        _ = srx.changed() => {
+                        _ = srx.cancelled() => {
                             break;
                         }
                     }
                 }
 
-                drop(finished.send(Ok(())));
+                Ok(())
             });
         }
 
         // Spawn a task that regularly updates metrics wrt database sizes on disk
         {
-            let finished = shutdown.push("corrosion_db_metrics");
-            let mut srx = shutdown.shutdown_rx();
-
+            let srx = shutdown.child();
             let update_interval = std::time::Duration::from_secs(5 * 60);
 
             let dbm = corrosion::metrics::DbMetrics::new(
@@ -1347,7 +1300,7 @@ impl Service {
                 sub_path.clone(),
             );
 
-            tokio::spawn(async move {
+            shutdown.push_async("corrosion_db_metrics", async move {
                 let mut interval = tokio::time::interval(update_interval);
 
                 loop {
@@ -1355,13 +1308,13 @@ impl Service {
                         _ = interval.tick() => {
                             dbm.update();
                         }
-                        _ = srx.changed() => {
+                        _ = srx.cancelled() => {
                             break;
                         }
                     }
                 }
 
-                drop(finished.send(Ok(())));
+                Ok(())
             });
         }
 
@@ -1408,18 +1361,15 @@ impl Service {
         // port so the log message at the start is kind of useless
         tracing::debug!(port, "corrosion service running");
 
-        let finished = shutdown.push("corrosion_server");
-        let mut srx = shutdown.shutdown_rx();
-
-        tokio::spawn(async move {
-            drop(srx.changed().await);
-
+        let srx = shutdown.child();
+        shutdown.push_async("corrosion_server", async move {
+            srx.cancelled().await;
             trip.shutdown().await;
 
             tracing::info!("shutting down corrosion server");
             udp_server.shutdown("graceful shutdown").await;
 
-            drop(finished.send(Ok(())));
+            Ok(())
         });
 
         Ok(())
@@ -1511,7 +1461,7 @@ impl Service {
             clear_buf_tx,
             // TODO: maybe make this configurable/optional, but currently the change handler will signal shutdown if it
             // encounters a fatal DB issue
-            shutdown: shutdown.shutdown_tx(),
+            shutdown: shutdown.root(),
         };
 
         // TODO: make this configurable or tune the defaults once we actually see numbers in real usage

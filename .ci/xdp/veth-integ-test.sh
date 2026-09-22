@@ -143,7 +143,7 @@ if [[ $logs =~ $regex ]]; then
     echo "::notice file=$source,line=$LINENO::Successfully sent $(numfmt --format='%.2f' --to=iec-i $send) and received $(numfmt --format='%.2f' --to=iec-i $recv)"
 
     # Now test QCMP pings which was also enabled in the proxy
-    ip netns exec cs ./target/release/quilkin qcmp ping $PROXY_IP:7600
+    ip netns exec cs ./target/$TARGET/quilkin qcmp ping $PROXY_IP:7600
 
     exit 0
   fi

@@ -11,6 +11,7 @@ license.workspace = true
 test = true
 
 [dependencies]
+quilkin-graceful.workspace = true
 quilkin-proto.workspace = true
 
 async-stream.workspace = true

@@ -440,13 +440,9 @@ impl XdpLoop {
     /// Detaches the eBPF program from the attacked NIC and cancels all I/O
     /// threads, waiting for them to exit
     pub fn shutdown(mut self, wait: bool) {
-        // if let Err(error) = self.ebpf_prog.detach(self.xdp_link) {
-        //     panic!("FAIL! {error}");
-
-        //     tracing::error!(%error, "failed to detach eBPF program");
-        // }
-
-        // panic!("detached?");
+        if let Err(error) = self.ebpf_prog.detach(self.xdp_link) {
+            tracing::error!(%error, "failed to detach eBPF program");
+        }
 
         self.shutdown
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -483,10 +479,11 @@ struct ThreadStats {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn report_pps(data: *mut core::ffi::c_void) {
+    // SAFETY: casting to type actually behind the void*
     let ts = unsafe { &*data.cast::<ThreadStats>() };
-    panic!("{}pps", (ts.time / ts.total as f64));
-
-    //tracing::warn!(pps = (ts.time / ts.total as f64), "processed packets");
+    if ts.time > 0.0 {
+        eprintln!("FUCK processed packets {}", (ts.total as f64 / ts.time));
+    }
 }
 
 fn spawn_worker<F, T>(
@@ -503,12 +500,14 @@ where
 
     // Finds the real pthread_create and specifies the pthread_key that is
     // used to uninstall and unmap the alternate stack
-    INIT.call_once(|| unsafe {
-        libc::pthread_key_create(
-            std::ptr::addr_of_mut!(THREAD_DESTRUCTOR_KEY),
-            Some(report_pps),
-        );
-    });
+    INIT.call_once(||
+        // SAFETY: syscall to create a per-thread key
+        unsafe {
+            libc::pthread_key_create(
+                std::ptr::addr_of_mut!(THREAD_DESTRUCTOR_KEY),
+                Some(report_pps),
+            );
+        });
 
     std::thread::Builder::new()
         .name(format!("xdp-io-{i}"))

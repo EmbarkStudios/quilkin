@@ -14,32 +14,36 @@
  *  limitations under the License.
  */
 
-use std::sync::atomic::AtomicBool;
-
-use std::panic;
-use std::sync::Arc;
-use std::sync::atomic::Ordering::Relaxed;
+use std::{
+    panic,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering::Relaxed},
+    },
+};
 
 #[derive(Clone)]
 pub struct Health {
     healthy: Arc<AtomicBool>,
-    shutdown_tx: crate::signal::ShutdownTx,
+    shutdown: quilkin_graceful::RootToken,
 }
 
 impl Health {
-    pub fn new(shutdown_tx: crate::signal::ShutdownTx) -> Self {
+    /// Creates a [`Self`] that installs a panic hook, marking the instance as unhealthy and initiating shutdown if
+    /// a panic is triggered
+    pub fn new(shutdown: quilkin_graceful::RootToken) -> Self {
         let health = Self {
             healthy: Arc::new(AtomicBool::new(true)),
-            shutdown_tx,
+            shutdown,
         };
 
         let healthy = health.healthy.clone();
-        let shutdown_tx = health.shutdown_tx.clone();
+        let shutdown = health.shutdown.clone();
         let default_hook = panic::take_hook();
         panic::set_hook(Box::new(move |panic_info| {
             tracing::error!(%panic_info, "Panic has occurred. Moving to Unhealthy");
             healthy.swap(false, Relaxed);
-            let _ = shutdown_tx.send(());
+            shutdown.cancel();
             default_hook(panic_info);
         }));
 
@@ -58,8 +62,8 @@ mod tests {
 
     #[test]
     fn panic_hook() {
-        let (shutdown_tx, _shutdown_rx) = crate::signal::channel();
-        let health = Health::new(shutdown_tx);
+        let token = quilkin_graceful::root();
+        let health = Health::new(token.clone());
 
         assert!(health.check_liveness());
 
@@ -68,5 +72,6 @@ mod tests {
         });
 
         assert!(!health.check_liveness());
+        assert!(token.is_cancelled());
     }
 }

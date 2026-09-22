@@ -85,7 +85,7 @@ base64_serde_type!(pub Base64Standard, base64::engine::general_purpose::STANDARD
 pub struct Config {
     pub dyn_cfg: DynamicConfig,
     bad_node_informer: Option<BadNodeInformer>,
-    cancellation_token: Option<tokio_util::sync::CancellationToken>,
+    cancellation_token: Option<quilkin_graceful::ChildToken>,
 }
 
 #[cfg(test)]
@@ -257,7 +257,7 @@ impl quilkin_xds::config::Configuration for Config {
     fn on_changed(
         &self,
         control_plane: quilkin_xds::server::ControlPlane<Self>,
-        mut shutdown: tokio::sync::watch::Receiver<()>,
+        shutdown: quilkin_graceful::ChildToken,
     ) -> impl std::future::Future<Output = ()> + Send + 'static {
         tracing::trace!("waiting for changes");
 
@@ -347,7 +347,7 @@ impl quilkin_xds::config::Configuration for Config {
                 });
             }
 
-            drop(shutdown.changed().await);
+            shutdown.cancelled().await;
             ls.abort_all();
 
             // join_all panics if a task is cancelled, we don't care
@@ -440,7 +440,7 @@ impl Config {
         icao_code: IcaoCode,
         providers: &crate::Providers,
         service: &mut crate::Service,
-        cancellation_token: tokio_util::sync::CancellationToken,
+        cancellation_token: quilkin_graceful::ChildToken,
     ) -> Arc<Self> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<std::net::SocketAddr>();
 

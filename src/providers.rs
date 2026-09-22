@@ -35,6 +35,7 @@ use crate::{
 };
 use eyre::Context;
 use futures::TryStreamExt;
+use quilkin_graceful::ChildToken;
 
 /// Functionally infinite retries as provider tasks are long running tasks
 /// that we continually want to retry and Quilkin can run for days or weeks.
@@ -447,7 +448,7 @@ impl Providers {
         locality: Option<crate::net::endpoint::Locality>,
         config: &super::Config,
         mutator: Option<crate::providers::corrosion::ServerMutator>,
-        shutdown: tokio::sync::watch::Receiver<()>,
+        shutdown: ChildToken,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let agones_namespaces = if !self.agones_namespace.is_empty() {
             tracing::warn!(
@@ -481,8 +482,7 @@ impl Providers {
             let locality = locality.clone();
             let health_check = health_check.clone();
             let mutator = mutator.clone();
-            let shutdown = shutdown;
-            let token = crate::signal::cancellation_token(shutdown.clone());
+            let token = shutdown.clone();
 
             move || {
                 let config = config.clone();
@@ -495,7 +495,6 @@ impl Providers {
                 let locality = locality.clone();
                 let health_check = health_check.clone();
                 let mutator = mutator.clone();
-                let shutdown = shutdown.clone();
                 let token = token.clone();
 
                 async move {
@@ -525,14 +524,14 @@ impl Providers {
                             k8s_leader_lease_name,
                             k8s_leader_id,
                             ll,
-                            shutdown.clone(),
+                            token.clone(),
                         ))
                     } else {
                         either::Right(std::future::pending())
                     };
 
                     // Cancels this attempt's batcher tasks when the future is dropped
-                    let batch_token = token.child_token();
+                    let batch_token = token.child();
                     let _batch_guard = batch_token.clone().drop_guard();
 
                     let mut gs_streams = tokio::task::JoinSet::new();
@@ -544,7 +543,7 @@ impl Providers {
                                     clusters.clone(),
                                     locality.clone(),
                                     std::time::Duration::from_millis(500),
-                                    batch_token.child_token(),
+                                    batch_token.child(),
                                 );
                             let processor = EventProcessor {
                                 namespace: namespace.clone(),
@@ -622,7 +621,7 @@ impl Providers {
         config: Arc<config::Config>,
         health_check: Arc<AtomicBool>,
         locality: Option<crate::net::endpoint::Locality>,
-        shutdown: tokio::sync::watch::Receiver<()>,
+        shutdown: ChildToken,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let config = config.clone();
         let endpoints = self.relay.clone();
@@ -744,7 +743,7 @@ impl Providers {
         health_check: Arc<AtomicBool>,
         locality: Option<crate::net::endpoint::Locality>,
         notifier: Option<tokio::sync::mpsc::UnboundedSender<String>>,
-        shutdown: tokio::sync::watch::Receiver<()>,
+        shutdown: ChildToken,
     ) -> tokio::task::JoinSet<crate::Result<()>> {
         let mut providers = tokio::task::JoinSet::new();
 
@@ -791,7 +790,7 @@ impl Providers {
                 locality.clone(),
                 config,
                 mutator.clone(),
-                shutdown,
+                shutdown.clone(),
             ));
         }
 
@@ -837,7 +836,7 @@ impl Providers {
             providers.spawn(Self::task(
                 "http_provider".into(),
                 health_check.clone(),
-                move || http::serve(fc.clone(), address, health_check.clone()),
+                move || http::serve(fc.clone(), address, health_check.clone(), shutdown.clone()),
             ));
         }
 

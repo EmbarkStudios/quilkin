@@ -258,15 +258,14 @@ impl Cli {
         tracing::debug!(cli = ?self, "config parameters");
 
         let locality = self.locality.locality();
-        let shutdown_handler = crate::signal::spawn_handler();
-        let drive_token = crate::signal::cancellation_token(shutdown_handler.shutdown_rx());
+        let shutdown_handler = crate::signal::ShutdownHandler::hook();
 
         let config = crate::Config::new_rc(
             self.service.id.clone(),
             self.locality.icao_code,
             &self.providers,
             &mut self.service,
-            drive_token.child_token(),
+            shutdown_handler.child(),
         );
         config.read_config(&self.config, locality.clone())?;
 
@@ -279,14 +278,16 @@ impl Cli {
             crate::components::admin::serve(
                 config.clone(),
                 ready.clone(),
-                shutdown_handler.shutdown_tx(),
+                // This is a root token as admin::serve owns the Health check and thus the panic handler, making it
+                // responsible for shutting down the instance as a whole if a panic occurs
+                shutdown_handler.root(),
                 self.admin.address,
             );
         }
 
         crate::alloc::spawn_heap_stats_updates(
             std::time::Duration::from_secs(10),
-            shutdown_handler.shutdown_rx(),
+            shutdown_handler.child(),
         );
 
         // Just call this early so there isn't a potential race when spawning xDS
@@ -297,10 +298,10 @@ impl Cli {
             ready.clone(),
             locality.clone(),
             None,
-            shutdown_handler.shutdown_rx(),
+            shutdown_handler.child(),
         );
 
-        let shutdown_tx = shutdown_handler.shutdown_tx();
+        let shutdown = shutdown_handler.root();
         let (mut service_task, _) = self
             .service
             .spawn_services(&config, shutdown_handler)
@@ -310,37 +311,38 @@ impl Cli {
             ready.store(true, std::sync::atomic::Ordering::SeqCst);
         }
 
-        loop {
-            tokio::select! {
-                Some(result) = provider_tasks.join_next() => {
-                    match result {
-                        Ok(_) => {
-                            // TODO should improve the provider tasks shutdown so we can log
-                            // exactly which provider has stopped
-                            tracing::info!("provider task stopped");
-                        },
-                        Err(error) => {
-                            tracing::error!(task_result=?error, "provider task completed unexpectedly, shutting down.");
-                            // Trigger shutdown so we can drain the active sessions in the service_task
-                            if let Err(error) = shutdown_tx.send(()) {
-                                tracing::error!(error=?error, "failed to trigger shutdown");
-                                return Err(error.into());
-                            }
-                        },
+        tokio::select! {
+            Some(result) = provider_tasks.join_next() => {
+                match result {
+                    Ok(_) => {
+                        // TODO should improve the provider tasks shutdown so we can log
+                        // exactly which provider has stopped
+                        tracing::info!("provider task stopped");
+                    },
+                    Err(error) => {
+                        tracing::error!(task_result=?error, "provider task completed unexpectedly, shutting down.");
+                        // Trigger shutdown so we can drain the active sessions in the service_task
+                    },
+                }
+
+                shutdown.cancel();
+            },
+            result = &mut service_task => {
+                return match result {
+                    Ok(result) => {
+                        return result;
                     }
-                },
-                result = &mut service_task => {
-                    return match result {
-                        Ok((_, result)) => {
-                            result
-                        }
-                        Err(join_error) => {
-                            Err(eyre::format_err!("failed to join services task: {join_error}"))
-                        }
-                    };
-                },
-            }
+                    Err(join_error) => {
+                        Err(eyre::format_err!("failed to join services task: {join_error}"))
+                    }
+                };
+            },
         }
+
+        service_task
+            .await
+            .map(|_| ())
+            .map_err(|err| eyre::format_err!("failed to join services task: {err}"))
     }
 }
 

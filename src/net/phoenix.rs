@@ -56,11 +56,13 @@ const DIMENSION: usize = 1;
 /// The number of consecutive ping failures after which we will inform that this is a bad node
 const BAD_NODE_THRESHOLD: u64 = 10;
 
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub fn spawn(
     listener: std::net::TcpListener,
     datacenters: config::Watch<config::DatacenterMap>,
     phoenix: Phoenix<crate::codec::qcmp::QcmpTransceiver>,
-    mut shutdown_rx: crate::signal::ShutdownRx,
+    shutdown: quilkin_graceful::ChildToken,
 ) -> crate::Result<crate::service::Finalizer> {
     use eyre::WrapErr as _;
 
@@ -128,7 +130,7 @@ pub fn spawn(
                     let handler_node_latencies = node_latencies_response.clone();
                     let handler_network_coordinates = network_coordinates_response.clone();
 
-                    let http_task_shutdown_rx = shutdown_rx.clone();
+                    let http_task_shutdown = shutdown.clone();
                     let http_task: tokio::task::JoinHandle<std::io::Result<()>> = {
                         tokio::spawn(async move {
                             let router =
@@ -138,7 +140,8 @@ pub fn spawn(
                                 "phoenix",
                                 tokio_listener,
                                 router,
-                                crate::signal::await_shutdown(http_task_shutdown_rx),
+                                http_task_shutdown.into(),
+                                SHUTDOWN_TIMEOUT,
                             )
                             .await
                         })
@@ -148,7 +151,7 @@ pub fn spawn(
                         use eyre::WrapErr as _;
 
                         tokio::select! {
-                            _ = shutdown_rx.changed() => break Ok::<_, eyre::Error>(()),
+                            _ = shutdown.cancelled() => break Ok::<_, eyre::Error>(()),
                             result = dc_watcher.changed() => if let Err(err) = result {
                                 break Err(err).context("config watcher sender dropped");
                             },
@@ -1230,7 +1233,7 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(target_os = "macos", ignore)]
     async fn http_server() {
-        let (tx, rx) = crate::signal::channel();
+        let token = quilkin_graceful::root();
         // Bind the TCP listener first to claim a genuinely free port: the UDP
         // socket below sets SO_REUSEPORT, which can make the kernel hand out
         // an ephemeral port already shared by another test's QCMP socket.
@@ -1242,7 +1245,7 @@ mod tests {
         let qcmp_port = listener.local_addr().unwrap().port();
         let socket = raw_socket_with_reuse(qcmp_port).unwrap();
         let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), token.child()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
@@ -1266,7 +1269,7 @@ mod tests {
             .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
             .build();
 
-        let end = super::spawn(listener, datacenters, phoenix, rx).unwrap();
+        let end = super::spawn(listener, datacenters, phoenix, token.child()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let client =
@@ -1305,14 +1308,14 @@ mod tests {
             );
         }
 
-        let _ = tx.send(());
+        token.cancel();
         end();
     }
 
     #[tokio::test]
     #[cfg_attr(target_os = "macos", ignore)]
     async fn get_network_coordinates() {
-        let (tx, rx) = crate::signal::channel();
+        let token = quilkin_graceful::root();
         // Bind the TCP listener first to claim a genuinely free port: the UDP
         // socket below sets SO_REUSEPORT, which can make the kernel hand out
         // an ephemeral port already shared by another test's QCMP socket.
@@ -1324,7 +1327,7 @@ mod tests {
         let qcmp_port = listener.local_addr().unwrap().port();
         let socket = raw_socket_with_reuse(qcmp_port).unwrap();
         let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), token.child()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
@@ -1348,7 +1351,7 @@ mod tests {
             .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
             .build();
 
-        let end = super::spawn(listener, datacenters, phoenix, rx).unwrap();
+        let end = super::spawn(listener, datacenters, phoenix, token.child()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let client =
@@ -1378,7 +1381,7 @@ mod tests {
             assert!(map.contains_key(&icao_code));
         }
 
-        let _ = tx.send(());
+        token.cancel();
         end();
     }
 }

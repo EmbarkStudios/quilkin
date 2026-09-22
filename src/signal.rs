@@ -1,137 +1,148 @@
-/// Receiver for a shutdown event.
-pub type ShutdownRx = tokio::sync::watch::Receiver<()>;
-pub type ShutdownTx = tokio::sync::watch::Sender<()>;
-
-/// Creates a new handler for shutdown signal (e.g. SIGTERM, SIGINT), and
-/// returns a receiver channel that will receive an event when a shutdown has
-/// been requested.
-pub fn spawn_handler() -> ShutdownHandler {
-    let (tx, rx) = channel();
-    crate::metrics::shutdown_initiated().set(false as _);
-
-    #[cfg(target_os = "linux")]
-    let mut sig_term_fut =
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
-
-    let shutdown_tx = tx.clone();
-    tokio::spawn(async move {
-        #[cfg(target_os = "linux")]
-        let sig_term = sig_term_fut.recv();
-        #[cfg(not(target_os = "linux"))]
-        let sig_term = std::future::pending();
-
-        let signal = tokio::select! {
-            _ = tokio::signal::ctrl_c() => "SIGINT",
-            _ = sig_term => "SIGTERM",
-        };
-
-        crate::metrics::shutdown_initiated().set(true as _);
-        tracing::info!(%signal, "shutting down from signal");
-        // Don't unwrap in order to ensure that we execute
-        // any subsequent shutdown tasks.
-        let _ = shutdown_tx.send(());
-    });
-
-    ShutdownHandler::new(tx, rx)
-}
-
-pub fn channel() -> (ShutdownTx, ShutdownRx) {
-    tokio::sync::watch::channel(())
-}
-
-pub async fn await_shutdown(mut shutdown_rx: ShutdownRx) {
-    if let Err(error) = shutdown_rx.changed().await {
-        tracing::error!(%error, "shutdown signal error");
-    }
-}
-
-/// Adapter method to create a `CancellationToken` that will be cancelled when the `ShutdownRx`
-/// watch channel is changed.
-///
-/// Spawns a tokio task so avoid calling more than once, clone the token instead.
-pub fn cancellation_token(mut rx: ShutdownRx) -> tokio_util::sync::CancellationToken {
-    let shutdown_token = tokio_util::sync::CancellationToken::new();
-    let task_token = shutdown_token.clone();
-    tokio::spawn(async move {
-        let _ = rx.changed().await;
-        task_token.cancel();
-    });
-    shutdown_token
-}
+pub use quilkin_graceful::{ChildToken, RootToken, TaskTracker};
 
 pub struct ShutdownHandler {
-    tx: ShutdownTx,
-    rx: ShutdownRx,
+    token: RootToken,
+    tracker: TaskTracker,
     services:
         std::collections::BTreeMap<&'static str, tokio::sync::oneshot::Receiver<eyre::Result<()>>>,
 }
 
 impl ShutdownHandler {
-    pub fn new(tx: ShutdownTx, rx: ShutdownRx) -> Self {
+    pub fn with_token(token: RootToken) -> Self {
         Self {
-            tx,
-            rx,
+            token,
+            tracker: TaskTracker::new(),
             services: Default::default(),
         }
     }
 
+    pub fn new() -> Self {
+        Self::with_token(RootToken::new())
+    }
+
+    /// Hooks shutdown signals (e.g. SIGTERM, SIGINT) and will attempt to gracefully shutdown the various async tasks
+    /// registered
+    pub fn hook() -> Self {
+        crate::metrics::shutdown_initiated().set(false as _);
+
+        let token = RootToken::new();
+        let tok = token.clone();
+
+        #[cfg(target_os = "linux")]
+        let mut sig_term_fut =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+
+        std::thread::Builder::new()
+            .name("signal-handler".into())
+            .spawn(move || {
+                #[cfg(target_os = "linux")]
+                unsafe {
+                    let mut block = std::mem::zeroed();
+                    libc::sigemptyset(&mut block);
+                    libc::sigaddset(&mut block, libc::SIGTERM);
+                    libc::sigaddset(&mut block, libc::SIGINT);
+                    libc::sigprocmask(libc::SIG_UNBLOCK, &block, std::ptr::null_mut());
+                }
+
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_io()
+                    .build_local(Default::default())
+                    .unwrap()
+                    .block_on(async move {
+                        #[cfg(target_os = "linux")]
+                        let sig_term = sig_term_fut.recv();
+                        #[cfg(not(target_os = "linux"))]
+                        let sig_term = std::future::pending();
+
+                        let signal = tokio::select! {
+                            _ = tokio::signal::ctrl_c() => "SIGINT",
+                            _ = sig_term => "SIGTERM",
+                        };
+
+                        crate::metrics::shutdown_initiated().set(true as _);
+                        tracing::info!(%signal, "shutting down from signal");
+
+                        // Cancel the token, initiating the graceful shutdown process
+                        tok.cancel();
+                    });
+            })
+            .expect("failed to spawn signal handler");
+
+        Self::with_token(token)
+    }
+
     #[inline]
-    pub fn push(&mut self, svc: &'static str) -> tokio::sync::oneshot::Sender<eyre::Result<()>> {
+    pub fn push_async(
+        &mut self,
+        svc: &'static str,
+        task: impl Future<Output = eyre::Result<()>> + Send + 'static,
+    ) {
         let (tx, rx) = tokio::sync::oneshot::channel();
         if self.services.insert(svc, rx).is_some() {
             panic!("service '{svc}' already registered");
         }
-        tx
+
+        self.tracker.spawn(async move {
+            if tx.send(task.await).is_err() {
+                tracing::warn!(service = svc, "failed to send result of service");
+            }
+        });
     }
 
     #[inline]
-    pub fn shutdown_rx(&self) -> ShutdownRx {
-        self.rx.clone()
-    }
-
-    #[inline]
-    pub fn shutdown_tx(&self) -> ShutdownTx {
-        self.tx.clone()
-    }
-
-    #[inline]
-    pub async fn wait_signal(
-        mut self,
-    ) -> (
-        ShutdownTx,
-        ShutdownRx,
-        Vec<(&'static str, eyre::Result<()>)>,
+    pub fn push_sync(
+        &mut self,
+        svc: &'static str,
+        wait: impl FnOnce() -> eyre::Result<()> + Send + 'static,
     ) {
-        let _ = self.rx.changed().await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if self.services.insert(svc, rx).is_some() {
+            panic!("service '{svc}' already registered");
+        }
+
+        let token = self.token.clone();
+        self.tracker.spawn(async move {
+            token.cancelled().await;
+
+            let res = tokio::task::block_in_place(|| wait());
+
+            if tx.send(res).is_err() {
+                tracing::warn!(service = svc, "failed to send result of service");
+            }
+        });
+    }
+
+    #[inline]
+    pub fn root(&self) -> RootToken {
+        self.token.clone()
+    }
+
+    #[inline]
+    pub fn child(&self) -> ChildToken {
+        self.token.child()
+    }
+
+    #[inline]
+    pub async fn wait_signal(self) -> Vec<(&'static str, eyre::Result<()>)> {
         let mut results = Vec::with_capacity(self.services.len());
-        let (t, r) = self.await_all(&mut results).await;
-        (t, r, results)
+        self.await_all(&mut results).await;
+        results
     }
 
     #[inline]
-    pub async fn shutdown(
-        self,
-    ) -> (
-        ShutdownTx,
-        ShutdownRx,
-        Vec<(&'static str, eyre::Result<()>)>,
-    ) {
-        let _ = self.tx.send(());
+    pub async fn shutdown(self) -> Vec<(&'static str, eyre::Result<()>)> {
+        self.token.cancel();
+
         let mut results = Vec::with_capacity(self.services.len());
-        let (t, r) = self.await_all(&mut results).await;
-        (t, r, results)
+        self.await_all(&mut results).await;
+        results
     }
 
-    pub async fn await_any_then_shutdown(
-        mut self,
-    ) -> (
-        ShutdownTx,
-        ShutdownRx,
-        Vec<(&'static str, eyre::Result<()>)>,
-    ) {
+    pub async fn await_any_then_shutdown(mut self) -> Vec<(&'static str, eyre::Result<()>)> {
         let (which, res) = {
             let mut completions = std::pin::pin!(&mut self.services);
-            let mut srx = std::pin::pin!(self.rx.changed());
+            let mut srx = std::pin::pin!(self.token.cancelled());
+
             std::future::poll_fn(move |cx| {
                 use std::task::Poll;
 
@@ -141,7 +152,7 @@ impl ShutdownHandler {
 
                 for (key, value) in completions.as_mut().iter_mut() {
                     if let Poll::Ready(res) = std::pin::pin!(value).as_mut().poll(cx) {
-                        return Poll::Ready((key, res.unwrap_or(Ok(()))));
+                        return Poll::Ready((*key, res.unwrap_or(Ok(()))));
                     }
                 }
 
@@ -152,21 +163,18 @@ impl ShutdownHandler {
 
         let mut results = Vec::with_capacity(self.services.len());
 
-        // If the future completed due to a task exiting, signal shutdown to ensure
-        // all the other tasks know to exit
+        // One of the tasks exited prematurely, signal the rest to begin shutting down
+        self.token.cancel();
+
         if !which.is_empty() {
-            let _ = self.tx.send(());
             results.push((which, res));
         }
 
-        let (t, r) = self.await_all(&mut results).await;
-        (t, r, results)
+        self.await_all(&mut results).await;
+        results
     }
 
-    async fn await_all(
-        mut self,
-        results: &mut Vec<(&'static str, eyre::Result<()>)>,
-    ) -> (ShutdownTx, ShutdownRx) {
+    async fn await_all(mut self, results: &mut Vec<(&'static str, eyre::Result<()>)>) {
         let start = tokio::time::Instant::now();
         let mut report = tokio::time::Instant::now();
         let mut sleep = std::time::Duration::from_millis(10);
@@ -204,6 +212,7 @@ impl ShutdownHandler {
             );
         }
 
-        (self.tx, self.rx)
+        // This should return immediately since we've already gotten results from all of the tasks that were tracked
+        self.tracker.wait().await;
     }
 }

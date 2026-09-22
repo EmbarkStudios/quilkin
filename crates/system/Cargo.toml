@@ -9,10 +9,12 @@ license.workspace = true
 
 [features]
 default = ["http", "sockets"]
-http = ["dep:axum", "dep:futures", "dep:hyper-util", "dep:tokio", "dep:tower"]
+http = ["dep:axum", "dep:futures", "dep:hyper-util", "dep:quilkin-graceful", "dep:tokio", "dep:tower"]
 sockets = ["dep:socket2"]
 
 [dependencies]
+quilkin-graceful = { workspace = true, optional = true }
+
 axum = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true, features = ["http1", "http2"] }

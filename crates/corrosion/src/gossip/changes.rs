@@ -319,7 +319,9 @@ pub struct ChangeCtx {
     pub bcast_tx: mpsc::Sender<bx::BroadcastInput>,
     pub apply_tx: mpsc::Sender<ChangeApply>,
     pub clear_buf_tx: mpsc::Sender<(ActorId, RangeInclusiveSet<CrsqlDbVersion>)>,
-    pub shutdown: tokio::sync::watch::Sender<()>,
+    /// This is a root token as fatal DB issues should cause the entire instance to shutdown rather than just
+    /// the corrosion tasks
+    pub shutdown: quilkin_graceful::RootToken,
     pub metrics: &'static super::GossipMetrics,
 }
 

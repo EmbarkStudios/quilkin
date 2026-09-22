@@ -194,7 +194,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
             self.config.on_changed(this, srx)
         });
 
-        let mut shutdown = self.shutdown.clone();
+        let shutdown = self.shutdown.clone();
         let server = AggregatedDiscoveryServiceServer::new(self)
             .max_encoding_message_size(crate::config::max_grpc_message_size());
         let builder = Self::server_builder();
@@ -209,7 +209,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         tracing::info!("serving management server on port `{}`", listener.port());
         Ok(server
             .serve_with_incoming_shutdown(listener.into_stream()?, async move {
-                drop(shutdown.changed().await);
+                shutdown.cancelled().await;
             })
             .map_err(From::from))
     }
@@ -225,7 +225,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
             self.config.on_changed(this, srx)
         });
 
-        let mut shutdown = self.shutdown.clone();
+        let shutdown = self.shutdown.clone();
         let server = AggregatedControlPlaneDiscoveryServiceServer::new(self)
             .max_encoding_message_size(crate::config::max_grpc_message_size());
         let builder = Self::server_builder();
@@ -240,7 +240,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         tracing::info!("serving relay server on port `{}`", listener.port());
         Ok(server
             .serve_with_incoming_shutdown(listener.into_stream()?, async move {
-                drop(shutdown.changed().await);
+                shutdown.cancelled().await;
             })
             .map_err(From::from))
     }
@@ -304,7 +304,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         let responder_control_plane = control_plane.clone();
         let client = node_id.clone();
         let cfg = self.config.clone();
-        let mut shutdown = self.shutdown.clone();
+        let shutdown = self.shutdown.clone();
 
         let responder = move |req: Option<DeltaDiscoveryRequest>,
                               type_url: &str,
@@ -496,7 +496,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
                         let Some(response) = responder(Some(client_request), &type_url, &mut client_tracker).unwrap() else { continue; };
                         yield response;
                     }
-                    _ = shutdown.changed() => {
+                    _ = shutdown.cancelled() => {
                         break;
                     }
                 }
@@ -594,7 +594,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
 
         tracing::info!(identifier, "new control plane delta discovery stream");
         let config = self.config.clone();
-        let mut shutdown = self.shutdown.clone();
+        let shutdown = self.shutdown.clone();
         let idle_request_interval = self.idle_request_interval;
 
         let (ds, mut request_stream) = super::client::DeltaClientStream::new();
@@ -674,7 +674,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                                 }
                             }
                         }
-                        _ = shutdown.changed() => {
+                        _ = shutdown.cancelled() => {
                             break Ok(());
                         }
                     }
@@ -719,7 +719,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
 
         let mut rx = self.tx.subscribe();
         let id = self.config.identifier();
-        let mut shutdown = self.shutdown.clone();
+        let shutdown = self.shutdown.clone();
 
         tracing::debug!(
             id,
@@ -926,7 +926,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
                         let Some(response) = responder(Some(client_request), &type_url, &mut client_tracker).unwrap() else { continue; };
                         yield response;
                     }
-                    _ = shutdown.changed() => {
+                    _ = shutdown.cancelled() => {
                         break;
                     }
                 }

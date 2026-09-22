@@ -383,10 +383,9 @@ pub fn spawn(
     port_rx: tokio::sync::broadcast::Receiver<u16>,
     shutdown: &mut crate::signal::ShutdownHandler,
 ) -> crate::Result<()> {
-    let finished = shutdown.push("qcmp");
-    let shutdown_rx = shutdown.shutdown_rx();
+    let token = shutdown.child();
 
-    let _qcmp_thread = std::thread::Builder::new()
+    let qcmp_thread = std::thread::Builder::new()
         .name("qcmp".into())
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -396,17 +395,22 @@ pub fn spawn(
                 .expect("couldn't create tokio runtime in thread");
 
             let res = runtime.block_on(async move {
-                let task = spawn_task(socket, port_rx, shutdown_rx)?;
-                drop(finished.send(task.await.wrap_err("qcmp task error")));
-
-                Ok::<_, eyre::Report>(())
+                let task = spawn_task(socket, port_rx, token)?;
+                task.await.wrap_err("qcmp task error")
             });
 
-            if let Err(error) = res {
+            if let Err(error) = &res {
                 tracing::error!(%error, "qcmp thread failed with an error");
             }
+
+            res
         })
         .expect("failed to spawn qcmp thread");
+
+    shutdown.push_sync("qcmp", move || match qcmp_thread.join() {
+        Ok(res) => res,
+        Err(_err) => Err(eyre::eyre!("failed to join QCMP thread")),
+    });
 
     Ok(())
 }
@@ -414,7 +418,7 @@ pub fn spawn(
 pub(crate) fn spawn_task(
     socket: socket2::Socket,
     mut port_rx: tokio::sync::broadcast::Receiver<u16>,
-    mut shutdown_rx: tokio::sync::watch::Receiver<()>,
+    shutdown: quilkin_graceful::ChildToken,
 ) -> crate::Result<tokio::task::JoinHandle<()>> {
     use tracing::{Instrument as _, instrument::WithSubscriber as _};
 
@@ -430,7 +434,7 @@ pub(crate) fn spawn_task(
             loop {
                 let result = tokio::select! {
                     result = socket.recv_from(&mut input_buf) => result,
-                    _ = shutdown_rx.changed() => {
+                    _ = shutdown.cancelled() => {
                         metrics::qcmp::active(false);
                         return;
                     }
@@ -966,9 +970,9 @@ mod tests {
         let socket = raw_socket_with_reuse(0).unwrap();
         let addr = socket.local_addr().unwrap().as_socket().unwrap();
 
-        let (_tx, rx) = crate::signal::channel();
         let pc = super::port_channel();
-        spawn_task(socket, pc.subscribe(), rx).unwrap();
+        let token = quilkin_graceful::root();
+        let jh = spawn_task(socket, pc.subscribe(), token.child()).unwrap();
 
         let delay = Duration::from_millis(50);
         let node = QcmpTransceiver::with_artificial_delay(delay).unwrap();
@@ -994,6 +998,12 @@ mod tests {
                 delay * 2
             );
         }
+
+        token.cancel();
+        tokio::time::timeout(std::time::Duration::from_millis(100), jh)
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]

@@ -37,15 +37,16 @@ pub const PORT: u16 = 8000;
 pub const PORT_LABEL: &str = "8000";
 
 pub(crate) const IDLE_REQUEST_INTERVAL: Duration = Duration::from_secs(30);
+pub(crate) const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn serve(
     config: Arc<crate::Config>,
     ready: Arc<AtomicBool>,
-    shutdown_tx: crate::signal::ShutdownTx,
+    shutdown: quilkin_graceful::RootToken,
     address: Option<std::net::SocketAddr>,
 ) -> std::thread::JoinHandle<()> {
     let address = address.unwrap_or_else(|| (std::net::Ipv6Addr::UNSPECIFIED, PORT).into());
-    let health = Health::new(shutdown_tx);
+    let health = Health::new(shutdown.clone());
     tracing::info!(address = %address, "Starting admin endpoint");
 
     let router = Admin {
@@ -63,12 +64,14 @@ pub fn serve(
                 .block_on(async move {
                     let listener = quilkin_system::net::tcp::default_nonblocking_listener(address)?;
                     let tokio_listener = tokio::net::TcpListener::from_std(listener)?;
+                    let spawner = shutdown.into();
 
                     quilkin_system::net::http::serve(
                         "admin",
                         tokio_listener,
                         router,
-                        std::future::pending(),
+                        spawner,
+                        SHUTDOWN_TIMEOUT,
                     )
                     .await
                 })
@@ -408,8 +411,8 @@ mod tests {
 
     #[tokio::test]
     async fn live() {
-        let (shutdown_tx, _shutdown_rx) = crate::signal::channel();
-        let health = Health::new(shutdown_tx);
+        let token = quilkin_graceful::root();
+        let health = Health::new(token.clone());
         let admin = Admin {
             config: crate::test::TestHelper::new_config(),
             ready: <_>::default(),
@@ -425,6 +428,8 @@ mod tests {
         });
 
         server.get("/live").expect_failure().await;
+
+        assert!(token.is_cancelled());
     }
 
     #[tokio::test]

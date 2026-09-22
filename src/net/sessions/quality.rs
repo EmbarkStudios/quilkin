@@ -489,23 +489,21 @@ pub fn spawn_aggregator(
     let _ = metrics::session_jitter_seconds();
 
     let mut aggregator = Aggregator::new(config);
-    let finished = shutdown.push("session_metrics");
-    let mut srx = shutdown.shutdown_rx();
-
-    tokio::spawn(async move {
+    let token = shutdown.child();
+    shutdown.push_async("session_metrics", async move {
         let mut interval = tokio::time::interval(config.interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
             tokio::select! {
                 _ = interval.tick() => aggregator.tick(),
-                _ = srx.changed() => break,
+                _ = token.cancelled() => break,
             }
         }
 
         // So a scrape during drain doesn't see a value from before shutdown
         aggregator.tick();
-        drop(finished.send(Ok(())));
+        Ok(())
     });
 
     Ok(())

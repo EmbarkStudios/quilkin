@@ -204,7 +204,7 @@ pub trait Configuration: Send + Sync + Sized + 'static {
     fn on_changed(
         &self,
         subscribed: crate::server::ControlPlane<Self>,
-        shutdown: tokio::sync::watch::Receiver<()>,
+        shutdown: crate::ShutdownSignal,
     ) -> impl std::future::Future<Output = ()> + Send + 'static;
 
     fn interested_resources(

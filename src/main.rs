@@ -16,6 +16,15 @@
 
 #[allow(clippy::exit)]
 fn main() {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let mut block = std::mem::zeroed();
+        libc::sigemptyset(&mut block);
+        libc::sigaddset(&mut block, libc::SIGTERM);
+        libc::sigaddset(&mut block, libc::SIGINT);
+        libc::sigprocmask(libc::SIG_BLOCK, &block, std::ptr::null_mut());
+    }
+
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name_fn(|| {
@@ -34,7 +43,9 @@ fn main() {
                 .unwrap();
 
             match <quilkin::Cli as clap::Parser>::parse().drive().await {
-                Ok(()) => std::process::exit(0),
+                Ok(()) => {
+                    std::process::exit(0);
+                }
                 Err(error) => {
                     tracing::error!(?error, "fatal error");
 

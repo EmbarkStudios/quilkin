@@ -27,7 +27,6 @@ use crate::{
     net::DualStackEpollSocket as DualStackLocalSocket,
     net::endpoint::metadata::Value,
     net::endpoint::{Endpoint, EndpointAddress},
-    signal::{ShutdownRx, ShutdownTx},
 };
 
 static LOG_ONCE: Once = Once::new();
@@ -142,8 +141,8 @@ impl StaticFilter for TestFilter {
 #[derive(Default)]
 pub struct TestHelper {
     /// Channel to subscribe to, and trigger the shutdown of created resources.
-    shutdown_ch: Option<(ShutdownTx, ShutdownRx)>,
-    server_shutdown_tx: Vec<Option<ShutdownTx>>,
+    shutdown_ch: Option<quilkin_graceful::RootToken>,
+    server_shutdown_tx: Vec<Option<quilkin_graceful::RootToken>>,
 }
 
 /// Returned from [creating a socket](TestHelper::open_socket_and_recv_single_packet)
@@ -156,24 +155,16 @@ pub struct OpenSocketRecvPacket {
 
 impl Drop for TestHelper {
     fn drop(&mut self) {
-        for shutdown_tx in self
+        for shutdown in self
             .server_shutdown_tx
             .iter_mut()
             .filter_map(|tx| tx.take())
         {
-            shutdown_tx
-                .send(())
-                .map_err(|error| {
-                    tracing::warn!(
-                        %error,
-                        "Failed to send server shutdown over channel"
-                    );
-                })
-                .ok();
+            shutdown.cancel();
         }
 
-        if let Some((shutdown_tx, _)) = self.shutdown_ch.take() {
-            shutdown_tx.send(()).unwrap();
+        if let Some(shutdown) = self.shutdown_ch.take() {
+            shutdown.cancel();
         }
     }
 }
@@ -221,7 +212,7 @@ impl TestHelper {
         socket: &Arc<DualStackLocalSocket>,
     ) -> mpsc::Receiver<String> {
         let (packet_tx, packet_rx) = mpsc::channel::<String>(10);
-        let mut shutdown_rx = self.get_shutdown_subscriber().await;
+        let shutdown_rx = self.get_shutdown();
         let socket_recv = socket.clone();
         tokio::spawn(async move {
             let mut buf = vec![0; 1024];
@@ -238,7 +229,7 @@ impl TestHelper {
                             }
                         };
                     },
-                    _ = shutdown_rx.changed() => {
+                    _ = shutdown_rx.cancelled() => {
                         return;
                     }
                 }
@@ -269,7 +260,7 @@ impl TestHelper {
         // sometimes give ipv6, sometimes ipv4.
         let mut addr = get_address(address_type, &socket);
         crate::test::map_addr_to_localhost(&mut addr);
-        let mut shutdown = self.get_shutdown_subscriber().await;
+        let shutdown = self.get_shutdown();
         let local_addr = addr;
         tokio::spawn(async move {
             loop {
@@ -282,7 +273,7 @@ impl TestHelper {
                         tap(sender, packet, local_addr);
                         socket.send_to(packet, sender).await.unwrap();
                     },
-                    _ = shutdown.changed() => {
+                    _ = shutdown.cancelled() => {
                         return;
                     }
                 }
@@ -299,7 +290,7 @@ impl TestHelper {
             Default::default(),
             &providers,
             &mut service,
-            tokio_util::sync::CancellationToken::new(),
+            quilkin_graceful::root().child(),
         )
     }
 
@@ -308,15 +299,15 @@ impl TestHelper {
         config: Arc<Config>,
         with_admin: Option<Option<SocketAddr>>,
     ) -> u16 {
-        let (shutdown_tx, shutdown_rx) = crate::signal::channel();
-        self.server_shutdown_tx.push(Some(shutdown_tx.clone()));
+        let cancel = quilkin_graceful::root();
+        self.server_shutdown_tx.push(Some(cancel.clone()));
         let ready = <_>::default();
 
         if let Some(address) = with_admin {
-            crate::components::admin::serve(config.clone(), ready, shutdown_tx.clone(), address);
+            crate::components::admin::serve(config.clone(), ready, cancel.clone(), address);
         }
 
-        let shutdown = crate::signal::ShutdownHandler::new(shutdown_tx, shutdown_rx);
+        let shutdown = crate::signal::ShutdownHandler::with_token(cancel);
 
         let (task, ports) = crate::Service::default()
             .udp()
@@ -337,15 +328,14 @@ impl TestHelper {
     }
 
     /// Returns a receiver subscribed to the helper's shutdown event.
-    async fn get_shutdown_subscriber(&mut self) -> ShutdownRx {
+    fn get_shutdown(&mut self) -> quilkin_graceful::RootToken {
         // If this is the first call, then we set up the channel first.
-        if let Some((_, rx)) = &self.shutdown_ch {
-            rx.clone()
+        if let Some(tok) = &self.shutdown_ch {
+            tok.clone()
         } else {
-            let ch = crate::signal::channel();
-            let recv = ch.1.clone();
-            self.shutdown_ch = Some(ch);
-            recv
+            let ch = quilkin_graceful::root();
+            self.shutdown_ch = Some(ch.clone());
+            ch
         }
     }
 }

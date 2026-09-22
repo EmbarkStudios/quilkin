@@ -1469,7 +1469,7 @@ pub struct ClusterUpdateBatcher {
     locality: Option<Locality>,
     updates: std::sync::Arc<std::sync::Mutex<Vec<EndpointSetUpdateAction>>>,
     interval: std::time::Duration,
-    token: tokio_util::sync::CancellationToken,
+    token: quilkin_graceful::ChildToken,
     batcher_mu: std::sync::Arc<std::sync::Mutex<()>>,
 }
 
@@ -1479,7 +1479,7 @@ impl ClusterUpdateBatcher {
         cluster_map: crate::config::Watch<ClusterMap>,
         locality: Option<Locality>,
         interval: std::time::Duration,
-        token: tokio_util::sync::CancellationToken,
+        token: quilkin_graceful::ChildToken,
     ) -> Self {
         let cub = Self {
             cluster_map,
@@ -1506,7 +1506,7 @@ impl ClusterUpdateBatcher {
             locality,
             updates: <_>::default(),
             interval: std::time::Duration::from_secs(1),
-            token: tokio_util::sync::CancellationToken::new(),
+            token: quilkin_graceful::root().child(),
             batcher_mu: <_>::default(),
         }
     }

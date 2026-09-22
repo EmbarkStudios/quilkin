@@ -102,14 +102,14 @@ mod tests {
             Default::default(),
             &providers,
             &mut service,
-            tokio_util::sync::CancellationToken::new(),
+            quilkin_graceful::root().child(),
         );
         let dest = crate::Config::new_rc(
             Some("basic".into()),
             Default::default(),
             &providers,
             &mut service,
-            tokio_util::sync::CancellationToken::new(),
+            quilkin_graceful::root().child(),
         );
         assert_eq!(source, dest);
 

@@ -3925,6 +3925,7 @@ dependencies = [
  "prost",
  "prost-types",
  "quilkin-corrosion",
+ "quilkin-graceful",
  "quilkin-macros",
  "quilkin-proto",
  "quilkin-system",
@@ -3987,6 +3988,7 @@ dependencies = [
  "itertools 0.14.0",
  "parking_lot",
  "prometheus",
+ "quilkin-graceful",
  "quilkin-types",
  "quinn",
  "quinn-plaintext",
@@ -4020,6 +4022,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "quilkin-graceful"
+version = "0.10.1"
+dependencies = [
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "quilkin-macros"
 version = "0.10.1"
 dependencies = [
@@ -4047,6 +4057,7 @@ dependencies = [
  "hyper-util",
  "once_cell",
  "prometheus-client",
+ "quilkin-graceful",
  "socket2",
  "tokio",
  "tower",
@@ -4092,6 +4103,7 @@ dependencies = [
  "prometheus",
  "prost",
  "prost-types",
+ "quilkin-graceful",
  "quilkin-proto",
  "rand 0.9.4",
  "schemars",
@@ -5484,6 +5496,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "slab",
  "tokio",

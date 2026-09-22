@@ -118,9 +118,9 @@ impl Drop for StreamMetrics {
 }
 
 #[inline]
-fn fatal_db_issue(issue: &'static str, stx: &tokio::sync::watch::Sender<()>) {
+fn fatal_db_issue(issue: &'static str, shutdown: &quilkin_graceful::RootToken) {
     tracing::error!(issue, "fatal DB issue encountered, attempting shutdown");
-    let _dont_care = stx.send(());
+    shutdown.cancel();
 }
 
 #[derive(Clone)]
