@@ -47,7 +47,7 @@ bincode = "2.0"
 foca = "0.19"
 governor = { version = "0.10", features = ["std"] }
 indexmap = "2.13"
-itertools = "0.14"
+itertools = "0.15"
 rand = "0.9"
 rangemap = "1.7"
 speedy = "0.8"
