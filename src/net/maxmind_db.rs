@@ -162,7 +162,7 @@ impl std::ops::DerefMut for MaxmindDb {
 
 #[derive(Clone, serde::Deserialize)]
 pub struct IpNetEntry {
-    #[serde(default, rename = "as")]
+    #[serde(default, rename = "as", deserialize_with = "deserialize_asn")]
     pub id: u64,
     #[serde(default)]
     pub as_cc: String,
@@ -174,6 +174,33 @@ pub struct IpNetEntry {
     pub prefix_name: String,
     #[serde(default)]
     pub prefix: String,
+}
+
+/// mmdb encodes an integer as the narrowest type that holds it, so `as` arrives
+/// at any width and `maxminddb`'s typed deserializers reject all but one.
+fn deserialize_asn<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+    use serde::de::{Error, Unexpected, Visitor};
+
+    struct AsnVisitor;
+
+    impl Visitor<'_> for AsnVisitor {
+        type Value = u64;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("an autonomous system number")
+        }
+
+        fn visit_u64<E: Error>(self, id: u64) -> Result<u64, E> {
+            Ok(id)
+        }
+
+        fn visit_i64<E: Error>(self, id: i64) -> Result<u64, E> {
+            id.try_into()
+                .map_err(|_e| E::invalid_value(Unexpected::Signed(id), &self))
+        }
+    }
+
+    deserializer.deserialize_any(AsnVisitor)
 }
 
 #[derive(Clone)]
@@ -276,5 +303,117 @@ mod test {
         check((u32::MAX >> 1) as _, &(u32::MAX >> 1).to_string());
         check((u32::MAX - 1) as _, &(u32::MAX - 1).to_string());
         check(u32::MAX as _, &u32::MAX.to_string());
+    }
+
+    /// Just enough of the mmdb encoding to build one record database.
+    #[derive(Default)]
+    struct Mmdb(Vec<u8>);
+
+    impl Mmdb {
+        const UINT16: u8 = 5;
+        const UINT32: u8 = 6;
+        const UINT64: u8 = 9;
+
+        fn control(&mut self, kind: u8, size: usize) {
+            assert!(size < 29, "only the short size form is implemented");
+            // Types above 7 move into a second byte, biased by 7.
+            if kind > 7 {
+                self.0.extend_from_slice(&[size as u8, kind - 7]);
+            } else {
+                self.0.push((kind << 5) | size as u8);
+            }
+        }
+
+        fn uint(&mut self, kind: u8, value: u64) -> &mut Self {
+            let bytes = value.to_be_bytes();
+            let significant = bytes.iter().position(|b| *b != 0).unwrap_or(bytes.len());
+            self.control(kind, bytes.len() - significant);
+            self.0.extend_from_slice(&bytes[significant..]);
+            self
+        }
+
+        fn string(&mut self, value: &str) -> &mut Self {
+            self.control(2, value.len());
+            self.0.extend_from_slice(value.as_bytes());
+            self
+        }
+
+        fn map(&mut self, entries: usize) -> &mut Self {
+            self.control(7, entries);
+            self
+        }
+
+        fn array(&mut self, items: usize) -> &mut Self {
+            self.control(11, items);
+            self
+        }
+    }
+
+    /// Wraps `record` in a single node tree that resolves every address to it.
+    fn database(record: &[u8]) -> Vec<u8> {
+        const NODE_COUNT: u32 = 1;
+        const RECORD_SIZE: u64 = 24;
+        // The reader takes the data section offset as `pointer - node_count - 16`.
+        const POINTER: u32 = NODE_COUNT + 16;
+
+        let mut db = Vec::new();
+        for _ in 0..2 {
+            db.extend_from_slice(&POINTER.to_be_bytes()[1..]);
+        }
+        db.extend_from_slice(&[0; 16]);
+        db.extend_from_slice(record);
+        db.extend_from_slice(b"\xab\xcd\xefMaxMind.com");
+
+        let mut metadata = Mmdb::default();
+        metadata
+            .map(9)
+            .string("binary_format_major_version")
+            .uint(Mmdb::UINT16, 2)
+            .string("binary_format_minor_version")
+            .uint(Mmdb::UINT16, 0)
+            .string("build_epoch")
+            .uint(Mmdb::UINT64, 0)
+            .string("database_type")
+            .string("quilkin-test")
+            .string("description")
+            .map(0)
+            .string("ip_version")
+            .uint(Mmdb::UINT16, 4)
+            .string("languages")
+            .array(0)
+            .string("node_count")
+            .uint(Mmdb::UINT32, NODE_COUNT as _)
+            .string("record_size")
+            .uint(Mmdb::UINT16, RECORD_SIZE);
+        db.extend_from_slice(&metadata.0);
+
+        db
+    }
+
+    /// mmdb stores an integer as the narrowest type that holds it, and
+    /// `maxminddb` decodes only the type it finds, so `as` has to be read at
+    /// whichever width the database that produced it happened to use.
+    #[test]
+    fn decodes_asn_at_every_stored_width() {
+        for kind in [Mmdb::UINT16, Mmdb::UINT32, Mmdb::UINT64] {
+            let mut record = Mmdb::default();
+            record
+                .map(2)
+                .string("as")
+                .uint(kind, 15169)
+                .string("prefix")
+                .string("8.8.8.0/24");
+
+            let reader = super::Reader::from_source(database(&record.0)).unwrap();
+            let entry = reader
+                .lookup(std::net::IpAddr::from([8, 8, 8, 8]))
+                .unwrap()
+                .decode::<super::IpNetEntry>()
+                .unwrap()
+                .unwrap_or_else(|| panic!("no record found for type {kind}"));
+
+            assert_eq!(entry.id, 15169, "type {kind}");
+            assert_eq!(entry.prefix, "8.8.8.0/24", "type {kind}");
+        }
     }
 }

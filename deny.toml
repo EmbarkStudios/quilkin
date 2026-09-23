@@ -52,12 +52,14 @@ skip = [
     { crate = "object@0.32.2", reason = "transitive dependency due to backtrace, backtrace is updated, but stable-eyre is using a feature that doesn't exist any longer, and can't update" },
     { crate = "miniz_oxide@0.7.4", reason = "pprof_util carries two different versions transitively" },
     { crate = "itertools:<0.14", reason = "sigh" },
+    { crate = "base64@0.22.1", reason = "the kube/tonic/hyper stack is still on 0.22, rcgen's pem is on 0.23" },
+    { crate = "pem@3.0.6", reason = "kube-client is on 3, rcgen is on 4" },
+    { crate = "synstructure@0.13.2", reason = "asn1-rs-derive is on 0.13, the icu/yoke stack is on 0.14" },
 ]
 skip-tree = [
     { crate = "thiserror@1.0.69", reason = "many crates use this old version" },
     { crate = "hashbrown:<=0.16.1", reason = "we're at *5* different versions :p" },
     { crate = "rand:<0.10", reason = "another version of rand, meaning tons of old versions :p" },
-    { crate = "sha2@0.10.9", reason = "old version that uses multiple other old crates" },
 ]
 
 [[bans.features]]

@@ -132,8 +132,8 @@ uuid.workspace = true
 lasso = { version = "0.7.3", features = ["multi-threaded"] }
 kube.workspace = true
 kube-core.workspace = true
-strum = "0.28"
-strum_macros = "0.28"
+strum = "0.27"
+strum_macros = "0.27"
 libflate = "2.2.1"
 form_urlencoded = "1.2.2"
 enum_dispatch = "0.3.13"
