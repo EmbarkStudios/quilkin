@@ -594,13 +594,15 @@ mod tests {
 
     #[test]
     fn handle_registration_is_scoped_to_the_session() {
-        let before = REGISTRY.len();
+        // Keyed on this handle's own id rather than the registry length, which
+        // every other live session moves.
         let handle = SessionQualityHandle::register(None);
-        assert_eq!(REGISTRY.len(), before + 1);
+        let id = handle.id;
+        assert!(REGISTRY.contains_key(&id));
 
         handle.record_arrival();
         drop(handle);
-        assert_eq!(REGISTRY.len(), before);
+        assert!(!REGISTRY.contains_key(&id));
     }
 
     /// `(asn, sessions, judged, degraded)`

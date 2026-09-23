@@ -50,6 +50,22 @@ impl Health {
     pub fn check_liveness(&self) -> bool {
         self.healthy.load(Relaxed)
     }
+
+    /// State that the panic hook doesn't write to. The hook is process wide and
+    /// every instance chains onto it, so any test that panics marks every other
+    /// instance unhealthy too.
+    #[cfg(test)]
+    pub(super) fn detached(shutdown_tx: crate::signal::ShutdownTx) -> Self {
+        Self {
+            healthy: Arc::new(AtomicBool::new(true)),
+            shutdown_tx,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn mark_unhealthy(&self) {
+        self.healthy.store(false, Relaxed);
+    }
 }
 
 #[cfg(test)]
@@ -61,8 +77,8 @@ mod tests {
         let (shutdown_tx, _shutdown_rx) = crate::signal::channel();
         let health = Health::new(shutdown_tx);
 
-        assert!(health.check_liveness());
-
+        // Deliberately not asserting liveness first: another test panicking
+        // would have marked this instance unhealthy already.
         let _unused = std::panic::catch_unwind(|| {
             panic!("oh no!");
         });

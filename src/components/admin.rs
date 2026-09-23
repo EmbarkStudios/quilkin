@@ -409,20 +409,20 @@ mod tests {
     #[tokio::test]
     async fn live() {
         let (shutdown_tx, _shutdown_rx) = crate::signal::channel();
-        let health = Health::new(shutdown_tx);
+        // The panic hook is process wide, so a real panic here would depend on
+        // every other test that panics. health::tests::panic_hook covers it.
+        let health = Health::detached(shutdown_tx);
         let admin = Admin {
             config: crate::test::TestHelper::new_config(),
             ready: <_>::default(),
-            health,
+            health: health.clone(),
         };
 
         let server = axum_test::TestServer::new(admin.router());
 
         server.get("/live").expect_success().await;
 
-        let _unused = std::panic::catch_unwind(|| {
-            panic!("oh no!");
-        });
+        health.mark_unhealthy();
 
         server.get("/live").expect_failure().await;
     }
