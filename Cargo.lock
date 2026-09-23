@@ -941,7 +941,7 @@ dependencies = [
  "deadpool",
  "eyre",
  "fallible-iterator",
- "foca",
+ "foca 0.19.0",
  "futures",
  "hex",
  "indexmap",
@@ -1667,6 +1667,16 @@ dependencies = [
  "rand 0.9.5",
  "serde",
  "tracing",
+]
+
+[[package]]
+name = "foca"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfdf03bd44a0044a679493054cf0a78696bcb8dc4140dadaa350af0a04b3bbe1"
+dependencies = [
+ "bytes",
+ "rand 0.10.3",
 ]
 
 [[package]]
@@ -4040,7 +4050,7 @@ dependencies = [
  "corro-types",
  "data-encoding",
  "eyre",
- "foca",
+ "foca 2.0.0",
  "futures",
  "futures-util",
  "governor",
