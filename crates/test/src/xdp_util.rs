@@ -209,8 +209,8 @@ impl SimpleLoop {
         &mut self,
         mut packet: TestPacket,
     ) -> [Option<TestPacket>; N] {
-        let mut rx = HeapSlab::with_capacity(1);
-        let mut tx = HeapSlab::with_capacity(1);
+        let mut rx = HeapSlab::with_capacity(N);
+        let mut tx = HeapSlab::with_capacity(N);
 
         rx.push_front(packet.inner.take().unwrap());
 
