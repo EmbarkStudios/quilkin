@@ -1053,7 +1053,7 @@ impl Service {
             require_tx_checksum: self.xdp.force_tx_checksum_offload,
             packets_per_queue: self.xdp.packets_per_queue,
             worker_thread_scheduling: crate::net::io::nic::xdp::WorkerThreadScheduling {
-                thread_policy: self.xdp.schedule_policy,
+                thread_policy: self.xdp.schedule_policy.unwrap_or_default(),
                 thread_priority: self.xdp.thread_priority as _,
                 pin_threads: self.xdp.pin_to_core,
             },
@@ -1620,7 +1620,7 @@ pub struct XdpOptions {
         long = "service.udp.xdp.schedule-policy",
         env = "QUILKIN_SERVICE_UDP_XDP_SCHEDULE_POLICY"
     )]
-    pub schedule_policy: crate::net::io::nic::ThreadPolicy,
+    pub schedule_policy: Option<crate::net::io::nic::ThreadPolicy>,
     /// Sets the thread priority for the XDP worker threads
     ///
     /// This only matters when using the `SCHED_FIFO` or `SCHED_RR` realtime policies. This value will be clamped within
@@ -1647,7 +1647,7 @@ impl Default for XdpOptions {
             force_zerocopy: false,
             force_tx_checksum_offload: false,
             packets_per_queue: 8 * 1024,
-            schedule_policy: Default::default(),
+            schedule_policy: None,
             thread_priority: 99,
             pin_to_core: false,
         }
