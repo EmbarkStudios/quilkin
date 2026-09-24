@@ -1049,9 +1049,14 @@ impl Service {
                 .map_or(xdp::NicConfig::Default, xdp::NicConfig::Name),
             external_port: udp_port,
             qcmp_port,
-            maximum_packet_memory: self.xdp.maximum_memory,
             require_zero_copy: self.xdp.force_zerocopy,
             require_tx_checksum: self.xdp.force_tx_checksum_offload,
+            packets_per_queue: self.xdp.packets_per_queue,
+            worker_thread_scheduling: crate::net::io::nic::xdp::WorkerThreadScheduling {
+                thread_policy: self.xdp.schedule_policy.unwrap_or_default(),
+                thread_priority: self.xdp.thread_priority as _,
+                pin_threads: self.xdp.pin_to_core,
+            },
         })
         .context("failed to setup XDP")?;
 
@@ -1560,6 +1565,22 @@ impl Service {
     }
 }
 
+fn validate_packet_count(p: &str) -> eyre::Result<u32> {
+    use eyre::Context;
+
+    let pc = p
+        .parse::<u32>()
+        .context("couldn't parse packet count as an unsigned integer")?;
+
+    // Set our floor at 2k, ie. 512 per ring (fill/rx/tx/completion)
+    eyre::ensure!(pc >= 2 * 1024, "{pc} needs to be at least 2K");
+
+    // Obviously we could correct this instead, but better to just error and tell the user they need to use a power of 2
+    eyre::ensure!(pc.is_power_of_two(), "{pc} is not a power of 2");
+
+    Ok(pc)
+}
+
 /// XDP (eXpress Data Path) options
 #[derive(clap::Args, Clone, Debug)]
 pub struct XdpOptions {
@@ -1588,15 +1609,34 @@ pub struct XdpOptions {
     /// as otherwise this is done in software
     #[clap(long = "service.udp.xdp.tco", env = "QUILKIN_SERVICE_UDP_XDP_TCO")]
     pub force_tx_checksum_offload: bool,
-    /// The maximum amount of memory mapped for packet buffers, in bytes
+    /// The total packets allocated per queue
     ///
-    /// If not specified, this defaults to 4MiB (2k allocated packets of 2k each at a time)
-    /// per NIC queue, ie 128MiB on a 32 queue NIC
+    /// We bind to the maximum amount of queues allowed by the NIC, each with its own memory pool where individual
+    /// packets for both RX and TX are allocated from.
+    #[clap(long = "service.udp.xdp.packets-per-queue", env = "QUILKIN_SERVICE_UDP_XDP_PACKETS_PER_QUEUE", default_value_t = 8192, value_parser = validate_packet_count)]
+    pub packets_per_queue: u32,
+    /// Set the thread scheduling policy for the XDP worker threads
     #[clap(
-        long = "service.udp.xdp.memory-limit",
-        env = "QUILKIN_SERVICE_UDP_XDP_MEMORY_LIMIT"
+        long = "service.udp.xdp.schedule-policy",
+        env = "QUILKIN_SERVICE_UDP_XDP_SCHEDULE_POLICY"
     )]
-    pub maximum_memory: Option<u64>,
+    pub schedule_policy: Option<crate::net::io::nic::ThreadPolicy>,
+    /// Sets the thread priority for the XDP worker threads
+    ///
+    /// This only matters when using the `SCHED_FIFO` or `SCHED_RR` realtime policies. This value will be clamped within
+    /// the valid range automatically.
+    #[clap(
+        long = "service.udp.xdp.thread-priority",
+        env = "QUILKIN_SERVICE_UDP_XDP_THREAD_PRIORITY",
+        default_value_t = 99
+    )]
+    pub thread_priority: u32,
+    /// If true, each XDP worker is pinned to its own core
+    #[clap(
+        long = "service.udp.xdp.pin-to-core",
+        env = "QUILKIN_SERVICE_UDP_XDP_PIN_TO_CORE"
+    )]
+    pub pin_to_core: bool,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -1606,7 +1646,10 @@ impl Default for XdpOptions {
             network_interface: None,
             force_zerocopy: false,
             force_tx_checksum_offload: false,
-            maximum_memory: None,
+            packets_per_queue: 8 * 1024,
+            schedule_policy: None,
+            thread_priority: 99,
+            pin_to_core: false,
         }
     }
 }
