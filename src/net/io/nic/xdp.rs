@@ -400,7 +400,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
 
     let mut worker_thread_scheduling = config.worker_thread_scheduling;
 
-    // SAFETY: syscalls
+    // SAFETY: We restrict the policy to only a select few, and still check the return value for an error
     unsafe {
         let min = libc::sched_get_priority_min(worker_thread_scheduling.thread_policy as _);
         let max = libc::sched_get_priority_max(worker_thread_scheduling.thread_policy as _);
@@ -484,7 +484,8 @@ where
         .name(format!("xdp-io-{i}"))
         .spawn(move || {
             'ts: {
-                // SAFETY: syscalls
+                // SAFETY: We've already validated the thread priority is clamped between the valid range and all other arguments
+                // are valid when each syscall is invoked
                 unsafe {
                     if libc::sched_setscheduler(0, scheduling.thread_policy as _, &libc::sched_param {
                         sched_priority: scheduling.thread_priority,

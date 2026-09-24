@@ -17,6 +17,12 @@ pub enum ThreadPolicy {
     RoundRobin = 2,
 }
 
+impl Default for ThreadPolicy {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
 impl fmt::Debug for ThreadPolicy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{self}")

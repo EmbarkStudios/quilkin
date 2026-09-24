@@ -1618,8 +1618,7 @@ pub struct XdpOptions {
     /// Set the thread scheduling policy for the XDP worker threads
     #[clap(
         long = "service.udp.xdp.schedule-policy",
-        env = "QUILKIN_SERVICE_UDP_XDP_SCHEDULE_POLICY",
-        default_value_t = crate::net::io::nic::ThreadPolicy::Default,
+        env = "QUILKIN_SERVICE_UDP_XDP_SCHEDULE_POLICY"
     )]
     pub schedule_policy: crate::net::io::nic::ThreadPolicy,
     /// Sets the thread priority for the XDP worker threads
@@ -1648,7 +1647,7 @@ impl Default for XdpOptions {
             force_zerocopy: false,
             force_tx_checksum_offload: false,
             packets_per_queue: 8 * 1024,
-            schedule_policy: crate::net::io::nic::ThreadPolicy::Default,
+            schedule_policy: Default::default(),
             thread_priority: 99,
             pin_to_core: false,
         }
