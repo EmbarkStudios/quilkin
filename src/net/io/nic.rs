@@ -6,21 +6,16 @@ use std::fmt;
 /// Different scheduling policies that can be used for XDP worker threads
 ///
 /// Note there are other scheduling policies, but these are the only ones relevant for quilkin
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 #[repr(i32)]
 pub enum ThreadPolicy {
     /// `SCHED_OTHER` default scheduling policy in Linux
+    #[default]
     Default = 0,
     /// [`SCHED_FIFO`](https://man.archlinux.org/man/sched.7.en#SCHED_FIFO:_First_in-first_out_scheduling) real time scheduling policy
     Fifo = 1,
     /// [`SCHED_RR`](https://man.archlinux.org/man/sched.7.en#SCHED_RR:_Round-robin_scheduling), FIFO but with time slicing
     RoundRobin = 2,
-}
-
-impl Default for ThreadPolicy {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 impl fmt::Debug for ThreadPolicy {
