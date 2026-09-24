@@ -4,6 +4,7 @@ pub mod debug;
 pub mod decryptor;
 pub mod drop;
 pub mod firewall;
+pub mod game_protocol;
 pub mod load_balancer;
 pub mod local_rate_limit;
 pub mod matches;
