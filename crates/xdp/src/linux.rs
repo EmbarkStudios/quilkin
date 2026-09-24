@@ -78,6 +78,8 @@ pub struct XdpWorker {
     pub tx: xdp::WakableTxRing,
     /// The ring the kernel pushes packets that have finished sending
     pub completion: xdp::CompletionRing,
+    /// For simplicity we size all rings the same
+    pub ring_len: usize,
 }
 
 pub struct EbpfProgram {
@@ -155,6 +157,7 @@ impl EbpfProgram {
         umem_cfg: xdp::umem::UmemCfg,
         device_caps: &xdp::nic::NetdevCapabilities,
         ring_cfg: xdp::RingConfig,
+        ring_len: u32,
     ) -> Result<Vec<XdpWorker>, BindError> {
         use std::os::fd::AsRawFd as _;
 
@@ -184,6 +187,7 @@ impl EbpfProgram {
                 rx: rings.rx_ring.unwrap(),
                 tx: rings.tx_ring.unwrap(),
                 completion: rings.completion_ring,
+                ring_len: ring_len as _,
             });
         }
 

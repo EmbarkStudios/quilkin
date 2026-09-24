@@ -125,8 +125,8 @@ impl Harness {
             return;
         }
 
-        let mut rx = xdp::slab::StackSlab::<1>::new();
-        let mut tx = xdp::slab::StackSlab::<BATCH>::new();
+        let mut rx = xdp::slab::HeapSlab::with_capacity(1);
+        let mut tx = xdp::slab::HeapSlab::with_capacity(BATCH);
         rx.push_front(packet);
 
         process::process_packets(

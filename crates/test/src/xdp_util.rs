@@ -1,5 +1,9 @@
 use quilkin::net::io::nic::xdp::process;
-use xdp::{Packet, packet::net_types::UdpHeaders};
+use xdp::{
+    Packet,
+    packet::net_types::UdpHeaders,
+    slab::{HeapSlab, Slab},
+};
 
 #[inline]
 pub fn make_config(
@@ -177,10 +181,8 @@ impl SimpleLoop {
 
     /// Runs the specified packet through
     pub fn process(&mut self, mut packet: TestPacket) -> Option<TestPacket> {
-        use xdp::slab::Slab;
-
-        let mut rx = xdp::slab::StackSlab::<1>::new();
-        let mut tx = xdp::slab::StackSlab::<1>::new();
+        let mut rx = HeapSlab::with_capacity(1);
+        let mut tx = HeapSlab::with_capacity(1);
 
         rx.push_front(packet.inner.take().unwrap());
 
@@ -207,10 +209,8 @@ impl SimpleLoop {
         &mut self,
         mut packet: TestPacket,
     ) -> [Option<TestPacket>; N] {
-        use xdp::slab::Slab;
-
-        let mut rx = xdp::slab::StackSlab::<1>::new();
-        let mut tx = xdp::slab::StackSlab::<N>::new();
+        let mut rx = HeapSlab::with_capacity(1);
+        let mut tx = HeapSlab::with_capacity(1);
 
         rx.push_front(packet.inner.take().unwrap());
 

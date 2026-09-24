@@ -9,7 +9,7 @@ use quilkin::{
         xdp::{
             self,
             packet::net_types::{self as nt, UdpHeaders},
-            slab::Slab,
+            slab::{HeapSlab, Slab},
         },
     },
     time::UtcTimestamp,
@@ -19,7 +19,10 @@ use std::{
     sync::Arc,
 };
 
-type LittleSlab = xdp::slab::StackSlab<1>;
+#[inline]
+fn little_slabs() -> (HeapSlab, HeapSlab) {
+    (HeapSlab::with_capacity(1), HeapSlab::with_capacity(1))
+}
 
 /// Validates we can do basic processing and forwarding of packets
 #[tokio::test]
@@ -72,9 +75,8 @@ async fn simple_forwarding() {
         .write(&mut client_packet, &data)
         .unwrap();
 
-    let mut rx_slab = LittleSlab::new();
+    let (mut rx_slab, mut tx_slab) = little_slabs();
     rx_slab.push_front(client_packet);
-    let mut tx_slab = LittleSlab::new();
     process::process_packets(
         &mut rx_slab,
         &mut umem,
@@ -146,8 +148,7 @@ async fn changes_ip_version() {
     )
     .unwrap();
 
-    let mut rx_slab = LittleSlab::new();
-    let mut tx_slab = LittleSlab::new();
+    let (mut rx_slab, mut tx_slab) = little_slabs();
 
     let port = {
         let mut client_packet = unsafe { umem.alloc().unwrap() };
@@ -242,8 +243,7 @@ async fn packet_manipulation() {
     )
     .unwrap();
 
-    let mut rx_slab = LittleSlab::new();
-    let mut tx_slab = LittleSlab::new();
+    let (mut rx_slab, mut tx_slab) = little_slabs();
 
     // Test suffix removal
     {
@@ -500,8 +500,8 @@ async fn multiple_servers() {
     )
     .unwrap();
 
-    let mut rx_slab = LittleSlab::new();
-    let mut tx_slab = xdp::slab::StackSlab::<COUNT>::new();
+    let mut rx_slab = HeapSlab::with_capacity(1);
+    let mut tx_slab = HeapSlab::with_capacity(COUNT);
 
     let mut client_packet = unsafe { umem.alloc().unwrap() };
 
@@ -587,8 +587,8 @@ async fn many_sessions() {
         packet.calc_udp_checksum().unwrap();
     }
 
-    let mut rx_slab = LittleSlab::new();
-    let mut tx_slab = LittleSlab::new();
+    let (mut rx_slab, mut tx_slab) = little_slabs();
+
     for i in 1..10000u32 {
         let mut client_packet = unsafe { umem.alloc().unwrap() };
 
@@ -687,8 +687,7 @@ async fn frees_dropped_packets() {
     )
     .unwrap();
 
-    let mut rx_slab = LittleSlab::new();
-    let mut tx_slab = LittleSlab::new();
+    let (mut rx_slab, mut tx_slab) = little_slabs();
 
     // sanity check the umem won't allow more than 1 packet at a time
     unsafe {
@@ -800,8 +799,7 @@ async fn qcmp() {
     )
     .unwrap();
 
-    let mut rx_slab = LittleSlab::new();
-    let mut tx_slab = LittleSlab::new();
+    let (mut rx_slab, mut tx_slab) = little_slabs();
 
     // sanity check the umem won't allow more than 1 packet at a time
     unsafe {
@@ -983,9 +981,8 @@ async fn trims_ethernet_padding() {
     assert_eq!(client_packet.len(), 59);
     client_packet.append(&[0]).unwrap();
 
-    let mut rx_slab = LittleSlab::new();
+    let (mut rx_slab, mut tx_slab) = little_slabs();
     rx_slab.push_front(client_packet);
-    let mut tx_slab = LittleSlab::new();
     process::process_packets(
         &mut rx_slab,
         &mut umem,
@@ -1037,8 +1034,7 @@ async fn drops_unparsable_packets() {
     )
     .unwrap();
 
-    let mut rx_slab = LittleSlab::new();
-    let mut tx_slab = LittleSlab::new();
+    let (mut rx_slab, mut tx_slab) = little_slabs();
 
     // The umem has a single frame, so a packet that wasn't freed fails the next alloc
     let mut process = |umem: &mut xdp::Umem, packet: xdp::Packet| {
@@ -1112,8 +1108,7 @@ async fn drops_packets_filters_cant_modify() {
     )
     .unwrap();
 
-    let mut rx_slab = LittleSlab::new();
-    let mut tx_slab = LittleSlab::new();
+    let (mut rx_slab, mut tx_slab) = little_slabs();
 
     // More than can ever fit in the 2k frame alongside the payload
     let concat_data = vec![0xff; 1500];
