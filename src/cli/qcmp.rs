@@ -43,11 +43,10 @@ impl Ping {
     pub async fn run(&self) -> crate::Result<()> {
         tracing::info!("starting ping task");
 
-        let mut results = Vec::new();
-
-        let qcmp_transceiver = std::sync::Arc::new(crate::codec::qcmp::QcmpTransceiver::new()?);
+        let qcmp_transceiver = crate::codec::qcmp::QcmpTransceiver::new()?;
         let mut ticker = self.interval.map(|d| tokio::time::interval(d.0));
 
+        let mut results = Vec::new();
         for _ in 0..self.amount {
             if let Some(ticker) = ticker.as_mut() {
                 let _ = ticker.tick().await;
@@ -69,27 +68,28 @@ impl Ping {
             results.push(delay);
         }
 
-        match median(&mut results) {
-            Some(median) => {
-                let median = median.duration();
-                let average = std::time::Duration::from_nanos(
-                    (results.iter().map(|dn| dn.nanos() as i128).sum::<i128>()
-                        / results.len() as i128) as u64,
-                );
-                tracing::info!(
-                    median_millis=%format!("{:.2}", median.as_secs_f64() * 1000.0),
-                    average_millis=%format!("{:.2}", average.as_secs_f64() * 1000.0),
-                    attempts=%self.amount,
-                    successful_attempts=%results.len(),
-                    "final results"
-                );
-            }
-            None => {
-                eyre::bail!("no successful results");
-            }
-        }
+        let res = if let Some(median) = median(&mut results) {
+            let median = median.duration();
+            let average = std::time::Duration::from_nanos(
+                (results.iter().map(|dn| dn.nanos() as i128).sum::<i128>() / results.len() as i128)
+                    as u64,
+            );
+            tracing::info!(
+                median_millis=%format!("{:.2}", median.as_secs_f64() * 1000.0),
+                average_millis=%format!("{:.2}", average.as_secs_f64() * 1000.0),
+                attempts=%self.amount,
+                successful_attempts=%results.len(),
+                "final results"
+            );
 
-        Ok(())
+            Ok(())
+        } else {
+            Err(eyre::eyre!("no successful results"))
+        };
+
+        qcmp_transceiver.shutdown().await;
+
+        res
     }
 }
 

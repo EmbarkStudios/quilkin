@@ -301,13 +301,17 @@ impl TestHelper {
     ) -> u16 {
         let cancel = quilkin_graceful::root();
         self.server_shutdown_tx.push(Some(cancel.clone()));
-        let ready = <_>::default();
 
         if let Some(address) = with_admin {
-            crate::components::admin::serve(config.clone(), ready, cancel.clone(), address);
+            crate::components::admin::serve(
+                config.clone(),
+                Default::default(),
+                cancel.clone(),
+                address,
+            );
         }
 
-        let shutdown = crate::signal::ShutdownHandler::with_token(cancel);
+        let spawner = quilkin_graceful::TaskSpawner::new();
 
         let (task, ports) = crate::Service::default()
             .udp()

@@ -5,6 +5,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+eyre.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 

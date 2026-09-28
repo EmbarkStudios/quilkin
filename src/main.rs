@@ -16,6 +16,7 @@
 
 #[allow(clippy::exit)]
 fn main() {
+    // SAFETY: syscalls
     #[cfg(target_os = "linux")]
     unsafe {
         let mut block = std::mem::zeroed();

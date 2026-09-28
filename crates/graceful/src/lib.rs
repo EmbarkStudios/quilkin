@@ -1,3 +1,4 @@
+use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken as Token;
 pub use tokio_util::task::TaskTracker;
 
@@ -72,37 +73,25 @@ macro_rules! common {
 common!(RootToken);
 common!(ChildToken);
 
-pub struct GracefulSpawner {
+/// A child of the [`RootSpawner`] that tracks its own child tasks for graceful shutdown
+#[derive(Clone)]
+pub struct SubSpawner {
     tracker: TaskTracker,
-    token: Token,
+    token: ChildToken,
 }
 
-impl From<RootToken> for GracefulSpawner {
-    fn from(value: RootToken) -> Self {
+impl From<ChildToken> for SubSpawner {
+    fn from(token: ChildToken) -> Self {
         Self {
             tracker: TaskTracker::new(),
-            token: value.0,
+            token,
         }
     }
 }
 
-impl From<ChildToken> for GracefulSpawner {
-    fn from(value: ChildToken) -> Self {
-        Self {
-            tracker: TaskTracker::new(),
-            token: value.0,
-        }
-    }
-}
-
-impl GracefulSpawner {
+impl SubSpawner {
     #[inline]
-    pub fn handle(&mut self) -> Spawner<'_> {
-        Spawner { gs: self }
-    }
-
-    #[inline]
-    pub fn token(&self) -> Token {
+    pub fn token(&self) -> ChildToken {
         self.token.clone()
     }
 
@@ -114,30 +103,170 @@ impl GracefulSpawner {
             .await
             .is_ok_and(|_| true)
     }
-}
 
-pub struct Spawner<'gs> {
-    gs: &'gs GracefulSpawner,
-}
-
-impl Spawner<'_> {
-    /// Spawns a task tracked by this spawner, which will wait for all spawned tasks
     #[inline]
-    pub fn spawn<F>(&self, task: F) -> tokio::task::JoinHandle<F::Output>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        self.gs.tracker.spawn(task)
+    pub async fn cancel_and_wait(self) {
+        self.tracker.close();
+        self.token.cancel();
+        self.tracker.wait().await;
+    }
+}
+
+impl std::ops::Deref for SubSpawner {
+    type Target = TaskTracker;
+
+    fn deref(&self) -> &Self::Target {
+        &self.tracker
+    }
+}
+
+/// A task spawner that awaits cancellation, or one or more of the registered tasks to complete
+pub struct TaskSpawner {
+    token: RootToken,
+    set: tokio::task::JoinSet<eyre::Result<()>>,
+    id_to_name: std::collections::BTreeMap<tokio::task::Id, (&'static str, AbortHandle)>,
+}
+
+impl TaskSpawner {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            token: RootToken::new(),
+            set: tokio::task::JoinSet::new(),
+            id_to_name: Default::default(),
+        }
     }
 
     #[inline]
-    pub fn cancelled(&self) -> tokio_util::sync::WaitForCancellationFuture<'_> {
-        self.gs.token.cancelled()
+    pub fn push_async(
+        &mut self,
+        svc: &'static str,
+        task: impl Future<Output = eyre::Result<()>> + Send + 'static,
+    ) {
+        let handle = self.set.spawn(task);
+        if self.id_to_name.insert(handle.id(), (svc, handle)).is_some() {
+            panic!("{svc} was already registered");
+        }
     }
 
     #[inline]
-    pub fn token(&self) -> Token {
-        self.gs.token.clone()
+    pub fn push_sync(
+        &mut self,
+        svc: &'static str,
+        wait: impl FnOnce() -> eyre::Result<()> + Send + 'static,
+    ) {
+        let token = self.token.clone();
+        let handle = self.set.spawn(async move {
+            token.cancelled().await;
+            tokio::task::block_in_place(wait)
+        });
+
+        if self.id_to_name.insert(handle.id(), (svc, handle)).is_some() {
+            panic!("{svc} was already registered");
+        }
+    }
+
+    #[inline]
+    pub fn root(&self) -> RootToken {
+        self.token.clone()
+    }
+
+    #[inline]
+    pub fn child(&self) -> ChildToken {
+        self.token.child()
+    }
+
+    #[inline]
+    pub fn sub_spawner(&self) -> SubSpawner {
+        self.token.child().into()
+    }
+
+    /// Waits for cancellation or one of the child tasks to finish, upon which it waits for the rest of the child tasks
+    /// to finish
+    pub async fn wait_cancellation_or_error(
+        self,
+        graceful_timeout: std::time::Duration,
+        wait_timeout: std::time::Duration,
+    ) -> Vec<(&'static str, eyre::Result<()>)> {
+        let Self {
+            token,
+            mut set,
+            mut id_to_name,
+        } = self;
+
+        let mut results = Vec::with_capacity(id_to_name.len());
+
+        fn push(
+            res: Result<(tokio::task::Id, eyre::Result<()>), tokio::task::JoinError>,
+            results: &mut Vec<(&'static str, eyre::Result<()>)>,
+            id_to_name: &mut std::collections::BTreeMap<
+                tokio::task::Id,
+                (&'static str, tokio::task::AbortHandle),
+            >,
+        ) {
+            let (id, res) = match res {
+                Ok((id, res)) => (id, res),
+                Err(je) => {
+                    let id = je.id();
+                    let res = if je.is_panic() {
+                        Err(eyre::eyre!("task paniced: {:?}", je.into_panic()))
+                    } else {
+                        Err(eyre::eyre!("task was cancelled"))
+                    };
+
+                    (id, res)
+                }
+            };
+
+            let name = id_to_name
+                .remove(&id)
+                .map_or("<unknown task>", |(name, _)| name);
+            results.push((name, res));
+        }
+
+        tokio::select! {
+            _ = token.cancelled() => {
+            }
+            res = set.join_next_with_id() => {
+                // Tasks spawned by this instance are supposed to live the lifetime of quilkin, so if one exits it's a
+                // terminal condition, so let the rest of the tasks know they are cancelled so they can attempt to
+                // gracefully shut down
+                token.cancel();
+
+                push(res.expect("no tasks are still running on the join set"), &mut results, &mut id_to_name);
+            }
+        };
+
+        // Attempt to wait for all of the tasks to gracefully shut down
+        if tokio::time::timeout(graceful_timeout, async {
+            while let Some(res) = set.join_next_with_id().await {
+                push(res, &mut results, &mut id_to_name);
+            }
+        })
+        .await
+        .is_ok()
+        {
+            return results;
+        }
+
+        // We tried to wait gracefully, abort the remaining tasks
+        set.abort_all();
+
+        if tokio::time::timeout(wait_timeout, async {
+            while let Some(res) = set.join_next_with_id().await {
+                push(res, &mut results, &mut id_to_name);
+            }
+        })
+        .await
+        .is_ok()
+        {
+            return results;
+        }
+
+        for (k, _) in id_to_name.into_values() {
+            results.push((k, Err(eyre::eyre!("task failed to abort within time"))));
+        }
+
+        results
     }
 }

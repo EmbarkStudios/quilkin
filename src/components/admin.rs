@@ -64,7 +64,7 @@ pub fn serve(
                 .block_on(async move {
                     let listener = quilkin_system::net::tcp::default_nonblocking_listener(address)?;
                     let tokio_listener = tokio::net::TcpListener::from_std(listener)?;
-                    let spawner = shutdown.into();
+                    let spawner = shutdown.child().into();
 
                     quilkin_system::net::http::serve(
                         "admin",

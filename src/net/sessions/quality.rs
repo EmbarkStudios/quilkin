@@ -473,7 +473,7 @@ fn asn_label(asn: Option<u32>) -> String {
 /// refused rather than silently adopting the first caller's configuration.
 pub fn spawn_aggregator(
     config: AggregationConfig,
-    shutdown: &mut crate::signal::ShutdownHandler,
+    spawner: &mut quilkin_graceful::TaskSpawner,
 ) -> eyre::Result<()> {
     static SPAWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -489,8 +489,8 @@ pub fn spawn_aggregator(
     let _ = metrics::session_jitter_seconds();
 
     let mut aggregator = Aggregator::new(config);
-    let token = shutdown.child();
-    shutdown.push_async("session_metrics", async move {
+    let token = spawner.child();
+    spawner.push_async("session_metrics", async move {
         let mut interval = tokio::time::interval(config.interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 

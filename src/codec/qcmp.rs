@@ -206,21 +206,24 @@ impl Drop for NonceLease {
     }
 }
 
-/// A transciever that can handle multiple simultaneous QCMP pings over the same socket and ensure
+/// A transceiver that can handle multiple simultaneous QCMP pings over the same socket and ensure
 /// that responses are forwarded to the correct receiver via the QCMP nonce
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct QcmpTransceiver {
     socket: Arc<DualStackEpollSocket>,
     #[cfg(test)]
     delay: Option<Duration>,
     nonces: NoncePool,
     waiters: Arc<dashmap::DashMap<u8, tokio::sync::oneshot::Sender<(UtcTimestamp, Protocol)>>>,
-    cancellation_token: tokio_util::sync::CancellationToken,
+    ss: quilkin_graceful::SubSpawner,
 }
 
 impl Drop for QcmpTransceiver {
     fn drop(&mut self) {
-        self.cancellation_token.cancel();
+        assert!(
+            self.ss.is_closed() && self.ss.is_empty(),
+            "QcmpTransceiver was dropped without shutdown being called"
+        );
     }
 }
 
@@ -230,12 +233,13 @@ impl Drop for QcmpTransceiver {
 async fn receive_task(
     socket: Arc<DualStackEpollSocket>,
     waiters: Arc<dashmap::DashMap<u8, tokio::sync::oneshot::Sender<(UtcTimestamp, Protocol)>>>,
-    cancellation_token: tokio_util::sync::CancellationToken,
+    token: quilkin_graceful::ChildToken,
 ) {
+    let mut recv = [0u8; 512];
+
     loop {
-        let mut recv = [0u8; 512];
         tokio::select! {
-            _ = cancellation_token.cancelled() => {
+            _ = token.cancelled() => {
                 tracing::debug!("task cancelled, stopping receiving on socket");
                 return;
             }
@@ -273,14 +277,18 @@ impl QcmpTransceiver {
         let socket = Arc::new(DualStackEpollSocket::new(0)?);
         let nonces = NoncePool::new();
         let waiters = Arc::new(dashmap::DashMap::with_capacity(MAX_WAITER_CAPACITY));
-        let cancellation_token = tokio_util::sync::CancellationToken::new();
 
         let task_socket = socket.clone();
         let task_waiters = waiters.clone();
-        let task_cancellation_token = cancellation_token.clone();
+
+        // Currently this is only used by the ping sub-command which doesn't hook into signals nor really do much else
+        // that quilkin normally does, so we just fake it
+        let root = quilkin_graceful::TaskSpawner::new();
+        let ss = root.sub_spawner();
+        let task_cancellation_token = ss.token();
 
         // Spawn receiver task that will receive and route packets to the registered waiters
-        tokio::spawn(async move {
+        ss.spawn(async move {
             receive_task(task_socket, task_waiters, task_cancellation_token).await;
         });
 
@@ -290,7 +298,7 @@ impl QcmpTransceiver {
             delay: None,
             nonces,
             waiters,
-            cancellation_token,
+            ss,
         })
     }
 
@@ -355,6 +363,11 @@ impl QcmpTransceiver {
             Err(error) => Err(error.into()),
         }
     }
+
+    #[inline]
+    pub async fn shutdown(&self) {
+        self.ss.clone().cancel_and_wait().await;
+    }
 }
 
 #[async_trait::async_trait]
@@ -381,9 +394,9 @@ pub fn port_channel() -> tokio::sync::broadcast::Sender<u16> {
 pub fn spawn(
     socket: socket2::Socket,
     port_rx: tokio::sync::broadcast::Receiver<u16>,
-    shutdown: &mut crate::signal::ShutdownHandler,
+    spawner: &mut quilkin_graceful::TaskSpawner,
 ) -> crate::Result<()> {
-    let token = shutdown.child();
+    let ss = spawner.sub_spawner();
 
     let qcmp_thread = std::thread::Builder::new()
         .name("qcmp".into())
@@ -395,8 +408,12 @@ pub fn spawn(
                 .expect("couldn't create tokio runtime in thread");
 
             let res = runtime.block_on(async move {
-                let task = spawn_task(socket, port_rx, token)?;
-                task.await.wrap_err("qcmp task error")
+                use tracing::{Instrument as _, instrument::WithSubscriber as _};
+                io_loop(socket, port_rx, ss)
+                    .instrument(tracing::debug_span!("qcmp"))
+                    .with_current_subscriber()
+                    .await
+                    .wrap_err("qcmp task error")
             });
 
             if let Err(error) = &res {
@@ -407,7 +424,7 @@ pub fn spawn(
         })
         .expect("failed to spawn qcmp thread");
 
-    shutdown.push_sync("qcmp", move || match qcmp_thread.join() {
+    spawner.push_sync("qcmp", move || match qcmp_thread.join() {
         Ok(res) => res,
         Err(_err) => Err(eyre::eyre!("failed to join QCMP thread")),
     });
@@ -415,134 +432,132 @@ pub fn spawn(
     Ok(())
 }
 
-pub(crate) fn spawn_task(
+pub(crate) async fn io_loop(
     socket: socket2::Socket,
     mut port_rx: tokio::sync::broadcast::Receiver<u16>,
-    shutdown: quilkin_graceful::ChildToken,
-) -> crate::Result<tokio::task::JoinHandle<()>> {
-    use tracing::{Instrument as _, instrument::WithSubscriber as _};
-
+    token: quilkin_graceful::ChildToken,
+) -> crate::Result<()> {
     let mut port = crate::net::socket_port(&socket);
     let mut socket = DualStackEpollSocket::new(port)?;
 
-    Ok(tokio::task::spawn(
-        async move {
-            let mut input_buf = [0u8; MAX_QCMP_PACKET_LEN];
-            let mut output_buf = QcmpPacket::default();
-            metrics::qcmp::active(true);
+    let mut input_buf = [0u8; MAX_QCMP_PACKET_LEN];
+    let mut output_buf = QcmpPacket::default();
+    metrics::qcmp::active(true);
 
-            loop {
-                let result = tokio::select! {
-                    result = socket.recv_from(&mut input_buf) => result,
-                    _ = shutdown.cancelled() => {
-                        metrics::qcmp::active(false);
-                        return;
-                    }
-                    new_port = port_rx.recv() => {
-                        tracing::info!(change=?new_port, "received qcmp port change");
-                        match new_port {
-                            Ok(new_port) => {
-                                // Attempt to bind the new port
-                                match DualStackEpollSocket::new(new_port) {
-                                    Ok(new_socket) => {
-                                        tracing::debug!(old_port = port, new_port, "bound QCMP server to new port");
-                                        port = new_port;
-                                        socket = new_socket;
-                                    }
-                                    Err(error) => {
-                                        tracing::error!(%error, old_port = port, new_port, "failed to bind QCMP to new port, continuing to use old port to respond to QCMP pings");
-                                        metrics::qcmp::errors_total("failed_port_change").inc();
-                                    }
-                                }
+    loop {
+        let result = tokio::select! {
+            result = socket.recv_from(&mut input_buf) => result,
+            _ = token.cancelled() => {
+                metrics::qcmp::active(false);
+                break;
+            }
+            new_port = port_rx.recv() => {
+                tracing::info!(change=?new_port, "received qcmp port change");
+                match new_port {
+                    Ok(new_port) => {
+                        // Attempt to bind the new port
+                        match DualStackEpollSocket::new(new_port) {
+                            Ok(new_socket) => {
+                                tracing::debug!(old_port = port, new_port, "bound QCMP server to new port");
+                                port = new_port;
+                                socket = new_socket;
                             }
                             Err(error) => {
-                                match error {
-                                    tokio::sync::broadcast::error::RecvError::Closed => {
-                                        return;
-                                    }
-                                    tokio::sync::broadcast::error::RecvError::Lagged(missed) => {
-                                        tracing::error!(missed, "the port changed many times and we missed changes");
-                                    }
-                                }
-                            }
-                        }
-
-                        continue;
-                    }
-                };
-
-                match track_error(result.map_err(Error::from)) {
-                    Ok((size, source)) => {
-                        tracing::debug!(
-                            %source,
-                            "received QCMP ping",
-                        );
-
-                        if source.port() == 0 {
-                            tracing::debug!(%source, "rejecting packet from address with invalid port");
-                            metrics::qcmp::packets_total_invalid(size);
-                            continue;
-                        }
-
-                        let received_at = UtcTimestamp::now();
-                        let command = match track_error(Protocol::parse(&input_buf[..size])) {
-                            Ok(Some(command)) => command,
-                            Ok(None) => {
-                                tracing::debug!("rejected non-qcmp packet");
-                                metrics::qcmp::packets_total_invalid(size);
-                                continue;
-                            }
-                            Err(error) => {
-                                tracing::debug!(%error, %source, "rejected malformed packet");
-                                continue;
-                            }
-                        };
-
-                        let Protocol::Ping {
-                            client_timestamp,
-                            nonce,
-                        } = command
-                        else {
-                            tracing::warn!(%source, "rejected unsupported QCMP packet");
-                            metrics::qcmp::packets_total_unsupported(size);
-                            continue;
-                        };
-                        tracing::debug!(
-                            %source,
-                            %nonce,
-                            "received QCMP ping",
-                        );
-
-                        metrics::qcmp::packets_total_valid(size);
-                        Protocol::ping_reply(nonce, client_timestamp, received_at)
-                            .encode(&mut output_buf);
-
-                        tracing::debug!(
-                            %source,
-                            %nonce,
-                            "sending QCMP pong",
-                        );
-
-                        match track_error(socket.send_to(&output_buf, source).await.map_err(Error::from)) {
-                            Ok(len) => {
-                                if len != output_buf.len() {
-                                    tracing::error!(%source, "failed to send entire QCMP pong response, expected {} but only sent {len}", output_buf.len());
-                                }
-                            }
-                            Err(error) => {
-                                tracing::warn!(%error, %source, "error responding to ping");
+                                tracing::error!(%error, old_port = port, new_port, "failed to bind QCMP to new port, continuing to use old port to respond to QCMP pings");
+                                metrics::qcmp::errors_total("failed_port_change").inc();
                             }
                         }
                     }
                     Err(error) => {
-                        tracing::warn!(%error, "error receiving packet");
+                        match error {
+                            tokio::sync::broadcast::error::RecvError::Closed => {
+                                break;
+                            }
+                            tokio::sync::broadcast::error::RecvError::Lagged(missed) => {
+                                tracing::error!(missed, "the port changed many times and we missed changes");
+                            }
+                        }
+                    }
+                }
+
+                continue;
+            }
+        };
+
+        match track_error(result.map_err(Error::from)) {
+            Ok((size, source)) => {
+                tracing::debug!(
+                    %source,
+                    "received QCMP ping",
+                );
+
+                if source.port() == 0 {
+                    tracing::debug!(%source, "rejecting packet from address with invalid port");
+                    metrics::qcmp::packets_total_invalid(size);
+                    continue;
+                }
+
+                let received_at = UtcTimestamp::now();
+                let command = match track_error(Protocol::parse(&input_buf[..size])) {
+                    Ok(Some(command)) => command,
+                    Ok(None) => {
+                        tracing::debug!("rejected non-qcmp packet");
+                        metrics::qcmp::packets_total_invalid(size);
+                        continue;
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, %source, "rejected malformed packet");
+                        continue;
                     }
                 };
+
+                let Protocol::Ping {
+                    client_timestamp,
+                    nonce,
+                } = command
+                else {
+                    tracing::warn!(%source, "rejected unsupported QCMP packet");
+                    metrics::qcmp::packets_total_unsupported(size);
+                    continue;
+                };
+                tracing::debug!(
+                    %source,
+                    %nonce,
+                    "received QCMP ping",
+                );
+
+                metrics::qcmp::packets_total_valid(size);
+                Protocol::ping_reply(nonce, client_timestamp, received_at).encode(&mut output_buf);
+
+                tracing::debug!(
+                    %source,
+                    %nonce,
+                    "sending QCMP pong",
+                );
+
+                match track_error(
+                    socket
+                        .send_to(&output_buf, source)
+                        .await
+                        .map_err(Error::from),
+                ) {
+                    Ok(len) => {
+                        if len != output_buf.len() {
+                            tracing::error!(%source, "failed to send entire QCMP pong response, expected {} but only sent {len}", output_buf.len());
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, %source, "error responding to ping");
+                    }
+                }
             }
-        }
-        .instrument(tracing::debug_span!("qcmp"))
-        .with_current_subscriber(),
-    ))
+            Err(error) => {
+                tracing::warn!(%error, "error receiving packet");
+            }
+        };
+    }
+
+    Ok(())
 }
 
 fn track_error<T>(result: Result<T>) -> Result<T> {
@@ -972,7 +987,7 @@ mod tests {
 
         let pc = super::port_channel();
         let token = quilkin_graceful::root();
-        let jh = spawn_task(socket, pc.subscribe(), token.child()).unwrap();
+        let jh = io_loop(socket, pc.subscribe(), token.child().into()).unwrap();
 
         let delay = Duration::from_millis(50);
         let node = QcmpTransceiver::with_artificial_delay(delay).unwrap();

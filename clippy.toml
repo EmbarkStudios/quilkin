@@ -1,0 +1,4 @@
+disallowed-methods = [
+  # Note this also catches the tokio::spawn re-export
+  "tokio::task::spawn",
+]

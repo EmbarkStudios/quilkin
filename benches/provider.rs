@@ -198,7 +198,7 @@ struct CombinedHarness {
     server: axum_test::TestServer,
     /// Kept alive so background service tasks keep running until the harness is
     /// dropped (which happens when the Criterion runtime tears down).
-    _shutdown_tx: quilkin::signal::CancellationToken,
+    token: quilkin_graceful::RootToken,
 }
 
 impl CombinedHarness {
@@ -222,7 +222,7 @@ impl CombinedHarness {
         let shutdown = quilkin::signal::ShutdownHandler::new();
         // Clone the sender before moving the handler into spawn_services so we
         // can keep the channel open (and the service alive) for the benchmark.
-        let shutdown_tx = shutdown.token();
+        let token = shutdown.root();
         drop(
             service
                 .spawn_services(&config, shutdown)
@@ -233,8 +233,14 @@ impl CombinedHarness {
         let fc = FiltersAndClusters::new(&config).unwrap();
         Self {
             server: axum_test::TestServer::new(quilkin::providers::http::make_router(fc)).unwrap(),
-            _shutdown_tx: shutdown_tx,
+            token,
         }
+    }
+}
+
+impl Drop for CombinedHarness {
+    fn drop(&mut self) {
+        self.token.cancel();
     }
 }
 

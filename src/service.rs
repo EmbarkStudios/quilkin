@@ -1,11 +1,11 @@
 use corrosion::persistent::mutator::BroadcastingTransactor;
 use eyre::ContextCompat;
+use quilkin_graceful::TaskSpawner;
 use std::sync::Arc;
 
 use crate::{
     config::{Config, filter::CachedFilterChain},
     net::SessionPool,
-    signal::ShutdownHandler,
 };
 
 #[derive(Debug, clap::Parser)]
@@ -568,8 +568,8 @@ impl Service {
     pub async fn spawn_services(
         mut self,
         config: &Arc<Config>,
-        mut shutdown: ShutdownHandler,
-    ) -> crate::Result<(tokio::task::JoinHandle<crate::Result<()>>, ServicePorts)> {
+        spawner: &mut TaskSpawner,
+    ) -> crate::Result<ServicePorts> {
         let mut ports = ServicePorts {
             mds: None,
             phoenix: None,
@@ -580,60 +580,23 @@ impl Service {
         };
 
         {
-            let shutdown = &mut shutdown;
-            self.publish_mds(config, shutdown, &mut ports).await?;
-            self.publish_phoenix(config, shutdown, &mut ports)?;
+            self.publish_mds(config, spawner, &mut ports).await?;
+            self.publish_phoenix(config, spawner, &mut ports)?;
             // We need to call this before qcmp since if we use XDP we handle QCMP
             // internally without a separate task
-            self.publish_udp(config, shutdown, &mut ports)?;
-            self.publish_qcmp(config, shutdown, &mut ports)?;
-            self.publish_xds(config, shutdown, &mut ports)?;
+            self.publish_udp(config, spawner, &mut ports)?;
+            self.publish_qcmp(config, spawner, &mut ports)?;
+            self.publish_xds(config, spawner, &mut ports)?;
         }
 
-        Ok((
-            tokio::spawn(async move {
-                let results = shutdown.await_any_then_shutdown().await;
-
-                let mut errors = 0;
-                for (task, res) in &results {
-                    match res {
-                        Ok(_o) => {
-                            tracing::info!(task, "service task finished");
-                        }
-                        Err(error) => {
-                            tracing::error!(task, %error, "service task failed");
-                            errors += 1;
-                        }
-                    }
-                }
-
-                match errors {
-                    0 => Ok(()),
-                    1 => Err(results.into_iter().find_map(|(_, res)| res.err()).unwrap()),
-                    _ => {
-                        use std::fmt::Write as _;
-                        let mut err_str = String::new();
-                        writeln!(&mut err_str, "encountered {errors} errors:").unwrap();
-
-                        for (which, res) in results {
-                            if let Err(error) = res {
-                                writeln!(&mut err_str, "  {which}: {error:#}").unwrap();
-                            }
-                        }
-
-                        Err(eyre::Report::msg(err_str))
-                    }
-                }
-            }),
-            ports,
-        ))
+        Ok(ports)
     }
 
     /// Spawns an QCMP server if enabled, otherwise returns a future which never completes.
     fn publish_phoenix(
         &self,
         config: &Arc<Config>,
-        shutdown: &mut ShutdownHandler,
+        spawner: &mut TaskSpawner,
         ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.phoenix_enabled {
@@ -663,12 +626,16 @@ impl Service {
         ))?;
         let port = listener.local_addr()?.port();
 
-        let finalizer =
-            crate::net::phoenix::spawn(listener, datacenters.clone(), phoenix, shutdown.child())?;
+        let finalizer = crate::net::phoenix::spawn(
+            listener,
+            datacenters.clone(),
+            phoenix,
+            spawner.sub_spawner(),
+        )?;
 
         ports.phoenix = Some(port);
 
-        shutdown.push_sync("phoenix", || {
+        spawner.push_sync("phoenix", || {
             finalizer();
             Ok(())
         });
@@ -680,7 +647,7 @@ impl Service {
     fn publish_qcmp(
         &self,
         config: &Config,
-        shutdown: &mut ShutdownHandler,
+        spawner: &mut TaskSpawner,
         ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.qcmp_enabled {
@@ -726,7 +693,7 @@ impl Service {
         )
         .management_server(listener, self.tls_identity()?)?;
 
-        shutdown.push_async("xds", async move { xds_server.await });
+        shutdown.push_async("xds", xds_server);
 
         Ok(())
     }
@@ -745,12 +712,6 @@ impl Service {
         self.spawn_corrosion_server(config.clone(), shutdown, ports)
             .await?;
 
-        // Transition compatibility, previously mds would be enable if _either_ mds_enabled or grpc_enabled
-        // were true
-        // if !self.grpc_enabled {
-        //     return Ok(());
-        // }
-
         tracing::info!(port=%self.mds_port, "starting mds service");
         let listener = crate::net::TcpListener::bind(Some(self.mds_port))?;
         ports.mds = Some(listener.port());
@@ -761,7 +722,7 @@ impl Service {
             shutdown.child(),
         )
         .relay_server(listener, self.tls_identity()?)?;
-        shutdown.push_async("mds", async move { mds_server.await });
+        shutdown.push_async("mds", mds_server);
 
         Ok(())
     }
@@ -812,7 +773,9 @@ impl Service {
                         ports.udp = Some(self.udp_port);
 
                         shutdown.push_sync("xdp", || {
+                            tracing::warn!("shutting down xdp...");
                             xdp();
+                            tracing::warn!("shut down xdp");
                             Ok(())
                         });
 

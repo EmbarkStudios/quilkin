@@ -10,30 +10,26 @@ pub async fn serve<L>(
     service: &'static str,
     mut listener: L,
     router: axum::Router,
-    mut spawner: quilkin_graceful::GracefulSpawner,
+    ss: quilkin_graceful::SubSpawner,
     shutdown_timeout: std::time::Duration,
 ) -> std::io::Result<()>
 where
     L: axum::serve::Listener,
 {
-    let shutdown = spawner.token();
+    let token = ss.token();
+    loop {
+        let (socket, _remote_addr) = tokio::select! {
+            conn = listener.accept() => conn,
+            _ = token.cancelled() => {
+                tracing::trace!("signal received, not accepting new connections");
+                break;
+            }
+        };
 
-    {
-        let handle = spawner.handle();
-        loop {
-            let (socket, _remote_addr) = tokio::select! {
-                conn = listener.accept() => conn,
-                _ = shutdown.cancelled() => {
-                    tracing::trace!("signal received, not accepting new connections");
-                    break;
-                }
-            };
-
-            handle_connection::<L>(service, socket, &router, &handle).await;
-        }
+        handle_connection::<L>(service, socket, &router, &ss).await;
     }
 
-    if !spawner.wait(shutdown_timeout).await {
+    if !ss.wait(shutdown_timeout).await {
         tracing::warn!(
             service,
             ?shutdown_timeout,
@@ -48,7 +44,7 @@ async fn handle_connection<L: axum::serve::Listener>(
     service: &str,
     socket: <L as axum::serve::Listener>::Io,
     router: &axum::Router,
-    spawner: &quilkin_graceful::Spawner<'_>,
+    spawner: &quilkin_graceful::SubSpawner,
 ) {
     let socket = hyper_util::rt::TokioIo::new(socket);
 

@@ -52,7 +52,7 @@ async fn spawn_echo_server() -> (u16, tokio::task::AbortHandle) {
 async fn spawn_proxy(
     upstream_port: u16,
     backend: UdpBackend,
-) -> (u16, quilkin::signal::CancellationToken) {
+) -> (u16, quilkin_graceful::RootToken) {
     let providers = Providers::default();
     let mut svc = quilkin::Service::builder()
         .udp()
@@ -64,7 +64,7 @@ async fn spawn_proxy(
     let config = make_config(&providers, &mut svc, upstream);
 
     let shutdown = quilkin::signal::ShutdownHandler::new();
-    let stx = shutdown.token();
+    let stx = shutdown.root();
 
     let (_task, ports) = svc
         .spawn_services(&config, shutdown)

@@ -229,8 +229,8 @@ pub struct Pusher {
 }
 
 impl Pusher {
-    pub async fn push_changes(mut self) -> crate::Result<()> {
-        loop {
+    pub async fn push_changes(mut self, ss: quilkin_graceful::SubSpawner) {
+        while !ss.token().is_cancelled() {
             let connect_to_corrosion = connect_first(&self.endpoints, |addr| {
                 let info = self.agent_info;
                 async move { connect(&addr, info).await }

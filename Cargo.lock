@@ -4025,6 +4025,7 @@ dependencies = [
 name = "quilkin-graceful"
 version = "0.10.1"
 dependencies = [
+ "eyre",
  "tokio",
  "tokio-util",
 ]

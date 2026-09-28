@@ -35,7 +35,7 @@ use crate::{
 };
 use eyre::Context;
 use futures::TryStreamExt;
-use quilkin_graceful::ChildToken;
+use quilkin_graceful::{ChildToken, TaskSpawner};
 
 /// Functionally infinite retries as provider tasks are long running tasks
 /// that we continually want to retry and Quilkin can run for days or weeks.
@@ -448,8 +448,8 @@ impl Providers {
         locality: Option<crate::net::endpoint::Locality>,
         config: &super::Config,
         mutator: Option<crate::providers::corrosion::ServerMutator>,
-        shutdown: ChildToken,
-    ) -> impl Future<Output = crate::Result<()>> + 'static {
+        spawner: &mut TaskSpawner,
+    ) {
         let agones_namespaces = if !self.agones_namespace.is_empty() {
             tracing::warn!(
                 "`config.k8s.agones.namespace` is deprecated, use `config.k8s.agones.namespaces` instead"
@@ -576,7 +576,7 @@ impl Providers {
             }
         };
 
-        Self::task("k8s_provider".into(), health_check.clone(), task)
+        Self::task(spawner, "k8s_provider", health_check.clone(), task)
     }
 
     async fn result_stream<T>(
@@ -593,9 +593,12 @@ impl Providers {
         }
     }
 
-    fn spawn_mmdb_provider(&self) -> impl Future<Output = crate::Result<()>> + 'static {
+    fn spawn_mmdb_provider(
+        &self,
+        token: ChildToken,
+    ) -> impl Future<Output = crate::Result<()>> + 'static {
         self.mmdb.as_ref().map_or_else(
-            || either::Left(std::future::pending()),
+            || either::Left(token.cancelled()),
             |source| {
                 let source = source.clone();
                 either::Right(async move {
@@ -610,7 +613,7 @@ impl Providers {
 
                     // TODO: Keep task running for now, should be replaced with
                     // checking for updates to the mmdb source.
-                    std::future::pending().await
+                    token.cancelled().await
                 })
             },
         )
@@ -621,17 +624,20 @@ impl Providers {
         config: Arc<config::Config>,
         health_check: Arc<AtomicBool>,
         locality: Option<crate::net::endpoint::Locality>,
-        shutdown: ChildToken,
-    ) -> impl Future<Output = crate::Result<()>> + 'static {
+        spawner: &mut TaskSpawner,
+    ) {
         let config = config.clone();
         let endpoints = self.relay.clone();
         let control_plane_id = locality.map_or_else(|| config.id(), |l| l.region().to_string());
-        Self::task("mds_provider".into(), health_check.clone(), move || {
+        let ss = spawner.sub_spawner();
+
+        Self::task(spawner, "mds_provider", health_check.clone(), move || {
             let config = config.clone();
             let endpoints = endpoints.clone();
             let control_plane_id = control_plane_id.clone();
             let health_check = health_check.clone();
             let shutdown = shutdown.clone();
+
             async move {
                 let stream =
                     crate::net::xds::client::MdsClient::connect(control_plane_id, endpoints)
@@ -652,11 +658,12 @@ impl Providers {
         config: Arc<config::Config>,
         health_check: Arc<AtomicBool>,
         notifier: Option<tokio::sync::mpsc::UnboundedSender<String>>,
-    ) -> impl Future<Output = crate::Result<()>> + 'static {
+        spawner: &mut TaskSpawner,
+    ) {
         let config = config.clone();
         let endpoints = self.xds_endpoints.clone();
 
-        Self::task("xds_provider".into(), health_check.clone(), move || {
+        Self::task(spawner, "xds_provider", health_check.clone(), move || {
             let config = config.clone();
             let endpoints = endpoints.clone();
             let health_check = health_check.clone();
@@ -743,14 +750,12 @@ impl Providers {
         health_check: Arc<AtomicBool>,
         locality: Option<crate::net::endpoint::Locality>,
         notifier: Option<tokio::sync::mpsc::UnboundedSender<String>>,
-        shutdown: ChildToken,
-    ) -> tokio::task::JoinSet<crate::Result<()>> {
-        let mut providers = tokio::task::JoinSet::new();
-
+        spawner: &mut TaskSpawner,
+    ) -> bool {
         if !self.any_provider_enabled() {
             tracing::info!("no configuration providers specified");
             health_check.store(true, std::sync::atomic::Ordering::Relaxed);
-            return providers;
+            return false;
         }
 
         tracing::info!(providers=?[
@@ -766,63 +771,55 @@ impl Providers {
         ].into_iter().flatten().collect::<Vec<&str>>(), "starting configuration providers");
 
         if self.mmdb_enabled() {
-            providers.spawn(self.spawn_mmdb_provider());
+            spawner.push_async("mmdb", self.spawn_mmdb_provider(spawner.child()));
         }
 
-        let mutator = self.maybe_spawn_corrosion(config, &health_check, &mut providers);
+        let mutator = self.maybe_spawn_corrosion(config, &health_check, &mut spawner);
 
         if mutator.is_some() && self.fs_enabled() {
             tracing::error!("corrosion mutation does not work with file system data");
         };
 
         if self.grpc_push_enabled() {
-            providers.spawn(self.spawn_mds_provider(
+            self.spawn_mds_provider(
                 config.clone(),
                 health_check.clone(),
                 locality.clone(),
-                shutdown.clone(),
-            ));
+                spawner,
+            );
         }
 
         if self.k8s_enabled() || self.agones_enabled() {
-            providers.spawn(self.spawn_k8s_provider(
+            self.spawn_k8s_provider(
                 health_check.clone(),
                 locality.clone(),
                 config,
                 mutator.clone(),
-                shutdown.clone(),
-            ));
+                spawner,
+            );
         }
 
         if self.grpc_pull_enabled() {
-            providers.spawn(self.spawn_xds_provider(
-                config.clone(),
-                health_check.clone(),
-                notifier,
-            ));
+            self.spawn_xds_provider(config.clone(), health_check.clone(), notifier, spawner);
         }
 
         if self.fs_enabled() {
             let config = config.clone();
 
-            providers.spawn(Self::task(
-                "fs_watch_provider".into(),
-                health_check.clone(),
-                {
-                    let path = self.fs_path.clone();
-                    let health_check = health_check.clone();
-                    let locality = locality.clone();
+            Self::task(spawner, "fs_watch_provider", health_check.clone(), {
+                let path = self.fs_path.clone();
+                let health_check = health_check.clone();
+                let locality = locality.clone();
 
-                    move || {
-                        fs::watch(
-                            config.clone(),
-                            health_check.clone(),
-                            path.clone(),
-                            locality.clone(),
-                        )
-                    }
-                },
-            ));
+                move || {
+                    fs::watch(
+                        config.clone(),
+                        health_check.clone(),
+                        path.clone(),
+                        locality.clone(),
+                    )
+                }
+            });
         }
 
         if self.http_enabled()
@@ -833,11 +830,9 @@ impl Providers {
                 .unwrap_or_else(|| (std::net::Ipv6Addr::UNSPECIFIED, http::DEFAULT_PORT).into());
             let health_check = health_check.clone();
 
-            providers.spawn(Self::task(
-                "http_provider".into(),
-                health_check.clone(),
-                move || http::serve(fc.clone(), address, health_check.clone(), shutdown.clone()),
-            ));
+            Self::task(spawner, "http_provider", health_check.clone(), move || {
+                http::serve(fc.clone(), address, health_check.clone(), shutdown.clone())
+            });
         }
 
         if let Some(fc) = self
@@ -862,27 +857,27 @@ impl Providers {
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
-    pub async fn task<F>(
-        name: String,
+    pub fn task<F, T>(
+        spawner: &mut TaskSpawner,
+        name: &'static str,
         health_check: Arc<AtomicBool>,
-        task: impl FnMut() -> F,
-    ) -> crate::Result<()>
-    where
-        F: std::future::Future<Output = crate::Result<()>>,
+        task: T,
+    ) where
+        F: std::future::Future<Output = crate::Result<()>> + Send + 'static,
+        T: FnMut() -> F + Send + 'static,
     {
-        tryhard::retry_fn(task)
-            .retries(RETRIES)
-            .exponential_backoff(BACKOFF_STEP)
-            .max_delay(MAX_DELAY)
-            .on_retry(|attempt, _, error: &eyre::Error| {
-                health_check.store(false, Ordering::SeqCst);
-                let name = name.clone();
-                let error = error.to_string();
-                async move {
-                    provider_task_failures_total(&name).inc();
-                    tracing::warn!(%attempt, %error, task=%name, "provider task error, retrying");
-                }
-            })
-            .await
+        spawner.push_async(name, async move {
+            tryhard::retry_fn(task)
+                .retries(RETRIES)
+                .exponential_backoff(BACKOFF_STEP)
+                .max_delay(MAX_DELAY)
+                .on_retry(|attempt, _, error: &eyre::Error| {
+                    health_check.store(false, Ordering::SeqCst);
+                    async move {
+                        provider_task_failures_total(&name).inc();
+                        tracing::warn!(%attempt, %error, task=%name, "provider task error, retrying");
+                    }
+                }).await
+        });
     }
 }

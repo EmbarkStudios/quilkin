@@ -62,7 +62,7 @@ pub fn spawn(
     listener: std::net::TcpListener,
     datacenters: config::Watch<config::DatacenterMap>,
     phoenix: Phoenix<crate::codec::qcmp::QcmpTransceiver>,
-    shutdown: quilkin_graceful::ChildToken,
+    ss: quilkin_graceful::SubSpawner,
 ) -> crate::Result<crate::service::Finalizer> {
     use eyre::WrapErr as _;
 
@@ -121,9 +121,10 @@ pub fn spawn(
                         network_coordinates_response.store(json.into());
                     };
 
-                    tokio::spawn({
+                    let token = ss.token();
+                    ss.handle().spawn({
                         let phoenix = phoenix.clone();
-                        async move { phoenix.background_update_task().await }
+                        async move { token.run_until_cancelled(phoenix.background_update_task()).await }
                     });
 
                     tracing::info!(addr=%tokio_listener.local_addr().expect("unbound listener"), "starting phoenix HTTP service");
