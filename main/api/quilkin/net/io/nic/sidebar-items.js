@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["xdp"]};
+window.SIDEBAR_ITEMS = {"enum":["ThreadPolicy"],"mod":["xdp"]};
