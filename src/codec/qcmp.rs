@@ -227,51 +227,6 @@ impl Drop for QcmpTransceiver {
     }
 }
 
-/// Asynchronous receive task that listens on the socket and receives all responses as soon as
-/// possible, recording the receive time, and forwarding to the matching request channel if it is
-/// registered.
-async fn receive_task(
-    socket: Arc<DualStackEpollSocket>,
-    waiters: Arc<dashmap::DashMap<u8, tokio::sync::oneshot::Sender<(UtcTimestamp, Protocol)>>>,
-    token: quilkin_graceful::ChildToken,
-) {
-    let mut recv = [0u8; 512];
-
-    loop {
-        tokio::select! {
-            _ = token.cancelled() => {
-                tracing::debug!("task cancelled, stopping receiving on socket");
-                return;
-            }
-            result = socket.recv_from(&mut recv) => {
-                match result {
-                    Ok((size, addr)) => {
-                        let recv_timestamp = UtcTimestamp::now();
-                        let Ok(Some(reply)) = Protocol::parse(&recv[..size]) else {
-                            tracing::warn!("received non qcmp packet {:?}", &recv[..size]);
-                            continue;
-                        };
-
-                        let key = reply.nonce();
-                        if let Some((_, waiter)) = waiters.remove(&key) {
-                            if let Err(error) = waiter.send((recv_timestamp, reply)) {
-                                tracing::error!(?error, "failed to inform waiter");
-                            }
-                        } else {
-                            tracing::debug!(
-                                ?addr,
-                                nonce = reply.nonce(),
-                                "received packet without a waiter"
-                            );
-                        }
-                    }
-                    Err(error) => tracing::error!(?error, "recv error"),
-                }
-            }
-        }
-    }
-}
-
 impl QcmpTransceiver {
     pub fn new() -> crate::Result<Self> {
         let socket = Arc::new(DualStackEpollSocket::new(0)?);
@@ -286,6 +241,53 @@ impl QcmpTransceiver {
         let root = quilkin_graceful::TaskSpawner::new();
         let ss = root.sub_spawner();
         let task_cancellation_token = ss.token();
+
+        /// Asynchronous receive task that listens on the socket and receives all responses as soon as
+        /// possible, recording the receive time, and forwarding to the matching request channel if it is
+        /// registered.
+        async fn receive_task(
+            socket: Arc<DualStackEpollSocket>,
+            waiters: Arc<
+                dashmap::DashMap<u8, tokio::sync::oneshot::Sender<(UtcTimestamp, Protocol)>>,
+            >,
+            token: quilkin_graceful::ChildToken,
+        ) {
+            let mut recv = [0u8; 512];
+
+            loop {
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        tracing::debug!("task cancelled, stopping receiving on socket");
+                        return;
+                    }
+                    result = socket.recv_from(&mut recv) => {
+                        match result {
+                            Ok((size, addr)) => {
+                                let recv_timestamp = UtcTimestamp::now();
+                                let Ok(Some(reply)) = Protocol::parse(&recv[..size]) else {
+                                    tracing::warn!("received non qcmp packet {:?}", &recv[..size]);
+                                    continue;
+                                };
+
+                                let key = reply.nonce();
+                                if let Some((_, waiter)) = waiters.remove(&key) {
+                                    if let Err(error) = waiter.send((recv_timestamp, reply)) {
+                                        tracing::error!(?error, "failed to inform waiter");
+                                    }
+                                } else {
+                                    tracing::debug!(
+                                        ?addr,
+                                        nonce = reply.nonce(),
+                                        "received packet without a waiter"
+                                    );
+                                }
+                            }
+                            Err(error) => tracing::error!(?error, "recv error"),
+                        }
+                    }
+                }
+            }
+        }
 
         // Spawn receiver task that will receive and route packets to the registered waiters
         ss.spawn(async move {
@@ -396,7 +398,7 @@ pub fn spawn(
     port_rx: tokio::sync::broadcast::Receiver<u16>,
     spawner: &mut quilkin_graceful::TaskSpawner,
 ) -> crate::Result<()> {
-    let ss = spawner.sub_spawner();
+    let token = spawner.child();
 
     let qcmp_thread = std::thread::Builder::new()
         .name("qcmp".into())
@@ -409,7 +411,7 @@ pub fn spawn(
 
             let res = runtime.block_on(async move {
                 use tracing::{Instrument as _, instrument::WithSubscriber as _};
-                io_loop(socket, port_rx, ss)
+                io_loop(socket, port_rx, token)
                     .instrument(tracing::debug_span!("qcmp"))
                     .with_current_subscriber()
                     .await
@@ -987,7 +989,8 @@ mod tests {
 
         let pc = super::port_channel();
         let token = quilkin_graceful::root();
-        let jh = io_loop(socket, pc.subscribe(), token.child().into()).unwrap();
+        let tt = token.child();
+        let jh = tokio::spawn(async move { io_loop(socket, pc.subscribe(), tt.into()).await });
 
         let delay = Duration::from_millis(50);
         let node = QcmpTransceiver::with_artificial_delay(delay).unwrap();

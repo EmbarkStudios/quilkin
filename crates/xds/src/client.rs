@@ -15,8 +15,10 @@
  */
 
 use std::{
-    sync::Arc,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -260,11 +262,12 @@ impl MdsClient {
     pub async fn delta_stream<C: crate::config::Configuration>(
         self,
         config: Arc<C>,
-        health: impl HealthState + Send + 'static,
-        shutdown: crate::ShutdownSignal,
+        health: quilkin_graceful::health::HealthToken,
+        ss: quilkin_graceful::SubSpawner,
     ) -> Result<tokio::task::JoinHandle<Result<()>>, Self> {
         const LEADERSHIP_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
         let identifier = String::from(&*self.identifier);
+        let token = ss.token();
 
         while config.is_leader() == Some(false) {
             tokio::time::sleep(LEADERSHIP_CHECK_INTERVAL).await;
@@ -283,11 +286,12 @@ impl MdsClient {
             };
 
         let id = identifier.clone();
-        let handle = tokio::task::spawn(
+        let cs = ss.clone();
+        let handle = ss.spawn(
             async move {
                 tracing::trace!("starting relay client delta stream task");
 
-                health.set_healthy();
+                health.mark_healthiness(true, None);
                 loop {
                     if config.is_leader() == Some(false) {
                         tracing::debug!("not leader, delaying task");
@@ -299,11 +303,11 @@ impl MdsClient {
                         let control_plane = super::server::ControlPlane::from_arc(
                             config.clone(),
                             IDLE_REQUEST_INTERVAL,
-                            shutdown.clone(),
+                            token.clone(),
                         );
 
-                        let change_watcher = tokio::spawn({
-                            control_plane.config.on_changed(control_plane.clone(), shutdown.clone())
+                        let change_watcher = cs.spawn({
+                            control_plane.config.on_changed(control_plane.clone(), token.clone())
                         });
 
                         tokio::select! {
@@ -349,17 +353,17 @@ impl MdsClient {
                                     }
                                 }
                             }
-                            _ = shutdown.cancelled() => {
+                            _ = token.cancelled() => {
                                 return Ok(());
                             }
                         }
                     }
 
-                    health.set_unhealthy("delta_stream: connection lost");
+                    health.mark_healthiness(false, Some("delta_stream: connection lost".into()));
 
                     tracing::info!("Lost connection to mDS, retrying");
                     loop {
-                        if shutdown.is_cancelled() {
+                        if token.is_cancelled() {
                             // We are shutting down, just quit
                             return Ok(());
                         }
@@ -385,7 +389,7 @@ impl MdsClient {
                         }
                     }
                     tracing::info!("mDS connection refreshed");
-                    health.set_healthy();
+                    health.mark_healthiness(true, None);
                 }
             }
             .instrument(tracing::trace_span!("handle_delta_discovery_response", id)),
@@ -556,7 +560,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
     config: Arc<C>,
     identifier: String,
     endpoints: Vec<Endpoint>,
-    health: impl HealthState + Send + 'static,
+    health: quilkin_graceful::health::HealthToken,
     notifier: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     resources: &'static [(&'static str, &'static [(&'static str, Vec<String>)])],
 ) -> eyre::Result<tokio::task::JoinHandle<Result<()>>> {
@@ -648,7 +652,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
             let mut response_stream = response_stream;
             let mut resource_subscriptions = resource_subscriptions;
 
-            health.set_healthy();
+            health.mark_healthiness(true, None);
             loop {
                 tracing::info!(%control_plane, "creating discovery response handler");
                 let mut ack_request_stream = crate::config::handle_delta_discovery_responses(
@@ -710,7 +714,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
                     }
                 }
 
-                health.set_unhealthy("delta_subscribe: connection lost");
+                health.mark_healthiness(false, Some("connection lost".into()));
 
                 loop {
                     tracing::info!(%control_plane, "Lost connection to xDS, retrying");
@@ -745,7 +749,7 @@ pub async fn delta_subscribe<C: crate::config::Configuration>(
                     return Err(error.wrap_err("refresh failed"));
                 }
                 tracing::info!(%control_plane, "xDS connection refreshed");
-                health.set_healthy();
+                health.mark_healthiness(true, None);
             }
         }
         .instrument(tracing::trace_span!("xds_client_stream", client_id)),

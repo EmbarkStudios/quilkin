@@ -667,7 +667,7 @@ impl Service {
 
         tracing::info!(port, "starting qcmp service");
 
-        crate::codec::qcmp::spawn(qcmp, qcmp_port.subscribe(), shutdown)?;
+        crate::codec::qcmp::spawn(qcmp, qcmp_port.subscribe(), spawner)?;
 
         Ok(())
     }
@@ -676,7 +676,7 @@ impl Service {
     fn publish_xds(
         &self,
         config: &Arc<Config>,
-        shutdown: &mut ShutdownHandler,
+        spawner: &mut TaskSpawner,
         ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.xds_enabled && !self.grpc_enabled {
@@ -688,12 +688,12 @@ impl Service {
 
         let xds_server = crate::net::xds::server::ControlPlane::from_arc(
             config.clone(),
-            crate::components::admin::IDLE_REQUEST_INTERVAL,
-            shutdown.child(),
+            crate::admin::IDLE_REQUEST_INTERVAL,
+            spawner.child(),
         )
         .management_server(listener, self.tls_identity()?)?;
 
-        shutdown.push_async("xds", xds_server);
+        spawner.push_async("xds", xds_server);
 
         Ok(())
     }
@@ -702,14 +702,14 @@ impl Service {
     async fn publish_mds(
         &mut self,
         config: &Arc<Config>,
-        shutdown: &mut ShutdownHandler,
+        spawner: &mut TaskSpawner,
         ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.mds_enabled {
             return Ok(());
         }
 
-        self.spawn_corrosion_server(config.clone(), shutdown, ports)
+        self.spawn_corrosion_server(config.clone(), spawner, ports)
             .await?;
 
         tracing::info!(port=%self.mds_port, "starting mds service");
@@ -718,11 +718,11 @@ impl Service {
 
         let mds_server = crate::net::xds::server::ControlPlane::from_arc(
             config.clone(),
-            crate::components::admin::IDLE_REQUEST_INTERVAL,
-            shutdown.child(),
+            crate::admin::IDLE_REQUEST_INTERVAL,
+            spawner.child(),
         )
         .relay_server(listener, self.tls_identity()?)?;
-        shutdown.push_async("mds", mds_server);
+        spawner.push_async("mds", mds_server);
 
         Ok(())
     }
@@ -730,7 +730,7 @@ impl Service {
     pub fn publish_udp(
         &mut self,
         config: &Arc<Config>,
-        shutdown: &mut ShutdownHandler,
+        spawner: &mut TaskSpawner,
         ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         if !self.udp_enabled && !self.qcmp_enabled {
@@ -742,7 +742,7 @@ impl Service {
         if self.udp_enabled {
             crate::net::sessions::quality::spawn_aggregator(
                 (&self.session_metrics).into(),
-                shutdown,
+                spawner,
             )?;
         }
 
@@ -772,7 +772,7 @@ impl Service {
                         ports.qcmp = Some(self.qcmp_port);
                         ports.udp = Some(self.udp_port);
 
-                        shutdown.push_sync("xdp", || {
+                        spawner.push_sync("xdp", || {
                             tracing::warn!("shutting down xdp...");
                             xdp();
                             tracing::warn!("shut down xdp");
@@ -806,7 +806,7 @@ impl Service {
             return Ok(());
         }
 
-        self.spawn_user_space_router(config.clone(), shutdown, ports)
+        self.spawn_user_space_router(config.clone(), spawner, ports)
     }
 
     /// Launches the user space implementation of the packet router using
@@ -820,7 +820,7 @@ impl Service {
     pub fn spawn_user_space_router(
         &self,
         config: Arc<Config>,
-        shutdown: &mut ShutdownHandler,
+        spawner: &mut TaskSpawner,
         ports: &mut ServicePorts,
     ) -> crate::Result<()> {
         let backend = match self.udp_backend {
@@ -906,11 +906,11 @@ impl Service {
             self.udp_ring_buffer,
         )?;
 
-        let cancelled = shutdown.child();
+        let cancelled = spawner.child();
         let testing = self.testing;
         let termination_timeout = self.termination_timeout;
 
-        shutdown.push_async("udp", async move {
+        spawner.push_async("udp", async move {
             cancelled.cancelled().await;
 
             if testing {
@@ -1003,7 +1003,7 @@ impl Service {
     async fn spawn_corrosion_server(
         &mut self,
         config: Arc<Config>,
-        shutdown: &mut ShutdownHandler,
+        spawner: &mut TaskSpawner,
         ports: &mut ServicePorts,
     ) -> eyre::Result<()> {
         use corrosion::types;
@@ -1118,9 +1118,9 @@ impl Service {
                 }
             }
 
-            let srx = shutdown.child();
+            let srx = spawner.child();
             let btx = btx.clone();
-            shutdown.push_async("corrosion_filter_mutator", async move {
+            spawner.push_async("corrosion_filter_mutator", async move {
                 // Set the initial state, at this early stage we _probably_ won't
                 // have subscribers, but we do the full DB + publish just in case
                 update_filters(&btx, &mut filters).await;
@@ -1178,9 +1178,9 @@ impl Service {
                 .take()
                 .expect("init_config was not called");
 
-            let srx = shutdown.child();
+            let srx = spawner.child();
             let btx = btx.clone();
-            shutdown.push_async("corrosion_mutator", async move {
+            spawner.push_async("corrosion_mutator", async move {
                 loop {
                     tokio::select! {
                         change = rx.recv() => {
@@ -1210,9 +1210,9 @@ impl Service {
             let check_interval = std::time::Duration::from_secs(reap_time / 2);
             let reap_time = std::time::Duration::from_secs(reap_time);
 
-            let srx = shutdown.child();
+            let srx = spawner.child();
             let btx = btx.clone();
-            shutdown.push_async("corrosion_reaper", async move {
+            spawner.push_async("corrosion_reaper", async move {
                 let mut interval = tokio::time::interval(check_interval);
 
                 loop {
@@ -1254,7 +1254,7 @@ impl Service {
 
         // Spawn a task that regularly updates metrics wrt database sizes on disk
         {
-            let srx = shutdown.child();
+            let srx = spawner.child();
             let update_interval = std::time::Duration::from_secs(5 * 60);
 
             let dbm = corrosion::metrics::DbMetrics::new(
@@ -1263,7 +1263,7 @@ impl Service {
                 sub_path.clone(),
             );
 
-            shutdown.push_async("corrosion_db_metrics", async move {
+            spawner.push_async("corrosion_db_metrics", async move {
                 let mut interval = tokio::time::interval(update_interval);
 
                 loop {
@@ -1292,7 +1292,7 @@ impl Service {
                 subs.clone(),
                 updates.unwrap(),
                 trip.tripwire(),
-                shutdown,
+                spawner,
             )
             .await
             .context("failed to spawn gossip service")?;
@@ -1324,8 +1324,8 @@ impl Service {
         // port so the log message at the start is kind of useless
         tracing::debug!(port, "corrosion service running");
 
-        let srx = shutdown.child();
-        shutdown.push_async("corrosion_server", async move {
+        let srx = spawner.child();
+        spawner.push_async("corrosion_server", async move {
             srx.cancelled().await;
             trip.shutdown().await;
 
@@ -1344,7 +1344,7 @@ impl Service {
         subs: corrosion::types::pubsub::SubsManager,
         updates: corrosion::types::updates::UpdatesManager,
         tripwire: corrosion::Tripwire,
-        shutdown: &mut ShutdownHandler,
+        spawner: &mut TaskSpawner,
     ) -> eyre::Result<()> {
         use corrosion::gossip;
         use eyre::WrapErr;
@@ -1424,7 +1424,7 @@ impl Service {
             clear_buf_tx,
             // TODO: maybe make this configurable/optional, but currently the change handler will signal shutdown if it
             // encounters a fatal DB issue
-            shutdown: shutdown.root(),
+            shutdown: spawner.root(),
         };
 
         // TODO: make this configurable or tune the defaults once we actually see numbers in real usage

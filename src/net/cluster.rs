@@ -1480,6 +1480,7 @@ impl ClusterUpdateBatcher {
         locality: Option<Locality>,
         interval: std::time::Duration,
         token: quilkin_graceful::ChildToken,
+        spawner: &mut tokio::task::JoinSet<crate::Result<()>>,
     ) -> Self {
         let cub = Self {
             cluster_map,
@@ -1490,7 +1491,10 @@ impl ClusterUpdateBatcher {
             batcher_mu: <_>::default(),
         };
         let task_cub = cub.clone();
-        tokio::spawn(async move { task_cub.batcher_task().await });
+        spawner.spawn(async move {
+            task_cub.batcher_task().await;
+            Ok(())
+        });
 
         cub
     }

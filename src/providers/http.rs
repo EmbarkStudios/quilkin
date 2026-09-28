@@ -15,14 +15,7 @@
 //! | `PUT`    | `/filterchain`           | Replace the filter chain                                              |
 //! | `DELETE` | `/filterchain`           | Reset the filter chain to empty                                       |
 
-use std::{
-    collections::BTreeSet,
-    net::SocketAddr,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-};
+use std::{collections::BTreeSet, net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{Path, State},
@@ -32,7 +25,7 @@ use axum::{
 };
 
 use crate::{
-    components::admin::SHUTDOWN_TIMEOUT,
+    admin::SHUTDOWN_TIMEOUT,
     config::{self, filter::FilterChainConfig},
     filters::FilterChain,
     net::{ClusterMap, endpoint::Endpoint},
@@ -203,7 +196,7 @@ pub fn make_router(fc: FiltersAndClusters) -> axum::Router {
 pub async fn serve(
     fc: FiltersAndClusters,
     address: SocketAddr,
-    health_check: Arc<AtomicBool>,
+    health_check: quilkin_graceful::health::HealthToken,
     shutdown: quilkin_graceful::ChildToken,
 ) -> crate::Result<()> {
     let state = HttpState {
@@ -214,7 +207,7 @@ pub async fn serve(
     let router = state.router();
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(%address, "HTTP provider listening");
-    health_check.store(true, Ordering::SeqCst);
+    health_check.ready();
 
     quilkin_system::net::http::serve(
         "http_provider",

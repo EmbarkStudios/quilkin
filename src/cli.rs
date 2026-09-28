@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use clap::builder::TypedValueParser;
 use clap::crate_version;
@@ -276,17 +276,7 @@ impl Cli {
             crate::metrics::register_metrics(&mut registry, config.id());
         });
 
-        let ready = Arc::<std::sync::atomic::AtomicBool>::default();
-        if self.admin.enabled {
-            crate::components::admin::serve(
-                config.clone(),
-                ready.clone(),
-                // This is a root token as admin::serve owns the Health check and thus the panic handler, making it
-                // responsible for shutting down the instance as a whole if a panic occurs
-                task_spawner.root(),
-                self.admin.address,
-            );
-        }
+        let mut check_init = quilkin_graceful::health::ChecksInit::new();
 
         crate::alloc::spawn_heap_stats_updates(
             std::time::Duration::from_secs(10),
@@ -296,22 +286,29 @@ impl Cli {
         // Just call this early so there isn't a potential race when spawning xDS
         quilkin_xds::metrics::set_registry(crate::metrics::registry());
 
-        let has_providers = self.providers.spawn_providers(
+        self.providers.spawn_providers(
             &config,
-            ready.clone(),
             locality.clone(),
             None,
             &mut task_spawner,
+            &mut check_init,
         );
+
+        if self.admin.enabled {
+            crate::admin::serve(
+                config.clone(),
+                check_init,
+                // This is a root token as admin::serve owns the Health check and thus the panic handler, making it
+                // responsible for shutting down the instance as a whole if a panic occurs
+                task_spawner.root(),
+                self.admin.address,
+            );
+        }
 
         let _ports = self
             .service
             .spawn_services(&config, &mut task_spawner)
             .await?;
-
-        if !has_providers {
-            ready.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
 
         let task_results = task_spawner
             .wait_cancellation_or_error(

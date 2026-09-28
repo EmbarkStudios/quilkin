@@ -8,7 +8,7 @@ pub(super) fn corrosion_mutate(
     qcmp: &crate::config::qcmp::QcmpPort,
     icao: &crate::config::NotifyingIcaoCode,
     endpoints: CorrosionAddrs,
-    hc: HealthCheck,
+    health: HealthCheck,
 ) -> (ServerMutator, Pusher) {
     let (tx, rx) = mpsc::unbounded_channel();
     let ls = Arc::new(LocalState::default());
@@ -24,7 +24,7 @@ pub(super) fn corrosion_mutate(
             tx,
         },
         Pusher {
-            hc,
+            health,
             endpoints,
             state: ls,
             rx,
@@ -219,7 +219,7 @@ impl LocalState {
 
 /// Pushes changes to a remote server
 pub struct Pusher {
-    hc: HealthCheck,
+    health: HealthCheck,
     endpoints: CorrosionAddrs,
     state: Arc<LocalState>,
     rx: mpsc::UnboundedReceiver<Mutation>,
@@ -230,6 +230,8 @@ pub struct Pusher {
 
 impl Pusher {
     pub async fn push_changes(mut self, ss: quilkin_graceful::SubSpawner) {
+        self.health.ready();
+
         while !ss.token().is_cancelled() {
             let connect_to_corrosion = connect_first(&self.endpoints, |addr| {
                 let info = self.agent_info;
@@ -248,17 +250,20 @@ impl Pusher {
             };
 
             tracing::info!(%address, "successfully connected to corrosion server");
-            self.hc.store(true, atomic::Ordering::Relaxed);
+            self.health.mark_healthiness(true, None);
 
-            self.push(client)
+            self.push(client, &ss)
                 .instrument(tracing::debug_span!("corrosion mutation events", %address))
                 .await;
 
-            self.hc.store(false, atomic::Ordering::Relaxed);
+            self.health.mark_healthiness(
+                false,
+                Some(format!("lost connection to client '{address}'")),
+            );
         }
     }
 
-    async fn push(&mut self, client: client::MutationClient) {
+    async fn push(&mut self, client: client::MutationClient, ss: &quilkin_graceful::SubSpawner) {
         // TODO: we could eventually be smarter about this and not send state of
         // of the world if we've previously been connected to this server (or
         // one that had some or all of the same state), but for now it is much
@@ -296,7 +301,8 @@ impl Pusher {
         let (tx, rx) = mpsc::channel(64);
 
         // Spawn a separate task to do the actual serialization and transmission to the remote server
-        tokio::task::spawn(async move {
+        let token = ss.token();
+        ss.spawn(async move {
             async fn publish_changes(
                 client: &client::MutationClient,
                 mut rx: mpsc::Receiver<v1::ServerChange>,
@@ -315,7 +321,10 @@ impl Pusher {
                 Ok(())
             }
 
-            if let Err(error) = publish_changes(&client, rx).await {
+            if let Some(Err(error)) = token
+                .run_until_cancelled(publish_changes(&client, rx))
+                .await
+            {
                 tracing::error!(%error, "failed to push changes to server");
             }
 
@@ -352,6 +361,8 @@ impl Pusher {
 
         // Transmit mutations. If we received mutations in the time between
         // the connection was made we might send duplicate data.
+        let token = ss.token();
+
         loop {
             let flush_elapsed = async {
                 match flush_deadline {
@@ -385,6 +396,9 @@ impl Pusher {
                 }
                 _ = flush_elapsed => {
                     flush!();
+                }
+                _ = token.cancelled() => {
+                    return;
                 }
                 qcmp = self.qcmp.recv() => {
                     let Ok(qcmp) = qcmp else {

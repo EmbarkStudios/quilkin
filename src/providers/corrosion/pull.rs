@@ -24,12 +24,13 @@ struct SubState {
 pub(super) async fn corrosion_subscribe(
     state: State,
     endpoints: CorrosionAddrs,
-    hc: HealthCheck,
+    health: HealthCheck,
 ) -> crate::Result<()> {
     // Each query keeps track of the latest change id it has received, if we
     // disconnect from a remote server, we can send this when subscribing to
     // (hopefully) be able to catch up to the state of that server more quickly
     let mut change_ids = QuerySet::new();
+    health.ready();
 
     loop {
         let connect_to_corrosion = connect_first(&endpoints, |addr| {
@@ -53,7 +54,7 @@ pub(super) async fn corrosion_subscribe(
         };
 
         tracing::info!(%address, "successfully subscribed to corrosion server");
-        hc.store(true, atomic::Ordering::Relaxed);
+        health.mark_healthiness(true, None);
 
         let _res = {
             let _metrics = crate::metrics::ActiveProviderMetrics::new(address.to_string());
@@ -64,8 +65,10 @@ pub(super) async fn corrosion_subscribe(
         };
 
         tracing::info!(%address, "lost connection to corrosion server");
-
-        hc.store(false, atomic::Ordering::Relaxed);
+        health.mark_healthiness(
+            false,
+            Some(format!("lost connection to corrosion server '{address}'")),
+        );
     }
 }
 

@@ -2,6 +2,8 @@ use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken as Token;
 pub use tokio_util::task::TaskTracker;
 
+pub mod health;
+
 /// A root cancellation token, cancelling it will cancel all tokens cloned from it
 pub struct RootToken(Token);
 
@@ -37,24 +39,6 @@ macro_rules! common {
                 $crate::ChildToken(self.0.child_token())
             }
 
-            /// <https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html#method.cancel>
-            #[inline]
-            pub fn cancel(&self) {
-                self.0.cancel();
-            }
-
-            /// <https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html#method.is_cancelled>
-            #[inline]
-            pub fn is_cancelled(&self) -> bool {
-                self.0.is_cancelled()
-            }
-
-            /// <https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html#method.cancelled>
-            #[inline]
-            pub fn cancelled(&self) -> tokio_util::sync::WaitForCancellationFuture<'_> {
-                self.0.cancelled()
-            }
-
             /// <https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html#method.drop_guard>
             #[inline]
             pub fn drop_guard(self) -> tokio_util::sync::DropGuard {
@@ -65,6 +49,13 @@ macro_rules! common {
         impl Clone for $which {
             fn clone(&self) -> Self {
                 Self(self.0.clone())
+            }
+        }
+
+        impl std::ops::Deref for $which {
+            type Target = Token;
+            fn deref(&self) -> &Self::Target {
+                &self.0
             }
         }
     };
@@ -109,6 +100,11 @@ impl SubSpawner {
         self.tracker.close();
         self.token.cancel();
         self.tracker.wait().await;
+    }
+
+    #[inline]
+    pub fn into_tracker(self) -> TaskTracker {
+        self.tracker
     }
 }
 

@@ -122,7 +122,7 @@ pub fn spawn(
                     };
 
                     let token = ss.token();
-                    ss.handle().spawn({
+                    ss.spawn({
                         let phoenix = phoenix.clone();
                         async move { token.run_until_cancelled(phoenix.background_update_task()).await }
                     });

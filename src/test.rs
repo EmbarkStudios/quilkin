@@ -294,43 +294,6 @@ impl TestHelper {
         )
     }
 
-    pub async fn run_server(
-        &mut self,
-        config: Arc<Config>,
-        with_admin: Option<Option<SocketAddr>>,
-    ) -> u16 {
-        let cancel = quilkin_graceful::root();
-        self.server_shutdown_tx.push(Some(cancel.clone()));
-
-        if let Some(address) = with_admin {
-            crate::components::admin::serve(
-                config.clone(),
-                Default::default(),
-                cancel.clone(),
-                address,
-            );
-        }
-
-        let spawner = quilkin_graceful::TaskSpawner::new();
-
-        let (task, ports) = crate::Service::default()
-            .udp()
-            .udp_port(0)
-            .qcmp()
-            .qcmp_port(0)
-            .phoenix()
-            .phoenix_port(0)
-            // Fast enough for a test to observe an aggregation without waiting
-            .session_metrics_interval(1)
-            .spawn_services(&config, shutdown)
-            .await
-            .expect("failed to spawn services");
-
-        tokio::spawn(async move { task.await.unwrap() });
-
-        ports.udp.expect("should have spawned UDP")
-    }
-
     /// Returns a receiver subscribed to the helper's shutdown event.
     fn get_shutdown(&mut self) -> quilkin_graceful::RootToken {
         // If this is the first call, then we set up the channel first.
@@ -341,6 +304,17 @@ impl TestHelper {
             self.shutdown_ch = Some(ch.clone());
             ch
         }
+    }
+
+    /// A helper to spawn an async task, by default we lint against `tokio::spawn` as we want all tasks in quilkin to
+    /// be gracefully shutdown, but in tests we don't care about that necessarily
+    pub fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        #[allow(clippy::disallowed_methods)]
+        tokio::spawn(future)
     }
 }
 

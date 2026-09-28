@@ -14,10 +14,7 @@
  *  limitations under the License.
  */
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::Arc;
 
 use notify::Watcher;
 use tracing::Instrument;
@@ -26,7 +23,7 @@ use crate::Config;
 
 pub async fn watch(
     config: Arc<Config>,
-    health_check: Arc<AtomicBool>,
+    health_check: quilkin_graceful::health::HealthToken,
     path: impl Into<std::path::PathBuf>,
     locality: Option<crate::net::endpoint::Locality>,
 ) -> crate::Result<()> {
@@ -62,7 +59,7 @@ pub async fn watch(
         .instrument(span.clone())
         .await?;
 
-    health_check.store(true, Ordering::SeqCst);
+    health_check.ready();
 
     while let Some(event) = rx.recv().instrument(span.clone()).await.transpose()? {
         tracing::trace!(event = ?event.kind, "new file event");

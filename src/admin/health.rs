@@ -24,7 +24,7 @@ use std::{
 
 #[derive(Clone)]
 pub struct Health {
-    healthy: Arc<AtomicBool>,
+    pub(super) healthy: Arc<AtomicBool>,
     shutdown: quilkin_graceful::RootToken,
 }
 
@@ -42,7 +42,7 @@ impl Health {
         let default_hook = panic::take_hook();
         panic::set_hook(Box::new(move |panic_info| {
             tracing::error!(%panic_info, "Panic has occurred. Moving to Unhealthy");
-            healthy.swap(false, Relaxed);
+            healthy.store(false, Relaxed);
             shutdown.cancel();
             default_hook(panic_info);
         }));

@@ -21,6 +21,49 @@ use quilkin::{
     test::{AddressType, TestHelper},
 };
 
+async fn run_server(
+    config: Arc<Config>,
+    admin: SocketAddr,
+) -> (quilkin_graceful::TaskSpawner, u16) {
+    let mut spawner = quilkin_graceful::TaskSpawner::new();
+
+    crate::components::admin::serve(config.clone(), Default::default(), spawner.root(), address);
+
+    let ports = crate::Service::default()
+        .udp()
+        .udp_port(0)
+        .qcmp()
+        .qcmp_port(0)
+        .phoenix()
+        .phoenix_port(0)
+        // Fast enough for a test to observe an aggregation without waiting
+        .session_metrics_interval(1)
+        .spawn_services(&config, &mut spawner)
+        .await
+        .expect("failed to spawn services");
+
+    (spawner, ports.udp.expect("should have spawned UDP"))
+}
+
+async fn run_client(config: Arc<Config>) -> (quilkin_graceful::TaskSpawner, u16) {
+    let mut spawner = quilkin_graceful::TaskSpawner::new();
+
+    let ports = crate::Service::default()
+        .udp()
+        .udp_port(0)
+        .qcmp()
+        .qcmp_port(0)
+        .phoenix()
+        .phoenix_port(0)
+        // Fast enough for a test to observe an aggregation without waiting
+        .session_metrics_interval(1)
+        .spawn_services(&config, &mut spawner)
+        .await
+        .expect("failed to spawn services");
+
+    (spawner, ports.udp.expect("should have spawned UDP"))
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[cfg_attr(target_os = "macos", ignore)]
 async fn metrics_server() {
@@ -39,12 +82,11 @@ async fn metrics_server() {
         .clusters()
         .unwrap()
         .modify(|clusters| clusters.insert_default([Endpoint::new(echo.clone())].into()));
-    let server_port = t
-        .run_server(
-            server_config,
-            Some(Some((std::net::Ipv4Addr::UNSPECIFIED, metrics_port).into())),
-        )
-        .await;
+    let (server_spawner, server_port) = run_server(
+        server_config,
+        (std::net::Ipv4Addr::UNSPECIFIED, metrics_port).into(),
+    )
+    .await;
 
     // create a local client
     let client_config = TestHelper::new_config();
@@ -60,7 +102,18 @@ async fn metrics_server() {
                 .into(),
             );
         });
-    let client_port = t.run_server(client_config, None).await;
+    let (client_spawner, client_port) = run_client(client_config).await;
+
+    let server_cancel = server_spawner.root();
+    let client_cancel = client_spawner.root();
+
+    let jh = t.spawn(async move {
+        const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
+        tokio::join!(
+            server_spawner.wait_cancellation_or_error(TIMEOUT, TIMEOUT),
+            client_spawner.wait_cancellation_or_error(TIMEOUT, TIMEOUT),
+        );
+    });
 
     // let's send the packet
     let (mut recv_chan, socket) = t.open_socket_and_recv_multiple_packets().await;
@@ -109,4 +162,9 @@ async fn metrics_server() {
     // Registered by the aggregation, which spawns with the UDP service, so a
     // proxy exports the distribution whether or not it currently has players
     assert!(response.contains("quilkin_session_jitter_seconds_bucket"));
+
+    server_cancel.cancel();
+    client_cancel.cancel();
+
+    jh.join().await.unwrap().unwrap();
 }

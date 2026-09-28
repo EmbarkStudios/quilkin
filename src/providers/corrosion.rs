@@ -1,8 +1,5 @@
 use eyre::{Context, ContextCompat as _};
-use std::{
-    sync::{Arc, atomic},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 use tracing_futures::Instrument as _;
 mod pull;
 pub mod push;
@@ -10,7 +7,7 @@ pub mod push;
 pub use push::ServerMutator;
 
 type CorrosionAddrs = Vec<crate::net::EndpointAddress>;
-type HealthCheck = Arc<atomic::AtomicBool>;
+type HealthCheck = quilkin_graceful::health::HealthToken;
 type State = Arc<crate::config::Config>;
 
 use rand::Rng as _;
@@ -142,8 +139,8 @@ impl super::Providers {
     pub(super) fn maybe_spawn_corrosion(
         &self,
         config: &State,
-        health_check: &HealthCheck,
-        spawner: &mut TaskSpawner,
+        spawner: &mut quilkin_graceful::TaskSpawner,
+        check_init: &mut quilkin_graceful::health::ChecksInit,
     ) -> Option<ServerMutator> {
         let Some(mode) = self.corrosion_mode else {
             tracing::debug!("corrosion is not enabled");
@@ -160,30 +157,24 @@ impl super::Providers {
                 }
 
                 let config = config.clone();
-                let health_check = health_check.clone();
+                let health = check_init.add("corrosion_subscribe");
                 let endpoints = self.corrosion_endpoints.clone();
                 let child = spawner.child();
 
                 // We're a proxy, subscribing to changes from a remote relay
-                Self::task(
-                    spawner,
-                    "corrosion_subscribe",
-                    health_check.clone(),
-                    move || {
-                        let state = config.clone();
-                        let endpoints = endpoints.clone();
-                        let hc = health_check.clone();
-                        let child = child.clone();
+                Self::task(spawner, health.clone(), move || {
+                    let state = config.clone();
+                    let endpoints = endpoints.clone();
+                    let hc = health.clone();
+                    let child = child.clone();
 
-                        async move {
-                            child
-                                .run_until_cancelled(pull::corrosion_subscribe(
-                                    state, endpoints, hc,
-                                ))
-                                .await
-                        }
-                    },
-                );
+                    async move {
+                        child
+                            .run_until_cancelled(pull::corrosion_subscribe(state, endpoints, hc))
+                            .await;
+                        Ok(())
+                    }
+                });
 
                 None
             }
@@ -202,19 +193,17 @@ impl super::Providers {
                 };
                 let icao = &config.dyn_cfg.icao_code;
 
-                let (mutator, pusher) = push::corrosion_mutate(
-                    qcmp,
-                    icao,
-                    self.corrosion_endpoints.clone(),
-                    health_check.clone(),
-                );
+                let health = check_init.add("corrosion_publish");
+
+                let (mutator, pusher) =
+                    push::corrosion_mutate(qcmp, icao, self.corrosion_endpoints.clone(), health);
 
                 // We're an agent, pushing changes to a remote relay
                 let cs = spawner.sub_spawner();
-                spawner.push_async(
-                    "corrosion_publish",
-                    async move { pusher.push_changes(cs).await },
-                );
+                spawner.push_async("corrosion_publish", async move {
+                    pusher.push_changes(cs).await;
+                    Ok(())
+                });
 
                 Some(mutator)
             }

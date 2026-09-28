@@ -20,11 +20,11 @@
 #[macro_use]
 pub mod net;
 
+pub mod admin;
 pub mod alloc;
 pub mod cli;
 pub mod codec;
 pub mod collections;
-pub mod components;
 pub mod config;
 pub mod filters;
 pub mod metrics;

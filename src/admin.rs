@@ -15,6 +15,7 @@
  */
 
 mod health;
+use health::Health;
 
 use std::sync::{
     Arc,
@@ -31,8 +32,6 @@ use bytes::Bytes;
 use http_body_util::Full;
 type Body = Full<Bytes>;
 
-use health::Health;
-
 pub const PORT: u16 = 8000;
 pub const PORT_LABEL: &str = "8000";
 
@@ -41,7 +40,7 @@ pub(crate) const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn serve(
     config: Arc<crate::Config>,
-    ready: Arc<AtomicBool>,
+    checks: quilkin_graceful::health::ChecksInit,
     shutdown: quilkin_graceful::RootToken,
     address: Option<std::net::SocketAddr>,
 ) -> std::thread::JoinHandle<()> {
@@ -49,10 +48,119 @@ pub fn serve(
     let health = Health::new(shutdown.clone());
     tracing::info!(address = %address, "Starting admin endpoint");
 
+    let ready_atomic = Arc::new(AtomicBool::default());
+    let ra = ready_atomic.clone();
+    let mut checks = checks.finished();
+
+    let spawner: quilkin_graceful::SubSpawner = shutdown.child().into();
+    let cancelled = spawner.token();
+    let health_atomic = health.healthy.clone();
+
+    spawner.spawn(async move {
+        {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+            let mut waiting = checks.registered.len();
+
+            loop {
+                tokio::select! {
+                    _ = cancelled.cancelled() => {
+                        tracing::warn!("Quilkin shutting down before being marked as ready");
+                        return;
+                    }
+                    _ = interval.tick() => {
+                        tracing::debug!(registered = ?checks.registered, "waiting for readiness");
+                    }
+                    ready = checks.rx.recv() => {
+                        let Some(ready) = ready else {
+                            tracing::error!(registered = ?checks.registered, "all health checks dropped before registering readiness, aborting health check");
+                            return;
+                        };
+
+                        let Some(svc) = checks.get(ready.0) else {
+                            // This should be impossible, so good to know about
+                            tracing::error!(unknown = ready.0, "an unknown task tried to mark itself ready");
+                            continue;
+                        };
+
+                        if ready.1 {
+                            if svc.1 {
+                                tracing::debug!(task = ready.0, "task marked as healthy again during readiness initialization");
+                            } else {
+                                waiting -= 1;
+                                svc.1 = true;
+                            }
+                        } else {
+                            tracing::error!(task = ready.0, reason = ?ready.2, "task marked as unhealthy while waiting on readiness");
+
+                            if svc.1 {
+                                svc.1 = false;
+                                waiting += 1;
+                            }
+                        }
+
+                        if waiting == 0 {
+                            tracing::info!("all tasks marked as ready, transitioning to ready");
+                            ra.store(true, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        {
+            // Now that all all the registered tasks are marked as ready, transition to healthy and monitor if that changes
+            let set = |state: bool| {
+                health_atomic.store(state, Ordering::Relaxed);
+            };
+
+            let mut unhealthy = 0;
+
+            loop {
+                tokio::select! {
+                    _ = cancelled.cancelled() => {
+                        tracing::info!("shutdown initiated, shutting down health monitoring");
+
+                        break;
+                    }
+                    health = checks.rx.recv() => {
+                        let Some(health) = health else {
+                            tracing::warn!("all tasks shutdown, shutting down health monitoring");
+                            break;
+                        };
+
+                        let Some(svc) = checks.get(health.0) else {
+                            // This should be impossible, so good to know about
+                            tracing::error!(unknown = health.0, "an unknown task tried to mark its health state");
+                            continue;
+                        };
+
+                        match (svc.1, health.1) {
+                            (true, false) => {
+                                unhealthy += 1;
+                                tracing::debug!(task = svc.0, reason = ?health.2, "task transitioned to unhealthy");
+                            }
+                            (false, true) => {
+                                unhealthy -= 1;
+                                tracing::debug!(task = svc.0, reason = ?health.2, "task transitioned to healthy");
+                            }
+                            (_, _) => continue,
+                        }
+
+                        svc.1 = health.1;
+                        set(unhealthy == 0);
+                    }
+                }
+            }
+
+            set(false);
+        }
+    });
+
     let router = Admin {
         config,
         health,
-        ready,
+        ready: ready_atomic,
     }
     .router();
 
@@ -64,7 +172,6 @@ pub fn serve(
                 .block_on(async move {
                     let listener = quilkin_system::net::tcp::default_nonblocking_listener(address)?;
                     let tokio_listener = tokio::net::TcpListener::from_std(listener)?;
-                    let spawner = shutdown.child().into();
 
                     quilkin_system::net::http::serve(
                         "admin",
