@@ -17,6 +17,8 @@
 pub use aya;
 pub use xdp::{self, nic::NicIndex};
 
+mod obj;
+
 // object unfortunately has alignment requirements, so we need to make sure
 // the raw bytes are aligned for a 64-bit ELF (8 bytes)
 

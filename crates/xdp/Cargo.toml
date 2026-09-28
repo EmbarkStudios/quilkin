@@ -12,8 +12,10 @@ thiserror.workspace = true
 xdp.workspace = true
 # Used to load and attach eBPF programs
 aya = "0.13.1"
-# Allows forwarding trace messages from eBPF programs to a global logger
-aya-log = "0.2.1"
+# eBPF program loading and manipulation
+object = { version = "0.39", default-features = false, features = ["elf", "read_core"] }
+# Raw syscall helper
+sc = "0.2"
 libc.workspace = true
 
 [lints]
