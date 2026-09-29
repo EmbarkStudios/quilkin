@@ -217,7 +217,7 @@ async-trait = "0.1.89"
 axum = { version = "0.8.8", features = ["macros"] }
 base64 = "0.23.1"
 bytes = { version = "1.11.1", features = ["serde"] }
-compact_str = "0.7"
+compact_str = "0.10"
 corrosion = { path = "crates/corrosion", version = "0.1.0", package = "quilkin-corrosion" }
 data-encoding = "2.10"
 ethtool = { version = "0.2.9", default-features = false, features = ["tokio_socket"] }
