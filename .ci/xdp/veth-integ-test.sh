@@ -58,13 +58,21 @@ done
 # Print kernel version just for confirmation in CI
 echo "::notice file=$source,line=$LINENO::Kernel $(uname -r)"
 
+QID=
+
 cleanup() {
     echo "Cleaning up"
     ip netns del cs || true
     ip netns del proxy || true
 
     pkill fortio || true
-    pkill quilkin || true
+
+    if [ -z $QID ]; then
+        pkill quilkin || true
+    else
+        kill $QID
+        pidwait -p $QID
+    fi
 }
 
 trap cleanup EXIT
@@ -124,7 +132,10 @@ ip netns exec proxy ./target/$TARGET/quilkin \
     --service.udp --service.qcmp --provider.static.endpoints=$OUTSIDE_IP:8078 \
     --service.udp.backend kernel --service.udp.xdp.network-interface veth-proxy \
     --service.udp.xdp.schedule-policy $SCHEDULE_POLICY ${PIN_CORES:+--service.udp.xdp.pin-to-core} \
-    --service.udp.xdp.packets-per-queue $ALLOCATED_PACKETS&
+    --service.udp.xdp.packets-per-queue $ALLOCATED_PACKETS \
+    --termination-timeout 1s&
+
+QID=$!
 
 echo "::notice file=$source,line=$LINENO::Launching client"
 ip netns exec cs fortio load -gomaxprocs $(getconf _NPROCESSORS_ONLN) -qps 0 -n $TX_COUNT udp://$PROXY_IP:7777 2> ./target/logs.txt

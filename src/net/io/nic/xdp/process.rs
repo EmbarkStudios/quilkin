@@ -543,6 +543,16 @@ impl SessionState {
         self.sessions.remove(server_addr);
         self.get_or_create(client_addr, server_addr, asn, cluster)
     }
+
+    #[inline]
+    pub(super) fn len(&self) -> usize {
+        self.sessions.len()
+    }
+
+    #[inline]
+    pub(super) fn is_empty(&self) -> bool {
+        self.sessions.is_empty()
+    }
 }
 
 /// The minimum ethernet frame size, the 4 byte frame check sequence is stripped

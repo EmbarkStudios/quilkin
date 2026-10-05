@@ -13,24 +13,34 @@ pub fn spawn_handler() -> ShutdownHandler {
     let mut sig_term_fut =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
 
-    let shutdown_tx = tx.clone();
-    tokio::spawn(async move {
-        #[cfg(target_os = "linux")]
-        let sig_term = sig_term_fut.recv();
-        #[cfg(not(target_os = "linux"))]
-        let sig_term = std::future::pending();
+    let token = tx.clone();
 
-        let signal = tokio::select! {
-            _ = tokio::signal::ctrl_c() => "SIGINT",
-            _ = sig_term => "SIGTERM",
-        };
+    std::thread::Builder::new()
+        .name("signal-handler".into())
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .build_local(Default::default())
+                .unwrap()
+                .block_on(async move {
+                    #[cfg(target_os = "linux")]
+                    let sig_term = sig_term_fut.recv();
+                    #[cfg(not(target_os = "linux"))]
+                    let sig_term = std::future::pending();
 
-        crate::metrics::shutdown_initiated().set(true as _);
-        tracing::info!(%signal, "shutting down from signal");
-        // Don't unwrap in order to ensure that we execute
-        // any subsequent shutdown tasks.
-        let _ = shutdown_tx.send(());
-    });
+                    let signal = tokio::select! {
+                        _ = tokio::signal::ctrl_c() => "SIGINT",
+                        _ = sig_term => "SIGTERM",
+                    };
+
+                    crate::metrics::shutdown_initiated().set(true as _);
+                    tracing::info!(%signal, "shutting down from signal");
+
+                    // Cancel the token, initiating the graceful shutdown process
+                    let _ = token.send(());
+                });
+        })
+        .expect("failed to spawn signal handler");
 
     ShutdownHandler::new(tx, rx)
 }

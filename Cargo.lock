@@ -143,7 +143,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -154,7 +154,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -826,7 +826,7 @@ dependencies = [
 [[package]]
 name = "consul-client"
 version = "0.2.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ba3d3376c774ea6655b13c2b055a2c16b63334e6"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
 dependencies = [
  "camino",
  "http",
@@ -885,7 +885,7 @@ checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
 [[package]]
 name = "corro-api-types"
 version = "0.2.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ba3d3376c774ea6655b13c2b055a2c16b63334e6"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
 dependencies = [
  "camino",
  "compact_str",
@@ -896,7 +896,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "speedy",
- "strum 0.27.2",
+ "strum",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -904,7 +904,7 @@ dependencies = [
 [[package]]
 name = "corro-base-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ba3d3376c774ea6655b13c2b055a2c16b63334e6"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
 dependencies = [
  "camino",
  "compact_str",
@@ -916,7 +916,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "speedy",
- "strum 0.27.2",
+ "strum",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -924,7 +924,7 @@ dependencies = [
 [[package]]
 name = "corro-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ba3d3376c774ea6655b13c2b055a2c16b63334e6"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
 dependencies = [
  "antithesis_sdk",
  "arc-swap",
@@ -964,7 +964,7 @@ dependencies = [
  "sqlite-functions",
  "sqlite-pool",
  "sqlite3-parser",
- "strum 0.27.2",
+ "strum",
  "tempfile",
  "thiserror 2.0.20",
  "thread_local",
@@ -980,7 +980,7 @@ dependencies = [
 [[package]]
 name = "corro-utils"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ba3d3376c774ea6655b13c2b055a2c16b63334e6"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
 dependencies = [
  "eyre",
  "tokio",
@@ -1513,7 +1513,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2469,7 +2469,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3265,7 +3265,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3867,7 +3867,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -4003,7 +4003,7 @@ dependencies = [
  "slab",
  "socket2",
  "stable-eyre",
- "strum 0.28.0",
+ "strum",
  "strum_macros",
  "sys-info",
  "tempfile",
@@ -4237,7 +4237,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4643,7 +4643,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4702,7 +4702,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4831,7 +4831,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5072,13 +5072,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
 name = "spawn"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ba3d3376c774ea6655b13c2b055a2c16b63334e6"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
 dependencies = [
  "futures",
  "parking_lot",
@@ -5131,7 +5131,7 @@ dependencies = [
 [[package]]
 name = "sqlite-functions"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ba3d3376c774ea6655b13c2b055a2c16b63334e6"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -5140,7 +5140,7 @@ dependencies = [
 [[package]]
 name = "sqlite-pool"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ba3d3376c774ea6655b13c2b055a2c16b63334e6"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
 dependencies = [
  "arc-swap",
  "deadpool",
@@ -5213,24 +5213,18 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "strum"
-version = "0.27.2"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
 dependencies = [
  "strum_macros",
 ]
 
 [[package]]
-name = "strum"
+name = "strum_macros"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
-
-[[package]]
-name = "strum_macros"
-version = "0.27.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+checksum = "ab85eea0270ee17587ed4156089e10b9e6880ee688791d45a905f5b1ca36f664"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -5373,7 +5367,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5816,7 +5810,7 @@ dependencies = [
 [[package]]
 name = "tripwire"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#ba3d3376c774ea6655b13c2b055a2c16b63334e6"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
 dependencies = [
  "futures",
  "futures-util",
@@ -6180,7 +6174,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6479,9 +6473,9 @@ dependencies = [
 
 [[package]]
 name = "yoke-derive"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33811428bee40dbceb6d545e95754741d17a6aef9a4849f0fd62e2ba4f412a78"
+checksum = "ec8ebde2db3681e8c9980cc27822030e68752690ddfa9473e739aeb4dbde6d71"
 dependencies = [
  "proc-macro2",
  "quote",
