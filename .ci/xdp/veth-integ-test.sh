@@ -71,7 +71,7 @@ cleanup() {
         pkill quilkin || true
     else
         kill $QID
-        pidwait -p $QID
+        wait $QID
     fi
 }
 
