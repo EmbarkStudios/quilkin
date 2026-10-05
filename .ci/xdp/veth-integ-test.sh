@@ -70,7 +70,7 @@ cleanup() {
     if [ -z $QID ]; then
         pkill quilkin || true
     else
-        pkill -p $QID
+        kill $QID
         pidwait -p $QID
     fi
 }
