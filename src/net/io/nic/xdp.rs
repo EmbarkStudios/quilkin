@@ -434,39 +434,68 @@ pub struct XdpLoop {
     ebpf_prog: quilkin_xdp::EbpfProgram,
     xdp_link: quilkin_xdp::aya::programs::xdp::XdpLinkId,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
+    terminate: Arc<std::sync::atomic::AtomicBool>,
+    sessions: Arc<process::SessionState>,
 }
 
 impl XdpLoop {
     /// Detaches the eBPF program from the attacked NIC and cancels all I/O
     /// threads, waiting for them to exit
-    pub fn shutdown(mut self, wait: bool) {
-        if let Err(error) = self.ebpf_prog.detach(self.xdp_link) {
-            tracing::error!(%error, "failed to detach eBPF program");
-        }
-
+    pub async fn shutdown(mut self, termination_timout: Option<std::time::Duration>) {
         self.shutdown
             .store(true, std::sync::atomic::Ordering::Relaxed);
 
-        if !wait {
-            return;
-        }
-
-        tracing::info!("waiting on XDP workers");
+        tracing::info!(sessions = %self.sessions.len(), "waiting for active XDP sessions to expire");
         let start = std::time::Instant::now();
 
-        for jh in self.threads {
-            if let Err(error) = jh.join() {
-                if let Some(error) = error.downcast_ref::<&'static str>() {
-                    tracing::error!(error, "XDP I/O thread encountered error");
-                } else if let Some(error) = error.downcast_ref::<String>() {
-                    tracing::error!(error, "XDP I/O thread encountered error");
-                } else {
-                    tracing::error!(?error, "XDP I/O thread encountered error");
-                };
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+
+        loop {
+            interval.tick().await;
+            let elapsed = start.elapsed();
+            if let Some(tt) = termination_timout
+                && elapsed > tt
+            {
+                tracing::info!(
+                    ?elapsed,
+                    "termination timeout was reached before all sessions expired"
+                );
+                break;
+            }
+
+            if self.sessions.is_empty() {
+                tracing::info!(shutdown_duration = ?elapsed, "all sessions expired");
+                break;
             }
         }
 
-        tracing::info!(elapsed = ?start.elapsed(), "finished shutting down XDP workers");
+        self.terminate
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+
+        tokio::task::block_in_place(|| {
+            tracing::info!("waiting on XDP workers");
+            let start = std::time::Instant::now();
+
+            for jh in self.threads {
+                if let Err(error) = jh.join() {
+                    if let Some(error) = error.downcast_ref::<&'static str>() {
+                        tracing::error!(error, "XDP I/O thread encountered error");
+                    } else if let Some(error) = error.downcast_ref::<String>() {
+                        tracing::error!(error, "XDP I/O thread encountered error");
+                    } else {
+                        tracing::error!(?error, "XDP I/O thread encountered error");
+                    };
+                }
+            }
+
+            tracing::info!(elapsed = ?start.elapsed(), "finished shutting down XDP workers");
+        });
+
+        if let Err(error) = self.ebpf_prog.detach(self.xdp_link) {
+            tracing::error!(%error, "failed to detach eBPF program");
+        } else {
+            tracing::info!("detached eBPF program");
+        }
     }
 }
 
@@ -529,6 +558,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
     let ipv6 = workers.ipv6;
     let session_state = Arc::new(process::SessionState::default());
     let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let terminate = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let queue_count = workers.workers.len();
     let mut threads = Vec::with_capacity(queue_count);
@@ -536,6 +566,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
         let cfg = config.clone();
         let ss = session_state.clone();
         let shutdown = shutdown.clone();
+        let terminate = terminate.clone();
 
         let jh = spawn_worker(i, workers.worker_thread_scheduling, move || {
             // Enqueue buffers to the fill ring to ensure that we don't miss any packets
@@ -559,6 +590,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
                 ipv4,
                 ipv6,
                 shutdown.clone(),
+                terminate.clone(),
             );
         })
         .map_err(XdpSpawnError::Thread)?;
@@ -573,6 +605,8 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
         ebpf_prog,
         xdp_link,
         shutdown,
+        terminate,
+        sessions: session_state,
     })
 }
 
@@ -595,6 +629,7 @@ fn io_loop(
     local_ipv4: std::net::Ipv4Addr,
     local_ipv6: std::net::Ipv6Addr,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
+    terminate: Arc<std::sync::atomic::AtomicBool>,
 ) {
     let quilkin_xdp::XdpWorker {
         mut umem,
@@ -633,13 +668,13 @@ fn io_loop(
     // between frames and the Umem, the frames cannot outlive the Umem which is
     // the owner of the actual memory map
     unsafe {
-        while !shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+        let mut inner = || {
             // Wait for packets to be received, note that
             // [poll](https://www.man7.org/linux/man-pages/man2/poll.2.html) also acts
             // as a [cancellation point](https://www.man7.org/linux/man-pages/man7/pthreads.7.html),
             // so shutdown will cause the thread to exit here
             let Ok(true) = socket.poll_read(POLL_TIMEOUT) else {
-                continue;
+                return;
             };
 
             let recvd = rx.recv(&umem, &mut rx_slab);
@@ -698,6 +733,16 @@ fn io_loop(
             let new = umem.outstanding() as i64;
             crate::metrics::allocated_xdp_packets().add(new - outstanding);
             outstanding = new;
+        };
+
+        while !shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+            inner();
+        }
+
+        // Shutdown has been signalled, so we still run the loop to process active sessions, but now wait on the signal
+        // of termination instead
+        while !terminate.load(std::sync::atomic::Ordering::Relaxed) {
+            inner();
         }
     }
 }

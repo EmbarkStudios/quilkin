@@ -824,8 +824,8 @@ impl Service {
         {
             let explicit_kernel = matches!(self.udp_backend, crate::net::io::UdpBackend::Kernel);
             if explicit_kernel || matches!(resolved_backend, crate::net::io::UdpBackend::Kernel) {
-                match self.spawn_xdp(config.clone()) {
-                    Ok(xdp) => {
+                match self.spawn_xdp(config.clone(), shutdown) {
+                    Ok(()) => {
                         // XDP handles QCMP in-kernel; disable the user-space QCMP service.
                         self.qcmp_enabled = false;
 
@@ -837,18 +837,6 @@ impl Service {
 
                         ports.qcmp = Some(self.qcmp_port);
                         ports.udp = Some(self.udp_port);
-
-                        let finished = shutdown.push("xdp");
-                        let mut srx = shutdown.shutdown_rx();
-                        tokio::spawn(async move {
-                            drop(srx.changed().await);
-
-                            tokio::task::block_in_place(|| {
-                                xdp();
-                            });
-
-                            drop(finished.send(Ok(())));
-                        });
 
                         return Ok(());
                     }
@@ -1021,7 +1009,7 @@ impl Service {
     }
 
     #[cfg(target_os = "linux")]
-    fn spawn_xdp(&self, config: Arc<Config>) -> eyre::Result<Finalizer> {
+    fn spawn_xdp(&self, config: Arc<Config>, shutdown: &mut ShutdownHandler) -> eyre::Result<()> {
         use crate::net::io::nic::xdp;
         use eyre::{Context as _, ContextCompat as _};
 
@@ -1061,9 +1049,18 @@ impl Service {
         .context("failed to setup XDP")?;
 
         let io_loop = xdp::spawn(workers, config).context("failed to spawn XDP I/O loop")?;
-        Ok(Box::new(move || {
-            io_loop.shutdown(true);
-        }))
+        let tt = self.termination_timeout.map(|tt| *tt);
+
+        let finished = shutdown.push("xdp");
+        let mut srx = shutdown.shutdown_rx();
+
+        tokio::spawn(async move {
+            drop(srx.changed().await);
+            io_loop.shutdown(tt).await;
+            drop(finished.send(Ok(())));
+        });
+
+        Ok(())
     }
 
     /// Spawn corrosion server
