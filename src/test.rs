@@ -308,7 +308,7 @@ impl TestHelper {
 
     /// A helper to spawn an async task, by default we lint against `tokio::spawn` as we want all tasks in quilkin to
     /// be gracefully shutdown, but in tests we don't care about that necessarily
-    pub fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
+    pub fn spawn<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
     where
         F: std::future::Future + Send + 'static,
         F::Output: Send + 'static,

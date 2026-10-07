@@ -177,6 +177,35 @@ impl TaskSpawner {
         self.token.child().into()
     }
 
+    /// Cancels the root token and waits for all tasks to finish before returning, panicing if errors occur
+    ///
+    /// Meant for testing only.
+    #[inline]
+    pub async fn abort_and_wait(self) {
+        self.token.cancel();
+
+        // This should be essentially infinite from a test perspective
+        let results = self
+            .wait_cancellation_or_error(
+                std::time::Duration::from_hours(1),
+                std::time::Duration::from_hours(1),
+            )
+            .await;
+        let count = results.iter().filter(|(_, res)| res.is_err()).count();
+        if count > 0 {
+            let mut errors = format!("{count} tasks encountered errors\n\n");
+
+            for (task, res) in results {
+                let Err(res) = res else {
+                    continue;
+                };
+
+                use std::fmt::Write;
+                writeln!(&mut errors, "- {task}: {res:#}").unwrap();
+            }
+        }
+    }
+
     /// Waits for cancellation or one of the child tasks to finish, upon which it waits for the rest of the child tasks
     /// to finish
     pub async fn wait_cancellation_or_error(

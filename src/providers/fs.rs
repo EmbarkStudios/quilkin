@@ -115,7 +115,13 @@ mod tests {
         tokio::fs::write(&file_path, serde_yaml::to_string(&source).unwrap())
             .await
             .unwrap();
-        let _handle = tokio::spawn(watch(dest.clone(), <_>::default(), file_path.clone(), None));
+
+        let _handle = tokio::spawn(watch(
+            dest.clone(),
+            quilkin_graceful::health::HealthToken::testing(),
+            file_path.clone(),
+            None,
+        ));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         source.dyn_cfg.clusters().unwrap().modify(|clusters| {

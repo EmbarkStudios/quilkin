@@ -79,6 +79,15 @@ impl HealthToken {
     pub fn mark_healthiness(&self, healthy: bool, reason: Option<String>) {
         drop(self.tx.send((self.name, healthy, reason)));
     }
+
+    /// Creates a non-functioning health token
+    #[inline]
+    pub fn testing() -> Self {
+        Self {
+            name: "testing-token",
+            tx: mpsc::unbounded_channel().0,
+        }
+    }
 }
 
 pub struct Checks {

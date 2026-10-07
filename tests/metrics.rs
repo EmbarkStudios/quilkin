@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use quilkin::{
+    Config,
     net::endpoint::Endpoint,
     test::{AddressType, TestHelper},
 };
@@ -26,10 +27,11 @@ async fn run_server(
     admin: SocketAddr,
 ) -> (quilkin_graceful::TaskSpawner, u16) {
     let mut spawner = quilkin_graceful::TaskSpawner::new();
+    let checks = quilkin_graceful::health::ChecksInit::new();
 
-    crate::components::admin::serve(config.clone(), Default::default(), spawner.root(), address);
+    quilkin::admin::serve(config.clone(), checks, spawner.root(), Some(admin));
 
-    let ports = crate::Service::default()
+    let ports = quilkin::Service::default()
         .udp()
         .udp_port(0)
         .qcmp()
@@ -48,7 +50,7 @@ async fn run_server(
 async fn run_client(config: Arc<Config>) -> (quilkin_graceful::TaskSpawner, u16) {
     let mut spawner = quilkin_graceful::TaskSpawner::new();
 
-    let ports = crate::Service::default()
+    let ports = quilkin::Service::default()
         .udp()
         .udp_port(0)
         .qcmp()
@@ -166,5 +168,5 @@ async fn metrics_server() {
     server_cancel.cancel();
     client_cancel.cancel();
 
-    jh.join().await.unwrap().unwrap();
+    jh.await.unwrap();
 }

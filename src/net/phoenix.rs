@@ -131,7 +131,7 @@ pub fn spawn(
                     let handler_node_latencies = node_latencies_response.clone();
                     let handler_network_coordinates = network_coordinates_response.clone();
 
-                    let http_task_shutdown = shutdown.clone();
+                    let shutdown = ss.token().clone();
                     let http_task: tokio::task::JoinHandle<std::io::Result<()>> = {
                         tokio::spawn(async move {
                             let router =
@@ -141,7 +141,7 @@ pub fn spawn(
                                 "phoenix",
                                 tokio_listener,
                                 router,
-                                http_task_shutdown.into(),
+                                ss,
                                 SHUTDOWN_TIMEOUT,
                             )
                             .await
@@ -1234,7 +1234,6 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(target_os = "macos", ignore)]
     async fn http_server() {
-        let token = quilkin_graceful::root();
         // Bind the TCP listener first to claim a genuinely free port: the UDP
         // socket below sets SO_REUSEPORT, which can make the kernel hand out
         // an ephemeral port already shared by another test's QCMP socket.
@@ -1246,7 +1245,10 @@ mod tests {
         let qcmp_port = listener.local_addr().unwrap().port();
         let socket = raw_socket_with_reuse(qcmp_port).unwrap();
         let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), token.child()).unwrap();
+
+        let mut ts = quilkin_graceful::TaskSpawner::new();
+
+        crate::codec::qcmp::spawn(socket, pc.subscribe(), &mut ts).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
@@ -1270,7 +1272,11 @@ mod tests {
             .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
             .build();
 
-        let end = super::spawn(listener, datacenters, phoenix, token.child()).unwrap();
+        let end = super::spawn(listener, datacenters, phoenix, ts.sub_spawner()).unwrap();
+        ts.push_sync("phoenix", || {
+            end();
+            Ok(())
+        });
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let client =
@@ -1309,14 +1315,12 @@ mod tests {
             );
         }
 
-        token.cancel();
-        end();
+        ts.abort_and_wait().await;
     }
 
     #[tokio::test]
     #[cfg_attr(target_os = "macos", ignore)]
     async fn get_network_coordinates() {
-        let token = quilkin_graceful::root();
         // Bind the TCP listener first to claim a genuinely free port: the UDP
         // socket below sets SO_REUSEPORT, which can make the kernel hand out
         // an ephemeral port already shared by another test's QCMP socket.
@@ -1328,7 +1332,9 @@ mod tests {
         let qcmp_port = listener.local_addr().unwrap().port();
         let socket = raw_socket_with_reuse(qcmp_port).unwrap();
         let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), token.child()).unwrap();
+        let mut ts = quilkin_graceful::TaskSpawner::new();
+
+        crate::codec::qcmp::spawn(socket, pc.subscribe(), &mut ts).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
@@ -1352,7 +1358,12 @@ mod tests {
             .interval_range(Duration::from_millis(10)..Duration::from_millis(15))
             .build();
 
-        let end = super::spawn(listener, datacenters, phoenix, token.child()).unwrap();
+        let end = super::spawn(listener, datacenters, phoenix, ts.sub_spawner()).unwrap();
+        ts.push_sync("phoenix", || {
+            end();
+            Ok(())
+        });
+
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let client =
@@ -1382,7 +1393,6 @@ mod tests {
             assert!(map.contains_key(&icao_code));
         }
 
-        token.cancel();
-        end();
+        ts.abort_and_wait().await;
     }
 }

@@ -272,6 +272,7 @@ tokio = { version = "1.49.0", features = [
     "test-util",
     "parking_lot",
     "tracing",
+    "taskdump",
 ] }
 tokio-stream = { version = "0.1.18", features = ["net", "sync"] }
 tokio-util = { version = "0.7.18", default-features = false, features = ["rt"] }

@@ -256,10 +256,7 @@ impl QcmpTransceiver {
 
             loop {
                 tokio::select! {
-                    _ = token.cancelled() => {
-                        tracing::debug!("task cancelled, stopping receiving on socket");
-                        return;
-                    }
+                    biased;
                     result = socket.recv_from(&mut recv) => {
                         match result {
                             Ok((size, addr)) => {
@@ -284,6 +281,10 @@ impl QcmpTransceiver {
                             }
                             Err(error) => tracing::error!(?error, "recv error"),
                         }
+                    }
+                    _ = token.cancelled() => {
+                        tracing::debug!("task cancelled, stopping recv_from on socket");
+                        return;
                     }
                 }
             }
@@ -399,36 +400,13 @@ pub fn spawn(
     spawner: &mut quilkin_graceful::TaskSpawner,
 ) -> crate::Result<()> {
     let token = spawner.child();
-
-    let qcmp_thread = std::thread::Builder::new()
-        .name("qcmp".into())
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .thread_name("qcmp-worker")
-                .build()
-                .expect("couldn't create tokio runtime in thread");
-
-            let res = runtime.block_on(async move {
-                use tracing::{Instrument as _, instrument::WithSubscriber as _};
-                io_loop(socket, port_rx, token)
-                    .instrument(tracing::debug_span!("qcmp"))
-                    .with_current_subscriber()
-                    .await
-                    .wrap_err("qcmp task error")
-            });
-
-            if let Err(error) = &res {
-                tracing::error!(%error, "qcmp thread failed with an error");
-            }
-
-            res
-        })
-        .expect("failed to spawn qcmp thread");
-
-    spawner.push_sync("qcmp", move || match qcmp_thread.join() {
-        Ok(res) => res,
-        Err(_err) => Err(eyre::eyre!("failed to join QCMP thread")),
+    spawner.push_async("qcmp", async move {
+        use tracing::{Instrument as _, instrument::WithSubscriber as _};
+        io_loop(socket, port_rx, token)
+            .instrument(tracing::debug_span!("qcmp"))
+            .with_current_subscriber()
+            .await
+            .wrap_err("qcmp task error")
     });
 
     Ok(())
@@ -448,9 +426,9 @@ pub(crate) async fn io_loop(
 
     loop {
         let result = tokio::select! {
+            biased;
             result = socket.recv_from(&mut input_buf) => result,
             _ = token.cancelled() => {
-                metrics::qcmp::active(false);
                 break;
             }
             new_port = port_rx.recv() => {
@@ -558,6 +536,8 @@ pub(crate) async fn io_loop(
             }
         };
     }
+
+    metrics::qcmp::active(false);
 
     Ok(())
 }
@@ -981,30 +961,63 @@ mod tests {
         assert!(Protocol::parse(INPUT).unwrap().is_none());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     #[cfg_attr(target_os = "macos", ignore)]
+
     async fn qcmp_measurement() {
+        use tracing_subscriber::{Layer as _, layer::SubscriberExt as _};
+        let layer = tracing_subscriber::fmt::layer()
+            .with_test_writer()
+            .with_filter(tracing_subscriber::filter::LevelFilter::TRACE)
+            .with_filter(tracing_subscriber::EnvFilter::new(format!(
+                "tokio=trace,quilkin=debug"
+            )));
+        let sub = tracing_subscriber::Registry::default().with(layer);
+        let disp = tracing::dispatcher::Dispatch::new(sub);
+        // tests in the same binary share the process-wide dispatcher, so only the
+        // first one gets to install it
+        drop(tracing::dispatcher::set_global_default(disp));
+
         let socket = raw_socket_with_reuse(0).unwrap();
         let addr = socket.local_addr().unwrap().as_socket().unwrap();
 
         let pc = super::port_channel();
-        let token = quilkin_graceful::root();
-        let tt = token.child();
-        let jh = tokio::spawn(async move { io_loop(socket, pc.subscribe(), tt.into()).await });
+        let mut ts = quilkin_graceful::TaskSpawner::new();
+        spawn(socket, pc.subscribe(), &mut ts).unwrap();
 
         let delay = Duration::from_millis(50);
         let node = QcmpTransceiver::with_artificial_delay(delay).unwrap();
 
         // fire messages until we get one back, so we know the socket is ready.
-        let mut check = false;
-        for _ in 0..20 {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            if node.measure_distance(addr).await.is_ok() {
-                check = true;
-                break;
+        if tokio::time::timeout(Duration::from_secs(10), async {
+            let mut interval = tokio::time::interval(Duration::from_millis(50));
+            interval.tick().await;
+
+            loop {
+                interval.tick().await;
+                if node.measure_distance(addr).await.is_ok() {
+                    break;
+                }
             }
+        })
+        .await
+        .is_err()
+        {
+            for (i, task) in tokio::runtime::Handle::current()
+                .dump()
+                .await
+                .tasks()
+                .iter()
+                .enumerate()
+            {
+                let trace = task.trace();
+                println!("TASK {i}:");
+                println!("{trace}\n");
+            }
+
+            node.shutdown().await;
+            panic!("timed out on initial QCMP spawn");
         }
-        assert!(check, "timed out on initial qcmp spawn");
 
         for _ in 0..3 {
             let dm = node.measure_distance(addr).await.unwrap();
@@ -1017,11 +1030,10 @@ mod tests {
             );
         }
 
-        token.cancel();
-        tokio::time::timeout(std::time::Duration::from_millis(100), jh)
+        tokio::time::timeout(std::time::Duration::from_millis(100), ts.abort_and_wait())
             .await
-            .unwrap()
             .unwrap();
+        node.shutdown().await;
     }
 
     #[tokio::test]
