@@ -69,6 +69,75 @@ pub struct DBLimits {
     pub wal_autocheckpoint: Option<u32>,
 }
 
+/// Percentage of the volume the main database file may occupy.
+const DB_CAPACITY_PCT: u64 = 75;
+/// Percentage of the volume the WAL may retain after a checkpoint.
+const WAL_CAPACITY_PCT: u64 = 12;
+
+/// Caps for a volume of `capacity` bytes, as `(max_page_count, journal_size_limit)`.
+///
+/// The two together are held under 100% so the remainder stays free for recovery writes.
+/// `None` if the volume cannot fit even a single page under the database cap.
+fn derive_limits(capacity: u64, page_size: u64) -> Option<(u64, i64)> {
+    let page_size = page_size.max(1);
+    let max_page_count = capacity.checked_mul(DB_CAPACITY_PCT)? / 100 / page_size;
+    let journal_size_limit = capacity.checked_mul(WAL_CAPACITY_PCT)? / 100;
+    (max_page_count > 0).then_some((max_page_count, journal_size_limit as i64))
+}
+
+/// Total size in bytes of the filesystem holding `path`.
+#[cfg(unix)]
+fn volume_capacity(path: &crate::Path) -> Option<u64> {
+    let stat = rustix::fs::statvfs(path.as_str()).ok()?;
+    stat.f_blocks.checked_mul(stat.f_frsize)
+}
+
+#[cfg(not(unix))]
+fn volume_capacity(_path: &crate::Path) -> Option<u64> {
+    None
+}
+
+impl DBLimits {
+    /// Fills whichever size caps are unset from the capacity of the volume holding `db_path`.
+    ///
+    /// Left unset, `SQLite` grows until the filesystem is exhausted, and at that point
+    /// `wal_checkpoint`, `incremental_vacuum` and the row purge in [`recover_space`] all need
+    /// to write and so all fail: the database is wedged until an operator intervenes. Capping
+    /// the database and WAL below capacity turns that into `SQLITE_FULL` while free space
+    /// remains, which [`crate::persistent::mutator::Transactor::with_full_recovery`] can act on.
+    pub fn apply_volume_defaults(
+        &mut self,
+        conn: &rusqlite::Connection,
+        db_path: &crate::Path,
+    ) -> eyre::Result<()> {
+        if self.max_page_count.is_some() && self.journal_size_limit.is_some() {
+            return Ok(());
+        }
+
+        let Some(capacity) = volume_capacity(db_path) else {
+            tracing::warn!(%db_path, "volume capacity unavailable, database growth is unbounded");
+            return Ok(());
+        };
+
+        let page_size: i64 = conn.pragma_query_value(None, "page_size", |row| row.get(0))?;
+        let Some((max_page_count, journal_size_limit)) = derive_limits(capacity, page_size as u64)
+        else {
+            tracing::warn!(
+                capacity,
+                page_size,
+                "volume too small to derive size limits"
+            );
+            return Ok(());
+        };
+
+        self.max_page_count.get_or_insert(max_page_count);
+        self.journal_size_limit.get_or_insert(journal_size_limit);
+        tracing::info!(capacity, "derived size limits from volume capacity");
+
+        Ok(())
+    }
+}
+
 /// Returns `true` if `err` is `SQLITE_FULL`.
 pub fn is_disk_full(err: &rusqlite::Error) -> bool {
     matches!(
@@ -113,6 +182,14 @@ pub struct DBMaintenance {
     pub wal_threshold: u32,
     /// The maximum number of unused free pages that can exist (a page is 4KiB)
     pub max_free_pages: u64,
+    /// How long a deleted row's tombstone is kept before [`reap_tombstones`] collects it.
+    ///
+    /// `None` disables collection, which lets the clock tables grow without bound under
+    /// row churn. Must exceed the time a partitioned peer can take to converge, otherwise
+    /// that peer can resurrect a row whose tombstone has already been collected.
+    pub tombstone_retention: Option<Duration>,
+    /// Tombstones collected per table per tick, bounding how long the write lock is held.
+    pub tombstone_batch: usize,
     pub limits: DBLimits,
 }
 
@@ -123,6 +200,10 @@ impl Default for DBMaintenance {
             // 2 GiB
             wal_threshold: 2 * 1024,
             max_free_pages: 10000,
+            // orders of magnitude above gossip convergence, and short enough that
+            // churn cannot accumulate a meaningful amount of dead weight
+            tombstone_retention: Some(Duration::from_secs(60 * 60)),
+            tombstone_batch: 2000,
             limits: DBLimits::default(),
         }
     }
@@ -157,7 +238,7 @@ impl InitializedDb {
     pub async fn setup(
         db_path: &crate::Path,
         schema: &str,
-        maintenance: Option<DBMaintenance>,
+        mut maintenance: Option<DBMaintenance>,
     ) -> eyre::Result<Self> {
         let partial_schema = corro_types::schema::parse_sql(schema)?;
 
@@ -201,6 +282,10 @@ impl InitializedDb {
                 update_schema(&mut conn, old_schema, partial_schema)
             })?;
 
+            if let Some(dbm) = maintenance.as_mut() {
+                tokio::task::block_in_place(|| dbm.limits.apply_volume_defaults(&conn, db_path))?;
+            }
+
             let limits = maintenance.as_ref().map(|m| &m.limits);
             tokio::task::block_in_place(|| run_startup_checks(&conn, limits))?;
 
@@ -222,7 +307,8 @@ impl InitializedDb {
         };
 
         if let Some(dbm) = maintenance {
-            spawn_db_maintenance(db_path, pool.clone(), dbm);
+            let tables = schema.tables.keys().cloned().collect();
+            spawn_db_maintenance(db_path, pool.clone(), dbm, clock.clone(), tables);
         }
 
         use eyre::WrapErr;
@@ -470,7 +556,71 @@ async fn vacuum_db(pool: &SplitPool, lim: u64) -> eyre::Result<()> {
     result
 }
 
-fn spawn_db_maintenance(path: &crate::Path, pool: SplitPool, dbm: DBMaintenance) {
+/// Collects the `CRDT` bookkeeping left behind by deleted rows.
+///
+/// `cr-sqlite` keeps a sentinel row in `<table>__crsql_clock` for every row ever deleted,
+/// so that a delete can still win against a concurrent write from a peer that has yet to
+/// see it, and a matching entry in `<table>__crsql_pks`. Neither is ever removed: under
+/// row churn the base table stays flat while those two grow without bound, which is what
+/// eventually exhausts the volume. Once `retention` has passed every peer has long since
+/// converged and the tombstone is only taking up space.
+///
+/// Deletes at most `limit` tombstones, plus any primary keys orphaned by an earlier pass.
+/// Returns the `(tombstone, primary key)` row counts. The clock tables are internal to
+/// `cr-sqlite` and carry no triggers, so this does not itself produce a change to gossip.
+pub async fn reap_tombstones(
+    pool: &SplitPool,
+    table: &str,
+    retention: Duration,
+    clock: &crate::Clock,
+    limit: usize,
+) -> eyre::Result<(usize, usize)> {
+    let now = corro_types::broadcast::Timestamp::from(clock.0.new_timestamp()).to_ntp64();
+    let cutoff = corro_types::broadcast::Timestamp(now - uhlc::NTP64::from(retention));
+
+    let mut conn = pool.write_low().await?;
+
+    tokio::task::block_in_place(|| {
+        let tx = conn.immediate_transaction()?;
+
+        // col_name -1 marks the delete sentinel, and an even col_version means the row is
+        // currently deleted rather than resurrected by a later insert
+        let tombstones = tx
+            .prepare_cached(&format!(
+                "DELETE FROM {table}__crsql_clock WHERE key IN (
+                     SELECT key FROM {table}__crsql_clock
+                     WHERE col_name = -1 AND col_version % 2 = 0 AND ts < ?
+                     LIMIT ?
+                 )"
+            ))?
+            .execute(rusqlite::params![cutoff, limit])?;
+
+        // a key whose clock rows have all gone can never be referenced again
+        let pks = tx
+            .prepare_cached(&format!(
+                "DELETE FROM {table}__crsql_pks WHERE __crsql_key IN (
+                     SELECT __crsql_key FROM {table}__crsql_pks
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM {table}__crsql_clock WHERE key = __crsql_key
+                     )
+                     LIMIT ?
+                 )"
+            ))?
+            .execute(rusqlite::params![limit])?;
+
+        tx.commit()?;
+        Ok::<_, rusqlite::Error>((tombstones, pks))
+    })
+    .map_err(Into::into)
+}
+
+fn spawn_db_maintenance(
+    path: &crate::Path,
+    pool: SplitPool,
+    dbm: DBMaintenance,
+    clock: crate::Clock,
+    tables: Vec<String>,
+) {
     let wal_path = {
         let mut wp = path.to_path_buf();
         wp.set_extension(format!("{}-wal", path.extension().unwrap_or_default()));
@@ -501,6 +651,22 @@ fn spawn_db_maintenance(path: &crate::Path, pool: SplitPool, dbm: DBMaintenance)
                 tracing::error!(%error, "could not check freelist and vacuum");
             }
 
+            if let Some(retention) = dbm.tombstone_retention {
+                for table in &tables {
+                    match reap_tombstones(&pool, table, retention, &clock, dbm.tombstone_batch)
+                        .await
+                    {
+                        Ok((0, 0)) => {}
+                        Ok((tombstones, pks)) => {
+                            tracing::debug!(table, tombstones, pks, "collected tombstones");
+                        }
+                        Err(error) => {
+                            tracing::error!(%error, table, "could not collect tombstones");
+                        }
+                    }
+                }
+            }
+
             if let Err(error) =
                 wal_checkpoint_over_threshold(wal_path.as_path(), &pool, wal_threshold).await
             {
@@ -508,4 +674,51 @@ fn spawn_db_maintenance(path: &crate::Path, pool: SplitPool, dbm: DBMaintenance)
             }
         }
     });
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// The caps have to leave the volume with room to spare. `SQLITE_FULL` is only
+    /// recoverable while writes still land: `recover_space` checkpoints, vacuums and
+    /// purges rows, and every one of those needs to write.
+    #[test]
+    fn derived_limits_leave_recovery_headroom() {
+        const PAGE: u64 = 4096;
+
+        // 64 MiB is the volume the relays wedged on
+        for capacity in [64 << 20, 256 << 20, 1 << 30, 64u64 << 30] {
+            let (max_page_count, journal_size_limit) =
+                derive_limits(capacity, PAGE).expect("limits should be derivable");
+            let used = max_page_count * PAGE + journal_size_limit as u64;
+            let reserved = capacity.checked_sub(used).expect("caps exceed the volume");
+
+            assert!(
+                reserved >= capacity / 20,
+                "{capacity} byte volume left only {reserved} bytes for recovery"
+            );
+        }
+    }
+
+    /// An operator sizing the caps against their own volume has to win over the
+    /// derived ones, including when they set only one of the two.
+    #[test]
+    fn configured_limits_are_kept() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut limits = DBLimits {
+            max_page_count: Some(1234),
+            ..Default::default()
+        };
+
+        limits
+            .apply_volume_defaults(&conn, crate::Path::new("/"))
+            .unwrap();
+
+        assert_eq!(limits.max_page_count, Some(1234));
+        assert!(
+            limits.journal_size_limit.is_some(),
+            "the unset cap should still be derived"
+        );
+    }
 }

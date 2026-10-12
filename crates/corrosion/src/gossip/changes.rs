@@ -1,5 +1,3 @@
-mod throttle;
-
 use super::{ChangeAndSource, GossipMetrics};
 use crate::Clock;
 use corro_types::{
@@ -1351,12 +1349,14 @@ pub fn spawn_buffered_apply(
         let mut retry_interval = tokio::time::interval(Duration::from_secs(5 * 60));
 
         // map to throttle retries for failed versions that took too long to apply
-        let mut limit_retries = throttle::ThrottleMap::new(throttle_min, throttle_max);
+        let mut limit_retries = corro_utils::ThrottleMap::new(throttle_min, throttle_max);
 
-        let do_process =
-            async |partial_version: (ActorId, CrsqlDbVersion),
-                   limit_retries: &mut throttle::ThrottleMap| {
-                async {
+        let do_process = async |partial_version: (ActorId, CrsqlDbVersion),
+                                limit_retries: &mut corro_utils::ThrottleMap<(
+            ActorId,
+            CrsqlDbVersion,
+        )>| {
+            async {
                 if let Some(blocked_until) = limit_retries.is_throttled(&partial_version) {
                     let next_retry = blocked_until.duration_since(Instant::now());
                     tracing::debug!(
@@ -1403,7 +1403,7 @@ pub fn spawn_buffered_apply(
                     }
                 }
             }.instrument(tracing::debug_span!("background apply", actor_id = %partial_version.0, version = %partial_version.1)).await;
-            };
+        };
 
         retry_interval.tick().await;
 

@@ -34,7 +34,7 @@ struct PendingWrite {
 }
 
 fn is_disk_full_change_error(err: &ChangeError) -> bool {
-    matches!(err, ChangeError::Rusqlite { source, .. } if db::is_disk_full(source))
+    err.sqlite_error_code() == Some(rusqlite::ErrorCode::DiskFull)
 }
 
 fn rusqlite_err(source: rusqlite::Error, actor_id: ActorId) -> ChangeError {

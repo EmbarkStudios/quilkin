@@ -212,6 +212,18 @@ pub struct Service {
     )]
     corrosion_journal_size_limit: Option<u64>,
 
+    /// How long, in seconds, a deleted server's `CRDT` tombstone is kept before it is
+    /// collected. `0` disables collection, which lets the database grow without bound
+    /// under server churn.
+    ///
+    /// Must exceed the time a partitioned relay can take to rejoin and converge, or that
+    /// relay can resurrect a server deleted while it was away. If not specified, defaults to 1h.
+    #[clap(
+        long = "service.corrosion.tombstone-retention",
+        env = "QUILKIN_SERVICE_CORROSION_TOMBSTONE_RETENTION"
+    )]
+    corrosion_tombstone_retention: Option<u64>,
+
     /// The port the corrosion gossip service listens on
     #[clap(
         long = "service.corrosion.gossip-port",
@@ -357,6 +369,7 @@ impl Default for Service {
             corrosion_server_reap: None,
             corrosion_max_page_count: None,
             corrosion_journal_size_limit: None,
+            corrosion_tombstone_retention: None,
             corrosion_gossip_enable: false,
             corrosion_gossip_port: 7902,
             corrosion_gossip_endpoints: Vec::new(),
@@ -1112,21 +1125,28 @@ impl Service {
         let sub_path = db_root.join("subs");
         let db_path = db_root.join("db.db");
 
+        let mut maintenance = corrosion::db::DBMaintenance {
+            limits: corrosion::db::DBLimits {
+                max_page_count: self.corrosion_max_page_count,
+                journal_size_limit: self.corrosion_journal_size_limit.map(|v| v as i64),
+                // Normal is safe for replicated corrosion nodes: the WAL guarantees
+                // crash recovery without per-commit fsync. Full fsync is only needed
+                // for standalone, non-replicated instances.
+                synchronous: Some(corrosion::db::WalSynchronous::Normal),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        if let Some(secs) = self.corrosion_tombstone_retention {
+            maintenance.tombstone_retention =
+                (secs > 0).then(|| std::time::Duration::from_secs(secs));
+        }
+
         let db = corrosion::db::InitializedDb::setup(
             &db_path,
             corrosion::schema::SCHEMA,
-            Some(corrosion::db::DBMaintenance {
-                limits: corrosion::db::DBLimits {
-                    max_page_count: self.corrosion_max_page_count,
-                    journal_size_limit: self.corrosion_journal_size_limit.map(|v| v as i64),
-                    // Normal is safe for replicated corrosion nodes: the WAL guarantees
-                    // crash recovery without per-commit fsync. Full fsync is only needed
-                    // for standalone, non-replicated instances.
-                    synchronous: Some(corrosion::db::WalSynchronous::Normal),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }),
+            Some(maintenance),
         )
         .await?;
 
@@ -1167,19 +1187,16 @@ impl Service {
                     fdb.upsert(&serialized);
                 }
 
+                let statement = statement.pop().unwrap();
                 let res = btx
-                    .make_broadcastable_changes(None, |tx| {
-                        corrosion::db::write::exec_single_interruptible(
-                            tx,
-                            &statement.pop().unwrap(),
-                        )
-                        .map_err(|source| {
-                            corrosion::types::agent::ChangeError::Rusqlite {
+                    .with_full_recovery(None, |tx| {
+                        corrosion::db::write::exec_single_interruptible(tx, &statement).map_err(
+                            |source| corrosion::types::agent::ChangeError::Rusqlite {
                                 source,
                                 actor_id: Some(btx.actor_id()),
                                 version: None,
-                            }
-                        })
+                            },
+                        )
                     })
                     .await;
 
@@ -1230,7 +1247,7 @@ impl Service {
                 statements: Vec<corrosion::api::Statement>,
             ) {
                 let res = btx
-                    .make_broadcastable_changes(None, |tx| {
+                    .with_full_recovery(None, |tx| {
                         let mut rows = 0;
                         for statement in &statements {
                             rows += corrosion::db::write::exec_single_interruptible(tx, statement)
@@ -1300,7 +1317,7 @@ impl Service {
                             let statement = corrosion::db::write::Server::<0>::reap_old(reap_time);
 
                             let res = btx
-                                .make_broadcastable_changes(None, |tx| {
+                                .with_full_recovery(None, |tx| {
                                     corrosion::db::write::exec_single_interruptible(tx, &statement)
                                     .map_err(|source| {
                                         corrosion::types::agent::ChangeError::Rusqlite {
