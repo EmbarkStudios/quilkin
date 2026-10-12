@@ -245,7 +245,7 @@ pub(super) async fn serve_sync(
         return Ok(0);
     };
 
-    let sync_state = generate_sync(&ctx).await;
+    let sync_state = sync::generate_sync(&ctx.bookie, ctx.actor_id).await;
 
     // first, send the current sync state
     writer
@@ -396,52 +396,6 @@ pub(super) async fn serve_sync(
     }
 
     recv_res
-}
-
-// Generates a `SyncMessage` to tell another node what versions we're missing
-async fn generate_sync(ctx: &GossipContext) -> sync::SyncStateV1 {
-    let mut state = sync::SyncStateV1 {
-        actor_id: ctx.actor_id,
-        ..Default::default()
-    };
-
-    let bookie = &ctx.bookie;
-    let guard = bookie.owned_guard();
-
-    for (&actor_id, booked) in bookie.iter(&guard) {
-        let bookedr = booked.read();
-
-        let last_version = match bookedr.last() {
-            None => continue,
-            Some(v) => v,
-        };
-
-        let need = bookedr.needed().iter().cloned().collect::<Vec<_>>();
-
-        if !need.is_empty() {
-            state.need.insert(actor_id, need);
-        }
-
-        {
-            for (v, partial) in bookedr
-                .partials
-                .iter()
-                // don't set partial if it is effectively complete
-                .filter(|(_, partial)| !partial.is_complete())
-            {
-                state.partial_need.entry(actor_id).or_default().insert(
-                    *v,
-                    partial
-                        .seqs
-                        .gaps(&(CrsqlSeq(0)..=partial.last_seq))
-                        .collect(),
-                );
-            }
-        }
-        state.heads.insert(actor_id, last_version);
-    }
-
-    state
 }
 
 async fn process_sync(
