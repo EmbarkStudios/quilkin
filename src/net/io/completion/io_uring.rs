@@ -474,6 +474,34 @@ impl<'uring> LoopCtx<'uring> {
 
 const BUFFER_RING: u16 = 0xfeed;
 
+/// Whether the io-uring backend is usable here. Some kernels and sandboxes
+/// allow ring creation but reject `register_buf_ring`, so probe that too.
+#[cfg(target_os = "linux")]
+pub fn is_available() -> bool {
+    fn probe() -> std::io::Result<()> {
+        let ring = io_uring::IoUring::<io_uring::squeue::Entry, io_uring::cqueue::Entry>::builder()
+            .build(2)?;
+        let rb = super::ring::BufferRing::new(2, 2048).map_err(std::io::Error::other)?;
+
+        // SAFETY: we ensure the buffer ring lives as long as the io ring itself
+        unsafe {
+            ring.submitter().register_buf_ring_with_flags(
+                rb.mmap.buf as u64,
+                rb.count,
+                BUFFER_RING,
+                0,
+            )?;
+        }
+        Ok(())
+    }
+
+    if let Err(error) = probe() {
+        tracing::debug!(%error, "io-uring unavailable, not selecting completion backend");
+        return false;
+    }
+    true
+}
+
 pub struct IoUringLoop {
     socket: crate::net::DualStackLocalSocket,
     recv_buffer_len: u16,
@@ -517,6 +545,16 @@ impl IoUringLoop {
         )
         .map_err(std::io::Error::other)?;
 
+        // SAFETY: we ensure the buffer ring lives as long as the io ring itself
+        unsafe {
+            ring.submitter().register_buf_ring_with_flags(
+                rb.mmap.buf as u64,
+                rb.count,
+                BUFFER_RING,
+                0,
+            )?;
+        }
+
         std::thread::Builder::new()
             .name(thread_name)
             .spawn(move || {
@@ -553,16 +591,6 @@ impl IoUringLoop {
                         // SAFETY: POD
                         ..unsafe { std::mem::zeroed() }
                     },
-                };
-
-                // SAFETY: we ensure the buffer ring lives as long as the io ring itself
-                unsafe {
-                    submitter.register_buf_ring_with_flags(
-                        rb.mmap.buf as u64,
-                        rb.count,
-                        BUFFER_RING,
-                        0 /* https://man.archlinux.org/man/extra/liburing/io_uring_register_buf_ring.3.en#IOU_PBUF_RING_INC is the only suppported flag */,
-                    ).expect("failed to register buffer ring");
                 };
 
                 loop_ctx.enqueue_recvmsg();
