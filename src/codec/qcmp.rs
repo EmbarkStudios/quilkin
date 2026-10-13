@@ -363,8 +363,9 @@ impl Measurement for QcmpTransceiver {
         &self,
         address: std::net::SocketAddr,
     ) -> eyre::Result<DistanceMeasure> {
+        // Well above the p99 round trip, but bounds a round containing a dead node.
         let (recv_timestamp, reply) = self
-            .ping(address, std::time::Duration::from_secs(5))
+            .ping(address, std::time::Duration::from_secs(2))
             .await?;
 
         reply
