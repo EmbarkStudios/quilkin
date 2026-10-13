@@ -163,17 +163,23 @@ impl AsnCache {
         entry.asn.as_ref()
     }
 
+    /// `lookup` returns `None` when there's no database to look `ip` up in, which unlike a miss
+    /// isn't cached. Otherwise a client seen before the database has loaded would stay unattributed
+    /// for as long as it stays active.
     #[inline]
     fn get_or_insert_with(
         &mut self,
         ip: IpAddr,
         now: i64,
-        lookup: impl FnOnce() -> Option<(IpNetEntry, maxmind_db::Asn)>,
+        lookup: impl FnOnce() -> Option<Option<(IpNetEntry, maxmind_db::Asn)>>,
     ) -> Option<&(IpNetEntry, maxmind_db::Asn)> {
-        let entry = self.map.entry(ip).or_insert_with(|| AsnCacheEntry {
-            asn: lookup(),
-            last_access: std::cell::Cell::new(now),
-        });
+        let entry = match self.map.entry(ip) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => entry.insert(AsnCacheEntry {
+                asn: lookup()?,
+                last_access: std::cell::Cell::new(now),
+            }),
+        };
         entry.last_access.set(now);
         entry.asn.as_ref()
     }
@@ -243,11 +249,14 @@ impl State {
             client_addr.ip(),
             self.last_receive.unix_nanos(),
             || {
+                // No database yet, try again on the client's next packet
+                maxmind_db::MaxmindDb::instance().as_ref()?;
+
                 let ipe = maxmind_db::MaxmindDb::lookup(client_addr.ip());
-                ipe.map(|ipe| {
+                Some(ipe.map(|ipe| {
                     let asn = maxmind_db::Asn::new(ipe.id);
                     (ipe, asn)
-                })
+                }))
             },
         );
 
@@ -1045,8 +1054,8 @@ mod test {
         let one = IpAddr::from([1, 1, 1, 1]);
         let two = IpAddr::from([2, 2, 2, 2]);
 
-        cache.get_or_insert_with(one, 0, || None);
-        cache.get_or_insert_with(two, 0, || None);
+        cache.get_or_insert_with(one, 0, || Some(None));
+        cache.get_or_insert_with(two, 0, || Some(None));
         cache.sweep(1);
         assert_eq!(cache.len(), 2);
 
@@ -1058,6 +1067,39 @@ mod test {
 
         cache.sweep(ASN_CACHE_TTL * 3);
         assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn asn_cache_retries_lookups_made_before_the_database_loaded() {
+        let mut cache = AsnCache::default();
+        let ip = IpAddr::from([1, 1, 1, 1]);
+        let entry = IpNetEntry {
+            id: 13335,
+            as_cc: "AU".into(),
+            as_name: String::new(),
+            prefix_entity: String::new(),
+            prefix_name: String::new(),
+            prefix: String::new(),
+        };
+
+        assert!(cache.get_or_insert_with(ip, 0, || None).is_none());
+        assert_eq!(cache.len(), 0);
+
+        let found = cache
+            .get_or_insert_with(ip, 1, || {
+                Some(Some((entry.clone(), maxmind_db::Asn::new(entry.id))))
+            })
+            .unwrap();
+        assert_eq!(found.0.as_cc, "AU");
+
+        // A miss with the database loaded is an answer, and is kept
+        let other = IpAddr::from([10, 0, 0, 1]);
+        cache.get_or_insert_with(other, 2, || Some(None));
+        assert!(
+            cache
+                .get_or_insert_with(other, 3, || panic!("looked up a cached miss"))
+                .is_none()
+        );
     }
 
     /// Builds an ipv4 UDP packet with `padding` trailing bytes
