@@ -484,7 +484,8 @@ impl<M: Measurement + 'static> Phoenix<M> {
             if Duration::from_nanos(avg_difference_ns as u64) < self.stability_threshold {
                 current_interval += self.adjustment_duration;
             } else {
-                current_interval -= self.adjustment_duration;
+                // The adjustment can exceed a short configured interval.
+                current_interval = current_interval.saturating_sub(self.adjustment_duration);
             }
 
             // Ensure current_interval remains within bounds
@@ -670,10 +671,17 @@ pub struct Builder<M> {
 
 impl<M: Measurement> Builder<M> {
     const DEFAULT_STABILITY_THRESHOLD: Duration = Duration::from_millis(50);
-    const DEFAULT_ADJUSTMENT_DURATION: Duration = Duration::from_millis(5);
+    /// The Phoenix paper (Section IV-E) uses 500s.
     const DEFAULT_INTERVAL_RANGE: Range<Duration> =
-        Duration::from_secs(60)..Duration::from_secs(10 * 60);
-    const DEFAULT_SUBSET: f64 = 0.5;
+        Duration::from_secs(5 * 60)..Duration::from_secs(10 * 60);
+    /// Rounds taken to cross [`Self::DEFAULT_INTERVAL_RANGE`].
+    const DEFAULT_ADJUSTMENT_ROUNDS: u64 = 30;
+    const DEFAULT_ADJUSTMENT_DURATION: Duration = Duration::from_secs(
+        (Self::DEFAULT_INTERVAL_RANGE.end.as_secs() - Self::DEFAULT_INTERVAL_RANGE.start.as_secs())
+            / Self::DEFAULT_ADJUSTMENT_ROUNDS,
+    );
+    /// Several addresses can share an ICAO code, of which only the lowest is kept.
+    const DEFAULT_SUBSET: f64 = 0.25;
 
     /// Constructs a new [`Phoenix`] builder.
     pub fn new(measurement: M) -> Self {
