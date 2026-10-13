@@ -34,7 +34,7 @@
 <a href=#34 id=34 data-nosnippet>34</a>}
 <a href=#35 id=35 data-nosnippet>35</a>
 <a href=#36 id=36 data-nosnippet>36</a><span class="kw">fn </span>is_disk_full_change_error(err: <span class="kw-2">&amp;</span>ChangeError) -&gt; bool {
-<a href=#37 id=37 data-nosnippet>37</a>    <span class="macro">matches!</span>(err, ChangeError::Rusqlite { source, .. } <span class="kw">if </span>db::is_disk_full(source))
+<a href=#37 id=37 data-nosnippet>37</a>    err.sqlite_error_code() == <span class="prelude-val">Some</span>(rusqlite::ErrorCode::DiskFull)
 <a href=#38 id=38 data-nosnippet>38</a>}
 <a href=#39 id=39 data-nosnippet>39</a>
 <a href=#40 id=40 data-nosnippet>40</a><span class="kw">fn </span>rusqlite_err(source: rusqlite::Error, actor_id: ActorId) -&gt; ChangeError {
