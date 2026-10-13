@@ -1,0 +1,55 @@
+# Quilkin's release surface is the container image and the CLI, env vars, config
+# schema and xDS protocol it exposes -- not the Rust API, which is unstable and
+# unpublished.
+#
+# Versions are calendar-based (`YYYY.M.PATCH`, month unpadded so they remain
+# valid semver) and computed by `.github/workflows/prepare-release.yml`, which
+# passes them to `PrepareRelease` via `--override-version`. Nothing here derives
+# a version; conventional commits only decide whether there is anything to
+# release and how the changelog is sectioned.
+
+[package]
+versioned_files = ["Cargo.toml", "Cargo.lock"]
+changelog = "CHANGELOG.md"
+
+[github]
+owner = "EmbarkStudios"
+repo = "quilkin"
+
+[[workflows]]
+name = "prepare-release"
+
+[[workflows.steps]]
+type = "Command"
+command = "git switch -C release"
+
+# Writes CHANGELOG.md and the version into Cargo.toml/Cargo.lock, and stages
+# them. Exits non-zero when no commit since the last release warrants one.
+[[workflows.steps]]
+type = "PrepareRelease"
+
+[[workflows.steps]]
+type = "Command"
+command = "git commit -m 'chore: release $version'"
+
+[[workflows.steps]]
+type = "Command"
+command = "git push --force origin release"
+
+# Overwrites the existing release PR's title and body rather than opening a
+# duplicate, so the PR tracks main until it is merged.
+[[workflows.steps]]
+type = "CreatePullRequest"
+base = "main"
+
+[workflows.steps.title]
+template = "chore: release $version"
+
+[workflows.steps.body]
+template = "Merging this PR tags `v$version` and publishes `ghcr.io/embarkstudios/quilkin:$version`.\n\n$changelog"
+
+[[workflows]]
+name = "release"
+
+[[workflows.steps]]
+type = "Release"

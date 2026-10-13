@@ -4,8 +4,16 @@ on:
   push:
     branches:
       - main
-    tags:
-      - '*'
+  workflow_call:
+    inputs:
+      version:
+        description: 'Release version to tag the image with. Dev tags are used when empty.'
+        type: string
+        default: ''
+      ref:
+        description: 'Commit to build. Defaults to the triggering ref.'
+        type: string
+        default: ''
   workflow_dispatch:
 
 permissions:
@@ -13,11 +21,11 @@ permissions:
   packages: write
 
 # Each arch occupies a runner for the length of an LTO build, so don't let
-# superseded pushes to main pile up. Tags get their own group and are never
+# superseded pushes to main pile up. Releases get their own group and are never
 # cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+  group: ${{ github.workflow }}-${{ inputs.version || github.ref }}
+  cancel-in-progress: ${{ inputs.version == '' }}
 
 env:
   REGISTRY_IMAGE: ghcr.io/embarkstudios/quilkin
@@ -50,6 +58,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: true
+          ref: ${{ inputs.ref }}
 
       - name: Gather information
         id: info
@@ -105,15 +114,6 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/checkout@v7
-        with:
-          submodules: false
-
-      - name: Gather information
-        id: info
-        run: |
-          echo "crate_version=$(yq '.workspace.package.version' Cargo.toml)" >> $GITHUB_OUTPUT
-
       - uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
@@ -129,8 +129,9 @@ jobs:
           images: |
             ${{ env.REGISTRY_IMAGE }}
           tags: |
-            type=ref,event=tag
-            type=sha,prefix=${{ steps.info.outputs.crate_version }}-
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.version != '' }}
+            type=sha,format=short,prefix=,enable=${{ inputs.version == '' }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests

@@ -4,8 +4,16 @@ on:
     branches:
       - main
       - pr/** # just for testing
-    tags:
-      - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
+  # Releases are tagged through the GitHub API, which does not trigger
+  # workflows, so release.yml calls this with the tag rather than relying on a
+  # `tags:` trigger.
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Tag to build the docs for. Defaults to the triggering ref.'
+        type: string
+        default: ''
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,17 +21,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
             submodules: true
-      - run: echo docs_dir=docs-build/${{ github.ref_name }} >> $GITHUB_ENV
+            ref: ${{ inputs.ref }}
+      - run: echo ref_name=${{ inputs.ref || github.ref_name }} >> $GITHUB_ENV
+      - run: echo docs_dir=docs-build/${{ env.ref_name }} >> $GITHUB_ENV
       - run: echo documentation directory=${{ env.docs_dir }}
       - uses: jdx/mise-action@v4
       - run: mise install rust mdbook cargo:mdbook-variables github:badboy/mdbook-mermaid
       - run: mkdir -p ${{ env.docs_dir }}
       - run: |
-          export GITHUB_REF_NAME=${{ github.ref_name }}
-          [[ $GITHUB_REF_NAME = v* ]] && export QUILKIN_RELEASE=1
-          export QUILKIN_VERSION=$(make --directory=./build version --no-print-directory)
-          echo GITHUB_REF_NAME=${GITHUB_REF_NAME}
-          echo QUILKIN_VERSION=${QUILKIN_VERSION}
+          export GITHUB_REF_NAME=${{ env.ref_name }}
           cd docs
           mise x -- mdbook build -d ../${{ env.docs_dir }}/book
       - run: mise x -- cargo doc --workspace --no-deps

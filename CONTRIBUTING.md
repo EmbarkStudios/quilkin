@@ -40,7 +40,6 @@ When designing the integration, you should ask questions like "Are there well kn
 To add a service you need to add it to the [`src/service.rs`](./src/service.rs), and then add the configuration to the `Service` struct. Providers are similarly located in [`src/providers`](./src/providers).
 
 ## Submitting code via Pull Requests
-See our [Quilkin Development and Building Guide](./build/README.md) for developing, testing and building Quilkin.
 
 - We follow the [GitHub Pull Request Model](https://help.github.com/articles/about-pull-requests/) for
   all contributions.
@@ -60,6 +59,35 @@ When submitting pull requests, make sure to do the following:
 - Ensure all Rust code passes the Rust [clippy](https://github.com/rust-lang/rust-clippy) linter.
 - Remove trailing whitespace. Many editors will do this automatically.
 - Ensure any new files have [a trailing newline](https://stackoverflow.com/questions/5813311/no-newline-at-end-of-file)
+
+## Commit messages and releases
+
+Releases are automated from [Conventional Commits]. Every merge to `main` opens or
+updates a release pull request holding the changelog entry and the next version;
+merging that PR tags the release and publishes the container image to
+`ghcr.io/embarkstudios/quilkin`.
+
+Versions are calendar-based — `YYYY.M.PATCH`, such as `2026.10.0`, where the patch
+counts releases within that month.
+
+**A breaking change means a break in Quilkin's operator-facing surface**: CLI flags
+and subcommands, environment variables, the config file schema, the xDS/protocol
+wire format, or metric names. It never refers to the Rust API, which is unstable,
+unpublished, and may change in any release. Mark one with a `!` or a
+`BREAKING CHANGE:` footer:
+
+```text
+feat(cli)!: rename `--to` to `--endpoints`
+
+BREAKING CHANGE: `--to` is now `--endpoints`, and `QUILKIN_TO` is now
+`QUILKIN_ENDPOINTS`.
+```
+
+Because versions are calendar-based, the version number carries no compatibility
+signal of its own — the changelog and release notes are the only place a break is
+communicated, so describe the migration in the footer.
+
+[Conventional Commits]: https://www.conventionalcommits.org/
 
 ## Continuous Integration
 Continuous integration is provided by [GitHub Actions](https://github.com/EmbarkStudios/quilkin/actions),

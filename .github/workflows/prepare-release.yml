@@ -1,0 +1,61 @@
+name: Prepare release
+
+on:
+  push:
+    branches:
+      - main
+  # The version is stamped into the release PR when the PR is written, so a PR
+  # left open across a month boundary would ship with last month's date. A daily
+  # re-run re-dates it.
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    # Merging the release PR puts a `chore: release` commit on main, which would
+    # otherwise immediately open another release PR.
+    if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore: release') }}"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: knope-dev/action@v2.1.2
+        with:
+          version: 0.23.0
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute version
+        id: version
+        run: |
+          # Month is unpadded: `2026.01.0` is not valid semver, so Cargo rejects
+          # it. Taking max+1 rather than counting tags keeps the next version off
+          # an existing tag if one is ever deleted.
+          ym="$(date -u +%Y).$(date -u +%-m)"
+          last=$(git tag -l "v${ym}.*" | sed -nE "s|^v${ym}\.([0-9]+)$|\1|p" | sort -n | tail -1)
+          echo "version=${ym}.$(( ${last:--1} + 1 ))" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the release PR
+        # `PrepareRelease` exits non-zero when nothing since the last release
+        # warrants one, which is the common case for `chore:`/`ci:`/`docs:`
+        # pushes. knope gives that no distinct exit code, so a genuine failure
+        # (bad token, malformed config) is swallowed here too and shows up as a
+        # release PR that silently stops updating -- check the step log if the PR
+        # ever looks stale.
+        continue-on-error: true
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          knope prepare-release --override-version '${{ steps.version.outputs.version }}' --verbose
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

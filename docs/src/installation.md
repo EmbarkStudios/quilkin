@@ -14,38 +14,31 @@ your local machine through [Cargo](#cargo).
   <dd>
 
 ```shell
-docker pull ghcr.io/embarkstudios/quilkin:<version>-<short_commit>
+# A release.
+docker pull ghcr.io/embarkstudios/quilkin:<version>
+# A specific commit built from `main`.
+docker pull ghcr.io/embarkstudios/quilkin:<short_commit>
 ```
 
   </dd>
   <dt><strong>Notes</strong></dt>
-  <dd>Pre-built Quilkin binary with no preset arguments</dd>
+  <dd>Pre-built Quilkin binary with no preset arguments. Releases are tagged
+  <code>YYYY.M.PATCH</code> and <code>latest</code>; builds from <code>main</code> are tagged
+  with the commit's short SHA, such as <code>41673c8</code>.</dd>
 </dl>
 
-### <a href="https://lib.rs/crates/quilkin" data-proofer-ignore>Cargo</a>
+### Cargo
 
 <dl>
   <dt><strong>Source / Method</strong></dt>
   <dd>
 
 ```
-cargo install quilkin
+cargo install --git https://github.com/EmbarkStudios/quilkin --tag v<version> quilkin
 ```
 
   </dd>
   <dt><strong>Notes</strong></dt>
-  <dd>Compiled from source using cargo</dd>
-</dl>
-
-### [GitHub](https://github.com/EmbarkStudios/quilkin)
-
-<dl>
-  <dt><strong>Source / Method</strong></dt>
-  <dd>
-
-[GitHub Releases](https://github.com/EmbarkStudios/quilkin/releases)
-
-  </dd>
-  <dt><strong>Notes</strong></dt>
-  <dd>Pre-built binaries for manual installation</dd>
+  <dd>Compiled from source using cargo. Quilkin is not published to crates.io,
+  so this installs from the Git tag.</dd>
 </dl>

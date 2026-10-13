@@ -16,6 +16,7 @@
 
 [package]
 name = "quilkin-macros"
+publish = false
 version.workspace = true
 authors = ["Erin Power <erin.power@embark-studios.com>"]
 license.workspace = true

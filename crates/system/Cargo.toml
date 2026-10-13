@@ -1,5 +1,6 @@
 [package]
 name = "quilkin-system"
+publish = false
 version.workspace = true
 description = "Quilkin is a non-transparent UDP proxy specifically designed for use with large scale multiplayer dedicated game server deployments, to ensure security, access control, telemetry data, metrics and more."
 homepage = "https://github.com/EmbarkStudios/quilkin"

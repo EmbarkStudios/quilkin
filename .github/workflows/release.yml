@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+jobs:
+  release:
+    if: github.head_ref == 'release' && github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - uses: knope-dev/action@v2.1.2
+        with:
+          version: 0.23.0
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Gather information
+        id: version
+        run: echo "version=$(yq '.workspace.package.version' Cargo.toml)" >> "$GITHUB_OUTPUT"
+
+      # Tags the merge commit and creates the GitHub release from the changelog
+      # section `PrepareRelease` wrote.
+      - name: Tag and release
+        run: knope release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Both are called directly rather than left to the tag push: tags created
+  # through the GitHub API with GITHUB_TOKEN do not trigger workflows.
+  image:
+    needs: release
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/image.yml
+    with:
+      version: ${{ needs.release.outputs.version }}
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+  docs:
+    needs: release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/docs.yml
+    with:
+      ref: v${{ needs.release.outputs.version }}
