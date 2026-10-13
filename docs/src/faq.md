@@ -14,8 +14,13 @@ We are always investigating further performance improvements in upcoming release
 
 ## Can I integrate Quilkin with C++ code?
 
-Quilkin is also released as a <a href="https://crates.io/crates/quilkin" data-proofer-ignore>library</a> so it can be
-integrated with an external codebase as necessary.
+Quilkin is also a library, so it can be integrated with an external codebase as necessary. It is not
+published to crates.io — its Rust API is not a stable interface and may change in any release — so depend
+on it from Git, pinned to a tag:
+
+```toml
+quilkin = { git = "https://github.com/EmbarkStudios/quilkin", tag = "v2026.10.0" }
+```
 
 Using Rust code inside a C or C++ project mostly consists of two parts.
 

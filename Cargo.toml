@@ -16,6 +16,9 @@
 
 [package]
 name = "quilkin"
+# The Rust API is not a stable interface; Quilkin ships as a container
+# image and its release surface is the CLI, env vars and config schema.
+publish = false
 version.workspace = true
 authors = [
     "Mark Mandel <markmandel@google.com>",

@@ -1,5 +1,6 @@
 [package]
 name = "quilkin-xdp"
+publish = false
 version = "0.1.0"
 description = "quilkin's XDP library"
 license.workspace = true

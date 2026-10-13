@@ -3,9 +3,8 @@
 </p>
 
 [![GitHub](https://img.shields.io/github/license/EmbarkStudios/quilkin)](./LICENSE)
-[![Crates.io](https://img.shields.io/crates/v/quilkin)](https://crates.io/crates/quilkin)
-[![Docs.rs](https://docs.rs/quilkin/badge.svg)](https://docs.rs/quilkin)
-[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/EmbarkStudios/quilkin)](https://github.com/EmbarkStudios/quilkin/releases)
+[![Container image](https://img.shields.io/badge/ghcr.io-embarkstudios%2Fquilkin-2496ed)](https://github.com/EmbarkStudios/quilkin/pkgs/container/quilkin)
+[![Release](https://img.shields.io/github/v/release/EmbarkStudios/quilkin)](https://github.com/EmbarkStudios/quilkin/releases)
 [![Discord](https://img.shields.io/discord/773975408265134100)](https://discord.gg/mfBNZjBDnc)
 
 Quilkin is a non-transparent UDP proxy specifically designed for use with large scale multiplayer dedicated game
@@ -24,39 +23,10 @@ systems, but that the API may break and functionality may be changed or removed 
 
 ## Documentation
 
-### Releases
-
-* v0.9.0 ([guides](https://embarkstudios.github.io/quilkin/v0.9.0/book/),
-  [api](https://embarkstudios.github.io/quilkin/v0.9.0/api/quilkin/),
-  [macros](https://embarkstudios.github.io/quilkin/v0.9.0/api/quilkin_macros/))
-* v0.8.0 ([guides](https://embarkstudios.github.io/quilkin/v0.8.0/book/),
-  [api](https://embarkstudios.github.io/quilkin/v0.8.0/api/quilkin/),
-  [macros](https://embarkstudios.github.io/quilkin/v0.8.0/api/quilkin_macros/))
-* v0.7.0 ([guides](https://embarkstudios.github.io/quilkin/v0.7.0/book/),
-  [api](https://embarkstudios.github.io/quilkin/v0.7.0/api/quilkin/),
-  [macros](https://embarkstudios.github.io/quilkin/v0.7.0/api/quilkin_macros/))
-* v0.6.0 ([guides](https://embarkstudios.github.io/quilkin/v0.6.0/book/),
-  [api](https://embarkstudios.github.io/quilkin/v0.6.0/api/quilkin/),
-  [macros](https://embarkstudios.github.io/quilkin/v0.6.0/api/quilkin_macros/))
-* v0.5.0 ([guides](https://embarkstudios.github.io/quilkin/v0.5.0/book/),
-  [api](https://embarkstudios.github.io/quilkin/v0.5.0/api/quilkin/),
-  [macros](https://embarkstudios.github.io/quilkin/v0.5.0/api/quilkin_macros/))
-* v0.4.0 ([guides](https://embarkstudios.github.io/quilkin/v0.4.0/book/),
-  [api](https://embarkstudios.github.io/quilkin/v0.4.0/api/quilkin/),
-  [macros](https://embarkstudios.github.io/quilkin/v0.4.0/api/quilkin_macros/))
-* v0.3.0 ([guides](https://embarkstudios.github.io/quilkin/v0.3.0/book/),
-  [api](https://embarkstudios.github.io/quilkin/v0.3.0/api/quilkin/),
-  [macros](https://embarkstudios.github.io/quilkin/v0.3.0/api/quilkin_macros/))
-* v0.2.0 ([guides](https://embarkstudios.github.io/quilkin/v0.2.0/book/),
-  [api](https://embarkstudios.github.io/quilkin/v0.2.0/api/quilkin/),
-  [macros](https://embarkstudios.github.io/quilkin/v0.2.0/api/quilkin_macros/))
-* v0.1.0 ([guides](https://github.com/embarkstudios/quilkin/blob/v0.1.0/README.md#usage),
-  [api](https://docs.rs/quilkin/0.1.0/quilkin/), [macros](https://docs.rs/quilkin-macros/0.1.0/quilkin_macros/)).
-
 ### Development
 
 > This documentation is for the development version of Quilkin, currently active on the `main` branch. To view the
-> documentation for a specific release, click on the appropriate release documentation link above.
+> documentation for a specific release, see `https://embarkstudios.github.io/quilkin/<tag>/book/`.
 
 * [Guide](https://embarkstudios.github.io/quilkin/main/book/)
 * [Api](https://embarkstudios.github.io/quilkin/main/api/quilkin/)

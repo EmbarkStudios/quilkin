@@ -1,5 +1,6 @@
 [package]
 name = "quilkin-ebpf"
+publish = false
 version = "0.1.0"
 description = "quilkin's eBPF module"
 # This crate is its own workspace, so these can't be inherited from the root

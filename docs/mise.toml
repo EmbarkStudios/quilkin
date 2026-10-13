@@ -2,7 +2,6 @@
 
 [env]
 GITHUB_REF_NAME='main'
-QUILKIN_VERSION='latest'
 
 [tasks.serve]
 run = '''
