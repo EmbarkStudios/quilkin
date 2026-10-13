@@ -736,6 +736,19 @@ impl Providers {
             insert_default::<crate::filters::FilterChain>(&mut config.dyn_cfg.typemap);
             insert_default::<crate::net::ClusterMap>(&mut config.dyn_cfg.typemap);
         }
+
+        // The cluster map can arrive before the filter chain, so populate with
+        // FilterChain::pending() to drop packets until the filter chain has arrived
+        if self.grpc_pull_enabled() {
+            config
+                .dyn_cfg
+                .typemap
+                .insert::<crate::filters::FilterChain>(
+                    crate::config::filter::FilterChainConfig::new(
+                        crate::filters::FilterChain::pending(),
+                    ),
+                );
+        }
     }
 
     pub fn spawn_providers(
@@ -885,5 +898,32 @@ impl Providers {
                 }
             })
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn filters_are_pending(providers: &Providers) -> bool {
+        let mut service = crate::Service::default();
+        let config = crate::Config::new(None, Default::default(), providers, &mut service);
+
+        config.dyn_cfg.filters().unwrap().load().is_pending()
+    }
+
+    #[test]
+    fn grpc_pull_provider_starts_with_pending_filters() {
+        let providers =
+            Providers::default().grpc_pull_endpoints([tonic::transport::Endpoint::from_static(
+                "http://127.0.0.1:7800",
+            )]);
+
+        assert!(filters_are_pending(&providers));
+    }
+
+    #[test]
+    fn standalone_provider_starts_with_not_pending_filters() {
+        assert!(!filters_are_pending(&Providers::default().fs()));
     }
 }

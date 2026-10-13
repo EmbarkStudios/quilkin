@@ -33,6 +33,7 @@ pub enum FilterError {
     Dropped,
     RateLimitExceeded,
     Custom(&'static str),
+    NoFilterChain,
 }
 
 impl FilterError {
@@ -46,6 +47,7 @@ impl FilterError {
             Self::Dropped => "filter::drop::dropped",
             Self::RateLimitExceeded => "filter::rate_limit::dropped",
             Self::Custom(custom) => custom,
+            Self::NoFilterChain => "filter::chain::not received",
         }
     }
 
@@ -66,6 +68,7 @@ impl FilterError {
                 DropReason::FilterError
             }
             Self::Io(..) => DropReason::SocketError,
+            Self::NoFilterChain => DropReason::NoFilterChain,
         }
     }
 
@@ -83,7 +86,7 @@ impl FilterError {
             Self::MatchNoMetadata => "match",
             Self::Dropped => "drop",
             Self::RateLimitExceeded => "rate_limit",
-            Self::Io(..) | Self::Custom(..) => "",
+            Self::Io(..) | Self::Custom(..) | Self::NoFilterChain => "",
         }
     }
 }
@@ -101,6 +104,7 @@ impl fmt::Display for FilterError {
             Self::Dropped => f.write_str("dropped"),
             Self::RateLimitExceeded => f.write_str("rate limit exceeded"),
             Self::Custom(custom) => f.write_str(custom),
+            Self::NoFilterChain => f.write_str("filter chain not received yet"),
         }
     }
 }
@@ -120,7 +124,8 @@ impl PartialEq for FilterError {
             | (Self::MatchNoMetadata, Self::MatchNoMetadata)
             | (Self::Dropped, Self::Dropped)
             | (Self::RateLimitExceeded, Self::RateLimitExceeded)
-            | (Self::NoValueCaptured, Self::NoValueCaptured) => true,
+            | (Self::NoValueCaptured, Self::NoValueCaptured)
+            | (Self::NoFilterChain, Self::NoFilterChain) => true,
             (Self::TokenRouter(tra), Self::TokenRouter(trb)) => tra.eq(trb),
             (Self::Io(ia), Self::Io(ib)) => ia.kind().eq(&ib.kind()),
             (Self::Custom(a), Self::Custom(b)) => a == b,
@@ -144,7 +149,8 @@ impl Hash for FilterError {
             | Self::FirewallDenied
             | Self::MatchNoMetadata
             | Self::Dropped
-            | Self::RateLimitExceeded => {}
+            | Self::RateLimitExceeded
+            | Self::NoFilterChain => {}
         }
     }
 }
