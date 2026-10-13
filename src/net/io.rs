@@ -79,7 +79,7 @@ impl UdpBackend {
     /// Use this when a socket-based listener is required regardless of XDP availability.
     #[cfg(target_os = "linux")]
     pub fn probe_user_space() -> Self {
-        if io_uring::IoUring::new(2).is_ok() {
+        if completion::io_uring::is_available() {
             Self::Completion
         } else {
             Self::Poll
