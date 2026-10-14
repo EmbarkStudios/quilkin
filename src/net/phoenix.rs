@@ -34,7 +34,11 @@
 //! Phoenix periodically updates the coordinates of each node based on a subset
 //! of latency measurements to reflect the current state of the network.
 
+#[cfg(test)]
+mod accuracy;
 mod nnls;
+#[cfg(test)]
+mod sim;
 
 use std::{collections::HashMap, net::SocketAddr, ops::Range, sync::Arc, time::Duration};
 
@@ -643,11 +647,14 @@ impl<M: Measurement + 'static> Phoenix<M> {
 
     #[cfg(test)]
     async fn measure_all_nodes(&self) {
-        let nodes = self
+        // Map order decides the solve's row order, and so its floating point
+        // summation order. Sorted, identical runs compare bit for bit.
+        let mut nodes = self
             .nodes
             .iter()
             .map(|entry| *entry.key())
             .collect::<Vec<_>>();
+        nodes.sort_unstable();
         let _ = self.measure_nodes(nodes).await;
     }
 }
