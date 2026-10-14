@@ -619,9 +619,7 @@ impl<M: Measurement + 'static> Phoenix<M> {
                 targets[i] = distance.total_nanos() as f64;
             }
 
-            let (self_outgoing, residual) = nnls::solve_regularized(&coefficients, &targets, 2.0);
-
-            crate::metrics::phoenix_nnls_outgoing_residual().set(residual);
+            let (self_outgoing, _) = nnls::solve_regularized(&coefficients, &targets, 2.0);
 
             self_outgoing[0]
         };
@@ -631,8 +629,7 @@ impl<M: Measurement + 'static> Phoenix<M> {
                 coefficients[[i, 0]] = distance.outgoing.nanos() as f64;
             }
 
-            let (self_incoming, residual) = nnls::solve_regularized(&coefficients, &targets, 2.0);
-            crate::metrics::phoenix_nnls_incoming_residual().set(residual);
+            let (self_incoming, _) = nnls::solve_regularized(&coefficients, &targets, 2.0);
 
             self_incoming[0]
         };
