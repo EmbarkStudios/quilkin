@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5e5211c9.js";
+            window.path_to_searchindex_js = "searchindex-fb0b5461.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-270f104f.js"></script>
@@ -296,7 +296,10 @@ your local machine through <a href="#cargo">Cargo</a>.</p>
 
   
 <dd>
-<pre><code class="language-shell">docker pull ghcr.io/embarkstudios/quilkin:&lt;version&gt;-&lt;short_commit&gt;
+<pre><code class="language-shell"># A release.
+docker pull ghcr.io/embarkstudios/quilkin:&lt;version&gt;
+# A specific commit built from `main`.
+docker pull ghcr.io/embarkstudios/quilkin:&lt;short_commit&gt;
 </code></pre>
   </dd>
 
@@ -304,18 +307,20 @@ your local machine through <a href="#cargo">Cargo</a>.</p>
 <dt><strong>Notes</strong></dt>
 
   
-<dd>Pre-built Quilkin binary with no preset arguments</dd>
+<dd>Pre-built Quilkin binary with no preset arguments. Releases are tagged
+  <code>YYYY.M.PATCH</code> and <code>latest</code>; builds from <code>main</code> are tagged
+  with the commit's short SHA, such as <code>41673c8</code>.</dd>
 
 </dl>
 
-<h3 id="cargo"><a class="header" href="#cargo"><a href="https://lib.rs/crates/quilkin" data-proofer-ignore="">Cargo</a></a></h3>
+<h3 id="cargo"><a class="header" href="#cargo">Cargo</a></h3>
 <dl>
   
 <dt><strong>Source / Method</strong></dt>
 
   
 <dd>
-<pre><code>cargo install quilkin
+<pre><code>cargo install --git https://github.com/EmbarkStudios/quilkin --tag v&lt;version&gt; quilkin
 </code></pre>
   </dd>
 
@@ -323,25 +328,8 @@ your local machine through <a href="#cargo">Cargo</a>.</p>
 <dt><strong>Notes</strong></dt>
 
   
-<dd>Compiled from source using cargo</dd>
-
-</dl>
-
-<h3 id="github"><a class="header" href="#github"><a href="https://github.com/EmbarkStudios/quilkin">GitHub</a></a></h3>
-<dl>
-  
-<dt><strong>Source / Method</strong></dt>
-
-  
-<dd>
-<p><a href="https://github.com/EmbarkStudios/quilkin/releases">GitHub Releases</a></p>
-  </dd>
-
-  
-<dt><strong>Notes</strong></dt>
-
-  
-<dd>Pre-built binaries for manual installation</dd>
+<dd>Compiled from source using cargo. Quilkin is not published to crates.io,
+  so this installs from the Git tag.</dd>
 
 </dl>
 
@@ -355,8 +343,11 @@ change depending on the underlying hardware, number of filters, configurations a
 workload and configuration as close as possible.</p>
 <p>We are always investigating further performance improvements in upcoming releases, both from an optimisation and observability perspective as well.</p>
 <h2 id="can-i-integrate-quilkin-with-c-code"><a class="header" href="#can-i-integrate-quilkin-with-c-code">Can I integrate Quilkin with C++ code?</a></h2>
-<p>Quilkin is also released as a <a href="https://crates.io/crates/quilkin" data-proofer-ignore="">library</a> so it can be
-integrated with an external codebase as necessary.</p>
+<p>Quilkin is also a library, so it can be integrated with an external codebase as necessary. It is not
+published to crates.io — its Rust API is not a stable interface and may change in any release — so depend
+on it from Git, pinned to a tag:</p>
+<pre><code class="language-toml">quilkin = { git = "https://github.com/EmbarkStudios/quilkin", tag = "v2026.10.0" }
+</code></pre>
 <p>Using Rust code inside a C or C++ project mostly consists of two parts.</p>
 <ul>
 <li>Creating a C-friendly API in Rust</li>

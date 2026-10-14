@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5e5211c9.js";
+            window.path_to_searchindex_js = "searchindex-fb0b5461.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-270f104f.js"></script>
@@ -183,8 +183,11 @@ change depending on the underlying hardware, number of filters, configurations a
 workload and configuration as close as possible.</p>
 <p>We are always investigating further performance improvements in upcoming releases, both from an optimisation and observability perspective as well.</p>
 <h2 id="can-i-integrate-quilkin-with-c-code"><a class="header" href="#can-i-integrate-quilkin-with-c-code">Can I integrate Quilkin with C++ code?</a></h2>
-<p>Quilkin is also released as a <a href="https://crates.io/crates/quilkin" data-proofer-ignore="">library</a> so it can be
-integrated with an external codebase as necessary.</p>
+<p>Quilkin is also a library, so it can be integrated with an external codebase as necessary. It is not
+published to crates.io — its Rust API is not a stable interface and may change in any release — so depend
+on it from Git, pinned to a tag:</p>
+<pre><code class="language-toml">quilkin = { git = "https://github.com/EmbarkStudios/quilkin", tag = "v2026.10.0" }
+</code></pre>
 <p>Using Rust code inside a C or C++ project mostly consists of two parts.</p>
 <ul>
 <li>Creating a C-friendly API in Rust</li>
