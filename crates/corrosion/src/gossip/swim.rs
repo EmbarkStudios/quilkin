@@ -17,12 +17,7 @@ use std::{
 use tokio::sync::mpsc;
 use tripwire::PreemptibleFutureExt;
 
-type Foca = foca::Foca<
-    Actor,
-    foca::BincodeCodec<bincode::config::Configuration>,
-    StdRng,
-    foca::NoCustomBroadcast,
->;
+type Foca = foca::Foca<Actor, foca::PostcardCodec, StdRng, foca::NoCustomBroadcast>;
 
 pub struct DispatchRuntime {
     pub to_send: mpsc::Sender<(Actor, Bytes)>,
@@ -106,7 +101,7 @@ pub fn swim_loop(
         actor,
         config.clone(),
         rng,
-        foca::BincodeCodec(bincode::config::Configuration::default()),
+        foca::PostcardCodec,
         foca::NoCustomBroadcast,
     );
 
