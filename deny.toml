@@ -25,9 +25,7 @@ all-features = true
 [advisories]
 unmaintained = 'workspace'
 yanked = 'deny'
-ignore = [
-    { id = "RUSTSEC-2025-0141", reason = "bincode is unmaintained but it's currently not an issue, there are alternatives if we need to change" },
-]
+ignore = []
 
 [bans]
 deny = [

@@ -46,8 +46,7 @@ tripwire.workspace = true
 
 # Ensure these versions match the versions from corro-types, they are transitive
 # dependencies that are not re-exported
-bincode = "2.0"
-foca = "0.19"
+foca = { version = "0.19", features = ["postcard-codec"] }
 governor = { version = "0.10", features = ["std"] }
 indexmap = "2.13"
 itertools = "0.14"
