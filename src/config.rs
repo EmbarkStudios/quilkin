@@ -776,8 +776,13 @@ impl Config {
 
                 let mut bridge = corro::Bridge::new(self);
 
-                if let Some(ip) = remote_addr.filter(|_| !removed_resources.is_empty()) {
-                    bridge.remove_dc(ip);
+                for removed in removed_resources {
+                    match removed.parse::<std::net::IpAddr>() {
+                        Ok(ip) => bridge.remove_dc(ip),
+                        Err(error) => {
+                            tracing::error!(%error, %removed, "failed to parse ip address of removed datacenter");
+                        }
+                    }
                 }
 
                 for res in resources {
@@ -969,5 +974,75 @@ impl clap::ValueEnum for crate::config::AddrKind {
             Self::Ipv6 => pv::new("v6"),
             Self::Any => pv::new("any"),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_proxy_drops_the_datacenters_the_relay_removed() {
+        let relay = Config::new(
+            None,
+            Default::default(),
+            &crate::Providers::default().fs(),
+            &mut crate::Service::default().xds(),
+        );
+        let proxy = Config::new(
+            None,
+            Default::default(),
+            &crate::Providers::default().grpc_pull_endpoints([
+                tonic::transport::Endpoint::from_static("http://[2001:db8::1]:7800"),
+            ]),
+            &mut crate::Service::default().udp(),
+        );
+
+        let old_agent: std::net::IpAddr = "2001:db8::a".parse().unwrap();
+        let new_agent: std::net::IpAddr = "2001:db8::b".parse().unwrap();
+        let dc = Datacenter {
+            qcmp_port: 7600,
+            icao_code: "EFLP".parse().unwrap(),
+        };
+
+        let relay_dcs = relay.dyn_cfg.datacenters().unwrap();
+        relay_dcs.write().insert(old_agent, dc);
+        relay_dcs.write().insert(new_agent, dc);
+
+        let mut client_state = quilkin_xds::config::ClientState::new(xds::DATACENTER_TYPE.into());
+        let sync = |client_state: &mut quilkin_xds::config::ClientState| {
+            let res = relay.delta_discovery_request(client_state).unwrap();
+            let removed = res.removed.into_iter().collect::<Vec<_>>();
+
+            for resource in &res.resources {
+                client_state
+                    .versions
+                    .insert(resource.name.clone(), resource.version.clone());
+            }
+            for name in &removed {
+                client_state.versions.remove(name);
+            }
+
+            proxy
+                .apply_delta(xds::DATACENTER_TYPE, res.resources, &removed, None)
+                .unwrap();
+            removed
+        };
+
+        sync(&mut client_state);
+        let proxy_dcs = proxy.dyn_cfg.datacenters().unwrap();
+        assert!(proxy_dcs.read().get(&old_agent).is_some());
+        assert!(proxy_dcs.read().get(&new_agent).is_some());
+
+        // The old agent's stream closes, and the relay forgets it
+        relay_dcs.write().remove(old_agent);
+        let removed = sync(&mut client_state);
+        assert_eq!(removed, [old_agent.to_string()]);
+
+        assert!(
+            proxy_dcs.read().get(&old_agent).is_none(),
+            "proxy kept {old_agent} after the relay removed it"
+        );
+        assert!(proxy_dcs.read().get(&new_agent).is_some());
     }
 }
