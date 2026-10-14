@@ -27,7 +27,12 @@ pub fn npre(errors: &[f64]) -> f64 {
 
 /// Relative error at the 50th percentile.
 pub fn median_relative_error(errors: &[f64]) -> f64 {
-    percentile(errors, 0.50)
+    median(errors)
+}
+
+/// Median, the lower of the two middle elements on an even-sized set.
+pub(super) fn median(values: &[f64]) -> f64 {
+    percentile(values, 0.50)
 }
 
 /// Median of `|predicted - measured|`, in the unit of the inputs.

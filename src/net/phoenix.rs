@@ -39,6 +39,8 @@ mod accuracy;
 mod nnls;
 #[cfg(test)]
 mod sim;
+#[cfg(test)]
+mod weights;
 
 use std::{collections::HashMap, net::SocketAddr, ops::Range, sync::Arc, time::Duration};
 
