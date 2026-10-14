@@ -674,30 +674,6 @@ impl CoordinateDirection {
     }
 }
 
-pub(crate) fn phoenix_nnls_outgoing_residual() -> Gauge {
-    phoenix_nnls_residual(CoordinateDirection::Outgoing)
-}
-
-pub(crate) fn phoenix_nnls_incoming_residual() -> Gauge {
-    phoenix_nnls_residual(CoordinateDirection::Incoming)
-}
-
-fn phoenix_nnls_residual(direction: CoordinateDirection) -> Gauge {
-    static PHOENIX_NNLS_RESIDUAL: Lazy<GaugeVec> = Lazy::new(|| {
-        prometheus::register_gauge_vec_with_registry! {
-            prometheus::opts! {
-                "quilkin_phoenix_nnls_residual",
-                "The NNLS residual norm from the most recent coordinate computation",
-            },
-            &["direction"],
-            registry(),
-        }
-        .unwrap()
-    });
-
-    PHOENIX_NNLS_RESIDUAL.with_label_values(&[direction.label()])
-}
-
 pub(crate) fn phoenix_distance_error_estimate(icao: crate::config::IcaoCode) -> Gauge {
     static PHOENIX_DISTANCE_ERROR_ESTIMATE: Lazy<GaugeVec> = Lazy::new(|| {
         prometheus::register_gauge_vec_with_registry! {

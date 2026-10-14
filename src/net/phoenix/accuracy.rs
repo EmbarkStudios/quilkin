@@ -1,6 +1,5 @@
 //! Scoring predicted network distances against measured ones.
 
-
 /// Error between a predicted and a measured distance, over the smaller of the
 /// two.
 pub fn relative_error(predicted: f64, measured: f64) -> f64 {

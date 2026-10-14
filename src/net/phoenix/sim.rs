@@ -489,8 +489,7 @@ mod tests {
 
         // EDDF reports only 2 of 15 columns, too few to cover the reference set.
         assert_eq!(
-            Simulation::new(Matrix::test(), BASELINE_REFERENCES, BASELINE_SEED)
-                .skipped_rows(),
+            Simulation::new(Matrix::test(), BASELINE_REFERENCES, BASELINE_SEED).skipped_rows(),
             vec!["EDDF"],
         );
     }
