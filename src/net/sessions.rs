@@ -72,8 +72,6 @@ pub trait SessionManager {
 #[derive(PartialEq, Eq, Hash)]
 pub enum SessionError {
     SocketAddressUnavailable,
-    MissingAllocatedSocket,
-    MissingDestinationSocket,
 }
 
 impl std::error::Error for SessionError {}
@@ -83,12 +81,6 @@ impl fmt::Display for SessionError {
         match self {
             Self::SocketAddressUnavailable => {
                 f.write_str("couldn't get socket address from raw socket")
-            }
-            Self::MissingAllocatedSocket => {
-                f.write_str("couldn't obtain any allocated socket, should be unreachable")
-            }
-            Self::MissingDestinationSocket => {
-                f.write_str("couldn't obtain any socket for destination, should be unreachable")
             }
         }
     }
@@ -172,7 +164,7 @@ impl SessionPool {
         cluster: Option<crate::net::endpoint::Locality>,
     ) -> Result<SessionRoute, super::PipelineError> {
         tracing::trace!(source=%key.source, dest=%key.dest, "creating new socket for session");
-        let raw_socket = crate::net::raw_socket_with_reuse(0)?;
+        let raw_socket = crate::net::session_socket()?;
         let port = raw_socket
             .local_addr()?
             .as_socket()
@@ -187,10 +179,11 @@ impl SessionPool {
             self.cached_filter_chain.clone(),
         )?;
 
-        self.ports_to_sockets
-            .write()
-            .insert(port, pending_sends.clone());
-        self.create_session_from_existing_socket(key, pending_sends, port, cluster)
+        // Reserve before publishing the port, or a same-destination session can reuse it first.
+        let route =
+            self.create_session_from_existing_socket(key, pending_sends.clone(), port, cluster)?;
+        self.ports_to_sockets.write().insert(port, pending_sends);
+        Ok(route)
     }
 
     pub(crate) fn process_received_upstream_packet(
@@ -307,49 +300,33 @@ impl SessionPool {
             return Err(super::PipelineError::SessionLimit);
         }
 
-        // If there's a socket_set available, it means there are sockets
-        // allocated to the address that we want to avoid.
-        let storage = self.storage.read();
-        let Some(socket_set) = storage.destination_to_sockets.get(&dest) else {
-            drop(storage);
-            let no_sockets = self.ports_to_sockets.read().is_empty();
-            return if no_sockets {
-                // Initial case where we have no allocated or reserved sockets.
-                self.create_new_session_from_new_socket(key, cluster)
-            } else {
-                // Where we have no allocated sockets for a destination, assign
-                // the first available one.
-                let (port, sender) = self
-                    .ports_to_sockets
-                    .read()
-                    .iter()
-                    .next()
-                    .map(|(port, socket)| (*port, socket.clone()))
-                    .ok_or(SessionError::MissingAllocatedSocket)?;
-
-                self.create_session_from_existing_socket(key, sender, port, cluster)
-            };
+        let reused = {
+            let mut storage = self.storage.write();
+            let ports = self.ports_to_sockets.read();
+            let chosen = ports
+                .iter()
+                .find(|(port, _)| {
+                    storage
+                        .destination_to_sockets
+                        .get(&dest)
+                        .is_none_or(|used| !used.contains(*port))
+                })
+                .map(|(port, socket)| (*port, socket.clone()));
+            if let Some((port, _)) = &chosen {
+                storage
+                    .destination_to_sockets
+                    .entry(dest)
+                    .or_default()
+                    .insert(*port);
+            }
+            chosen
         };
 
-        let available_socket = self
-            .ports_to_sockets
-            .read()
-            .iter()
-            .find(|(port, _)| !socket_set.contains(port))
-            .map(|(port, socket)| (*port, socket.clone()));
-
-        if let Some((port, socket)) = available_socket {
-            drop(storage);
-            self.storage
-                .write()
-                .destination_to_sockets
-                .get_mut(&dest)
-                .ok_or(SessionError::MissingDestinationSocket)?
-                .insert(port);
-            self.create_session_from_existing_socket(key, socket, port, cluster)
-        } else {
-            drop(storage);
-            self.create_new_session_from_new_socket(key, cluster)
+        match reused {
+            Some((port, socket)) => {
+                self.create_session_from_existing_socket(key, socket, port, cluster)
+            }
+            None => self.create_new_session_from_new_socket(key, cluster),
         }
     }
 
