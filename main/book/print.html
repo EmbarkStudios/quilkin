@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-b3067f57.js";
+            window.path_to_searchindex_js = "searchindex-5e5211c9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-270f104f.js"></script>
@@ -1107,6 +1107,17 @@ more accurately represent the location of any datacentre.</p>
 request to the QCMP port.</p>
 <p>The returned data is a JSON object with each key being the ICAO code for the
 datacentre, and the value being the latency in nanoseconds.</p>
+<h3 id="network-coordinates"><a class="header" href="#network-coordinates">Network coordinates</a></h3>
+<p><code>GET /network-coordinates</code> returns each datacentre’s coordinate, keyed by ICAO
+code: <code>incoming</code> for the path towards it, <code>outgoing</code> for the path back.</p>
+<p>The <code>X-Api-Version</code> header, a <code>YYYY-MM-DD</code> date, selects the shape. On or after
+<code>2026-10-15</code>, one array per direction with an element per dimension:</p>
+<pre><code class="language-json">{ "ESSA": { "incoming": [1250000.0], "outgoing": [1310000.0] } }
+</code></pre>
+<p>Otherwise each direction is that array’s Euclidean norm, which is the element
+itself while the space has one dimension:</p>
+<pre><code class="language-json">{ "ESSA": { "incoming": 1250000.0, "outgoing": 1310000.0 } }
+</code></pre>
 <h2 id="metrics"><a class="header" href="#metrics">Metrics</a></h2>
 <ul>
 <li>
