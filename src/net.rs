@@ -81,6 +81,15 @@ pub fn raw_socket_with_reuse(port: u16) -> IoResult<Socket> {
     raw_socket_with_reuse_and_address((Ipv6Addr::UNSPECIFIED, port).into())
 }
 
+/// A per-session upstream socket without `SO_REUSEPORT`, which would risk duplicate ports.
+pub fn session_socket() -> IoResult<Socket> {
+    let sock = Socket::new(socket2::Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+    sock.set_nonblocking(true)?;
+    sock.set_only_v6(false)?;
+    sock.bind(&SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)).into())?;
+    Ok(sock)
+}
+
 pub fn raw_socket_with_reuse_and_address(addr: SocketAddr) -> IoResult<Socket> {
     let domain = match addr {
         SocketAddr::V4(_) => socket2::Domain::IPV4,
