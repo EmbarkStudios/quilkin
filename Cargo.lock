@@ -3942,7 +3942,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin"
-version = "0.10.1"
+version = "2026.10.0"
 dependencies = [
  "arc-swap",
  "async-stream",
