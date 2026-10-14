@@ -57,6 +57,42 @@ use crate::{
 /// once corrosion is deployed and we can share measurements across nodes.
 const DIMENSION: usize = 1;
 
+const _: () = assert!(DIMENSION > 0, "a coordinate needs at least one element");
+
+const API_VERSION_HEADER: &str = "X-Api-Version";
+
+/// `X-Api-Version` from which `/network-coordinates` serves a vector per
+/// direction.
+const VECTOR_COORDINATES_VERSION: &str = "2026-10-15";
+
+/// Dates order correctly as text, being fixed width and zero padded. The shape
+/// check stops a malformed value sorting past the cutover.
+fn wants_coordinate_vectors(headers: &axum::http::HeaderMap) -> bool {
+    fn is_date(value: &str) -> bool {
+        value.len() == 10
+            && value
+                .as_bytes()
+                .iter()
+                .enumerate()
+                .all(|(index, byte)| match index {
+                    4 | 7 => *byte == b'-',
+                    _ => byte.is_ascii_digit(),
+                })
+    }
+
+    headers
+        .get(API_VERSION_HEADER)
+        .and_then(|version| version.to_str().ok())
+        .is_some_and(|version| is_date(version) && version >= VECTOR_COORDINATES_VERSION)
+}
+
+/// Both encodings, rebuilt each round so a request only picks one.
+#[derive(Default)]
+struct NetworkCoordinates {
+    vectors: serde_json::Map<String, serde_json::Value>,
+    scalars: serde_json::Map<String, serde_json::Value>,
+}
+
 /// The number of consecutive ping failures after which we will inform that this is a bad node
 const BAD_NODE_THRESHOLD: u64 = 10;
 
@@ -106,21 +142,29 @@ pub fn spawn(
                         node_latencies_response.store(json.into());
                     };
                     let network_coordinates_response =
-                        Arc::new(arc_swap::ArcSwap::new(Arc::new(serde_json::Map::default())));
+                        Arc::new(arc_swap::ArcSwap::new(Arc::new(NetworkCoordinates::default())));
                     let update_network_coordinates = || {
-                        let coordinate_map = phoenix.coordinate_map();
-                        let mut json = serde_json::Map::default();
-                        for (icao, coordinates) in coordinate_map {
+                        let mut response = NetworkCoordinates::default();
+
+                        for (icao, coordinates) in phoenix.coordinate_map() {
                             match serde_json::to_value(coordinates) {
-                                Ok(coords) => {
-                                    json.insert(icao.to_string(), coords);
+                                Ok(vectors) => {
+                                    response.scalars.insert(
+                                        icao.to_string(),
+                                        serde_json::json!({
+                                            "incoming": norm(&coordinates.incoming),
+                                            "outgoing": norm(&coordinates.outgoing),
+                                        }),
+                                    );
+                                    response.vectors.insert(icao.to_string(), vectors);
                                 }
                                 Err(error) => {
                                     tracing::error!(?error, "failed to serialize coordinates");
                                 }
                             };
                         }
-                        network_coordinates_response.store(json.into());
+
+                        network_coordinates_response.store(response.into());
                     };
 
                     tokio::spawn({
@@ -201,7 +245,7 @@ pub fn spawn(
 }
 
 fn http_router(
-    network_coordinates: Arc<arc_swap::ArcSwap<serde_json::Map<String, serde_json::Value>>>,
+    network_coordinates: Arc<arc_swap::ArcSwap<NetworkCoordinates>>,
     node_latencies: Arc<arc_swap::ArcSwap<serde_json::Map<String, serde_json::Value>>>,
 ) -> axum::Router {
     use quilkin_system::net::http::metrics::HttpMetricsLayer;
@@ -216,9 +260,15 @@ fn http_router(
         )
         .route(
             "/network-coordinates",
-            axum::routing::get(|| async move {
+            axum::routing::get(|headers: axum::http::HeaderMap| async move {
                 tracing::trace!("serving phoenix request");
-                axum::response::Json(network_coordinates.load().clone())
+                let coordinates = network_coordinates.load();
+
+                axum::response::Json(if wants_coordinate_vectors(&headers) {
+                    coordinates.vectors.clone()
+                } else {
+                    coordinates.scalars.clone()
+                })
             }),
         )
         .layer(HttpMetricsLayer::new_with_path_buckets(
@@ -348,9 +398,9 @@ pub struct Inner<M> {
     ),
     bad_node_informer: Option<crate::config::BadNodeInformer>,
     /// This node's outgoing coordinate vector, computed by NNLS each round.
-    self_outgoing: parking_lot::RwLock<f64>,
+    self_outgoing: parking_lot::RwLock<[f64; DIMENSION]>,
     /// This node's incoming coordinate vector, computed by NNLS each round.
-    self_incoming: parking_lot::RwLock<f64>,
+    self_incoming: parking_lot::RwLock<[f64; DIMENSION]>,
 }
 
 impl<M> Phoenix<M> {
@@ -600,7 +650,7 @@ impl<M: Measurement + 'static> Phoenix<M> {
             let outgoing = distance.outgoing.nanos() as f64;
 
             if let Some(mut node) = self.nodes.get_mut(&address) {
-                node.set_coordinates(Coordinates { incoming, outgoing });
+                node.set_coordinates(Coordinates::from_measurement(incoming, outgoing));
             }
         }
 
@@ -621,7 +671,7 @@ impl<M: Measurement + 'static> Phoenix<M> {
 
             let (self_outgoing, _) = nnls::solve_regularized(&coefficients, &targets, 2.0);
 
-            self_outgoing[0]
+            vector(&self_outgoing)
         };
 
         *self.self_incoming.write() = {
@@ -631,12 +681,12 @@ impl<M: Measurement + 'static> Phoenix<M> {
 
             let (self_incoming, _) = nnls::solve_regularized(&coefficients, &targets, 2.0);
 
-            self_incoming[0]
+            vector(&self_incoming)
         };
 
         tracing::debug!(
-            self_outgoing = *self.self_outgoing.read(),
-            self_incoming = *self.self_incoming.read(),
+            self_outgoing = ?*self.self_outgoing.read(),
+            self_incoming = ?*self.self_incoming.read(),
             nodes = num_measurements,
             "computed NNLS coordinates"
         );
@@ -754,35 +804,64 @@ impl<M: Measurement> Builder<M> {
                 subset_percentage: self.subset_percentage.unwrap_or(Self::DEFAULT_SUBSET),
                 update_watcher: tokio::sync::watch::channel(()),
                 bad_node_informer: self.bad_node_informer,
-                self_outgoing: <_>::default(),
-                self_incoming: <_>::default(),
+                self_outgoing: parking_lot::RwLock::new([0.0; DIMENSION]),
+                self_incoming: parking_lot::RwLock::new([0.0; DIMENSION]),
             }),
         }
     }
 }
 
-/// The network coordinates of a node in the phoenix system.
-///
-/// Each field represents one element of the d-dimensional coordinate vector
-/// (currently d=1). Predicted one-way latency from node A
-/// to node B is the dot product `A.outgoing · B.incoming`.
+/// A node's position. Predicted one-way latency from A to B is
+/// `A.outgoing · B.incoming`; every element is non-negative, so no prediction
+/// is either.
 #[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct Coordinates {
-    incoming: f64,
-    outgoing: f64,
+    incoming: [f64; DIMENSION],
+    outgoing: [f64; DIMENSION],
 }
 
 impl Coordinates {
-    /// Sum of coordinate components — used as RTT estimate for ordering.
-    fn rtt_estimate(&self) -> f64 {
-        self.incoming + self.outgoing
+    /// One measured value per direction, in the first element.
+    fn from_measurement(incoming: f64, outgoing: f64) -> Self {
+        let mut coordinates = Self {
+            incoming: [0.0; DIMENSION],
+            outgoing: [0.0; DIMENSION],
+        };
+
+        coordinates.incoming[0] = incoming;
+        coordinates.outgoing[0] = outgoing;
+        coordinates
     }
 
-    /// Euclidean magnitude of the coordinate vector (for metrics).
-    fn distance_from_origin(&self) -> f64 {
-        #[allow(clippy::imprecise_flops)]
-        (self.incoming.powi(2) + self.outgoing.powi(2)).sqrt()
+    /// Orders nodes by latency.
+    fn rtt_estimate(&self) -> f64 {
+        self.incoming.iter().chain(&self.outgoing).sum()
     }
+
+    /// Magnitude of both vectors together.
+    fn distance_from_origin(&self) -> f64 {
+        norm(&self.incoming).hypot(norm(&self.outgoing))
+    }
+}
+
+/// Euclidean norm.
+fn norm(values: &[f64]) -> f64 {
+    values.iter().map(|value| value * value).sum::<f64>().sqrt()
+}
+
+#[cfg(test)]
+fn dot(a: &[f64; DIMENSION], b: &[f64; DIMENSION]) -> f64 {
+    a.iter().zip(b).map(|(x, y)| x * y).sum()
+}
+
+/// # Panics
+///
+/// Panics unless the solution has [`DIMENSION`] elements, which holds because
+/// the system is built with that many columns.
+fn vector(solution: &ndarray::Array1<f64>) -> [f64; DIMENSION] {
+    let mut vector = [0.0; DIMENSION];
+    vector.copy_from_slice(solution.as_slice().expect("solution is contiguous"));
+    vector
 }
 
 /// A node in Phoenix system, contains its location, and an estimate of how
@@ -819,8 +898,8 @@ impl Node {
 
     /// Set this node's coordinates (computed by NNLS) and update metrics.
     fn set_coordinates(&mut self, coords: Coordinates) {
-        crate::metrics::phoenix_coordinates(self.icao_code, "x").set(coords.incoming);
-        crate::metrics::phoenix_coordinates(self.icao_code, "y").set(coords.outgoing);
+        crate::metrics::phoenix_coordinates(self.icao_code, "x").set(norm(&coords.incoming));
+        crate::metrics::phoenix_coordinates(self.icao_code, "y").set(norm(&coords.outgoing));
         crate::metrics::phoenix_distance(self.icao_code).set(coords.distance_from_origin());
         self.coordinates = Some(coords);
         self.consecutive_errors = 0;
@@ -998,7 +1077,7 @@ mod tests {
             .get_coordinates(&"127.0.0.1:8081".parse().unwrap())
             .unwrap();
         assert!(
-            coords.incoming != 0.0 || coords.outgoing != 0.0,
+            coords.rtt_estimate() != 0.0,
             "Coordinates were not adjusted."
         );
     }
@@ -1072,6 +1151,16 @@ mod tests {
             result.is_err(),
             "Builder should panic when given an invalid subset percentage."
         );
+    }
+
+    /// The legacy scalar is the norm, so at one element it has to be that
+    /// element or clients predating the vector schema see a different number.
+    #[test]
+    fn legacy_scalar_matches_the_single_element() {
+        let coordinates = Coordinates::from_measurement(12_500_000.0, 7_250_000.0);
+
+        assert_eq!(norm(&coordinates.incoming), coordinates.incoming[0]);
+        assert_eq!(norm(&coordinates.outgoing), coordinates.outgoing[0]);
     }
 
     #[test]
@@ -1303,8 +1392,8 @@ mod tests {
             let map = serde_json::from_slice::<serde_json::Map<_, _>>(&resp).unwrap();
 
             let coords = Coordinates {
-                incoming: std::time::Duration::from_millis(50).as_nanos() as f64 / 2.0,
-                outgoing: std::time::Duration::from_millis(1).as_nanos() as f64 / 2.0,
+                incoming: [std::time::Duration::from_millis(50).as_nanos() as f64 / 2.0],
+                outgoing: [std::time::Duration::from_millis(1).as_nanos() as f64 / 2.0],
             };
 
             let min = coords.rtt_estimate();
@@ -1367,27 +1456,48 @@ mod tests {
             hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
                 .build_http::<http_body_util::Empty<bytes::Bytes>>();
         use http_body_util::BodyExt;
-        for _ in 0..10 {
-            let resp = tokio::time::timeout(
-                Duration::from_millis(100),
-                client
-                    .get(
-                        format!("http://localhost:{qcmp_port}/network-coordinates")
-                            .parse()
-                            .unwrap(),
-                    )
-                    .await
-                    .unwrap()
-                    .into_body()
-                    .collect(),
-            )
-            .await
-            .unwrap()
-            .unwrap()
-            .to_bytes();
 
-            let map = serde_json::from_slice::<HashMap<IcaoCode, Coordinates>>(&resp).unwrap();
-            assert!(map.contains_key(&icao_code));
+        let fetch = |version: Option<&'static str>| {
+            let client = client.clone();
+            async move {
+                let mut request = axum::http::Request::get(format!(
+                    "http://localhost:{qcmp_port}/network-coordinates"
+                ));
+
+                if let Some(version) = version {
+                    request = request.header(API_VERSION_HEADER, version);
+                }
+
+                let body = tokio::time::timeout(
+                    Duration::from_millis(100),
+                    client
+                        .request(request.body(http_body_util::Empty::new()).unwrap())
+                        .await
+                        .unwrap()
+                        .into_body()
+                        .collect(),
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .to_bytes();
+
+                serde_json::from_slice::<HashMap<IcaoCode, serde_json::Value>>(&body).unwrap()
+            }
+        };
+
+        for _ in 0..10 {
+            for version in [None, Some("2020-01-01"), Some("not-a-date")] {
+                let map = fetch(version).await;
+                assert!(map[&icao_code]["incoming"].is_number(), "{version:?}");
+                assert!(map[&icao_code]["outgoing"].is_number(), "{version:?}");
+            }
+
+            for version in [Some(VECTOR_COORDINATES_VERSION), Some("2030-06-01")] {
+                let map = fetch(version).await;
+                assert!(map[&icao_code]["incoming"].is_array(), "{version:?}");
+                assert!(map[&icao_code]["outgoing"].is_array(), "{version:?}");
+            }
         }
 
         let _ = tx.send(());

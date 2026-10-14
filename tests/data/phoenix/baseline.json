@@ -3,7 +3,7 @@
   "held_out_unpredicted": 181,
   "hosts": 20,
   "matrix": "median.csv",
-  "mean_self_outgoing": 2.0,
+  "mean_self_outgoing_norm": 2.0,
   "reference_columns": 5,
   "reference_median_error": 0.9999999939047742,
   "reference_npre": 1.0,

@@ -103,6 +103,25 @@ request to the QCMP port.
 The returned data is a JSON object with each key being the ICAO code for the
 datacentre, and the value being the latency in nanoseconds.
 
+### Network coordinates
+
+`GET /network-coordinates` returns each datacentre's coordinate, keyed by ICAO
+code: `incoming` for the path towards it, `outgoing` for the path back.
+
+The `X-Api-Version` header, a `YYYY-MM-DD` date, selects the shape. On or after
+`2026-10-15`, one array per direction with an element per dimension:
+
+```json
+{ "ESSA": { "incoming": [1250000.0], "outgoing": [1310000.0] } }
+```
+
+Otherwise each direction is that array's Euclidean norm, which is the element
+itself while the space has one dimension:
+
+```json
+{ "ESSA": { "incoming": 1250000.0, "outgoing": 1310000.0 } }
+```
+
 ## Metrics
 
 * `quilkin_phoenix_requests`

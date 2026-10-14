@@ -5,7 +5,7 @@ use std::{collections::HashMap, net::SocketAddr};
 use async_trait::async_trait;
 use rand::{SeedableRng, seq::SliceRandom};
 
-use super::{DistanceMeasure, Measurement, Phoenix, accuracy};
+use super::{DistanceMeasure, Measurement, Phoenix, accuracy, dot, norm};
 use crate::config::IcaoCode;
 
 const TEST_MATRIX: &str = include_str!("../../../tests/data/phoenix/median.csv");
@@ -180,8 +180,8 @@ pub struct RoundResult {
     /// [`Self::held_out`] so a missing prediction is not averaged with an
     /// inaccurate one.
     pub unpredicted: usize,
-    /// Each host's solved outgoing coordinate, in input order.
-    pub self_outgoing: Vec<f64>,
+    /// Euclidean norm of each host's solved outgoing vector, in input order.
+    pub self_outgoing_norm: Vec<f64>,
 }
 
 impl RoundResult {
@@ -292,7 +292,7 @@ impl Simulation {
 
                 let self_outgoing = *phoenix.self_outgoing.read();
                 let self_incoming = *phoenix.self_incoming.read();
-                result.self_outgoing.push(self_outgoing);
+                result.self_outgoing_norm.push(norm(&self_outgoing));
 
                 for (column, address) in addresses.iter().enumerate() {
                     let Some(measured) = self.matrix.get(*row, column) else {
@@ -304,8 +304,8 @@ impl Simulation {
                         // Round trip is the two directed dot products summed.
                         Some(peer) => {
                             let prediction = Prediction {
-                                predicted: self_outgoing * peer.incoming
-                                    + peer.outgoing * self_incoming,
+                                predicted: dot(&self_outgoing, &peer.incoming)
+                                    + dot(&peer.outgoing, &self_incoming),
                                 measured,
                             };
 
@@ -409,7 +409,7 @@ mod tests {
                 .run(3)
                 .await
                 .last()
-                .map(|round| (round.self_outgoing.clone(), round.unpredicted))
+                .map(|round| (round.self_outgoing_norm.clone(), round.unpredicted))
                 .unwrap()
         };
 
@@ -431,15 +431,15 @@ mod tests {
     }
 
     fn baseline_summary(round: &RoundResult) -> serde_json::Value {
-        let mean_self_outgoing =
-            round.self_outgoing.iter().sum::<f64>() / round.self_outgoing.len() as f64;
+        let mean_self_outgoing_norm =
+            round.self_outgoing_norm.iter().sum::<f64>() / round.self_outgoing_norm.len() as f64;
 
         serde_json::json!({
             "matrix": "median.csv",
             "reference_columns": BASELINE_REFERENCES,
             "seed": BASELINE_SEED,
             "rounds": BASELINE_ROUNDS,
-            "hosts": round.self_outgoing.len(),
+            "hosts": round.self_outgoing_norm.len(),
             "reference_npre": round.reference_npre(),
             "reference_median_error": accuracy::median_relative_error(
                 &RoundResult::errors(&round.reference),
@@ -447,7 +447,7 @@ mod tests {
             "reference_scored": round.reference.len(),
             "held_out_scored": round.held_out.len(),
             "held_out_unpredicted": round.unpredicted,
-            "mean_self_outgoing": mean_self_outgoing,
+            "mean_self_outgoing_norm": mean_self_outgoing_norm,
         })
     }
 
@@ -483,7 +483,7 @@ mod tests {
         // Predictions on measured nodes come out at exactly twice the recorded
         // distance, hence a relative error of 1.0.
         assert!((round.reference_npre() - 1.0).abs() < 1e-6);
-        for self_outgoing in &round.self_outgoing {
+        for self_outgoing in &round.self_outgoing_norm {
             assert!((self_outgoing - 2.0).abs() < 1e-6);
         }
 
