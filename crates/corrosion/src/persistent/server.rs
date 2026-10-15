@@ -375,6 +375,26 @@ mod v1_impl {
             return (send, recv, Err(error));
         }
 
+        // Renewal runs beside the read loop rather than in a select with it:
+        // reading a length prefixed frame is not cancel safe, and dropping that
+        // future part way through would desynchronise the stream.
+        let renewal = tokio::spawn({
+            let mutator = mutator.clone();
+            let (icao, qcmp_port) = (req.icao, req.qcmp_port);
+
+            async move {
+                let mut renew = tokio::time::interval_at(
+                    tokio::time::Instant::now() + NODE_REFRESH,
+                    NODE_REFRESH,
+                );
+
+                loop {
+                    renew.tick().await;
+                    mutator.joined(peer, icao, qcmp_port).await;
+                }
+            }
+        });
+
         // Responses must be sent in request order, so the reader queues each
         // request's result channel and the writer drains them in FIFO order,
         // allowing requests to execute while earlier results are being written
@@ -429,12 +449,14 @@ mod v1_impl {
         let (send, write_result) = match writer.await {
             Ok(sr) => sr,
             Err(error) => {
+                renewal.abort();
                 mutator.disconnected(peer).await;
                 mutator.left(peer).await;
                 std::panic::resume_unwind(error.into_panic());
             }
         };
 
+        renewal.abort();
         mutator.disconnected(peer).await;
         mutator.left(peer).await;
 
