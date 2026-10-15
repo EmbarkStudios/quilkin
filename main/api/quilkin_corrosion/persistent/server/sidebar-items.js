@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["VERSION"],"struct":["Server"],"trait":["DbMutator"]};
+window.SIDEBAR_ITEMS = {"constant":["NODE_REFRESH","VERSION"],"struct":["Server"],"trait":["DbMutator"]};
