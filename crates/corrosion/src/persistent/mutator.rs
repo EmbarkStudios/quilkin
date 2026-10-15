@@ -291,9 +291,15 @@ impl BroadcastingTransactor {
 
 #[async_trait::async_trait]
 impl super::server::DbMutator for BroadcastingTransactor {
-    async fn joined(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
+    async fn joined(
+        &self,
+        peer: Peer,
+        icao: IcaoCode,
+        qcmp_port: u16,
+        capabilities: quilkin_types::Capabilities,
+    ) {
         let mut node = smallvec::SmallVec::<[_; 1]>::new();
-        db::write::Node(&mut node).upsert(peer, qcmp_port, icao);
+        db::write::Node(&mut node).upsert(peer, qcmp_port, icao, capabilities);
         self.commit_datacenter(peer, node, "node joined", "failed to insert node")
             .await;
     }

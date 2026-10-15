@@ -157,6 +157,7 @@ pub struct NodeRow {
     pub ip: IpAddr,
     pub icao: IcaoCode,
     pub qcmp_port: u16,
+    pub capabilities: quilkin_types::Capabilities,
     /// `None` until the node has solved a coordinate.
     pub coordinate: Option<Coordinate>,
 }
@@ -208,8 +209,9 @@ impl FromSqlValue for NodeRow {
             .try_into()
             .context("qcmp port was not within expected range")?;
         let icao = get_column!(req 2, "icao", values).parse()?;
+        let capabilities = get_column!(req 3, "capabilities", values).parse()?;
 
-        let dim: usize = integer(3, "dim")?
+        let dim: usize = integer(4, "dim")?
             .try_into()
             .context("dim was not within expected range")?;
 
@@ -218,9 +220,9 @@ impl FromSqlValue for NodeRow {
         let coordinate = (dim > 0)
             .then(|| -> eyre::Result<Coordinate> {
                 Ok(Coordinate {
-                    outgoing: deserialize_vector(values.get(4).and_then(|v| v.as_str()), dim)?,
-                    incoming: deserialize_vector(values.get(5).and_then(|v| v.as_str()), dim)?,
-                    round: integer(6, "round")?
+                    outgoing: deserialize_vector(values.get(5).and_then(|v| v.as_str()), dim)?,
+                    incoming: deserialize_vector(values.get(6).and_then(|v| v.as_str()), dim)?,
+                    round: integer(7, "round")?
                         .try_into()
                         .context("round was not within expected range")?,
                 })
@@ -231,6 +233,7 @@ impl FromSqlValue for NodeRow {
             ip,
             icao,
             qcmp_port,
+            capabilities,
             coordinate,
         })
     }

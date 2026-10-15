@@ -199,12 +199,17 @@ impl MutationClient {
         inner: Client,
         qcmp_port: u16,
         icao: IcaoCode,
+        capabilities: quilkin_types::Capabilities,
     ) -> Result<Self, ConnectError> {
         let (mut send, mut recv) = inner.conn.open_bi().await?;
 
         // We need to actually send something for the connection to be fully established
-        let req_buf =
-            proto::v1::Request::Mutate(proto::v1::MutateRequest { qcmp_port, icao }).write()?;
+        let req_buf = proto::v1::Request::Mutate(proto::v1::MutateRequest {
+            qcmp_port,
+            icao,
+            capabilities,
+        })
+        .write()?;
 
         send.write_chunk(req_buf).await.map_err(StreamError::from)?;
 
@@ -421,12 +426,13 @@ pub struct SubClientStream {
 }
 
 impl SubscriptionClient {
-    /// `identity` is this node's QCMP port and ICAO, which the server records so
-    /// other nodes can measure it. `None` leaves this node unregistered.
+    /// `identity` is this node's QCMP port, ICAO and capabilities, which the
+    /// server records so other nodes can find and measure it. `None` leaves
+    /// this node unregistered.
     pub async fn connect(
         inner: Client,
         params: crate::pubsub::SubParamsv1,
-        identity: Option<(u16, IcaoCode)>,
+        identity: Option<(u16, IcaoCode, quilkin_types::Capabilities)>,
     ) -> Result<(Self, SubClientStream), ConnectError> {
         let (mut send, mut recv) = inner.conn.open_bi().await?;
 
@@ -519,13 +525,14 @@ impl SubscriptionClient {
         send: &mut quinn::SendStream,
         recv: &mut quinn::RecvStream,
         params: crate::pubsub::SubParamsv1,
-        identity: Option<(u16, IcaoCode)>,
+        identity: Option<(u16, IcaoCode, quilkin_types::Capabilities)>,
     ) -> Result<proto::v1::SubscribeResponse, ConnectError> {
         // We need to actually send something for the connection to be fully established
         let req_buf = proto::v1::Request::Subscribe(proto::v1::SubscribeRequest {
             params,
-            qcmp_port: identity.map(|(port, _)| port),
-            icao: identity.map(|(_, icao)| icao),
+            qcmp_port: identity.map(|(port, ..)| port),
+            icao: identity.map(|(_, icao, _)| icao),
+            capabilities: identity.map_or_else(Default::default, |(.., c)| c),
         })
         .write()?;
 

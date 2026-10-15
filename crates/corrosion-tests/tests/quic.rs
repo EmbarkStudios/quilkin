@@ -78,11 +78,17 @@ impl server::DbMutator for InstaPrinter {
         self.do_mutate(&node).await;
     }
 
-    async fn joined(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
+    async fn joined(
+        &self,
+        peer: Peer,
+        icao: IcaoCode,
+        qcmp_port: u16,
+        capabilities: quilkin_types::Capabilities,
+    ) {
         let mut node = smallvec::SmallVec::<[_; 1]>::new();
         {
             let mut node = db::write::Node(&mut node);
-            node.upsert(peer, qcmp_port, icao);
+            node.upsert(peer, qcmp_port, icao, capabilities);
         }
 
         self.do_mutate(&node).await;
@@ -195,10 +201,29 @@ async fn test_quic_stream() {
     .await
     .unwrap();
 
-    let mutator = client::MutationClient::connect(client.clone(), 2001, icao)
-        .await
-        .unwrap();
+    let mutator = client::MutationClient::connect(
+        client.clone(),
+        2001,
+        icao,
+        quilkin_types::Capabilities::GAMESERVERS,
+    )
+    .await
+    .unwrap();
     insta::assert_snapshot!("connect", ip.print().await);
+
+    // Connecting is what registers a node, so the row and the capabilities it
+    // advertised are both there without anything else having to happen.
+    {
+        let conn = ip.db.read().await.unwrap();
+        let (port, capabilities) = conn
+            .query_row("SELECT port,capabilities FROM node", [], |row| {
+                Ok((row.get::<_, u16>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap();
+
+        assert_eq!(port, 2001);
+        assert_eq!(capabilities, "gameservers");
+    }
 
     // TODO: Pull this out into an actual type used in quilkin when we integrate the corrosion stuff in
     let mut actual = std::collections::BTreeMap::<Endpoint, (IcaoCode, TokenSet)>::new();

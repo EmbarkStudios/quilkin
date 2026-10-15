@@ -7,7 +7,7 @@ use corrosion::db::{
     write,
 };
 use corrosion_tests::{self as ct, Cell};
-use quilkin_types::{AddressKind, Endpoint, IcaoCode};
+use quilkin_types::{AddressKind, Capabilities, Endpoint, IcaoCode};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
 
 async fn exec_all<const N: usize>(v: &mut smallvec::SmallVec<[Statement; N]>, sp: &SplitPool) {
@@ -273,7 +273,12 @@ async fn registers_and_deregisters_nodes() {
     let mut v = smallvec::SmallVec::<[_; 2]>::new();
     {
         let mut node = write::Node(&mut v);
-        node.upsert(PREP_PEER, 7600, IcaoCode::new_testing([b'E'; 4]));
+        node.upsert(
+            PREP_PEER,
+            7600,
+            IcaoCode::new_testing([b'E'; 4]),
+            Capabilities::GAMESERVERS,
+        );
         exec_all(node.0, &sp).await;
     }
 
@@ -282,7 +287,12 @@ async fn registers_and_deregisters_nodes() {
     // Rejoining on a different port updates in place; a node is its address.
     {
         let mut node = write::Node(&mut v);
-        node.upsert(PREP_PEER, 7601, IcaoCode::new_testing([b'E'; 4]));
+        node.upsert(
+            PREP_PEER,
+            7601,
+            IcaoCode::new_testing([b'E'; 4]),
+            Capabilities::GAMESERVERS,
+        );
         exec_all(node.0, &sp).await;
     }
 
@@ -306,7 +316,7 @@ async fn stores_and_reads_coordinates() {
     let read = async || -> read::NodeRow {
         let conn = sp.read().await.unwrap();
         conn.query_row(corrosion::pubsub::NODE_QUERY, [], |row| {
-            let v = (0..7)
+            let v = (0..8)
                 .map(|i| row.get::<_, SqliteValue>(i).unwrap())
                 .collect::<Vec<_>>();
             Ok(read::NodeRow::from_sql(&v).unwrap())
@@ -317,7 +327,12 @@ async fn stores_and_reads_coordinates() {
     let mut v = smallvec::SmallVec::<[_; 2]>::new();
     {
         let mut node = write::Node(&mut v);
-        node.upsert(PREP_PEER, 7600, IcaoCode::new_testing([b'E'; 4]));
+        node.upsert(
+            PREP_PEER,
+            7600,
+            IcaoCode::new_testing([b'E'; 4]),
+            Capabilities::GAMESERVERS,
+        );
         exec_all(node.0, &sp).await;
     }
 
@@ -342,6 +357,7 @@ async fn stores_and_reads_coordinates() {
 
     // The identity columns are untouched by a coordinate write.
     assert_eq!(row.qcmp_port, 7600);
+    assert_eq!(row.capabilities, Capabilities::GAMESERVERS);
 }
 
 /// A node that stopped renewing is reaped, which is the backstop for a
@@ -359,7 +375,12 @@ async fn reaps_nodes_that_stopped_renewing() {
     let mut v = smallvec::SmallVec::<[_; 2]>::new();
     {
         let mut node = write::Node(&mut v);
-        node.upsert(PREP_PEER, 7600, IcaoCode::new_testing([b'E'; 4]));
+        node.upsert(
+            PREP_PEER,
+            7600,
+            IcaoCode::new_testing([b'E'; 4]),
+            Capabilities::GAMESERVERS,
+        );
         exec_all(node.0, &sp).await;
     }
 

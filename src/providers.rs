@@ -690,6 +690,14 @@ impl Providers {
         !self.xds_endpoints.is_empty()
     }
 
+    /// Whether this node is configured with somewhere to forward game traffic.
+    ///
+    /// Coarse on purpose: a peer cares that gameservers are reachable here, not
+    /// which provider supplies them.
+    pub fn gameservers(&self) -> bool {
+        self.agones_enabled() || self.static_enabled() || self.http_enabled()
+    }
+
     pub fn k8s_enabled(&self) -> bool {
         self.k8s_enabled
     }

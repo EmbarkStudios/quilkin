@@ -32,6 +32,8 @@ CREATE TABLE node (
     icao char(4) not null default 'XXXX',
     -- when it last joined
     joined timestamp,
+    -- comma separated set of what the node offers; see quilkin_types::Capabilities
+    capabilities text not null default '',
     -- elements in each coordinate vector; 0 until the node has solved one. A
     -- reader MUST skip a row whose dim differs from its own
     dim int not null default 0,

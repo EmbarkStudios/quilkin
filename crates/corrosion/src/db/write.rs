@@ -293,18 +293,27 @@ pub struct Node<'s, const N: usize>(pub &'s mut smallvec::SmallVec<[Statement; N
 
 impl<const N: usize> Node<'_, N> {
     #[inline]
-    pub fn upsert(&mut self, peer: Peer, qcmp: u16, icao: IcaoCode) {
+    pub fn upsert(
+        &mut self,
+        peer: Peer,
+        qcmp: u16,
+        icao: IcaoCode,
+        capabilities: quilkin_types::Capabilities,
+    ) {
         let params = vec![
             peer.to_sql(),
             SqliteParam::Integer(qcmp as _),
             icao.to_sql(),
+            SqliteParam::Text(capabilities.to_string().into()),
         ];
 
         self.0.push(Statement::WithParams(
-            "INSERT INTO node (ip,port,icao,joined) VALUES (?,?,?,unixepoch('now'))
+            "INSERT INTO node (ip,port,icao,capabilities,joined)
+                VALUES (?,?,?,?,unixepoch('now'))
             ON CONFLICT(ip) DO UPDATE SET
                 port = excluded.port,
                 icao = excluded.icao,
+                capabilities = excluded.capabilities,
                 joined = unixepoch('now')"
                 .into(),
             params,

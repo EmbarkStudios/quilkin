@@ -7,6 +7,7 @@ use tokio::sync::{broadcast, mpsc};
 pub(super) fn corrosion_mutate(
     qcmp: &crate::config::qcmp::QcmpPort,
     icao: &crate::config::NotifyingIcaoCode,
+    capabilities: quilkin_types::Capabilities,
     endpoints: CorrosionAddrs,
     hc: HealthCheck,
 ) -> (ServerMutator, Pusher) {
@@ -16,6 +17,7 @@ pub(super) fn corrosion_mutate(
     let agent_info = AgentInfo {
         qcmp: qcmp.load(),
         icao: icao.load(),
+        capabilities,
     };
 
     (
@@ -39,6 +41,7 @@ pub(super) fn corrosion_mutate(
 struct AgentInfo {
     qcmp: u16,
     icao: IcaoCode,
+    capabilities: quilkin_types::Capabilities,
 }
 
 pub enum Mutation {
@@ -430,5 +433,5 @@ async fn connect(
     .await
     .context("failed to connect")?;
 
-    Ok(client::MutationClient::connect(root, info.qcmp, info.icao).await?)
+    Ok(client::MutationClient::connect(root, info.qcmp, info.icao, info.capabilities).await?)
 }
