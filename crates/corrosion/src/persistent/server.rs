@@ -19,11 +19,22 @@ use super::{error::ErrorCode, update_metric};
 ///   All frames after are u16 length prefixed JSON
 pub const VERSION: u16 = 1;
 
+/// How often a connected node's registration is renewed.
+///
+/// Must stay below the reaper's threshold, which is checked where both are
+/// known.
+pub const NODE_REFRESH: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Trait used by a server implementation to perform database mutations
 #[async_trait::async_trait]
 pub trait DbMutator: Sync + Send + Clone {
     /// A new mutation client has connected
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16);
+    /// A node joined gossip, by either stream kind. Unlike
+    /// [`Self::connected`] this says nothing about what the node serves.
+    async fn joined(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16);
+    /// A node's gossip connection ended, by either stream kind.
+    async fn left(&self, peer: Peer);
     /// Queues 1 or more database mutations, returning a channel that receives
     /// the result once committed
     ///
@@ -126,11 +137,14 @@ impl Server {
         tc
     }
 
+    /// `qcmp_port` is advertised to subscribers so they can measure this
+    /// server; `None` when it serves no QCMP.
     pub fn new_unencrypted(
         addr: SocketAddr,
         mutator: impl DbMutator + 'static,
         subs: PubsubContext,
         metrics: super::Metrics,
+        qcmp_port: Option<u16>,
     ) -> std::io::Result<Self> {
         let mut sc = quinn_plaintext::server_config();
         sc.transport_config(std::sync::Arc::new(Self::transport_config()));
@@ -196,7 +210,8 @@ impl Server {
                                         let usbs = usbs.clone();
 
                                         tokio::spawn(async move {
-                                            Self::handle_request(vr, mutator, usbs).await;
+                                            Self::handle_request(vr, mutator, usbs, qcmp_port)
+                                                .await;
                                         });
                                     }
                                     Err(error) => {
@@ -269,6 +284,7 @@ impl Server {
         req: ValidRequest,
         mutator: impl DbMutator + 'static,
         subs: PubsubContext,
+        qcmp_port: Option<u16>,
     ) {
         let ValidRequest {
             send,
@@ -279,7 +295,7 @@ impl Server {
 
         let (send, recv, result) = match request {
             proto::Request::V1(inner) => {
-                v1_impl::handle_stream(inner, peer, send, recv, mutator, subs).await
+                v1_impl::handle_stream(inner, peer, send, recv, mutator, subs, qcmp_port).await
             }
         };
 
@@ -346,6 +362,7 @@ mod v1_impl {
         mutator: impl DbMutator + 'static,
     ) -> (SendStream, RecvStream, Result<(), IoLoopError>) {
         mutator.connected(peer, req.icao, req.qcmp_port).await;
+        mutator.joined(peer, req.icao, req.qcmp_port).await;
 
         if let Err(error) = send_response(
             &mut send,
@@ -354,6 +371,7 @@ mod v1_impl {
         .await
         {
             mutator.disconnected(peer).await;
+            mutator.left(peer).await;
             return (send, recv, Err(error));
         }
 
@@ -412,11 +430,13 @@ mod v1_impl {
             Ok(sr) => sr,
             Err(error) => {
                 mutator.disconnected(peer).await;
+                mutator.left(peer).await;
                 std::panic::resume_unwind(error.into_panic());
             }
         };
 
         mutator.disconnected(peer).await;
+        mutator.left(peer).await;
 
         // a read error is either the client closing the stream or a bad frame,
         // both of which take precedence over any downstream write error
@@ -429,8 +449,19 @@ mod v1_impl {
         peer: Peer,
         mut send: SendStream,
         subs: PubsubContext,
+        qcmp_port: Option<u16>,
+        mutator: impl DbMutator + 'static,
     ) -> (SendStream, Result<(), IoLoopError>) {
-        let res = handle_subscribe_inner(req, peer, &mut send, subs).await;
+        // Deregister on every exit path, but only for a subscriber that was
+        // registered in the first place.
+        let registered = req.qcmp_port.is_some() && req.icao.is_some();
+        let res =
+            handle_subscribe_inner(req, peer, &mut send, subs, qcmp_port, mutator.clone()).await;
+
+        if registered {
+            mutator.left(peer).await;
+        }
+
         (send, res)
     }
 
@@ -439,17 +470,27 @@ mod v1_impl {
         peer: Peer,
         send: &mut SendStream,
         subs: PubsubContext,
+        qcmp_port: Option<u16>,
+        mutator: impl DbMutator + 'static,
     ) -> Result<(), IoLoopError> {
-        let max_buffer = req.0.max_buffer;
-        let max_time = req.0.max_time;
+        let max_buffer = req.params.max_buffer;
+        let max_time = req.params.max_time;
 
-        match subs.subscribe(req.0).await {
+        // A subscriber that told us how to reach it is registered as a node, the
+        // same as a mutating peer; one that did not stays invisible.
+        let registration = req.qcmp_port.zip(req.icao);
+        if let Some((port, icao)) = registration {
+            mutator.joined(peer, icao, port).await;
+        }
+
+        match subs.subscribe(req.params).await {
             Ok(sub) => {
                 send_response(
                     send,
                     v1::Response::Ok(v1::OkResponse::Subscribe(v1::SubscribeResponse {
                         id: sub.id,
                         query_hash: sub.query_hash.clone(),
+                        qcmp_port,
                     })),
                 )
                 .await?;
@@ -458,9 +499,21 @@ mod v1_impl {
 
                 let mut bs = pubsub::BufferingSubStream::new(sub, max_buffer, max_time);
 
+                // The registration carries a timestamp the reaper measures
+                // against, so a connection outliving the reap threshold has to
+                // renew or it would be collected while still live.
+                let mut renew = tokio::time::interval_at(
+                    tokio::time::Instant::now() + NODE_REFRESH,
+                    NODE_REFRESH,
+                );
+
                 let mut io_loop = async || -> Result<(), IoLoopError> {
                     loop {
                         tokio::select! {
+                            _ = renew.tick(), if registration.is_some() => {
+                                let (port, icao) = registration.expect("guarded above");
+                                mutator.joined(peer, icao, port).await;
+                            }
                             buf = bs.next() => {
                                 if let Some(buf) = buf {
                                     send.write_chunk(buf).await?;
@@ -536,12 +589,13 @@ mod v1_impl {
         recv: RecvStream,
         mutator: impl DbMutator + 'static,
         subs: PubsubContext,
+        qcmp_port: Option<u16>,
     ) -> (SendStream, RecvStream, Result<(), IoLoopError>) {
         match request {
             v1::Request::Mutate(mreq) => handle_mutate(mreq, peer, send, recv, mutator).await,
             v1::Request::Subscribe(sreq) => {
-                let query = sreq.0.query.query().to_owned();
-                let (send, res) = handle_subscribe(sreq, peer, send, subs)
+                let query = sreq.params.query.query().to_owned();
+                let (send, res) = handle_subscribe(sreq, peer, send, subs, qcmp_port, mutator)
                     .instrument(
                         tracing::debug_span!("subscribe", %peer, id = recv.id().index(), query),
                     )

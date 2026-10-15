@@ -23,6 +23,17 @@ CREATE TABLE dc (
     servers blob
 );
 
+CREATE TABLE node (
+    -- the IPv6 (or IPv4 mapped) address, as observed by whoever it connected to
+    ip varchar(40) not null primary key,
+    -- the QCMP port it advertised
+    port int not null default 0,
+    -- icao code
+    icao char(4) not null default 'XXXX',
+    -- when it last joined
+    joined timestamp
+);
+
 CREATE TABLE filter (
     -- no sense making the filter itself the key
     id int not null primary key,

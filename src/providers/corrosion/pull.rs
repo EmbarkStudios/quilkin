@@ -31,11 +31,18 @@ pub(super) async fn corrosion_subscribe(
     // (hopefully) be able to catch up to the state of that server more quickly
     let mut change_ids = QuerySet::new();
 
+    // Sent at subscribe so the server can register this node, letting others
+    // measure it. Absent when this node serves no QCMP.
+    let identity = state
+        .dyn_cfg
+        .qcmp_port()
+        .map(|port| (port.load(), state.dyn_cfg.icao_code.load()));
+
     loop {
         let connect_to_corrosion = connect_first(&endpoints, |addr| {
             let cids = change_ids.clone();
             async move {
-                connect_and_sub(&addr, &cids)
+                connect_and_sub(&addr, &cids, identity)
                     .instrument(tracing::debug_span!("connect_and_sub", address = %addr))
                     .await
             }
@@ -54,6 +61,28 @@ pub(super) async fn corrosion_subscribe(
 
         tracing::info!(%address, "successfully subscribed to corrosion server");
         hc.store(true, atomic::Ordering::Relaxed);
+
+        // Phoenix measures the relay it is subscribed to. Only that relay tells
+        // us its QCMP port, so the set is whichever one we reached.
+        if let Some(reference_hosts) = state.dyn_cfg.reference_hosts() {
+            let host = match (sstate.servers.stream.qcmp_port, address.to_socket_addr()) {
+                (Some(port), Ok(resolved)) => {
+                    let host = std::net::SocketAddr::new(resolved.ip(), port);
+                    tracing::info!(%host, "phoenix reference host advertised");
+                    Some(host)
+                }
+                (None, _) => {
+                    tracing::info!(%address, "corrosion server advertised no QCMP port");
+                    None
+                }
+                (Some(_), Err(error)) => {
+                    tracing::warn!(%address, %error, "cannot resolve the subscribed server");
+                    None
+                }
+            };
+
+            reference_hosts.store(host.into_iter().collect());
+        }
 
         let _res = {
             let _metrics = crate::metrics::ActiveProviderMetrics::new(address.to_string());
@@ -74,6 +103,7 @@ pub(super) async fn corrosion_subscribe(
 async fn connect_and_sub(
     addr: &crate::net::EndpointAddress,
     change_ids: &ChangeIds,
+    identity: Option<(u16, quilkin_types::IcaoCode)>,
 ) -> crate::Result<SubState> {
     tracing::debug!("connecting to corrosion server");
 
@@ -95,8 +125,10 @@ async fn connect_and_sub(
         async move {
             let mut sp = SubParams::new(pubsub::SERVER_QUERY);
             sp.from = from;
+            // Only the first subscription registers; the row is keyed by
+            // address, so repeating it on the other two would just rewrite it.
             (
-                client::SubscriptionClient::connect(root, sp).await,
+                client::SubscriptionClient::connect(root, sp, identity).await,
                 Which::Servers,
             )
         }
@@ -109,7 +141,7 @@ async fn connect_and_sub(
             let mut sp = SubParams::new(pubsub::DC_QUERY);
             sp.from = from;
             (
-                client::SubscriptionClient::connect(root, sp).await,
+                client::SubscriptionClient::connect(root, sp, None).await,
                 Which::Clusters,
             )
         }
@@ -122,7 +154,7 @@ async fn connect_and_sub(
             let mut sp = SubParams::new(pubsub::FILTER_QUERY);
             sp.from = from;
             (
-                client::SubscriptionClient::connect(root, sp).await,
+                client::SubscriptionClient::connect(root, sp, None).await,
                 Which::Filter,
             )
         }

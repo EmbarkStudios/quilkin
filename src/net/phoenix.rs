@@ -399,6 +399,10 @@ pub struct Inner<M> {
         tokio::sync::watch::Receiver<()>,
     ),
     bad_node_informer: Option<crate::config::BadNodeInformer>,
+    /// Hosts this node's own coordinate is solved against, measured every round
+    /// and kept apart from the datacentres being ranked. Empty until a relay
+    /// advertises its QCMP port.
+    reference_hosts: Option<crate::config::ReferenceHosts>,
     /// This node's outgoing coordinate vector, computed by NNLS each round.
     self_outgoing: parking_lot::RwLock<[f64; DIMENSION]>,
     /// This node's incoming coordinate vector, computed by NNLS each round.
@@ -531,6 +535,8 @@ impl<M: Measurement + 'static> Phoenix<M> {
     async fn update(&self, mut current_interval: std::time::Duration) -> std::time::Duration {
         let nodes = self.select_nodes_to_probe();
 
+        self.measure_reference_hosts().await;
+
         let (count, total_difference) = self.measure_nodes(nodes).await;
 
         if count > 0 {
@@ -562,6 +568,46 @@ impl<M: Measurement + 'static> Phoenix<M> {
             current_interval = self.update(current_interval).await;
 
             tokio::time::sleep(current_interval).await;
+        }
+    }
+
+    /// Measures every reference host, recording the latency to each.
+    ///
+    /// Nothing is solved against them yet, and they are kept out of the
+    /// datacentre ranking: a reference may share an ICAO code with a
+    /// datacentre, and is not one.
+    async fn measure_reference_hosts(&self) {
+        use crate::metrics::CoordinateDirection;
+
+        let Some(reference_hosts) = self.reference_hosts.as_ref() else {
+            return;
+        };
+
+        for address in reference_hosts.load().iter() {
+            let endpoint = address.to_string();
+
+            match self.measurement.measure_distance(*address).await {
+                Ok(distance) if distance.is_plausible() => {
+                    crate::metrics::phoenix_reference_seconds(
+                        &endpoint,
+                        CoordinateDirection::Incoming,
+                    )
+                    .observe(distance.incoming.duration().as_secs_f64());
+                    crate::metrics::phoenix_reference_seconds(
+                        &endpoint,
+                        CoordinateDirection::Outgoing,
+                    )
+                    .observe(distance.outgoing.duration().as_secs_f64());
+                }
+                Ok(_) => {
+                    tracing::warn!(%address, "discarding implausible reference measurement");
+                    crate::metrics::phoenix_reference_errors(&endpoint).inc();
+                }
+                Err(error) => {
+                    tracing::debug!(%address, %error, "error measuring reference host");
+                    crate::metrics::phoenix_reference_errors(&endpoint).inc();
+                }
+            }
         }
     }
 
@@ -723,6 +769,7 @@ pub struct Builder<M> {
     interval_range: Option<Range<Duration>>,
     subset_percentage: Option<f64>,
     bad_node_informer: Option<crate::config::BadNodeInformer>,
+    reference_hosts: Option<crate::config::ReferenceHosts>,
 }
 
 impl<M: Measurement> Builder<M> {
@@ -748,6 +795,7 @@ impl<M: Measurement> Builder<M> {
             interval_range: None,
             subset_percentage: None,
             bad_node_informer: None,
+            reference_hosts: None,
         }
     }
 
@@ -785,6 +833,12 @@ impl<M: Measurement> Builder<M> {
         self
     }
 
+    /// Sets the shared set of hosts this node's coordinate is solved against.
+    pub fn reference_hosts(mut self, hosts: crate::config::ReferenceHosts) -> Self {
+        self.reference_hosts = Some(hosts);
+        self
+    }
+
     /// Inform about bad nodes that don't respond to pings.
     pub fn inform_bad_nodes(mut self, bad_node_informer: crate::config::BadNodeInformer) -> Self {
         self.bad_node_informer = Some(bad_node_informer);
@@ -806,6 +860,7 @@ impl<M: Measurement> Builder<M> {
                 subset_percentage: self.subset_percentage.unwrap_or(Self::DEFAULT_SUBSET),
                 update_watcher: tokio::sync::watch::channel(()),
                 bad_node_informer: self.bad_node_informer,
+                reference_hosts: self.reference_hosts,
                 self_outgoing: parking_lot::RwLock::new([0.0; DIMENSION]),
                 self_incoming: parking_lot::RwLock::new([0.0; DIMENSION]),
             }),
@@ -920,7 +975,6 @@ mod tests {
     use tokio::sync::Mutex;
 
     #[derive(Clone)]
-    #[allow(dead_code)]
     struct LoggingMockMeasurement {
         latencies: HashMap<SocketAddr, DistanceMeasure>,
         probed_addresses: Arc<Mutex<HashSet<SocketAddr>>>,
@@ -982,6 +1036,40 @@ mod tests {
 
     fn ijkl() -> IcaoCode {
         "IJKL".parse().unwrap()
+    }
+
+    /// Reference hosts are probed to solve this node's own coordinate, and are
+    /// not candidates for the datacentre ranking. The two sets can name the same
+    /// ICAO code, so a leak would show up as a datacentre at the wrong latency.
+    #[tokio::test]
+    async fn reference_hosts_are_measured_but_not_ranked() {
+        let datacentre = "127.0.0.1:8080".parse::<SocketAddr>().unwrap();
+        let reference = "127.0.0.1:9090".parse::<SocketAddr>().unwrap();
+        let probed = Arc::new(Mutex::new(HashSet::new()));
+
+        let phoenix = Phoenix::builder(LoggingMockMeasurement {
+            latencies: HashMap::from([(datacentre, (100, 100).into()), (reference, (5, 5).into())]),
+            probed_addresses: probed.clone(),
+        })
+        .reference_hosts({
+            let hosts = crate::config::ReferenceHosts::default();
+            hosts.store(vec![reference]);
+            hosts
+        })
+        .build();
+
+        phoenix.add_node(datacentre, abcd());
+        phoenix.update(Duration::from_secs(60)).await;
+
+        assert!(probed.lock().await.contains(&reference));
+        assert_eq!(
+            phoenix
+                .ordered_nodes_by_latency()
+                .into_iter()
+                .map(|(icao, _)| icao)
+                .collect::<Vec<_>>(),
+            vec![abcd()],
+        );
     }
 
     #[test]

@@ -291,6 +291,13 @@ impl BroadcastingTransactor {
 
 #[async_trait::async_trait]
 impl super::server::DbMutator for BroadcastingTransactor {
+    async fn joined(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
+        let mut node = smallvec::SmallVec::<[_; 1]>::new();
+        db::write::Node(&mut node).upsert(peer, qcmp_port, icao);
+        self.commit_datacenter(peer, node, "node joined", "failed to insert node")
+            .await;
+    }
+
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
         let mut dc = smallvec::SmallVec::<[_; 1]>::new();
         db::write::Datacenter(&mut dc).insert(peer, qcmp_port, icao);
@@ -361,6 +368,13 @@ impl super::server::DbMutator for BroadcastingTransactor {
         let mut dc = smallvec::SmallVec::<[_; 2]>::new();
         db::write::Datacenter(&mut dc).remove(peer, None);
         self.commit_datacenter(peer, dc, "peer removed", "failed to remove dc")
+            .await;
+    }
+
+    async fn left(&self, peer: Peer) {
+        let mut node = smallvec::SmallVec::<[_; 1]>::new();
+        db::write::Node(&mut node).remove(peer);
+        self.commit_datacenter(peer, node, "node left", "failed to remove node")
             .await;
     }
 }

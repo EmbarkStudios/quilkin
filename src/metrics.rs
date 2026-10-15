@@ -626,6 +626,49 @@ pub(crate) fn phoenix_measurements_rejected_total(
     ])
 }
 
+/// Latency to a reference host, kept apart from the per-datacentre histogram
+/// because a reference may share an ICAO code with a datacentre.
+pub(crate) fn phoenix_reference_seconds(
+    endpoint: &str,
+    direction: CoordinateDirection,
+) -> Histogram {
+    /// As in [`phoenix_measurement_seconds`]; the paths span the same range.
+    const BUCKETS: &[f64] = &[
+        0.0005, 0.001, 0.002, 0.004, 0.008, 0.015, 0.03, 0.05, 0.08, 0.12, 0.2, 0.3, 0.5,
+    ];
+
+    static PHOENIX_REFERENCE: Lazy<HistogramVec> = Lazy::new(|| {
+        prometheus::register_histogram_vec_with_registry! {
+            prometheus::histogram_opts! {
+                "quilkin_phoenix_reference_seconds",
+                "Histogram of measurements to the coordinate reference hosts",
+                BUCKETS.to_vec()
+            },
+            &["endpoint", "direction"],
+            registry(),
+        }
+        .unwrap()
+    });
+
+    PHOENIX_REFERENCE.with_label_values(&[endpoint, direction.label()])
+}
+
+pub(crate) fn phoenix_reference_errors(endpoint: &str) -> IntCounter {
+    static PHOENIX_REFERENCE_ERRORS: Lazy<IntCounterVec> = Lazy::new(|| {
+        prometheus::register_int_counter_vec_with_registry! {
+            prometheus::opts! {
+                "quilkin_phoenix_reference_errors_total",
+                "Measurements to a reference host that yielded no usable value",
+            },
+            &["endpoint"],
+            registry(),
+        }
+        .unwrap()
+    });
+
+    PHOENIX_REFERENCE_ERRORS.with_label_values(&[endpoint])
+}
+
 pub(crate) fn phoenix_distance(icao: crate::config::IcaoCode) -> Gauge {
     static PHOENIX_DISTANCE: Lazy<GaugeVec> = Lazy::new(|| {
         prometheus::register_gauge_vec_with_registry! {

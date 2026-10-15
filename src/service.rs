@@ -666,9 +666,13 @@ impl Service {
         };
 
         tracing::info!(port=%self.qcmp_port, "starting phoenix service");
+
         let phoenix = {
             let mut builder =
                 crate::net::phoenix::Phoenix::builder(crate::codec::qcmp::QcmpTransceiver::new()?);
+            if let Some(hosts) = config.dyn_cfg.reference_hosts() {
+                builder = builder.reference_hosts(hosts);
+            }
             if let Some(informer) = config.bad_node_informer() {
                 builder = builder.inform_bad_nodes(informer);
             }
@@ -1300,6 +1304,14 @@ impl Service {
             const TEN_MINUTES: u32 = 10 * 60;
 
             let reap_time = self.corrosion_server_reap.unwrap_or(TEN_MINUTES) as _;
+
+            eyre::ensure!(
+                std::time::Duration::from_secs(reap_time)
+                    > corrosion::persistent::server::NODE_REFRESH,
+                "--service.corrosion.server-reap must exceed {:?}, the interval at which a \
+                 connected node renews its registration, or live nodes are reaped",
+                corrosion::persistent::server::NODE_REFRESH,
+            );
             let check_interval = std::time::Duration::from_secs(reap_time / 2);
             let reap_time = std::time::Duration::from_secs(reap_time);
 
@@ -1314,11 +1326,14 @@ impl Service {
                 loop {
                     tokio::select! {
                         _ = interval.tick() => {
-                            let statement = corrosion::db::write::Server::<0>::reap_old(reap_time);
+                            let statements = [
+                                corrosion::db::write::Server::<0>::reap_old(reap_time),
+                                corrosion::db::write::Node::<0>::reap_old(reap_time),
+                            ];
 
                             let res = btx
                                 .with_full_recovery(None, |tx| {
-                                    corrosion::db::write::exec_single_interruptible(tx, &statement)
+                                    corrosion::db::write::exec_interruptible(tx, &statements)
                                     .map_err(|source| {
                                         corrosion::types::agent::ChangeError::Rusqlite {
                                             source,
@@ -1331,10 +1346,10 @@ impl Service {
 
                             match res {
                                 Ok((count, version, elapsed)) => {
-                                    tracing::debug!(count, ?version, ?elapsed, "reaped old servers");
+                                    tracing::debug!(count, ?version, ?elapsed, "reaped stale rows");
                                 }
                                 Err(error) => {
-                                    tracing::error!(%error, "failed to reap old servers");
+                                    tracing::error!(%error, "failed to reap stale rows");
                                 }
                             }
                         }
@@ -1413,6 +1428,9 @@ impl Service {
             btx,
             ps_ctx,
             corrosion::persistent::Metrics::new(crate::metrics::registry()),
+            // Advertised so subscribers can measure their latency to this
+            // server; they have its host already, but not this port.
+            self.qcmp_enabled.then_some(self.qcmp_port),
         )?;
 
         let port = udp_server.local_addr().port();

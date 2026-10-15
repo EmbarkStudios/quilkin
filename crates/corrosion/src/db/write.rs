@@ -273,6 +273,55 @@ impl ToSqlParam for Peer {
     }
 }
 
+/// Registration for any node that joins gossip, whatever services it runs.
+///
+/// Distinct from [`Datacenter`], which records the sites that host gameservers
+/// and is what latency is reported against.
+pub struct Node<'s, const N: usize>(pub &'s mut smallvec::SmallVec<[Statement; N]>);
+
+impl<const N: usize> Node<'_, N> {
+    #[inline]
+    pub fn upsert(&mut self, peer: Peer, qcmp: u16, icao: IcaoCode) {
+        let params = vec![
+            peer.to_sql(),
+            SqliteParam::Integer(qcmp as _),
+            icao.to_sql(),
+        ];
+
+        self.0.push(Statement::WithParams(
+            "INSERT INTO node (ip,port,icao,joined) VALUES (?,?,?,unixepoch('now'))
+            ON CONFLICT(ip) DO UPDATE SET
+                port = excluded.port,
+                icao = excluded.icao,
+                joined = unixepoch('now')"
+                .into(),
+            params,
+        ));
+    }
+
+    /// Create a statement to remove the specified node
+    #[inline]
+    pub fn remove(&mut self, peer: Peer) {
+        self.0.push(Statement::WithParams(
+            "DELETE FROM node WHERE ip = ?".into(),
+            vec![peer.to_sql()],
+        ));
+    }
+
+    /// Create a statement to remove nodes that have not refreshed within the
+    /// specified duration.
+    ///
+    /// Backstop for a row whose departure was never observed, which happens
+    /// when the server holding the connection restarts rather than the node.
+    #[inline]
+    pub fn reap_old(max_age: std::time::Duration) -> Statement {
+        Statement::WithParams(
+            "DELETE FROM node WHERE unixepoch('now') - joined > ?".into(),
+            vec![SqliteParam::Integer(max_age.as_secs() as i64)],
+        )
+    }
+}
+
 pub struct Datacenter<'s, const N: usize>(pub &'s mut smallvec::SmallVec<[Statement; N]>);
 
 impl<const N: usize> Datacenter<'_, N> {

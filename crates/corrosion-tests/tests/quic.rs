@@ -68,6 +68,26 @@ impl InstaPrinter {
 
 #[async_trait::async_trait]
 impl server::DbMutator for InstaPrinter {
+    async fn left(&self, peer: Peer) {
+        let mut node = smallvec::SmallVec::<[_; 1]>::new();
+        {
+            let mut node = db::write::Node(&mut node);
+            node.remove(peer);
+        }
+
+        self.do_mutate(&node).await;
+    }
+
+    async fn joined(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
+        let mut node = smallvec::SmallVec::<[_; 1]>::new();
+        {
+            let mut node = db::write::Node(&mut node);
+            node.upsert(peer, qcmp_port, icao);
+        }
+
+        self.do_mutate(&node).await;
+    }
+
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16) {
         let mut dc = smallvec::SmallVec::<[_; 1]>::new();
         {
@@ -159,6 +179,7 @@ async fn test_quic_stream() {
         ip.clone(),
         db.pubsub_ctx(),
         corrosion::persistent::Metrics::new(sreg),
+        None,
     )
     .unwrap();
 
@@ -194,6 +215,7 @@ async fn test_quic_stream() {
             process_interval: Duration::from_millis(10),
             change_threshold: 0,
         },
+        None,
     )
     .await
     .unwrap();

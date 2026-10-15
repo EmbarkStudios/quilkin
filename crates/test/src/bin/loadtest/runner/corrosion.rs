@@ -116,6 +116,7 @@ impl CorrosionHandle {
             btx,
             pubsub_ctx,
             metrics.clone(),
+            None,
         )?;
         let addr = server.local_addr();
 
