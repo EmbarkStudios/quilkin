@@ -1333,20 +1333,49 @@ impl Service {
 
                             let res = btx
                                 .with_full_recovery(None, |tx| {
-                                    corrosion::db::write::exec_interruptible(tx, &statements)
-                                    .map_err(|source| {
+                                    let failed = |source| {
                                         corrosion::types::agent::ChangeError::Rusqlite {
                                             source,
                                             actor_id: Some(btx.actor_id()),
                                             version: None,
                                         }
-                                    })
+                                    };
+
+                                    let servers = corrosion::db::write::exec_single_interruptible(
+                                        tx,
+                                        &statements[0],
+                                    )
+                                    .map_err(failed)?;
+                                    let nodes = corrosion::db::write::exec_single_interruptible(
+                                        tx,
+                                        &statements[1],
+                                    )
+                                    .map_err(failed)?;
+
+                                    // Read back inside the same transaction, so
+                                    // the gauge cannot straddle another reap.
+                                    let registered: i64 = tx
+                                        .prepare_cached("SELECT COUNT(*) FROM node")
+                                        .and_then(|mut s| s.query_row((), |row| row.get(0)))
+                                        .map_err(failed)?;
+
+                                    Ok((servers, nodes, registered))
                                 })
                                 .await;
 
                             match res {
-                                Ok((count, version, elapsed)) => {
-                                    tracing::debug!(count, ?version, ?elapsed, "reaped stale rows");
+                                Ok(((servers, nodes, registered), version, elapsed)) => {
+                                    crate::metrics::corrosion_nodes().set(registered);
+                                    crate::metrics::corrosion_nodes_reaped()
+                                        .inc_by(nodes as u64);
+                                    tracing::debug!(
+                                        servers,
+                                        nodes,
+                                        registered,
+                                        ?version,
+                                        ?elapsed,
+                                        "reaped stale rows"
+                                    );
                                 }
                                 Err(error) => {
                                     tracing::error!(%error, "failed to reap stale rows");

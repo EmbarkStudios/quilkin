@@ -669,6 +669,44 @@ pub(crate) fn phoenix_reference_errors(endpoint: &str) -> IntCounter {
     PHOENIX_REFERENCE_ERRORS.with_label_values(&[endpoint])
 }
 
+/// Nodes currently registered in gossip.
+///
+/// Holds steady while connected nodes renew; a sawtooth means renewal is losing
+/// to the reaper, and zero means registration is not reaching the table.
+pub(crate) fn corrosion_nodes() -> &'static IntGauge {
+    static CORROSION_NODES: Lazy<IntGauge> = Lazy::new(|| {
+        prometheus::register_int_gauge_with_registry! {
+            prometheus::opts! {
+                "quilkin_corrosion_nodes",
+                "Number of nodes currently registered in gossip",
+            },
+            registry(),
+        }
+        .unwrap()
+    });
+
+    &CORROSION_NODES
+}
+
+/// Registrations removed for going stale rather than for leaving.
+///
+/// Expected to stay near zero: a node that is still connected renews, so a
+/// rising count means renewals are not arriving.
+pub(crate) fn corrosion_nodes_reaped() -> &'static IntCounter {
+    static CORROSION_NODES_REAPED: Lazy<IntCounter> = Lazy::new(|| {
+        prometheus::register_int_counter_with_registry! {
+            prometheus::opts! {
+                "quilkin_corrosion_nodes_reaped_total",
+                "Node registrations removed by the reaper for going stale",
+            },
+            registry(),
+        }
+        .unwrap()
+    });
+
+    &CORROSION_NODES_REAPED
+}
+
 pub(crate) fn phoenix_distance(icao: crate::config::IcaoCode) -> Gauge {
     static PHOENIX_DISTANCE: Lazy<GaugeVec> = Lazy::new(|| {
         prometheus::register_gauge_vec_with_registry! {
