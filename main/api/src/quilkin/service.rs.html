@@ -1333,356 +1333,385 @@
 <a href=#1333 id=1333 data-nosnippet>1333</a>
 <a href=#1334 id=1334 data-nosnippet>1334</a>                            <span class="kw">let </span>res = btx
 <a href=#1335 id=1335 data-nosnippet>1335</a>                                .with_full_recovery(<span class="prelude-val">None</span>, |tx| {
-<a href=#1336 id=1336 data-nosnippet>1336</a>                                    corrosion::db::write::exec_interruptible(tx, <span class="kw-2">&amp;</span>statements)
-<a href=#1337 id=1337 data-nosnippet>1337</a>                                    .map_err(|source| {
-<a href=#1338 id=1338 data-nosnippet>1338</a>                                        corrosion::types::agent::ChangeError::Rusqlite {
-<a href=#1339 id=1339 data-nosnippet>1339</a>                                            source,
-<a href=#1340 id=1340 data-nosnippet>1340</a>                                            actor_id: <span class="prelude-val">Some</span>(btx.actor_id()),
-<a href=#1341 id=1341 data-nosnippet>1341</a>                                            version: <span class="prelude-val">None</span>,
-<a href=#1342 id=1342 data-nosnippet>1342</a>                                        }
-<a href=#1343 id=1343 data-nosnippet>1343</a>                                    })
-<a href=#1344 id=1344 data-nosnippet>1344</a>                                })
-<a href=#1345 id=1345 data-nosnippet>1345</a>                                .<span class="kw">await</span>;
-<a href=#1346 id=1346 data-nosnippet>1346</a>
-<a href=#1347 id=1347 data-nosnippet>1347</a>                            <span class="kw">match </span>res {
-<a href=#1348 id=1348 data-nosnippet>1348</a>                                <span class="prelude-val">Ok</span>((count, version, elapsed)) =&gt; {
-<a href=#1349 id=1349 data-nosnippet>1349</a>                                    <span class="macro">tracing::debug!</span>(count, <span class="question-mark">?</span>version, <span class="question-mark">?</span>elapsed, <span class="string">"reaped stale rows"</span>);
-<a href=#1350 id=1350 data-nosnippet>1350</a>                                }
-<a href=#1351 id=1351 data-nosnippet>1351</a>                                <span class="prelude-val">Err</span>(error) =&gt; {
-<a href=#1352 id=1352 data-nosnippet>1352</a>                                    <span class="macro">tracing::error!</span>(%error, <span class="string">"failed to reap stale rows"</span>);
-<a href=#1353 id=1353 data-nosnippet>1353</a>                                }
-<a href=#1354 id=1354 data-nosnippet>1354</a>                            }
-<a href=#1355 id=1355 data-nosnippet>1355</a>                        }
-<a href=#1356 id=1356 data-nosnippet>1356</a>                        <span class="kw">_ </span>= srx.changed() =&gt; {
-<a href=#1357 id=1357 data-nosnippet>1357</a>                            <span class="kw">break</span>;
-<a href=#1358 id=1358 data-nosnippet>1358</a>                        }
-<a href=#1359 id=1359 data-nosnippet>1359</a>                    }
-<a href=#1360 id=1360 data-nosnippet>1360</a>                }
+<a href=#1336 id=1336 data-nosnippet>1336</a>                                    <span class="kw">let </span>failed = |source| {
+<a href=#1337 id=1337 data-nosnippet>1337</a>                                        corrosion::types::agent::ChangeError::Rusqlite {
+<a href=#1338 id=1338 data-nosnippet>1338</a>                                            source,
+<a href=#1339 id=1339 data-nosnippet>1339</a>                                            actor_id: <span class="prelude-val">Some</span>(btx.actor_id()),
+<a href=#1340 id=1340 data-nosnippet>1340</a>                                            version: <span class="prelude-val">None</span>,
+<a href=#1341 id=1341 data-nosnippet>1341</a>                                        }
+<a href=#1342 id=1342 data-nosnippet>1342</a>                                    };
+<a href=#1343 id=1343 data-nosnippet>1343</a>
+<a href=#1344 id=1344 data-nosnippet>1344</a>                                    <span class="kw">let </span>servers = corrosion::db::write::exec_single_interruptible(
+<a href=#1345 id=1345 data-nosnippet>1345</a>                                        tx,
+<a href=#1346 id=1346 data-nosnippet>1346</a>                                        <span class="kw-2">&amp;</span>statements[<span class="number">0</span>],
+<a href=#1347 id=1347 data-nosnippet>1347</a>                                    )
+<a href=#1348 id=1348 data-nosnippet>1348</a>                                    .map_err(failed)<span class="question-mark">?</span>;
+<a href=#1349 id=1349 data-nosnippet>1349</a>                                    <span class="kw">let </span>nodes = corrosion::db::write::exec_single_interruptible(
+<a href=#1350 id=1350 data-nosnippet>1350</a>                                        tx,
+<a href=#1351 id=1351 data-nosnippet>1351</a>                                        <span class="kw-2">&amp;</span>statements[<span class="number">1</span>],
+<a href=#1352 id=1352 data-nosnippet>1352</a>                                    )
+<a href=#1353 id=1353 data-nosnippet>1353</a>                                    .map_err(failed)<span class="question-mark">?</span>;
+<a href=#1354 id=1354 data-nosnippet>1354</a>
+<a href=#1355 id=1355 data-nosnippet>1355</a>                                    <span class="comment">// Read back inside the same transaction, so
+<a href=#1356 id=1356 data-nosnippet>1356</a>                                    // the gauge cannot straddle another reap.
+<a href=#1357 id=1357 data-nosnippet>1357</a>                                    </span><span class="kw">let </span>registered: i64 = tx
+<a href=#1358 id=1358 data-nosnippet>1358</a>                                        .prepare_cached(<span class="string">"SELECT COUNT(*) FROM node"</span>)
+<a href=#1359 id=1359 data-nosnippet>1359</a>                                        .and_then(|<span class="kw-2">mut </span>s| s.query_row((), |row| row.get(<span class="number">0</span>)))
+<a href=#1360 id=1360 data-nosnippet>1360</a>                                        .map_err(failed)<span class="question-mark">?</span>;
 <a href=#1361 id=1361 data-nosnippet>1361</a>
-<a href=#1362 id=1362 data-nosnippet>1362</a>                drop(finished.send(<span class="prelude-val">Ok</span>(())));
-<a href=#1363 id=1363 data-nosnippet>1363</a>            });
-<a href=#1364 id=1364 data-nosnippet>1364</a>        }
+<a href=#1362 id=1362 data-nosnippet>1362</a>                                    <span class="prelude-val">Ok</span>((servers, nodes, registered))
+<a href=#1363 id=1363 data-nosnippet>1363</a>                                })
+<a href=#1364 id=1364 data-nosnippet>1364</a>                                .<span class="kw">await</span>;
 <a href=#1365 id=1365 data-nosnippet>1365</a>
-<a href=#1366 id=1366 data-nosnippet>1366</a>        <span class="comment">// Spawn a task that regularly updates metrics wrt database sizes on disk
-<a href=#1367 id=1367 data-nosnippet>1367</a>        </span>{
-<a href=#1368 id=1368 data-nosnippet>1368</a>            <span class="kw">let </span>finished = shutdown.push(<span class="string">"corrosion_db_metrics"</span>);
-<a href=#1369 id=1369 data-nosnippet>1369</a>            <span class="kw">let </span><span class="kw-2">mut </span>srx = shutdown.shutdown_rx();
-<a href=#1370 id=1370 data-nosnippet>1370</a>
-<a href=#1371 id=1371 data-nosnippet>1371</a>            <span class="kw">let </span>update_interval = std::time::Duration::from_secs(<span class="number">5 </span>* <span class="number">60</span>);
-<a href=#1372 id=1372 data-nosnippet>1372</a>
-<a href=#1373 id=1373 data-nosnippet>1373</a>            <span class="kw">let </span>dbm = corrosion::metrics::DbMetrics::new(
-<a href=#1374 id=1374 data-nosnippet>1374</a>                <span class="kw">crate</span>::metrics::registry(),
-<a href=#1375 id=1375 data-nosnippet>1375</a>                db_path,
-<a href=#1376 id=1376 data-nosnippet>1376</a>                sub_path.clone(),
-<a href=#1377 id=1377 data-nosnippet>1377</a>            );
-<a href=#1378 id=1378 data-nosnippet>1378</a>
-<a href=#1379 id=1379 data-nosnippet>1379</a>            tokio::spawn(<span class="kw">async move </span>{
-<a href=#1380 id=1380 data-nosnippet>1380</a>                <span class="kw">let </span><span class="kw-2">mut </span>interval = tokio::time::interval(update_interval);
-<a href=#1381 id=1381 data-nosnippet>1381</a>
-<a href=#1382 id=1382 data-nosnippet>1382</a>                <span class="kw">loop </span>{
-<a href=#1383 id=1383 data-nosnippet>1383</a>                    <span class="macro">tokio::select!</span> {
-<a href=#1384 id=1384 data-nosnippet>1384</a>                        <span class="kw">_ </span>= interval.tick() =&gt; {
-<a href=#1385 id=1385 data-nosnippet>1385</a>                            dbm.update();
-<a href=#1386 id=1386 data-nosnippet>1386</a>                        }
-<a href=#1387 id=1387 data-nosnippet>1387</a>                        <span class="kw">_ </span>= srx.changed() =&gt; {
-<a href=#1388 id=1388 data-nosnippet>1388</a>                            <span class="kw">break</span>;
-<a href=#1389 id=1389 data-nosnippet>1389</a>                        }
-<a href=#1390 id=1390 data-nosnippet>1390</a>                    }
-<a href=#1391 id=1391 data-nosnippet>1391</a>                }
-<a href=#1392 id=1392 data-nosnippet>1392</a>
-<a href=#1393 id=1393 data-nosnippet>1393</a>                drop(finished.send(<span class="prelude-val">Ok</span>(())));
-<a href=#1394 id=1394 data-nosnippet>1394</a>            });
-<a href=#1395 id=1395 data-nosnippet>1395</a>        }
-<a href=#1396 id=1396 data-nosnippet>1396</a>
-<a href=#1397 id=1397 data-nosnippet>1397</a>        <span class="comment">// Tripwire is how corrosion communicates a shutdown was requested
-<a href=#1398 id=1398 data-nosnippet>1398</a>        </span><span class="kw">let </span>trip = corrosion::pubsub::Trip::new();
+<a href=#1366 id=1366 data-nosnippet>1366</a>                            <span class="kw">match </span>res {
+<a href=#1367 id=1367 data-nosnippet>1367</a>                                <span class="prelude-val">Ok</span>(((servers, nodes, registered), version, elapsed)) =&gt; {
+<a href=#1368 id=1368 data-nosnippet>1368</a>                                    <span class="kw">crate</span>::metrics::corrosion_nodes().set(registered);
+<a href=#1369 id=1369 data-nosnippet>1369</a>                                    <span class="kw">crate</span>::metrics::corrosion_nodes_reaped()
+<a href=#1370 id=1370 data-nosnippet>1370</a>                                        .inc_by(nodes <span class="kw">as </span>u64);
+<a href=#1371 id=1371 data-nosnippet>1371</a>                                    <span class="macro">tracing::debug!</span>(
+<a href=#1372 id=1372 data-nosnippet>1372</a>                                        servers,
+<a href=#1373 id=1373 data-nosnippet>1373</a>                                        nodes,
+<a href=#1374 id=1374 data-nosnippet>1374</a>                                        registered,
+<a href=#1375 id=1375 data-nosnippet>1375</a>                                        <span class="question-mark">?</span>version,
+<a href=#1376 id=1376 data-nosnippet>1376</a>                                        <span class="question-mark">?</span>elapsed,
+<a href=#1377 id=1377 data-nosnippet>1377</a>                                        <span class="string">"reaped stale rows"
+<a href=#1378 id=1378 data-nosnippet>1378</a>                                    </span>);
+<a href=#1379 id=1379 data-nosnippet>1379</a>                                }
+<a href=#1380 id=1380 data-nosnippet>1380</a>                                <span class="prelude-val">Err</span>(error) =&gt; {
+<a href=#1381 id=1381 data-nosnippet>1381</a>                                    <span class="macro">tracing::error!</span>(%error, <span class="string">"failed to reap stale rows"</span>);
+<a href=#1382 id=1382 data-nosnippet>1382</a>                                }
+<a href=#1383 id=1383 data-nosnippet>1383</a>                            }
+<a href=#1384 id=1384 data-nosnippet>1384</a>                        }
+<a href=#1385 id=1385 data-nosnippet>1385</a>                        <span class="kw">_ </span>= srx.changed() =&gt; {
+<a href=#1386 id=1386 data-nosnippet>1386</a>                            <span class="kw">break</span>;
+<a href=#1387 id=1387 data-nosnippet>1387</a>                        }
+<a href=#1388 id=1388 data-nosnippet>1388</a>                    }
+<a href=#1389 id=1389 data-nosnippet>1389</a>                }
+<a href=#1390 id=1390 data-nosnippet>1390</a>
+<a href=#1391 id=1391 data-nosnippet>1391</a>                drop(finished.send(<span class="prelude-val">Ok</span>(())));
+<a href=#1392 id=1392 data-nosnippet>1392</a>            });
+<a href=#1393 id=1393 data-nosnippet>1393</a>        }
+<a href=#1394 id=1394 data-nosnippet>1394</a>
+<a href=#1395 id=1395 data-nosnippet>1395</a>        <span class="comment">// Spawn a task that regularly updates metrics wrt database sizes on disk
+<a href=#1396 id=1396 data-nosnippet>1396</a>        </span>{
+<a href=#1397 id=1397 data-nosnippet>1397</a>            <span class="kw">let </span>finished = shutdown.push(<span class="string">"corrosion_db_metrics"</span>);
+<a href=#1398 id=1398 data-nosnippet>1398</a>            <span class="kw">let </span><span class="kw-2">mut </span>srx = shutdown.shutdown_rx();
 <a href=#1399 id=1399 data-nosnippet>1399</a>
-<a href=#1400 id=1400 data-nosnippet>1400</a>        <span class="kw">if </span><span class="self">self</span>.corrosion_gossip_enable {
-<a href=#1401 id=1401 data-nosnippet>1401</a>            <span class="kw">use </span>eyre::WrapErr;
-<a href=#1402 id=1402 data-nosnippet>1402</a>
-<a href=#1403 id=1403 data-nosnippet>1403</a>            <span class="self">self</span>.spawn_gossip_service(
-<a href=#1404 id=1404 data-nosnippet>1404</a>                <span class="kw-2">&amp;</span>db,
-<a href=#1405 id=1405 data-nosnippet>1405</a>                subs.clone(),
-<a href=#1406 id=1406 data-nosnippet>1406</a>                updates.unwrap(),
-<a href=#1407 id=1407 data-nosnippet>1407</a>                trip.tripwire(),
-<a href=#1408 id=1408 data-nosnippet>1408</a>                shutdown,
-<a href=#1409 id=1409 data-nosnippet>1409</a>            )
-<a href=#1410 id=1410 data-nosnippet>1410</a>            .<span class="kw">await
-<a href=#1411 id=1411 data-nosnippet>1411</a>            </span>.context(<span class="string">"failed to spawn gossip service"</span>)<span class="question-mark">?</span>;
-<a href=#1412 id=1412 data-nosnippet>1412</a>        }
-<a href=#1413 id=1413 data-nosnippet>1413</a>
-<a href=#1414 id=1414 data-nosnippet>1414</a>        <span class="kw">let </span>ps_ctx = corrosion::pubsub::PubsubContext::new(
-<a href=#1415 id=1415 data-nosnippet>1415</a>            subs,
-<a href=#1416 id=1416 data-nosnippet>1416</a>            sub_path,
-<a href=#1417 id=1417 data-nosnippet>1417</a>            db.pool,
-<a href=#1418 id=1418 data-nosnippet>1418</a>            db.schema,
-<a href=#1419 id=1419 data-nosnippet>1419</a>            trip.tripwire(),
-<a href=#1420 id=1420 data-nosnippet>1420</a>            types::pubsub::MatcherLoopConfig::default(),
-<a href=#1421 id=1421 data-nosnippet>1421</a>        )
-<a href=#1422 id=1422 data-nosnippet>1422</a>        .<span class="kw">await</span><span class="question-mark">?</span>;
-<a href=#1423 id=1423 data-nosnippet>1423</a>
-<a href=#1424 id=1424 data-nosnippet>1424</a>        <span class="comment">// Spin up a UDP socket to receive state mutations from agents and send
-<a href=#1425 id=1425 data-nosnippet>1425</a>        // events to proxy subscribers
-<a href=#1426 id=1426 data-nosnippet>1426</a>        </span><span class="kw">let </span>udp_server = corrosion::persistent::server::Server::new_unencrypted(
-<a href=#1427 id=1427 data-nosnippet>1427</a>            (std::net::Ipv6Addr::UNSPECIFIED, <span class="self">self</span>.corrosion_port).into(),
-<a href=#1428 id=1428 data-nosnippet>1428</a>            btx,
-<a href=#1429 id=1429 data-nosnippet>1429</a>            ps_ctx,
-<a href=#1430 id=1430 data-nosnippet>1430</a>            corrosion::persistent::Metrics::new(<span class="kw">crate</span>::metrics::registry()),
-<a href=#1431 id=1431 data-nosnippet>1431</a>            <span class="comment">// Advertised so subscribers can measure their latency to this
-<a href=#1432 id=1432 data-nosnippet>1432</a>            // server; they have its host already, but not this port.
-<a href=#1433 id=1433 data-nosnippet>1433</a>            </span><span class="self">self</span>.qcmp_enabled.then_some(<span class="self">self</span>.qcmp_port),
-<a href=#1434 id=1434 data-nosnippet>1434</a>        )<span class="question-mark">?</span>;
-<a href=#1435 id=1435 data-nosnippet>1435</a>
-<a href=#1436 id=1436 data-nosnippet>1436</a>        <span class="kw">let </span>port = udp_server.local_addr().port();
-<a href=#1437 id=1437 data-nosnippet>1437</a>        ports.corrosion = <span class="prelude-val">Some</span>(port);
-<a href=#1438 id=1438 data-nosnippet>1438</a>
-<a href=#1439 id=1439 data-nosnippet>1439</a>        <span class="comment">// Mainly for testing when the requested port is 0 and we bind to an ephemeral
-<a href=#1440 id=1440 data-nosnippet>1440</a>        // port so the log message at the start is kind of useless
-<a href=#1441 id=1441 data-nosnippet>1441</a>        </span><span class="macro">tracing::debug!</span>(port, <span class="string">"corrosion service running"</span>);
+<a href=#1400 id=1400 data-nosnippet>1400</a>            <span class="kw">let </span>update_interval = std::time::Duration::from_secs(<span class="number">5 </span>* <span class="number">60</span>);
+<a href=#1401 id=1401 data-nosnippet>1401</a>
+<a href=#1402 id=1402 data-nosnippet>1402</a>            <span class="kw">let </span>dbm = corrosion::metrics::DbMetrics::new(
+<a href=#1403 id=1403 data-nosnippet>1403</a>                <span class="kw">crate</span>::metrics::registry(),
+<a href=#1404 id=1404 data-nosnippet>1404</a>                db_path,
+<a href=#1405 id=1405 data-nosnippet>1405</a>                sub_path.clone(),
+<a href=#1406 id=1406 data-nosnippet>1406</a>            );
+<a href=#1407 id=1407 data-nosnippet>1407</a>
+<a href=#1408 id=1408 data-nosnippet>1408</a>            tokio::spawn(<span class="kw">async move </span>{
+<a href=#1409 id=1409 data-nosnippet>1409</a>                <span class="kw">let </span><span class="kw-2">mut </span>interval = tokio::time::interval(update_interval);
+<a href=#1410 id=1410 data-nosnippet>1410</a>
+<a href=#1411 id=1411 data-nosnippet>1411</a>                <span class="kw">loop </span>{
+<a href=#1412 id=1412 data-nosnippet>1412</a>                    <span class="macro">tokio::select!</span> {
+<a href=#1413 id=1413 data-nosnippet>1413</a>                        <span class="kw">_ </span>= interval.tick() =&gt; {
+<a href=#1414 id=1414 data-nosnippet>1414</a>                            dbm.update();
+<a href=#1415 id=1415 data-nosnippet>1415</a>                        }
+<a href=#1416 id=1416 data-nosnippet>1416</a>                        <span class="kw">_ </span>= srx.changed() =&gt; {
+<a href=#1417 id=1417 data-nosnippet>1417</a>                            <span class="kw">break</span>;
+<a href=#1418 id=1418 data-nosnippet>1418</a>                        }
+<a href=#1419 id=1419 data-nosnippet>1419</a>                    }
+<a href=#1420 id=1420 data-nosnippet>1420</a>                }
+<a href=#1421 id=1421 data-nosnippet>1421</a>
+<a href=#1422 id=1422 data-nosnippet>1422</a>                drop(finished.send(<span class="prelude-val">Ok</span>(())));
+<a href=#1423 id=1423 data-nosnippet>1423</a>            });
+<a href=#1424 id=1424 data-nosnippet>1424</a>        }
+<a href=#1425 id=1425 data-nosnippet>1425</a>
+<a href=#1426 id=1426 data-nosnippet>1426</a>        <span class="comment">// Tripwire is how corrosion communicates a shutdown was requested
+<a href=#1427 id=1427 data-nosnippet>1427</a>        </span><span class="kw">let </span>trip = corrosion::pubsub::Trip::new();
+<a href=#1428 id=1428 data-nosnippet>1428</a>
+<a href=#1429 id=1429 data-nosnippet>1429</a>        <span class="kw">if </span><span class="self">self</span>.corrosion_gossip_enable {
+<a href=#1430 id=1430 data-nosnippet>1430</a>            <span class="kw">use </span>eyre::WrapErr;
+<a href=#1431 id=1431 data-nosnippet>1431</a>
+<a href=#1432 id=1432 data-nosnippet>1432</a>            <span class="self">self</span>.spawn_gossip_service(
+<a href=#1433 id=1433 data-nosnippet>1433</a>                <span class="kw-2">&amp;</span>db,
+<a href=#1434 id=1434 data-nosnippet>1434</a>                subs.clone(),
+<a href=#1435 id=1435 data-nosnippet>1435</a>                updates.unwrap(),
+<a href=#1436 id=1436 data-nosnippet>1436</a>                trip.tripwire(),
+<a href=#1437 id=1437 data-nosnippet>1437</a>                shutdown,
+<a href=#1438 id=1438 data-nosnippet>1438</a>            )
+<a href=#1439 id=1439 data-nosnippet>1439</a>            .<span class="kw">await
+<a href=#1440 id=1440 data-nosnippet>1440</a>            </span>.context(<span class="string">"failed to spawn gossip service"</span>)<span class="question-mark">?</span>;
+<a href=#1441 id=1441 data-nosnippet>1441</a>        }
 <a href=#1442 id=1442 data-nosnippet>1442</a>
-<a href=#1443 id=1443 data-nosnippet>1443</a>        <span class="kw">let </span>finished = shutdown.push(<span class="string">"corrosion_server"</span>);
-<a href=#1444 id=1444 data-nosnippet>1444</a>        <span class="kw">let </span><span class="kw-2">mut </span>srx = shutdown.shutdown_rx();
-<a href=#1445 id=1445 data-nosnippet>1445</a>
-<a href=#1446 id=1446 data-nosnippet>1446</a>        tokio::spawn(<span class="kw">async move </span>{
-<a href=#1447 id=1447 data-nosnippet>1447</a>            drop(srx.changed().<span class="kw">await</span>);
-<a href=#1448 id=1448 data-nosnippet>1448</a>
-<a href=#1449 id=1449 data-nosnippet>1449</a>            trip.shutdown().<span class="kw">await</span>;
-<a href=#1450 id=1450 data-nosnippet>1450</a>
-<a href=#1451 id=1451 data-nosnippet>1451</a>            <span class="macro">tracing::info!</span>(<span class="string">"shutting down corrosion server"</span>);
-<a href=#1452 id=1452 data-nosnippet>1452</a>            udp_server.shutdown(<span class="string">"graceful shutdown"</span>).<span class="kw">await</span>;
-<a href=#1453 id=1453 data-nosnippet>1453</a>
-<a href=#1454 id=1454 data-nosnippet>1454</a>            drop(finished.send(<span class="prelude-val">Ok</span>(())));
-<a href=#1455 id=1455 data-nosnippet>1455</a>        });
-<a href=#1456 id=1456 data-nosnippet>1456</a>
-<a href=#1457 id=1457 data-nosnippet>1457</a>        <span class="prelude-val">Ok</span>(())
-<a href=#1458 id=1458 data-nosnippet>1458</a>    }
-<a href=#1459 id=1459 data-nosnippet>1459</a>
-<a href=#1460 id=1460 data-nosnippet>1460</a>    <span class="kw">async fn </span>spawn_gossip_service(
-<a href=#1461 id=1461 data-nosnippet>1461</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#1462 id=1462 data-nosnippet>1462</a>        db: <span class="kw-2">&amp;</span>corrosion::db::InitializedDb,
-<a href=#1463 id=1463 data-nosnippet>1463</a>        subs: corrosion::types::pubsub::SubsManager,
-<a href=#1464 id=1464 data-nosnippet>1464</a>        updates: corrosion::types::updates::UpdatesManager,
-<a href=#1465 id=1465 data-nosnippet>1465</a>        tripwire: corrosion::Tripwire,
-<a href=#1466 id=1466 data-nosnippet>1466</a>        shutdown: <span class="kw-2">&amp;mut </span>ShutdownHandler,
-<a href=#1467 id=1467 data-nosnippet>1467</a>    ) -&gt; eyre::Result&lt;()&gt; {
-<a href=#1468 id=1468 data-nosnippet>1468</a>        <span class="kw">use </span>corrosion::gossip;
-<a href=#1469 id=1469 data-nosnippet>1469</a>        <span class="kw">use </span>eyre::WrapErr;
-<a href=#1470 id=1470 data-nosnippet>1470</a>        <span class="kw">use </span>tokio::sync::mpsc::channel;
+<a href=#1443 id=1443 data-nosnippet>1443</a>        <span class="kw">let </span>ps_ctx = corrosion::pubsub::PubsubContext::new(
+<a href=#1444 id=1444 data-nosnippet>1444</a>            subs,
+<a href=#1445 id=1445 data-nosnippet>1445</a>            sub_path,
+<a href=#1446 id=1446 data-nosnippet>1446</a>            db.pool,
+<a href=#1447 id=1447 data-nosnippet>1447</a>            db.schema,
+<a href=#1448 id=1448 data-nosnippet>1448</a>            trip.tripwire(),
+<a href=#1449 id=1449 data-nosnippet>1449</a>            types::pubsub::MatcherLoopConfig::default(),
+<a href=#1450 id=1450 data-nosnippet>1450</a>        )
+<a href=#1451 id=1451 data-nosnippet>1451</a>        .<span class="kw">await</span><span class="question-mark">?</span>;
+<a href=#1452 id=1452 data-nosnippet>1452</a>
+<a href=#1453 id=1453 data-nosnippet>1453</a>        <span class="comment">// Spin up a UDP socket to receive state mutations from agents and send
+<a href=#1454 id=1454 data-nosnippet>1454</a>        // events to proxy subscribers
+<a href=#1455 id=1455 data-nosnippet>1455</a>        </span><span class="kw">let </span>udp_server = corrosion::persistent::server::Server::new_unencrypted(
+<a href=#1456 id=1456 data-nosnippet>1456</a>            (std::net::Ipv6Addr::UNSPECIFIED, <span class="self">self</span>.corrosion_port).into(),
+<a href=#1457 id=1457 data-nosnippet>1457</a>            btx,
+<a href=#1458 id=1458 data-nosnippet>1458</a>            ps_ctx,
+<a href=#1459 id=1459 data-nosnippet>1459</a>            corrosion::persistent::Metrics::new(<span class="kw">crate</span>::metrics::registry()),
+<a href=#1460 id=1460 data-nosnippet>1460</a>            <span class="comment">// Advertised so subscribers can measure their latency to this
+<a href=#1461 id=1461 data-nosnippet>1461</a>            // server; they have its host already, but not this port.
+<a href=#1462 id=1462 data-nosnippet>1462</a>            </span><span class="self">self</span>.qcmp_enabled.then_some(<span class="self">self</span>.qcmp_port),
+<a href=#1463 id=1463 data-nosnippet>1463</a>        )<span class="question-mark">?</span>;
+<a href=#1464 id=1464 data-nosnippet>1464</a>
+<a href=#1465 id=1465 data-nosnippet>1465</a>        <span class="kw">let </span>port = udp_server.local_addr().port();
+<a href=#1466 id=1466 data-nosnippet>1466</a>        ports.corrosion = <span class="prelude-val">Some</span>(port);
+<a href=#1467 id=1467 data-nosnippet>1467</a>
+<a href=#1468 id=1468 data-nosnippet>1468</a>        <span class="comment">// Mainly for testing when the requested port is 0 and we bind to an ephemeral
+<a href=#1469 id=1469 data-nosnippet>1469</a>        // port so the log message at the start is kind of useless
+<a href=#1470 id=1470 data-nosnippet>1470</a>        </span><span class="macro">tracing::debug!</span>(port, <span class="string">"corrosion service running"</span>);
 <a href=#1471 id=1471 data-nosnippet>1471</a>
-<a href=#1472 id=1472 data-nosnippet>1472</a>        <span class="kw">let </span>metrics = gossip::GossipMetrics::new(<span class="kw">crate</span>::metrics::registry());
-<a href=#1473 id=1473 data-nosnippet>1473</a>
-<a href=#1474 id=1474 data-nosnippet>1474</a>        <span class="comment">// Note that all of the various hardcoded numbers here are taken from the corrosion defaults, we should
-<a href=#1475 id=1475 data-nosnippet>1475</a>        // make them configurable and/or tune the numbers based on our usage in the future
-<a href=#1476 id=1476 data-nosnippet>1476</a>
-<a href=#1477 id=1477 data-nosnippet>1477</a>        // Foca is the library corrosion uses to manage the cluster's SWIM state, the state is transmitted via QUIC
-<a href=#1478 id=1478 data-nosnippet>1478</a>        // datagrams
-<a href=#1479 id=1479 data-nosnippet>1479</a>        </span><span class="kw">let </span>(foca_tx, foca_rx) = channel(<span class="number">256</span>);
-<a href=#1480 id=1480 data-nosnippet>1480</a>        <span class="kw">let </span>(changes_tx, changes_rx) = channel(<span class="number">1024</span>);
-<a href=#1481 id=1481 data-nosnippet>1481</a>        <span class="kw">let </span>(rtt_tx, rtt_rx) = channel(<span class="number">128</span>);
-<a href=#1482 id=1482 data-nosnippet>1482</a>        <span class="kw">let </span>(broadcast_tx, broadcast_rx) = channel(<span class="number">512</span>);
-<a href=#1483 id=1483 data-nosnippet>1483</a>        <span class="kw">let </span>(to_send_tx, to_send_rx) = channel(<span class="number">512</span>);
-<a href=#1484 id=1484 data-nosnippet>1484</a>        <span class="kw">let </span>(notifications_tx, notifications_rx) = channel(<span class="number">512</span>);
-<a href=#1485 id=1485 data-nosnippet>1485</a>        <span class="kw">let </span>(apply_tx, apply_rx) = channel(<span class="number">2048</span>);
-<a href=#1486 id=1486 data-nosnippet>1486</a>        <span class="kw">let </span>(clear_buf_tx, clear_buf_rx) = channel(<span class="number">512</span>);
-<a href=#1487 id=1487 data-nosnippet>1487</a>
-<a href=#1488 id=1488 data-nosnippet>1488</a>        <span class="kw">let </span>member_states = gossip::swim::load_member_states(<span class="kw-2">&amp;</span>db.pool).<span class="kw">await</span>;
-<a href=#1489 id=1489 data-nosnippet>1489</a>
-<a href=#1490 id=1490 data-nosnippet>1490</a>        <span class="kw">let </span>members = gossip::Members(Default::default());
-<a href=#1491 id=1491 data-nosnippet>1491</a>
-<a href=#1492 id=1492 data-nosnippet>1492</a>        <span class="kw">let </span>swim_ctx = gossip::swim::SwimCtx {
-<a href=#1493 id=1493 data-nosnippet>1493</a>            metrics,
-<a href=#1494 id=1494 data-nosnippet>1494</a>            pool: db.pool.clone(),
-<a href=#1495 id=1495 data-nosnippet>1495</a>            actor_id: db.actor_id,
-<a href=#1496 id=1496 data-nosnippet>1496</a>            cluster_id: db.cluster_id,
-<a href=#1497 id=1497 data-nosnippet>1497</a>            <span class="comment">// AFAICT this is literally only set by corrosion in tests...
-<a href=#1498 id=1498 data-nosnippet>1498</a>            </span>member_id: <span class="prelude-val">None</span>,
-<a href=#1499 id=1499 data-nosnippet>1499</a>            members: members.clone(),
-<a href=#1500 id=1500 data-nosnippet>1500</a>        };
-<a href=#1501 id=1501 data-nosnippet>1501</a>
-<a href=#1502 id=1502 data-nosnippet>1502</a>        <span class="kw">let </span>transport = gossip::transport::Transport::new_insecure(metrics, rtt_tx)
-<a href=#1503 id=1503 data-nosnippet>1503</a>            .context(<span class="string">"failed to spawn client transport"</span>)<span class="question-mark">?</span>;
-<a href=#1504 id=1504 data-nosnippet>1504</a>
-<a href=#1505 id=1505 data-nosnippet>1505</a>        <span class="comment">// Spawn the actual SWIM handler before we start accepting remote connections or making our own
-<a href=#1506 id=1506 data-nosnippet>1506</a>        </span>gossip::swim::swim_loop(
-<a href=#1507 id=1507 data-nosnippet>1507</a>            swim_ctx,
-<a href=#1508 id=1508 data-nosnippet>1508</a>            corrosion::types::actor::Actor::new(
-<a href=#1509 id=1509 data-nosnippet>1509</a>                db.actor_id,
-<a href=#1510 id=1510 data-nosnippet>1510</a>                (std::net::Ipv6Addr::UNSPECIFIED, <span class="self">self</span>.corrosion_gossip_port).into(),
-<a href=#1511 id=1511 data-nosnippet>1511</a>                db.clock.new_timestamp(),
-<a href=#1512 id=1512 data-nosnippet>1512</a>                db.cluster_id,
-<a href=#1513 id=1513 data-nosnippet>1513</a>                <span class="prelude-val">None</span>,
-<a href=#1514 id=1514 data-nosnippet>1514</a>            ),
-<a href=#1515 id=1515 data-nosnippet>1515</a>            transport.clone(),
-<a href=#1516 id=1516 data-nosnippet>1516</a>            foca_rx,
-<a href=#1517 id=1517 data-nosnippet>1517</a>            broadcast_rx,
-<a href=#1518 id=1518 data-nosnippet>1518</a>            to_send_tx,
-<a href=#1519 id=1519 data-nosnippet>1519</a>            notifications_tx,
-<a href=#1520 id=1520 data-nosnippet>1520</a>            tripwire.clone(),
-<a href=#1521 id=1521 data-nosnippet>1521</a>            member_states,
-<a href=#1522 id=1522 data-nosnippet>1522</a>        );
-<a href=#1523 id=1523 data-nosnippet>1523</a>
-<a href=#1524 id=1524 data-nosnippet>1524</a>        gossip::swim::spawn_sender(transport, to_send_rx, tripwire.clone());
-<a href=#1525 id=1525 data-nosnippet>1525</a>        gossip::swim::spawn_notification_handler(
-<a href=#1526 id=1526 data-nosnippet>1526</a>            metrics,
-<a href=#1527 id=1527 data-nosnippet>1527</a>            members.clone(),
-<a href=#1528 id=1528 data-nosnippet>1528</a>            notifications_rx,
-<a href=#1529 id=1529 data-nosnippet>1529</a>            foca_tx.clone(),
-<a href=#1530 id=1530 data-nosnippet>1530</a>            tripwire.clone(),
-<a href=#1531 id=1531 data-nosnippet>1531</a>        );
-<a href=#1532 id=1532 data-nosnippet>1532</a>
-<a href=#1533 id=1533 data-nosnippet>1533</a>        <span class="kw">let </span>change_ctx = gossip::changes::ChangeCtx {
-<a href=#1534 id=1534 data-nosnippet>1534</a>            metrics,
-<a href=#1535 id=1535 data-nosnippet>1535</a>            pool: db.pool.clone(),
-<a href=#1536 id=1536 data-nosnippet>1536</a>            sub_manager: subs,
-<a href=#1537 id=1537 data-nosnippet>1537</a>            update_manager: updates,
-<a href=#1538 id=1538 data-nosnippet>1538</a>            bookie: db.bookie.clone(),
-<a href=#1539 id=1539 data-nosnippet>1539</a>            actor_id: db.actor_id,
-<a href=#1540 id=1540 data-nosnippet>1540</a>            clock: db.clock.clone(),
-<a href=#1541 id=1541 data-nosnippet>1541</a>            bcast_tx: broadcast_tx,
-<a href=#1542 id=1542 data-nosnippet>1542</a>            apply_tx,
-<a href=#1543 id=1543 data-nosnippet>1543</a>            clear_buf_tx,
-<a href=#1544 id=1544 data-nosnippet>1544</a>            <span class="comment">// TODO: maybe make this configurable/optional, but currently the change handler will signal shutdown if it
-<a href=#1545 id=1545 data-nosnippet>1545</a>            // encounters a fatal DB issue
-<a href=#1546 id=1546 data-nosnippet>1546</a>            </span>shutdown: shutdown.shutdown_tx(),
-<a href=#1547 id=1547 data-nosnippet>1547</a>        };
-<a href=#1548 id=1548 data-nosnippet>1548</a>
-<a href=#1549 id=1549 data-nosnippet>1549</a>        <span class="comment">// TODO: make this configurable or tune the defaults once we actually see numbers in real usage
-<a href=#1550 id=1550 data-nosnippet>1550</a>        </span><span class="kw">let </span>change_opts = gossip::changes::ChangeOptions::default();
-<a href=#1551 id=1551 data-nosnippet>1551</a>
-<a href=#1552 id=1552 data-nosnippet>1552</a>        gossip::changes::spawn_changes_handler(
-<a href=#1553 id=1553 data-nosnippet>1553</a>            change_ctx.clone(),
-<a href=#1554 id=1554 data-nosnippet>1554</a>            change_opts.clone(),
-<a href=#1555 id=1555 data-nosnippet>1555</a>            changes_rx,
-<a href=#1556 id=1556 data-nosnippet>1556</a>            tripwire.clone(),
-<a href=#1557 id=1557 data-nosnippet>1557</a>        );
-<a href=#1558 id=1558 data-nosnippet>1558</a>
-<a href=#1559 id=1559 data-nosnippet>1559</a>        gossip::changes::spawn_buffered_apply(
-<a href=#1560 id=1560 data-nosnippet>1560</a>            change_ctx.clone(),
-<a href=#1561 id=1561 data-nosnippet>1561</a>            change_opts.clone(),
-<a href=#1562 id=1562 data-nosnippet>1562</a>            db.bookie.clone(),
-<a href=#1563 id=1563 data-nosnippet>1563</a>            apply_rx,
-<a href=#1564 id=1564 data-nosnippet>1564</a>            tripwire.clone(),
-<a href=#1565 id=1565 data-nosnippet>1565</a>        );
-<a href=#1566 id=1566 data-nosnippet>1566</a>
-<a href=#1567 id=1567 data-nosnippet>1567</a>        gossip::changes::spawn_buffered_cleanup(
-<a href=#1568 id=1568 data-nosnippet>1568</a>            change_ctx,
-<a href=#1569 id=1569 data-nosnippet>1569</a>            change_opts,
-<a href=#1570 id=1570 data-nosnippet>1570</a>            clear_buf_rx,
-<a href=#1571 id=1571 data-nosnippet>1571</a>            tripwire.clone(),
-<a href=#1572 id=1572 data-nosnippet>1572</a>        );
-<a href=#1573 id=1573 data-nosnippet>1573</a>
-<a href=#1574 id=1574 data-nosnippet>1574</a>        <span class="comment">// Spawn a task to update the RTT state of the cluster members
-<a href=#1575 id=1575 data-nosnippet>1575</a>        </span>gossip::handler::spawn_rtt_handler(members.clone(), rtt_rx, tripwire.clone());
-<a href=#1576 id=1576 data-nosnippet>1576</a>
-<a href=#1577 id=1577 data-nosnippet>1577</a>        <span class="kw">let </span>srv_ctx = gossip::GossipContext {
-<a href=#1578 id=1578 data-nosnippet>1578</a>            metrics,
-<a href=#1579 id=1579 data-nosnippet>1579</a>            foca_tx,
-<a href=#1580 id=1580 data-nosnippet>1580</a>            changes_tx,
-<a href=#1581 id=1581 data-nosnippet>1581</a>            sync_permits: std::sync::Arc::new(tokio::sync::Semaphore::new(<span class="number">3</span>)),
-<a href=#1582 id=1582 data-nosnippet>1582</a>            pool: db.pool.clone(),
-<a href=#1583 id=1583 data-nosnippet>1583</a>            bookie: db.bookie.clone(),
-<a href=#1584 id=1584 data-nosnippet>1584</a>            actor_id: db.actor_id,
-<a href=#1585 id=1585 data-nosnippet>1585</a>            clock: db.clock.clone(),
-<a href=#1586 id=1586 data-nosnippet>1586</a>            cluster_id: db.cluster_id,
-<a href=#1587 id=1587 data-nosnippet>1587</a>        };
-<a href=#1588 id=1588 data-nosnippet>1588</a>
-<a href=#1589 id=1589 data-nosnippet>1589</a>        corrosion::gossip::handler::spawn_gossipserver_unencrypted(
-<a href=#1590 id=1590 data-nosnippet>1590</a>            srv_ctx,
-<a href=#1591 id=1591 data-nosnippet>1591</a>            tripwire,
-<a href=#1592 id=1592 data-nosnippet>1592</a>            (std::net::Ipv6Addr::UNSPECIFIED, <span class="self">self</span>.corrosion_gossip_port).into(),
-<a href=#1593 id=1593 data-nosnippet>1593</a>        )
-<a href=#1594 id=1594 data-nosnippet>1594</a>        .context(<span class="string">"failed to spawn gossip server"</span>)<span class="question-mark">?</span>;
+<a href=#1472 id=1472 data-nosnippet>1472</a>        <span class="kw">let </span>finished = shutdown.push(<span class="string">"corrosion_server"</span>);
+<a href=#1473 id=1473 data-nosnippet>1473</a>        <span class="kw">let </span><span class="kw-2">mut </span>srx = shutdown.shutdown_rx();
+<a href=#1474 id=1474 data-nosnippet>1474</a>
+<a href=#1475 id=1475 data-nosnippet>1475</a>        tokio::spawn(<span class="kw">async move </span>{
+<a href=#1476 id=1476 data-nosnippet>1476</a>            drop(srx.changed().<span class="kw">await</span>);
+<a href=#1477 id=1477 data-nosnippet>1477</a>
+<a href=#1478 id=1478 data-nosnippet>1478</a>            trip.shutdown().<span class="kw">await</span>;
+<a href=#1479 id=1479 data-nosnippet>1479</a>
+<a href=#1480 id=1480 data-nosnippet>1480</a>            <span class="macro">tracing::info!</span>(<span class="string">"shutting down corrosion server"</span>);
+<a href=#1481 id=1481 data-nosnippet>1481</a>            udp_server.shutdown(<span class="string">"graceful shutdown"</span>).<span class="kw">await</span>;
+<a href=#1482 id=1482 data-nosnippet>1482</a>
+<a href=#1483 id=1483 data-nosnippet>1483</a>            drop(finished.send(<span class="prelude-val">Ok</span>(())));
+<a href=#1484 id=1484 data-nosnippet>1484</a>        });
+<a href=#1485 id=1485 data-nosnippet>1485</a>
+<a href=#1486 id=1486 data-nosnippet>1486</a>        <span class="prelude-val">Ok</span>(())
+<a href=#1487 id=1487 data-nosnippet>1487</a>    }
+<a href=#1488 id=1488 data-nosnippet>1488</a>
+<a href=#1489 id=1489 data-nosnippet>1489</a>    <span class="kw">async fn </span>spawn_gossip_service(
+<a href=#1490 id=1490 data-nosnippet>1490</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#1491 id=1491 data-nosnippet>1491</a>        db: <span class="kw-2">&amp;</span>corrosion::db::InitializedDb,
+<a href=#1492 id=1492 data-nosnippet>1492</a>        subs: corrosion::types::pubsub::SubsManager,
+<a href=#1493 id=1493 data-nosnippet>1493</a>        updates: corrosion::types::updates::UpdatesManager,
+<a href=#1494 id=1494 data-nosnippet>1494</a>        tripwire: corrosion::Tripwire,
+<a href=#1495 id=1495 data-nosnippet>1495</a>        shutdown: <span class="kw-2">&amp;mut </span>ShutdownHandler,
+<a href=#1496 id=1496 data-nosnippet>1496</a>    ) -&gt; eyre::Result&lt;()&gt; {
+<a href=#1497 id=1497 data-nosnippet>1497</a>        <span class="kw">use </span>corrosion::gossip;
+<a href=#1498 id=1498 data-nosnippet>1498</a>        <span class="kw">use </span>eyre::WrapErr;
+<a href=#1499 id=1499 data-nosnippet>1499</a>        <span class="kw">use </span>tokio::sync::mpsc::channel;
+<a href=#1500 id=1500 data-nosnippet>1500</a>
+<a href=#1501 id=1501 data-nosnippet>1501</a>        <span class="kw">let </span>metrics = gossip::GossipMetrics::new(<span class="kw">crate</span>::metrics::registry());
+<a href=#1502 id=1502 data-nosnippet>1502</a>
+<a href=#1503 id=1503 data-nosnippet>1503</a>        <span class="comment">// Note that all of the various hardcoded numbers here are taken from the corrosion defaults, we should
+<a href=#1504 id=1504 data-nosnippet>1504</a>        // make them configurable and/or tune the numbers based on our usage in the future
+<a href=#1505 id=1505 data-nosnippet>1505</a>
+<a href=#1506 id=1506 data-nosnippet>1506</a>        // Foca is the library corrosion uses to manage the cluster's SWIM state, the state is transmitted via QUIC
+<a href=#1507 id=1507 data-nosnippet>1507</a>        // datagrams
+<a href=#1508 id=1508 data-nosnippet>1508</a>        </span><span class="kw">let </span>(foca_tx, foca_rx) = channel(<span class="number">256</span>);
+<a href=#1509 id=1509 data-nosnippet>1509</a>        <span class="kw">let </span>(changes_tx, changes_rx) = channel(<span class="number">1024</span>);
+<a href=#1510 id=1510 data-nosnippet>1510</a>        <span class="kw">let </span>(rtt_tx, rtt_rx) = channel(<span class="number">128</span>);
+<a href=#1511 id=1511 data-nosnippet>1511</a>        <span class="kw">let </span>(broadcast_tx, broadcast_rx) = channel(<span class="number">512</span>);
+<a href=#1512 id=1512 data-nosnippet>1512</a>        <span class="kw">let </span>(to_send_tx, to_send_rx) = channel(<span class="number">512</span>);
+<a href=#1513 id=1513 data-nosnippet>1513</a>        <span class="kw">let </span>(notifications_tx, notifications_rx) = channel(<span class="number">512</span>);
+<a href=#1514 id=1514 data-nosnippet>1514</a>        <span class="kw">let </span>(apply_tx, apply_rx) = channel(<span class="number">2048</span>);
+<a href=#1515 id=1515 data-nosnippet>1515</a>        <span class="kw">let </span>(clear_buf_tx, clear_buf_rx) = channel(<span class="number">512</span>);
+<a href=#1516 id=1516 data-nosnippet>1516</a>
+<a href=#1517 id=1517 data-nosnippet>1517</a>        <span class="kw">let </span>member_states = gossip::swim::load_member_states(<span class="kw-2">&amp;</span>db.pool).<span class="kw">await</span>;
+<a href=#1518 id=1518 data-nosnippet>1518</a>
+<a href=#1519 id=1519 data-nosnippet>1519</a>        <span class="kw">let </span>members = gossip::Members(Default::default());
+<a href=#1520 id=1520 data-nosnippet>1520</a>
+<a href=#1521 id=1521 data-nosnippet>1521</a>        <span class="kw">let </span>swim_ctx = gossip::swim::SwimCtx {
+<a href=#1522 id=1522 data-nosnippet>1522</a>            metrics,
+<a href=#1523 id=1523 data-nosnippet>1523</a>            pool: db.pool.clone(),
+<a href=#1524 id=1524 data-nosnippet>1524</a>            actor_id: db.actor_id,
+<a href=#1525 id=1525 data-nosnippet>1525</a>            cluster_id: db.cluster_id,
+<a href=#1526 id=1526 data-nosnippet>1526</a>            <span class="comment">// AFAICT this is literally only set by corrosion in tests...
+<a href=#1527 id=1527 data-nosnippet>1527</a>            </span>member_id: <span class="prelude-val">None</span>,
+<a href=#1528 id=1528 data-nosnippet>1528</a>            members: members.clone(),
+<a href=#1529 id=1529 data-nosnippet>1529</a>        };
+<a href=#1530 id=1530 data-nosnippet>1530</a>
+<a href=#1531 id=1531 data-nosnippet>1531</a>        <span class="kw">let </span>transport = gossip::transport::Transport::new_insecure(metrics, rtt_tx)
+<a href=#1532 id=1532 data-nosnippet>1532</a>            .context(<span class="string">"failed to spawn client transport"</span>)<span class="question-mark">?</span>;
+<a href=#1533 id=1533 data-nosnippet>1533</a>
+<a href=#1534 id=1534 data-nosnippet>1534</a>        <span class="comment">// Spawn the actual SWIM handler before we start accepting remote connections or making our own
+<a href=#1535 id=1535 data-nosnippet>1535</a>        </span>gossip::swim::swim_loop(
+<a href=#1536 id=1536 data-nosnippet>1536</a>            swim_ctx,
+<a href=#1537 id=1537 data-nosnippet>1537</a>            corrosion::types::actor::Actor::new(
+<a href=#1538 id=1538 data-nosnippet>1538</a>                db.actor_id,
+<a href=#1539 id=1539 data-nosnippet>1539</a>                (std::net::Ipv6Addr::UNSPECIFIED, <span class="self">self</span>.corrosion_gossip_port).into(),
+<a href=#1540 id=1540 data-nosnippet>1540</a>                db.clock.new_timestamp(),
+<a href=#1541 id=1541 data-nosnippet>1541</a>                db.cluster_id,
+<a href=#1542 id=1542 data-nosnippet>1542</a>                <span class="prelude-val">None</span>,
+<a href=#1543 id=1543 data-nosnippet>1543</a>            ),
+<a href=#1544 id=1544 data-nosnippet>1544</a>            transport.clone(),
+<a href=#1545 id=1545 data-nosnippet>1545</a>            foca_rx,
+<a href=#1546 id=1546 data-nosnippet>1546</a>            broadcast_rx,
+<a href=#1547 id=1547 data-nosnippet>1547</a>            to_send_tx,
+<a href=#1548 id=1548 data-nosnippet>1548</a>            notifications_tx,
+<a href=#1549 id=1549 data-nosnippet>1549</a>            tripwire.clone(),
+<a href=#1550 id=1550 data-nosnippet>1550</a>            member_states,
+<a href=#1551 id=1551 data-nosnippet>1551</a>        );
+<a href=#1552 id=1552 data-nosnippet>1552</a>
+<a href=#1553 id=1553 data-nosnippet>1553</a>        gossip::swim::spawn_sender(transport, to_send_rx, tripwire.clone());
+<a href=#1554 id=1554 data-nosnippet>1554</a>        gossip::swim::spawn_notification_handler(
+<a href=#1555 id=1555 data-nosnippet>1555</a>            metrics,
+<a href=#1556 id=1556 data-nosnippet>1556</a>            members.clone(),
+<a href=#1557 id=1557 data-nosnippet>1557</a>            notifications_rx,
+<a href=#1558 id=1558 data-nosnippet>1558</a>            foca_tx.clone(),
+<a href=#1559 id=1559 data-nosnippet>1559</a>            tripwire.clone(),
+<a href=#1560 id=1560 data-nosnippet>1560</a>        );
+<a href=#1561 id=1561 data-nosnippet>1561</a>
+<a href=#1562 id=1562 data-nosnippet>1562</a>        <span class="kw">let </span>change_ctx = gossip::changes::ChangeCtx {
+<a href=#1563 id=1563 data-nosnippet>1563</a>            metrics,
+<a href=#1564 id=1564 data-nosnippet>1564</a>            pool: db.pool.clone(),
+<a href=#1565 id=1565 data-nosnippet>1565</a>            sub_manager: subs,
+<a href=#1566 id=1566 data-nosnippet>1566</a>            update_manager: updates,
+<a href=#1567 id=1567 data-nosnippet>1567</a>            bookie: db.bookie.clone(),
+<a href=#1568 id=1568 data-nosnippet>1568</a>            actor_id: db.actor_id,
+<a href=#1569 id=1569 data-nosnippet>1569</a>            clock: db.clock.clone(),
+<a href=#1570 id=1570 data-nosnippet>1570</a>            bcast_tx: broadcast_tx,
+<a href=#1571 id=1571 data-nosnippet>1571</a>            apply_tx,
+<a href=#1572 id=1572 data-nosnippet>1572</a>            clear_buf_tx,
+<a href=#1573 id=1573 data-nosnippet>1573</a>            <span class="comment">// TODO: maybe make this configurable/optional, but currently the change handler will signal shutdown if it
+<a href=#1574 id=1574 data-nosnippet>1574</a>            // encounters a fatal DB issue
+<a href=#1575 id=1575 data-nosnippet>1575</a>            </span>shutdown: shutdown.shutdown_tx(),
+<a href=#1576 id=1576 data-nosnippet>1576</a>        };
+<a href=#1577 id=1577 data-nosnippet>1577</a>
+<a href=#1578 id=1578 data-nosnippet>1578</a>        <span class="comment">// TODO: make this configurable or tune the defaults once we actually see numbers in real usage
+<a href=#1579 id=1579 data-nosnippet>1579</a>        </span><span class="kw">let </span>change_opts = gossip::changes::ChangeOptions::default();
+<a href=#1580 id=1580 data-nosnippet>1580</a>
+<a href=#1581 id=1581 data-nosnippet>1581</a>        gossip::changes::spawn_changes_handler(
+<a href=#1582 id=1582 data-nosnippet>1582</a>            change_ctx.clone(),
+<a href=#1583 id=1583 data-nosnippet>1583</a>            change_opts.clone(),
+<a href=#1584 id=1584 data-nosnippet>1584</a>            changes_rx,
+<a href=#1585 id=1585 data-nosnippet>1585</a>            tripwire.clone(),
+<a href=#1586 id=1586 data-nosnippet>1586</a>        );
+<a href=#1587 id=1587 data-nosnippet>1587</a>
+<a href=#1588 id=1588 data-nosnippet>1588</a>        gossip::changes::spawn_buffered_apply(
+<a href=#1589 id=1589 data-nosnippet>1589</a>            change_ctx.clone(),
+<a href=#1590 id=1590 data-nosnippet>1590</a>            change_opts.clone(),
+<a href=#1591 id=1591 data-nosnippet>1591</a>            db.bookie.clone(),
+<a href=#1592 id=1592 data-nosnippet>1592</a>            apply_rx,
+<a href=#1593 id=1593 data-nosnippet>1593</a>            tripwire.clone(),
+<a href=#1594 id=1594 data-nosnippet>1594</a>        );
 <a href=#1595 id=1595 data-nosnippet>1595</a>
-<a href=#1596 id=1596 data-nosnippet>1596</a>        <span class="prelude-val">Ok</span>(())
-<a href=#1597 id=1597 data-nosnippet>1597</a>    }
-<a href=#1598 id=1598 data-nosnippet>1598</a>}
-<a href=#1599 id=1599 data-nosnippet>1599</a>
-<a href=#1600 id=1600 data-nosnippet>1600</a><span class="kw">fn </span>validate_packet_count(p: <span class="kw-2">&amp;</span>str) -&gt; eyre::Result&lt;u32&gt; {
-<a href=#1601 id=1601 data-nosnippet>1601</a>    <span class="kw">use </span>eyre::Context;
+<a href=#1596 id=1596 data-nosnippet>1596</a>        gossip::changes::spawn_buffered_cleanup(
+<a href=#1597 id=1597 data-nosnippet>1597</a>            change_ctx,
+<a href=#1598 id=1598 data-nosnippet>1598</a>            change_opts,
+<a href=#1599 id=1599 data-nosnippet>1599</a>            clear_buf_rx,
+<a href=#1600 id=1600 data-nosnippet>1600</a>            tripwire.clone(),
+<a href=#1601 id=1601 data-nosnippet>1601</a>        );
 <a href=#1602 id=1602 data-nosnippet>1602</a>
-<a href=#1603 id=1603 data-nosnippet>1603</a>    <span class="kw">let </span>pc = p
-<a href=#1604 id=1604 data-nosnippet>1604</a>        .parse::&lt;u32&gt;()
-<a href=#1605 id=1605 data-nosnippet>1605</a>        .context(<span class="string">"couldn't parse packet count as an unsigned integer"</span>)<span class="question-mark">?</span>;
-<a href=#1606 id=1606 data-nosnippet>1606</a>
-<a href=#1607 id=1607 data-nosnippet>1607</a>    <span class="comment">// Set our floor at 2k, ie. 512 per ring (fill/rx/tx/completion)
-<a href=#1608 id=1608 data-nosnippet>1608</a>    </span><span class="macro">eyre::ensure!</span>(pc &gt;= <span class="number">2 </span>* <span class="number">1024</span>, <span class="string">"{pc} needs to be at least 2K"</span>);
-<a href=#1609 id=1609 data-nosnippet>1609</a>
-<a href=#1610 id=1610 data-nosnippet>1610</a>    <span class="comment">// Obviously we could correct this instead, but better to just error and tell the user they need to use a power of 2
-<a href=#1611 id=1611 data-nosnippet>1611</a>    </span><span class="macro">eyre::ensure!</span>(pc.is_power_of_two(), <span class="string">"{pc} is not a power of 2"</span>);
-<a href=#1612 id=1612 data-nosnippet>1612</a>
-<a href=#1613 id=1613 data-nosnippet>1613</a>    <span class="prelude-val">Ok</span>(pc)
-<a href=#1614 id=1614 data-nosnippet>1614</a>}
-<a href=#1615 id=1615 data-nosnippet>1615</a>
-<a href=#1616 id=1616 data-nosnippet>1616</a><span class="doccomment">/// XDP (eXpress Data Path) options
-<a href=#1617 id=1617 data-nosnippet>1617</a></span><span class="attr">#[derive(clap::Args, Clone, Debug)]
-<a href=#1618 id=1618 data-nosnippet>1618</a></span><span class="kw">pub struct </span>XdpOptions {
-<a href=#1619 id=1619 data-nosnippet>1619</a>    <span class="doccomment">/// The name of the network interface to bind the XDP socket(s) to.
-<a href=#1620 id=1620 data-nosnippet>1620</a>    ///
-<a href=#1621 id=1621 data-nosnippet>1621</a>    /// If not specified quilkin will attempt to determine the most appropriate
-<a href=#1622 id=1622 data-nosnippet>1622</a>    /// network interface to use. Quilkin will exit with an error if the network
-<a href=#1623 id=1623 data-nosnippet>1623</a>    /// interface does not exist, or a suitable default cannot be determined.
-<a href=#1624 id=1624 data-nosnippet>1624</a>    </span><span class="attr">#[clap(
-<a href=#1625 id=1625 data-nosnippet>1625</a>        long = <span class="string">"service.udp.xdp.network-interface"</span>,
-<a href=#1626 id=1626 data-nosnippet>1626</a>        env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_NETWORK_INTERFACE"
-<a href=#1627 id=1627 data-nosnippet>1627</a>    </span>)]
-<a href=#1628 id=1628 data-nosnippet>1628</a>    </span><span class="kw">pub </span>network_interface: <span class="prelude-ty">Option</span>&lt;String&gt;,
-<a href=#1629 id=1629 data-nosnippet>1629</a>    <span class="doccomment">/// Forces the use of [`XDP_ZEROCOPY`](https://www.kernel.org/doc/html/latest/networking/af_xdp.html#xdp-copy-and-xdp-zerocopy-bind-flags)
-<a href=#1630 id=1630 data-nosnippet>1630</a>    ///
-<a href=#1631 id=1631 data-nosnippet>1631</a>    /// If zero copy is not available on the chosen NIC, Quilkin exits with an error
-<a href=#1632 id=1632 data-nosnippet>1632</a>    </span><span class="attr">#[clap(
-<a href=#1633 id=1633 data-nosnippet>1633</a>        long = <span class="string">"service.udp.xdp.zerocopy"</span>,
-<a href=#1634 id=1634 data-nosnippet>1634</a>        env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_ZEROCOPY"
-<a href=#1635 id=1635 data-nosnippet>1635</a>    </span>)]
-<a href=#1636 id=1636 data-nosnippet>1636</a>    </span><span class="kw">pub </span>force_zerocopy: bool,
-<a href=#1637 id=1637 data-nosnippet>1637</a>    <span class="doccomment">/// Forces the use of [TX checksum offload](https://docs.kernel.org/6.8/networking/xsk-tx-metadata.html)
-<a href=#1638 id=1638 data-nosnippet>1638</a>    ///
-<a href=#1639 id=1639 data-nosnippet>1639</a>    /// TX checksum offload is an optional feature allowing the data portion of
-<a href=#1640 id=1640 data-nosnippet>1640</a>    /// a packet to have its internet checksum calculation offloaded to the NIC,
-<a href=#1641 id=1641 data-nosnippet>1641</a>    /// as otherwise this is done in software
-<a href=#1642 id=1642 data-nosnippet>1642</a>    </span><span class="attr">#[clap(long = <span class="string">"service.udp.xdp.tco"</span>, env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_TCO"</span>)]
-<a href=#1643 id=1643 data-nosnippet>1643</a>    </span><span class="kw">pub </span>force_tx_checksum_offload: bool,
-<a href=#1644 id=1644 data-nosnippet>1644</a>    <span class="doccomment">/// The total packets allocated per queue
-<a href=#1645 id=1645 data-nosnippet>1645</a>    ///
-<a href=#1646 id=1646 data-nosnippet>1646</a>    /// We bind to the maximum amount of queues allowed by the NIC, each with its own memory pool where individual
-<a href=#1647 id=1647 data-nosnippet>1647</a>    /// packets for both RX and TX are allocated from.
-<a href=#1648 id=1648 data-nosnippet>1648</a>    </span><span class="attr">#[clap(long = <span class="string">"service.udp.xdp.packets-per-queue"</span>, env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_PACKETS_PER_QUEUE"</span>, default_value_t = <span class="number">8192</span>, value_parser = validate_packet_count)]
-<a href=#1649 id=1649 data-nosnippet>1649</a>    </span><span class="kw">pub </span>packets_per_queue: u32,
-<a href=#1650 id=1650 data-nosnippet>1650</a>    <span class="doccomment">/// Set the thread scheduling policy for the XDP worker threads
-<a href=#1651 id=1651 data-nosnippet>1651</a>    </span><span class="attr">#[clap(
-<a href=#1652 id=1652 data-nosnippet>1652</a>        long = <span class="string">"service.udp.xdp.schedule-policy"</span>,
-<a href=#1653 id=1653 data-nosnippet>1653</a>        env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_SCHEDULE_POLICY"
-<a href=#1654 id=1654 data-nosnippet>1654</a>    </span>)]
-<a href=#1655 id=1655 data-nosnippet>1655</a>    </span><span class="kw">pub </span>schedule_policy: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::net::io::nic::ThreadPolicy&gt;,
-<a href=#1656 id=1656 data-nosnippet>1656</a>    <span class="doccomment">/// Sets the thread priority for the XDP worker threads
-<a href=#1657 id=1657 data-nosnippet>1657</a>    ///
-<a href=#1658 id=1658 data-nosnippet>1658</a>    /// This only matters when using the `SCHED_FIFO` or `SCHED_RR` realtime policies. This value will be clamped within
-<a href=#1659 id=1659 data-nosnippet>1659</a>    /// the valid range automatically.
-<a href=#1660 id=1660 data-nosnippet>1660</a>    </span><span class="attr">#[clap(
-<a href=#1661 id=1661 data-nosnippet>1661</a>        long = <span class="string">"service.udp.xdp.thread-priority"</span>,
-<a href=#1662 id=1662 data-nosnippet>1662</a>        env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_THREAD_PRIORITY"</span>,
-<a href=#1663 id=1663 data-nosnippet>1663</a>        default_value_t = <span class="number">99
+<a href=#1603 id=1603 data-nosnippet>1603</a>        <span class="comment">// Spawn a task to update the RTT state of the cluster members
+<a href=#1604 id=1604 data-nosnippet>1604</a>        </span>gossip::handler::spawn_rtt_handler(members.clone(), rtt_rx, tripwire.clone());
+<a href=#1605 id=1605 data-nosnippet>1605</a>
+<a href=#1606 id=1606 data-nosnippet>1606</a>        <span class="kw">let </span>srv_ctx = gossip::GossipContext {
+<a href=#1607 id=1607 data-nosnippet>1607</a>            metrics,
+<a href=#1608 id=1608 data-nosnippet>1608</a>            foca_tx,
+<a href=#1609 id=1609 data-nosnippet>1609</a>            changes_tx,
+<a href=#1610 id=1610 data-nosnippet>1610</a>            sync_permits: std::sync::Arc::new(tokio::sync::Semaphore::new(<span class="number">3</span>)),
+<a href=#1611 id=1611 data-nosnippet>1611</a>            pool: db.pool.clone(),
+<a href=#1612 id=1612 data-nosnippet>1612</a>            bookie: db.bookie.clone(),
+<a href=#1613 id=1613 data-nosnippet>1613</a>            actor_id: db.actor_id,
+<a href=#1614 id=1614 data-nosnippet>1614</a>            clock: db.clock.clone(),
+<a href=#1615 id=1615 data-nosnippet>1615</a>            cluster_id: db.cluster_id,
+<a href=#1616 id=1616 data-nosnippet>1616</a>        };
+<a href=#1617 id=1617 data-nosnippet>1617</a>
+<a href=#1618 id=1618 data-nosnippet>1618</a>        corrosion::gossip::handler::spawn_gossipserver_unencrypted(
+<a href=#1619 id=1619 data-nosnippet>1619</a>            srv_ctx,
+<a href=#1620 id=1620 data-nosnippet>1620</a>            tripwire,
+<a href=#1621 id=1621 data-nosnippet>1621</a>            (std::net::Ipv6Addr::UNSPECIFIED, <span class="self">self</span>.corrosion_gossip_port).into(),
+<a href=#1622 id=1622 data-nosnippet>1622</a>        )
+<a href=#1623 id=1623 data-nosnippet>1623</a>        .context(<span class="string">"failed to spawn gossip server"</span>)<span class="question-mark">?</span>;
+<a href=#1624 id=1624 data-nosnippet>1624</a>
+<a href=#1625 id=1625 data-nosnippet>1625</a>        <span class="prelude-val">Ok</span>(())
+<a href=#1626 id=1626 data-nosnippet>1626</a>    }
+<a href=#1627 id=1627 data-nosnippet>1627</a>}
+<a href=#1628 id=1628 data-nosnippet>1628</a>
+<a href=#1629 id=1629 data-nosnippet>1629</a><span class="kw">fn </span>validate_packet_count(p: <span class="kw-2">&amp;</span>str) -&gt; eyre::Result&lt;u32&gt; {
+<a href=#1630 id=1630 data-nosnippet>1630</a>    <span class="kw">use </span>eyre::Context;
+<a href=#1631 id=1631 data-nosnippet>1631</a>
+<a href=#1632 id=1632 data-nosnippet>1632</a>    <span class="kw">let </span>pc = p
+<a href=#1633 id=1633 data-nosnippet>1633</a>        .parse::&lt;u32&gt;()
+<a href=#1634 id=1634 data-nosnippet>1634</a>        .context(<span class="string">"couldn't parse packet count as an unsigned integer"</span>)<span class="question-mark">?</span>;
+<a href=#1635 id=1635 data-nosnippet>1635</a>
+<a href=#1636 id=1636 data-nosnippet>1636</a>    <span class="comment">// Set our floor at 2k, ie. 512 per ring (fill/rx/tx/completion)
+<a href=#1637 id=1637 data-nosnippet>1637</a>    </span><span class="macro">eyre::ensure!</span>(pc &gt;= <span class="number">2 </span>* <span class="number">1024</span>, <span class="string">"{pc} needs to be at least 2K"</span>);
+<a href=#1638 id=1638 data-nosnippet>1638</a>
+<a href=#1639 id=1639 data-nosnippet>1639</a>    <span class="comment">// Obviously we could correct this instead, but better to just error and tell the user they need to use a power of 2
+<a href=#1640 id=1640 data-nosnippet>1640</a>    </span><span class="macro">eyre::ensure!</span>(pc.is_power_of_two(), <span class="string">"{pc} is not a power of 2"</span>);
+<a href=#1641 id=1641 data-nosnippet>1641</a>
+<a href=#1642 id=1642 data-nosnippet>1642</a>    <span class="prelude-val">Ok</span>(pc)
+<a href=#1643 id=1643 data-nosnippet>1643</a>}
+<a href=#1644 id=1644 data-nosnippet>1644</a>
+<a href=#1645 id=1645 data-nosnippet>1645</a><span class="doccomment">/// XDP (eXpress Data Path) options
+<a href=#1646 id=1646 data-nosnippet>1646</a></span><span class="attr">#[derive(clap::Args, Clone, Debug)]
+<a href=#1647 id=1647 data-nosnippet>1647</a></span><span class="kw">pub struct </span>XdpOptions {
+<a href=#1648 id=1648 data-nosnippet>1648</a>    <span class="doccomment">/// The name of the network interface to bind the XDP socket(s) to.
+<a href=#1649 id=1649 data-nosnippet>1649</a>    ///
+<a href=#1650 id=1650 data-nosnippet>1650</a>    /// If not specified quilkin will attempt to determine the most appropriate
+<a href=#1651 id=1651 data-nosnippet>1651</a>    /// network interface to use. Quilkin will exit with an error if the network
+<a href=#1652 id=1652 data-nosnippet>1652</a>    /// interface does not exist, or a suitable default cannot be determined.
+<a href=#1653 id=1653 data-nosnippet>1653</a>    </span><span class="attr">#[clap(
+<a href=#1654 id=1654 data-nosnippet>1654</a>        long = <span class="string">"service.udp.xdp.network-interface"</span>,
+<a href=#1655 id=1655 data-nosnippet>1655</a>        env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_NETWORK_INTERFACE"
+<a href=#1656 id=1656 data-nosnippet>1656</a>    </span>)]
+<a href=#1657 id=1657 data-nosnippet>1657</a>    </span><span class="kw">pub </span>network_interface: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#1658 id=1658 data-nosnippet>1658</a>    <span class="doccomment">/// Forces the use of [`XDP_ZEROCOPY`](https://www.kernel.org/doc/html/latest/networking/af_xdp.html#xdp-copy-and-xdp-zerocopy-bind-flags)
+<a href=#1659 id=1659 data-nosnippet>1659</a>    ///
+<a href=#1660 id=1660 data-nosnippet>1660</a>    /// If zero copy is not available on the chosen NIC, Quilkin exits with an error
+<a href=#1661 id=1661 data-nosnippet>1661</a>    </span><span class="attr">#[clap(
+<a href=#1662 id=1662 data-nosnippet>1662</a>        long = <span class="string">"service.udp.xdp.zerocopy"</span>,
+<a href=#1663 id=1663 data-nosnippet>1663</a>        env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_ZEROCOPY"
 <a href=#1664 id=1664 data-nosnippet>1664</a>    </span>)]
-<a href=#1665 id=1665 data-nosnippet>1665</a>    </span><span class="kw">pub </span>thread_priority: u32,
-<a href=#1666 id=1666 data-nosnippet>1666</a>    <span class="doccomment">/// If true, each XDP worker is pinned to its own core
-<a href=#1667 id=1667 data-nosnippet>1667</a>    </span><span class="attr">#[clap(
-<a href=#1668 id=1668 data-nosnippet>1668</a>        long = <span class="string">"service.udp.xdp.pin-to-core"</span>,
-<a href=#1669 id=1669 data-nosnippet>1669</a>        env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_PIN_TO_CORE"
-<a href=#1670 id=1670 data-nosnippet>1670</a>    </span>)]
-<a href=#1671 id=1671 data-nosnippet>1671</a>    </span><span class="kw">pub </span>pin_to_core: bool,
-<a href=#1672 id=1672 data-nosnippet>1672</a>}
-<a href=#1673 id=1673 data-nosnippet>1673</a>
-<a href=#1674 id=1674 data-nosnippet>1674</a><span class="attr">#[allow(clippy::derivable_impls)]
-<a href=#1675 id=1675 data-nosnippet>1675</a></span><span class="kw">impl </span>Default <span class="kw">for </span>XdpOptions {
-<a href=#1676 id=1676 data-nosnippet>1676</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
-<a href=#1677 id=1677 data-nosnippet>1677</a>        <span class="self">Self </span>{
-<a href=#1678 id=1678 data-nosnippet>1678</a>            network_interface: <span class="prelude-val">None</span>,
-<a href=#1679 id=1679 data-nosnippet>1679</a>            force_zerocopy: <span class="bool-val">false</span>,
-<a href=#1680 id=1680 data-nosnippet>1680</a>            force_tx_checksum_offload: <span class="bool-val">false</span>,
-<a href=#1681 id=1681 data-nosnippet>1681</a>            packets_per_queue: <span class="number">8 </span>* <span class="number">1024</span>,
-<a href=#1682 id=1682 data-nosnippet>1682</a>            schedule_policy: <span class="prelude-val">None</span>,
-<a href=#1683 id=1683 data-nosnippet>1683</a>            thread_priority: <span class="number">99</span>,
-<a href=#1684 id=1684 data-nosnippet>1684</a>            pin_to_core: <span class="bool-val">false</span>,
-<a href=#1685 id=1685 data-nosnippet>1685</a>        }
-<a href=#1686 id=1686 data-nosnippet>1686</a>    }
-<a href=#1687 id=1687 data-nosnippet>1687</a>}
+<a href=#1665 id=1665 data-nosnippet>1665</a>    </span><span class="kw">pub </span>force_zerocopy: bool,
+<a href=#1666 id=1666 data-nosnippet>1666</a>    <span class="doccomment">/// Forces the use of [TX checksum offload](https://docs.kernel.org/6.8/networking/xsk-tx-metadata.html)
+<a href=#1667 id=1667 data-nosnippet>1667</a>    ///
+<a href=#1668 id=1668 data-nosnippet>1668</a>    /// TX checksum offload is an optional feature allowing the data portion of
+<a href=#1669 id=1669 data-nosnippet>1669</a>    /// a packet to have its internet checksum calculation offloaded to the NIC,
+<a href=#1670 id=1670 data-nosnippet>1670</a>    /// as otherwise this is done in software
+<a href=#1671 id=1671 data-nosnippet>1671</a>    </span><span class="attr">#[clap(long = <span class="string">"service.udp.xdp.tco"</span>, env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_TCO"</span>)]
+<a href=#1672 id=1672 data-nosnippet>1672</a>    </span><span class="kw">pub </span>force_tx_checksum_offload: bool,
+<a href=#1673 id=1673 data-nosnippet>1673</a>    <span class="doccomment">/// The total packets allocated per queue
+<a href=#1674 id=1674 data-nosnippet>1674</a>    ///
+<a href=#1675 id=1675 data-nosnippet>1675</a>    /// We bind to the maximum amount of queues allowed by the NIC, each with its own memory pool where individual
+<a href=#1676 id=1676 data-nosnippet>1676</a>    /// packets for both RX and TX are allocated from.
+<a href=#1677 id=1677 data-nosnippet>1677</a>    </span><span class="attr">#[clap(long = <span class="string">"service.udp.xdp.packets-per-queue"</span>, env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_PACKETS_PER_QUEUE"</span>, default_value_t = <span class="number">8192</span>, value_parser = validate_packet_count)]
+<a href=#1678 id=1678 data-nosnippet>1678</a>    </span><span class="kw">pub </span>packets_per_queue: u32,
+<a href=#1679 id=1679 data-nosnippet>1679</a>    <span class="doccomment">/// Set the thread scheduling policy for the XDP worker threads
+<a href=#1680 id=1680 data-nosnippet>1680</a>    </span><span class="attr">#[clap(
+<a href=#1681 id=1681 data-nosnippet>1681</a>        long = <span class="string">"service.udp.xdp.schedule-policy"</span>,
+<a href=#1682 id=1682 data-nosnippet>1682</a>        env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_SCHEDULE_POLICY"
+<a href=#1683 id=1683 data-nosnippet>1683</a>    </span>)]
+<a href=#1684 id=1684 data-nosnippet>1684</a>    </span><span class="kw">pub </span>schedule_policy: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::net::io::nic::ThreadPolicy&gt;,
+<a href=#1685 id=1685 data-nosnippet>1685</a>    <span class="doccomment">/// Sets the thread priority for the XDP worker threads
+<a href=#1686 id=1686 data-nosnippet>1686</a>    ///
+<a href=#1687 id=1687 data-nosnippet>1687</a>    /// This only matters when using the `SCHED_FIFO` or `SCHED_RR` realtime policies. This value will be clamped within
+<a href=#1688 id=1688 data-nosnippet>1688</a>    /// the valid range automatically.
+<a href=#1689 id=1689 data-nosnippet>1689</a>    </span><span class="attr">#[clap(
+<a href=#1690 id=1690 data-nosnippet>1690</a>        long = <span class="string">"service.udp.xdp.thread-priority"</span>,
+<a href=#1691 id=1691 data-nosnippet>1691</a>        env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_THREAD_PRIORITY"</span>,
+<a href=#1692 id=1692 data-nosnippet>1692</a>        default_value_t = <span class="number">99
+<a href=#1693 id=1693 data-nosnippet>1693</a>    </span>)]
+<a href=#1694 id=1694 data-nosnippet>1694</a>    </span><span class="kw">pub </span>thread_priority: u32,
+<a href=#1695 id=1695 data-nosnippet>1695</a>    <span class="doccomment">/// If true, each XDP worker is pinned to its own core
+<a href=#1696 id=1696 data-nosnippet>1696</a>    </span><span class="attr">#[clap(
+<a href=#1697 id=1697 data-nosnippet>1697</a>        long = <span class="string">"service.udp.xdp.pin-to-core"</span>,
+<a href=#1698 id=1698 data-nosnippet>1698</a>        env = <span class="string">"QUILKIN_SERVICE_UDP_XDP_PIN_TO_CORE"
+<a href=#1699 id=1699 data-nosnippet>1699</a>    </span>)]
+<a href=#1700 id=1700 data-nosnippet>1700</a>    </span><span class="kw">pub </span>pin_to_core: bool,
+<a href=#1701 id=1701 data-nosnippet>1701</a>}
+<a href=#1702 id=1702 data-nosnippet>1702</a>
+<a href=#1703 id=1703 data-nosnippet>1703</a><span class="attr">#[allow(clippy::derivable_impls)]
+<a href=#1704 id=1704 data-nosnippet>1704</a></span><span class="kw">impl </span>Default <span class="kw">for </span>XdpOptions {
+<a href=#1705 id=1705 data-nosnippet>1705</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+<a href=#1706 id=1706 data-nosnippet>1706</a>        <span class="self">Self </span>{
+<a href=#1707 id=1707 data-nosnippet>1707</a>            network_interface: <span class="prelude-val">None</span>,
+<a href=#1708 id=1708 data-nosnippet>1708</a>            force_zerocopy: <span class="bool-val">false</span>,
+<a href=#1709 id=1709 data-nosnippet>1709</a>            force_tx_checksum_offload: <span class="bool-val">false</span>,
+<a href=#1710 id=1710 data-nosnippet>1710</a>            packets_per_queue: <span class="number">8 </span>* <span class="number">1024</span>,
+<a href=#1711 id=1711 data-nosnippet>1711</a>            schedule_policy: <span class="prelude-val">None</span>,
+<a href=#1712 id=1712 data-nosnippet>1712</a>            thread_priority: <span class="number">99</span>,
+<a href=#1713 id=1713 data-nosnippet>1713</a>            pin_to_core: <span class="bool-val">false</span>,
+<a href=#1714 id=1714 data-nosnippet>1714</a>        }
+<a href=#1715 id=1715 data-nosnippet>1715</a>    }
+<a href=#1716 id=1716 data-nosnippet>1716</a>}
 </code></pre></div></section></main></body></html>
