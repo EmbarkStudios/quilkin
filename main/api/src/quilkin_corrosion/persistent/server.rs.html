@@ -375,234 +375,256 @@
 <a href=#375 id=375 data-nosnippet>375</a>            <span class="kw">return </span>(send, recv, <span class="prelude-val">Err</span>(error));
 <a href=#376 id=376 data-nosnippet>376</a>        }
 <a href=#377 id=377 data-nosnippet>377</a>
-<a href=#378 id=378 data-nosnippet>378</a>        <span class="comment">// Responses must be sent in request order, so the reader queues each
-<a href=#379 id=379 data-nosnippet>379</a>        // request's result channel and the writer drains them in FIFO order,
-<a href=#380 id=380 data-nosnippet>380</a>        // allowing requests to execute while earlier results are being written
-<a href=#381 id=381 data-nosnippet>381</a>        </span><span class="kw">let </span>(resp_tx, <span class="kw-2">mut </span>resp_rx) = tokio::sync::mpsc::channel::&lt;
-<a href=#382 id=382 data-nosnippet>382</a>            tokio::sync::oneshot::Receiver&lt;corro_types::api::ExecResponse&gt;,
-<a href=#383 id=383 data-nosnippet>383</a>        &gt;(MAX_INFLIGHT);
+<a href=#378 id=378 data-nosnippet>378</a>        <span class="comment">// Renewal runs beside the read loop rather than in a select with it:
+<a href=#379 id=379 data-nosnippet>379</a>        // reading a length prefixed frame is not cancel safe, and dropping that
+<a href=#380 id=380 data-nosnippet>380</a>        // future part way through would desynchronise the stream.
+<a href=#381 id=381 data-nosnippet>381</a>        </span><span class="kw">let </span>renewal = tokio::spawn({
+<a href=#382 id=382 data-nosnippet>382</a>            <span class="kw">let </span>mutator = mutator.clone();
+<a href=#383 id=383 data-nosnippet>383</a>            <span class="kw">let </span>(icao, qcmp_port) = (req.icao, req.qcmp_port);
 <a href=#384 id=384 data-nosnippet>384</a>
-<a href=#385 id=385 data-nosnippet>385</a>        <span class="kw">let </span>writer = tokio::spawn(<span class="kw">async move </span>{
-<a href=#386 id=386 data-nosnippet>386</a>            <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="prelude-val">Ok</span>(());
-<a href=#387 id=387 data-nosnippet>387</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(rx) = resp_rx.recv().<span class="kw">await </span>{
-<a href=#388 id=388 data-nosnippet>388</a>                <span class="kw">let </span>response = rx.<span class="kw">await</span>.unwrap_or_else(|<span class="kw">_</span>| corro_types::api::ExecResponse {
-<a href=#389 id=389 data-nosnippet>389</a>                    results: <span class="macro">vec!</span>[corro_types::api::ExecResult::Error {
-<a href=#390 id=390 data-nosnippet>390</a>                        error: <span class="string">"mutation was dropped before being committed"</span>.into(),
-<a href=#391 id=391 data-nosnippet>391</a>                    }],
-<a href=#392 id=392 data-nosnippet>392</a>                    time: <span class="number">0.0</span>,
-<a href=#393 id=393 data-nosnippet>393</a>                    version: <span class="prelude-val">None</span>,
-<a href=#394 id=394 data-nosnippet>394</a>                    actor_id: <span class="prelude-val">None</span>,
-<a href=#395 id=395 data-nosnippet>395</a>                });
-<a href=#396 id=396 data-nosnippet>396</a>
-<a href=#397 id=397 data-nosnippet>397</a>                <span class="kw">let </span>response = <span class="kw">match </span>codec::write_length_prefixed_json(<span class="kw-2">&amp;</span>response) {
-<a href=#398 id=398 data-nosnippet>398</a>                    <span class="prelude-val">Ok</span>(r) =&gt; r,
-<a href=#399 id=399 data-nosnippet>399</a>                    <span class="prelude-val">Err</span>(error) =&gt; {
-<a href=#400 id=400 data-nosnippet>400</a>                        result = <span class="prelude-val">Err</span>(IoLoopError::Serialization(error));
-<a href=#401 id=401 data-nosnippet>401</a>                        <span class="kw">break</span>;
-<a href=#402 id=402 data-nosnippet>402</a>                    }
-<a href=#403 id=403 data-nosnippet>403</a>                };
-<a href=#404 id=404 data-nosnippet>404</a>                <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = send.write_chunk(response.freeze()).<span class="kw">await </span>{
-<a href=#405 id=405 data-nosnippet>405</a>                    result = <span class="prelude-val">Err</span>(IoLoopError::Write(error));
-<a href=#406 id=406 data-nosnippet>406</a>                    <span class="kw">break</span>;
-<a href=#407 id=407 data-nosnippet>407</a>                }
-<a href=#408 id=408 data-nosnippet>408</a>            }
-<a href=#409 id=409 data-nosnippet>409</a>
-<a href=#410 id=410 data-nosnippet>410</a>            (send, result)
-<a href=#411 id=411 data-nosnippet>411</a>        });
-<a href=#412 id=412 data-nosnippet>412</a>
-<a href=#413 id=413 data-nosnippet>413</a>        <span class="kw">let </span>read_result = <span class="kw">loop </span>{
-<a href=#414 id=414 data-nosnippet>414</a>            <span class="kw">let </span>to_exec =
-<a href=#415 id=415 data-nosnippet>415</a>                <span class="kw">match </span>codec::read_length_prefixed_json::&lt;Vec&lt;v1::ServerChange&gt;&gt;(<span class="kw-2">&amp;mut </span>recv).<span class="kw">await </span>{
-<a href=#416 id=416 data-nosnippet>416</a>                    <span class="prelude-val">Ok</span>(to_exec) =&gt; to_exec,
-<a href=#417 id=417 data-nosnippet>417</a>                    <span class="prelude-val">Err</span>(error) =&gt; <span class="kw">break </span><span class="prelude-val">Err</span>(IoLoopError::Read(error)),
-<a href=#418 id=418 data-nosnippet>418</a>                };
-<a href=#419 id=419 data-nosnippet>419</a>
-<a href=#420 id=420 data-nosnippet>420</a>            <span class="kw">let </span>rx = mutator.submit(peer, <span class="kw-2">&amp;</span>to_exec).<span class="kw">await</span>;
-<a href=#421 id=421 data-nosnippet>421</a>            <span class="kw">if </span>resp_tx.send(rx).<span class="kw">await</span>.is_err() {
-<a href=#422 id=422 data-nosnippet>422</a>                <span class="comment">// the writer only ends early on error, which it will report
-<a href=#423 id=423 data-nosnippet>423</a>                </span><span class="kw">break </span><span class="prelude-val">Ok</span>(());
-<a href=#424 id=424 data-nosnippet>424</a>            }
-<a href=#425 id=425 data-nosnippet>425</a>        };
-<a href=#426 id=426 data-nosnippet>426</a>
-<a href=#427 id=427 data-nosnippet>427</a>        <span class="comment">// let the writer drain the responses for requests already submitted
-<a href=#428 id=428 data-nosnippet>428</a>        </span>drop(resp_tx);
-<a href=#429 id=429 data-nosnippet>429</a>        <span class="kw">let </span>(send, write_result) = <span class="kw">match </span>writer.<span class="kw">await </span>{
-<a href=#430 id=430 data-nosnippet>430</a>            <span class="prelude-val">Ok</span>(sr) =&gt; sr,
-<a href=#431 id=431 data-nosnippet>431</a>            <span class="prelude-val">Err</span>(error) =&gt; {
-<a href=#432 id=432 data-nosnippet>432</a>                mutator.disconnected(peer).<span class="kw">await</span>;
-<a href=#433 id=433 data-nosnippet>433</a>                mutator.left(peer).<span class="kw">await</span>;
-<a href=#434 id=434 data-nosnippet>434</a>                std::panic::resume_unwind(error.into_panic());
-<a href=#435 id=435 data-nosnippet>435</a>            }
-<a href=#436 id=436 data-nosnippet>436</a>        };
-<a href=#437 id=437 data-nosnippet>437</a>
-<a href=#438 id=438 data-nosnippet>438</a>        mutator.disconnected(peer).<span class="kw">await</span>;
-<a href=#439 id=439 data-nosnippet>439</a>        mutator.left(peer).<span class="kw">await</span>;
-<a href=#440 id=440 data-nosnippet>440</a>
-<a href=#441 id=441 data-nosnippet>441</a>        <span class="comment">// a read error is either the client closing the stream or a bad frame,
-<a href=#442 id=442 data-nosnippet>442</a>        // both of which take precedence over any downstream write error
-<a href=#443 id=443 data-nosnippet>443</a>        </span><span class="kw">let </span>res = read_result.and(write_result);
-<a href=#444 id=444 data-nosnippet>444</a>        (send, recv, res)
-<a href=#445 id=445 data-nosnippet>445</a>    }
+<a href=#385 id=385 data-nosnippet>385</a>            <span class="kw">async move </span>{
+<a href=#386 id=386 data-nosnippet>386</a>                <span class="kw">let </span><span class="kw-2">mut </span>renew = tokio::time::interval_at(
+<a href=#387 id=387 data-nosnippet>387</a>                    tokio::time::Instant::now() + NODE_REFRESH,
+<a href=#388 id=388 data-nosnippet>388</a>                    NODE_REFRESH,
+<a href=#389 id=389 data-nosnippet>389</a>                );
+<a href=#390 id=390 data-nosnippet>390</a>
+<a href=#391 id=391 data-nosnippet>391</a>                <span class="kw">loop </span>{
+<a href=#392 id=392 data-nosnippet>392</a>                    renew.tick().<span class="kw">await</span>;
+<a href=#393 id=393 data-nosnippet>393</a>                    mutator.joined(peer, icao, qcmp_port).<span class="kw">await</span>;
+<a href=#394 id=394 data-nosnippet>394</a>                }
+<a href=#395 id=395 data-nosnippet>395</a>            }
+<a href=#396 id=396 data-nosnippet>396</a>        });
+<a href=#397 id=397 data-nosnippet>397</a>
+<a href=#398 id=398 data-nosnippet>398</a>        <span class="comment">// Responses must be sent in request order, so the reader queues each
+<a href=#399 id=399 data-nosnippet>399</a>        // request's result channel and the writer drains them in FIFO order,
+<a href=#400 id=400 data-nosnippet>400</a>        // allowing requests to execute while earlier results are being written
+<a href=#401 id=401 data-nosnippet>401</a>        </span><span class="kw">let </span>(resp_tx, <span class="kw-2">mut </span>resp_rx) = tokio::sync::mpsc::channel::&lt;
+<a href=#402 id=402 data-nosnippet>402</a>            tokio::sync::oneshot::Receiver&lt;corro_types::api::ExecResponse&gt;,
+<a href=#403 id=403 data-nosnippet>403</a>        &gt;(MAX_INFLIGHT);
+<a href=#404 id=404 data-nosnippet>404</a>
+<a href=#405 id=405 data-nosnippet>405</a>        <span class="kw">let </span>writer = tokio::spawn(<span class="kw">async move </span>{
+<a href=#406 id=406 data-nosnippet>406</a>            <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="prelude-val">Ok</span>(());
+<a href=#407 id=407 data-nosnippet>407</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(rx) = resp_rx.recv().<span class="kw">await </span>{
+<a href=#408 id=408 data-nosnippet>408</a>                <span class="kw">let </span>response = rx.<span class="kw">await</span>.unwrap_or_else(|<span class="kw">_</span>| corro_types::api::ExecResponse {
+<a href=#409 id=409 data-nosnippet>409</a>                    results: <span class="macro">vec!</span>[corro_types::api::ExecResult::Error {
+<a href=#410 id=410 data-nosnippet>410</a>                        error: <span class="string">"mutation was dropped before being committed"</span>.into(),
+<a href=#411 id=411 data-nosnippet>411</a>                    }],
+<a href=#412 id=412 data-nosnippet>412</a>                    time: <span class="number">0.0</span>,
+<a href=#413 id=413 data-nosnippet>413</a>                    version: <span class="prelude-val">None</span>,
+<a href=#414 id=414 data-nosnippet>414</a>                    actor_id: <span class="prelude-val">None</span>,
+<a href=#415 id=415 data-nosnippet>415</a>                });
+<a href=#416 id=416 data-nosnippet>416</a>
+<a href=#417 id=417 data-nosnippet>417</a>                <span class="kw">let </span>response = <span class="kw">match </span>codec::write_length_prefixed_json(<span class="kw-2">&amp;</span>response) {
+<a href=#418 id=418 data-nosnippet>418</a>                    <span class="prelude-val">Ok</span>(r) =&gt; r,
+<a href=#419 id=419 data-nosnippet>419</a>                    <span class="prelude-val">Err</span>(error) =&gt; {
+<a href=#420 id=420 data-nosnippet>420</a>                        result = <span class="prelude-val">Err</span>(IoLoopError::Serialization(error));
+<a href=#421 id=421 data-nosnippet>421</a>                        <span class="kw">break</span>;
+<a href=#422 id=422 data-nosnippet>422</a>                    }
+<a href=#423 id=423 data-nosnippet>423</a>                };
+<a href=#424 id=424 data-nosnippet>424</a>                <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = send.write_chunk(response.freeze()).<span class="kw">await </span>{
+<a href=#425 id=425 data-nosnippet>425</a>                    result = <span class="prelude-val">Err</span>(IoLoopError::Write(error));
+<a href=#426 id=426 data-nosnippet>426</a>                    <span class="kw">break</span>;
+<a href=#427 id=427 data-nosnippet>427</a>                }
+<a href=#428 id=428 data-nosnippet>428</a>            }
+<a href=#429 id=429 data-nosnippet>429</a>
+<a href=#430 id=430 data-nosnippet>430</a>            (send, result)
+<a href=#431 id=431 data-nosnippet>431</a>        });
+<a href=#432 id=432 data-nosnippet>432</a>
+<a href=#433 id=433 data-nosnippet>433</a>        <span class="kw">let </span>read_result = <span class="kw">loop </span>{
+<a href=#434 id=434 data-nosnippet>434</a>            <span class="kw">let </span>to_exec =
+<a href=#435 id=435 data-nosnippet>435</a>                <span class="kw">match </span>codec::read_length_prefixed_json::&lt;Vec&lt;v1::ServerChange&gt;&gt;(<span class="kw-2">&amp;mut </span>recv).<span class="kw">await </span>{
+<a href=#436 id=436 data-nosnippet>436</a>                    <span class="prelude-val">Ok</span>(to_exec) =&gt; to_exec,
+<a href=#437 id=437 data-nosnippet>437</a>                    <span class="prelude-val">Err</span>(error) =&gt; <span class="kw">break </span><span class="prelude-val">Err</span>(IoLoopError::Read(error)),
+<a href=#438 id=438 data-nosnippet>438</a>                };
+<a href=#439 id=439 data-nosnippet>439</a>
+<a href=#440 id=440 data-nosnippet>440</a>            <span class="kw">let </span>rx = mutator.submit(peer, <span class="kw-2">&amp;</span>to_exec).<span class="kw">await</span>;
+<a href=#441 id=441 data-nosnippet>441</a>            <span class="kw">if </span>resp_tx.send(rx).<span class="kw">await</span>.is_err() {
+<a href=#442 id=442 data-nosnippet>442</a>                <span class="comment">// the writer only ends early on error, which it will report
+<a href=#443 id=443 data-nosnippet>443</a>                </span><span class="kw">break </span><span class="prelude-val">Ok</span>(());
+<a href=#444 id=444 data-nosnippet>444</a>            }
+<a href=#445 id=445 data-nosnippet>445</a>        };
 <a href=#446 id=446 data-nosnippet>446</a>
-<a href=#447 id=447 data-nosnippet>447</a>    <span class="kw">async fn </span>handle_subscribe(
-<a href=#448 id=448 data-nosnippet>448</a>        req: v1::SubscribeRequest,
-<a href=#449 id=449 data-nosnippet>449</a>        peer: Peer,
-<a href=#450 id=450 data-nosnippet>450</a>        <span class="kw-2">mut </span>send: SendStream,
-<a href=#451 id=451 data-nosnippet>451</a>        subs: PubsubContext,
-<a href=#452 id=452 data-nosnippet>452</a>        qcmp_port: <span class="prelude-ty">Option</span>&lt;u16&gt;,
-<a href=#453 id=453 data-nosnippet>453</a>        mutator: <span class="kw">impl </span>DbMutator + <span class="lifetime">'static</span>,
-<a href=#454 id=454 data-nosnippet>454</a>    ) -&gt; (SendStream, <span class="prelude-ty">Result</span>&lt;(), IoLoopError&gt;) {
-<a href=#455 id=455 data-nosnippet>455</a>        <span class="comment">// Deregister on every exit path, but only for a subscriber that was
-<a href=#456 id=456 data-nosnippet>456</a>        // registered in the first place.
-<a href=#457 id=457 data-nosnippet>457</a>        </span><span class="kw">let </span>registered = req.qcmp_port.is_some() &amp;&amp; req.icao.is_some();
-<a href=#458 id=458 data-nosnippet>458</a>        <span class="kw">let </span>res =
-<a href=#459 id=459 data-nosnippet>459</a>            handle_subscribe_inner(req, peer, <span class="kw-2">&amp;mut </span>send, subs, qcmp_port, mutator.clone()).<span class="kw">await</span>;
-<a href=#460 id=460 data-nosnippet>460</a>
-<a href=#461 id=461 data-nosnippet>461</a>        <span class="kw">if </span>registered {
-<a href=#462 id=462 data-nosnippet>462</a>            mutator.left(peer).<span class="kw">await</span>;
-<a href=#463 id=463 data-nosnippet>463</a>        }
-<a href=#464 id=464 data-nosnippet>464</a>
-<a href=#465 id=465 data-nosnippet>465</a>        (send, res)
-<a href=#466 id=466 data-nosnippet>466</a>    }
-<a href=#467 id=467 data-nosnippet>467</a>
-<a href=#468 id=468 data-nosnippet>468</a>    <span class="kw">async fn </span>handle_subscribe_inner(
-<a href=#469 id=469 data-nosnippet>469</a>        req: v1::SubscribeRequest,
-<a href=#470 id=470 data-nosnippet>470</a>        peer: Peer,
-<a href=#471 id=471 data-nosnippet>471</a>        send: <span class="kw-2">&amp;mut </span>SendStream,
-<a href=#472 id=472 data-nosnippet>472</a>        subs: PubsubContext,
-<a href=#473 id=473 data-nosnippet>473</a>        qcmp_port: <span class="prelude-ty">Option</span>&lt;u16&gt;,
-<a href=#474 id=474 data-nosnippet>474</a>        mutator: <span class="kw">impl </span>DbMutator + <span class="lifetime">'static</span>,
-<a href=#475 id=475 data-nosnippet>475</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), IoLoopError&gt; {
-<a href=#476 id=476 data-nosnippet>476</a>        <span class="kw">let </span>max_buffer = req.params.max_buffer;
-<a href=#477 id=477 data-nosnippet>477</a>        <span class="kw">let </span>max_time = req.params.max_time;
-<a href=#478 id=478 data-nosnippet>478</a>
-<a href=#479 id=479 data-nosnippet>479</a>        <span class="comment">// A subscriber that told us how to reach it is registered as a node, the
-<a href=#480 id=480 data-nosnippet>480</a>        // same as a mutating peer; one that did not stays invisible.
-<a href=#481 id=481 data-nosnippet>481</a>        </span><span class="kw">let </span>registration = req.qcmp_port.zip(req.icao);
-<a href=#482 id=482 data-nosnippet>482</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>((port, icao)) = registration {
-<a href=#483 id=483 data-nosnippet>483</a>            mutator.joined(peer, icao, port).<span class="kw">await</span>;
-<a href=#484 id=484 data-nosnippet>484</a>        }
-<a href=#485 id=485 data-nosnippet>485</a>
-<a href=#486 id=486 data-nosnippet>486</a>        <span class="kw">match </span>subs.subscribe(req.params).<span class="kw">await </span>{
-<a href=#487 id=487 data-nosnippet>487</a>            <span class="prelude-val">Ok</span>(sub) =&gt; {
-<a href=#488 id=488 data-nosnippet>488</a>                send_response(
-<a href=#489 id=489 data-nosnippet>489</a>                    send,
-<a href=#490 id=490 data-nosnippet>490</a>                    v1::Response::Ok(v1::OkResponse::Subscribe(v1::SubscribeResponse {
-<a href=#491 id=491 data-nosnippet>491</a>                        id: sub.id,
-<a href=#492 id=492 data-nosnippet>492</a>                        query_hash: sub.query_hash.clone(),
-<a href=#493 id=493 data-nosnippet>493</a>                        qcmp_port,
-<a href=#494 id=494 data-nosnippet>494</a>                    })),
-<a href=#495 id=495 data-nosnippet>495</a>                )
-<a href=#496 id=496 data-nosnippet>496</a>                .<span class="kw">await</span><span class="question-mark">?</span>;
-<a href=#497 id=497 data-nosnippet>497</a>
-<a href=#498 id=498 data-nosnippet>498</a>                <span class="kw">let </span>sub_id = sub.id;
-<a href=#499 id=499 data-nosnippet>499</a>
-<a href=#500 id=500 data-nosnippet>500</a>                <span class="kw">let </span><span class="kw-2">mut </span>bs = pubsub::BufferingSubStream::new(sub, max_buffer, max_time);
-<a href=#501 id=501 data-nosnippet>501</a>
-<a href=#502 id=502 data-nosnippet>502</a>                <span class="comment">// The registration carries a timestamp the reaper measures
-<a href=#503 id=503 data-nosnippet>503</a>                // against, so a connection outliving the reap threshold has to
-<a href=#504 id=504 data-nosnippet>504</a>                // renew or it would be collected while still live.
-<a href=#505 id=505 data-nosnippet>505</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>renew = tokio::time::interval_at(
-<a href=#506 id=506 data-nosnippet>506</a>                    tokio::time::Instant::now() + NODE_REFRESH,
-<a href=#507 id=507 data-nosnippet>507</a>                    NODE_REFRESH,
-<a href=#508 id=508 data-nosnippet>508</a>                );
-<a href=#509 id=509 data-nosnippet>509</a>
-<a href=#510 id=510 data-nosnippet>510</a>                <span class="kw">let </span><span class="kw-2">mut </span>io_loop = <span class="kw">async </span>|| -&gt; <span class="prelude-ty">Result</span>&lt;(), IoLoopError&gt; {
-<a href=#511 id=511 data-nosnippet>511</a>                    <span class="kw">loop </span>{
-<a href=#512 id=512 data-nosnippet>512</a>                        <span class="macro">tokio::select!</span> {
-<a href=#513 id=513 data-nosnippet>513</a>                            <span class="kw">_ </span>= renew.tick(), <span class="kw">if </span>registration.is_some() =&gt; {
-<a href=#514 id=514 data-nosnippet>514</a>                                <span class="kw">let </span>(port, icao) = registration.expect(<span class="string">"guarded above"</span>);
-<a href=#515 id=515 data-nosnippet>515</a>                                mutator.joined(peer, icao, port).<span class="kw">await</span>;
-<a href=#516 id=516 data-nosnippet>516</a>                            }
-<a href=#517 id=517 data-nosnippet>517</a>                            buf = bs.next() =&gt; {
-<a href=#518 id=518 data-nosnippet>518</a>                                <span class="kw">if let </span><span class="prelude-val">Some</span>(buf) = buf {
-<a href=#519 id=519 data-nosnippet>519</a>                                    send.write_chunk(buf).<span class="kw">await</span><span class="question-mark">?</span>;
-<a href=#520 id=520 data-nosnippet>520</a>                                } <span class="kw">else </span>{
-<a href=#521 id=521 data-nosnippet>521</a>                                    <span class="macro">tracing::info!</span>(%peer, %sub_id, <span class="string">"subscription sender was closed"</span>);
-<a href=#522 id=522 data-nosnippet>522</a>                                    <span class="comment">// This should maybe be an error?
-<a href=#523 id=523 data-nosnippet>523</a>                                    </span><span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#524 id=524 data-nosnippet>524</a>                                }
-<a href=#525 id=525 data-nosnippet>525</a>                            }
-<a href=#526 id=526 data-nosnippet>526</a>                            res = send.stopped() =&gt; {
-<a href=#527 id=527 data-nosnippet>527</a>                                <span class="kw">match </span>res {
-<a href=#528 id=528 data-nosnippet>528</a>                                    <span class="prelude-val">Ok</span>(code) =&gt; {
-<a href=#529 id=529 data-nosnippet>529</a>                                        <span class="macro">tracing::info!</span>(%peer, %sub_id, <span class="question-mark">?</span>code, <span class="string">"subscriber disconnected with code"</span>);
-<a href=#530 id=530 data-nosnippet>530</a>                                    }
-<a href=#531 id=531 data-nosnippet>531</a>                                    <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; {
-<a href=#532 id=532 data-nosnippet>532</a>                                        <span class="macro">tracing::info!</span>(%peer, %sub_id, <span class="string">"subscriber disconnected"</span>);
-<a href=#533 id=533 data-nosnippet>533</a>                                    }
-<a href=#534 id=534 data-nosnippet>534</a>                                }
-<a href=#535 id=535 data-nosnippet>535</a>                                <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#536 id=536 data-nosnippet>536</a>                            }
-<a href=#537 id=537 data-nosnippet>537</a>                        }
-<a href=#538 id=538 data-nosnippet>538</a>                    }
-<a href=#539 id=539 data-nosnippet>539</a>                };
-<a href=#540 id=540 data-nosnippet>540</a>
-<a href=#541 id=541 data-nosnippet>541</a>                <span class="kw">let </span>res = io_loop().<span class="kw">await</span>;
-<a href=#542 id=542 data-nosnippet>542</a>                <span class="macro">tracing::debug!</span>(result = <span class="question-mark">?</span>res, <span class="string">"subscription stream ended"</span>);
-<a href=#543 id=543 data-nosnippet>543</a>
-<a href=#544 id=544 data-nosnippet>544</a>                <span class="comment">// For now we don't care about restoring subscriptions and just always do state of the world on initial
-<a href=#545 id=545 data-nosnippet>545</a>                // connection for simplicity
-<a href=#546 id=546 data-nosnippet>546</a>                </span><span class="kw">if </span>!subs.remove(<span class="kw-2">&amp;</span>sub_id).<span class="kw">await </span>{
-<a href=#547 id=547 data-nosnippet>547</a>                    <span class="macro">tracing::debug!</span>(%peer, %sub_id, <span class="string">"subscription already removed on termination"</span>);
-<a href=#548 id=548 data-nosnippet>548</a>                }
-<a href=#549 id=549 data-nosnippet>549</a>
-<a href=#550 id=550 data-nosnippet>550</a>                res
-<a href=#551 id=551 data-nosnippet>551</a>            }
-<a href=#552 id=552 data-nosnippet>552</a>            <span class="prelude-val">Err</span>(err) =&gt; {
-<a href=#553 id=553 data-nosnippet>553</a>                <span class="kw">use </span>pubsub::{MatcherError <span class="kw">as </span>Me, MatcherUpsertError <span class="kw">as </span>E};
-<a href=#554 id=554 data-nosnippet>554</a>
-<a href=#555 id=555 data-nosnippet>555</a>                <span class="kw">let </span>err_str = err.to_string();
-<a href=#556 id=556 data-nosnippet>556</a>                <span class="kw">let </span>code = <span class="kw">match </span>err {
-<a href=#557 id=557 data-nosnippet>557</a>                    E::Pool(<span class="kw">_</span>) | E::Sqlite(<span class="kw">_</span>) | E::MissingBroadcaster =&gt; {
-<a href=#558 id=558 data-nosnippet>558</a>                        ErrorCode::InternalServerError
-<a href=#559 id=559 data-nosnippet>559</a>                    }
-<a href=#560 id=560 data-nosnippet>560</a>                    E::CouldNotExpand | E::NormalizeStatement(<span class="kw">_</span>) | E::SubFromWithoutMatcher =&gt; {
-<a href=#561 id=561 data-nosnippet>561</a>                        ErrorCode::BadRequest
-<a href=#562 id=562 data-nosnippet>562</a>                    }
-<a href=#563 id=563 data-nosnippet>563</a>                    E::Matcher(me) =&gt; {
-<a href=#564 id=564 data-nosnippet>564</a>                        <span class="kw">match </span>me {
-<a href=#565 id=565 data-nosnippet>565</a>                            Me::Lexer(<span class="kw">_</span>) | Me::StatementRequired |  Me::TableRequired | Me::QualificationRequired { .. } | Me::AggPrimaryKeyMissing(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; ErrorCode::BadRequest,
-<a href=#566 id=566 data-nosnippet>566</a>                            Me::TableNotFound(<span class="kw">_</span>) | Me::TableForColumnNotFound { .. }=&gt; ErrorCode::NotFound,
-<a href=#567 id=567 data-nosnippet>567</a>                            Me::UnsupportedStatement | Me::UnsupportedExpr { .. } | Me::JoinOnExprUnsupported { .. } =&gt; ErrorCode::Unsupported,
-<a href=#568 id=568 data-nosnippet>568</a>                            Me::Sqlite(<span class="kw">_</span>) | Me::NoPrimaryKey(<span class="kw">_</span>) | Me::TableStarNotFound { .. } | Me::MissingPrimaryKeys | Me::ChangeQueueClosedOrFull <span class="comment">/* this could maybe be serviceunavailable */ </span>| Me::NoChangeInserted | Me::EventReceiverClosed | Me::Unpack(<span class="kw">_</span>) | Me::InsertSub | Me::FromSql(<span class="kw">_</span>) | Me::Io(<span class="kw">_</span>) | Me::ChangesetEncode(<span class="kw">_</span>) | Me::QueueFull | Me::CannotRestoreExisting | Me::WritePermitAcquire(<span class="kw">_</span>) | Me::NotRunning | Me::MissingSql =&gt; ErrorCode::InternalServerError,
-<a href=#569 id=569 data-nosnippet>569</a>                        }
-<a href=#570 id=570 data-nosnippet>570</a>                    }
-<a href=#571 id=571 data-nosnippet>571</a>                };
-<a href=#572 id=572 data-nosnippet>572</a>
-<a href=#573 id=573 data-nosnippet>573</a>                send_response(
-<a href=#574 id=574 data-nosnippet>574</a>                    send,
-<a href=#575 id=575 data-nosnippet>575</a>                    v1::Response::Err {
-<a href=#576 id=576 data-nosnippet>576</a>                        code: code <span class="kw">as </span>u16,
-<a href=#577 id=577 data-nosnippet>577</a>                        message: err_str,
-<a href=#578 id=578 data-nosnippet>578</a>                    },
-<a href=#579 id=579 data-nosnippet>579</a>                )
-<a href=#580 id=580 data-nosnippet>580</a>                .<span class="kw">await
-<a href=#581 id=581 data-nosnippet>581</a>            </span>}
-<a href=#582 id=582 data-nosnippet>582</a>        }
-<a href=#583 id=583 data-nosnippet>583</a>    }
-<a href=#584 id=584 data-nosnippet>584</a>
-<a href=#585 id=585 data-nosnippet>585</a>    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">async fn </span>handle_stream(
-<a href=#586 id=586 data-nosnippet>586</a>        request: proto::v1::Request,
-<a href=#587 id=587 data-nosnippet>587</a>        peer: Peer,
-<a href=#588 id=588 data-nosnippet>588</a>        send: SendStream,
-<a href=#589 id=589 data-nosnippet>589</a>        recv: RecvStream,
-<a href=#590 id=590 data-nosnippet>590</a>        mutator: <span class="kw">impl </span>DbMutator + <span class="lifetime">'static</span>,
-<a href=#591 id=591 data-nosnippet>591</a>        subs: PubsubContext,
-<a href=#592 id=592 data-nosnippet>592</a>        qcmp_port: <span class="prelude-ty">Option</span>&lt;u16&gt;,
-<a href=#593 id=593 data-nosnippet>593</a>    ) -&gt; (SendStream, RecvStream, <span class="prelude-ty">Result</span>&lt;(), IoLoopError&gt;) {
-<a href=#594 id=594 data-nosnippet>594</a>        <span class="kw">match </span>request {
-<a href=#595 id=595 data-nosnippet>595</a>            v1::Request::Mutate(mreq) =&gt; handle_mutate(mreq, peer, send, recv, mutator).<span class="kw">await</span>,
-<a href=#596 id=596 data-nosnippet>596</a>            v1::Request::Subscribe(sreq) =&gt; {
-<a href=#597 id=597 data-nosnippet>597</a>                <span class="kw">let </span>query = sreq.params.query.query().to_owned();
-<a href=#598 id=598 data-nosnippet>598</a>                <span class="kw">let </span>(send, res) = handle_subscribe(sreq, peer, send, subs, qcmp_port, mutator)
-<a href=#599 id=599 data-nosnippet>599</a>                    .instrument(
-<a href=#600 id=600 data-nosnippet>600</a>                        <span class="macro">tracing::debug_span!</span>(<span class="string">"subscribe"</span>, %peer, id = recv.id().index(), query),
-<a href=#601 id=601 data-nosnippet>601</a>                    )
-<a href=#602 id=602 data-nosnippet>602</a>                    .<span class="kw">await</span>;
-<a href=#603 id=603 data-nosnippet>603</a>                (send, recv, res)
-<a href=#604 id=604 data-nosnippet>604</a>            }
-<a href=#605 id=605 data-nosnippet>605</a>        }
-<a href=#606 id=606 data-nosnippet>606</a>    }
-<a href=#607 id=607 data-nosnippet>607</a>}
+<a href=#447 id=447 data-nosnippet>447</a>        <span class="comment">// let the writer drain the responses for requests already submitted
+<a href=#448 id=448 data-nosnippet>448</a>        </span>drop(resp_tx);
+<a href=#449 id=449 data-nosnippet>449</a>        <span class="kw">let </span>(send, write_result) = <span class="kw">match </span>writer.<span class="kw">await </span>{
+<a href=#450 id=450 data-nosnippet>450</a>            <span class="prelude-val">Ok</span>(sr) =&gt; sr,
+<a href=#451 id=451 data-nosnippet>451</a>            <span class="prelude-val">Err</span>(error) =&gt; {
+<a href=#452 id=452 data-nosnippet>452</a>                renewal.abort();
+<a href=#453 id=453 data-nosnippet>453</a>                mutator.disconnected(peer).<span class="kw">await</span>;
+<a href=#454 id=454 data-nosnippet>454</a>                mutator.left(peer).<span class="kw">await</span>;
+<a href=#455 id=455 data-nosnippet>455</a>                std::panic::resume_unwind(error.into_panic());
+<a href=#456 id=456 data-nosnippet>456</a>            }
+<a href=#457 id=457 data-nosnippet>457</a>        };
+<a href=#458 id=458 data-nosnippet>458</a>
+<a href=#459 id=459 data-nosnippet>459</a>        renewal.abort();
+<a href=#460 id=460 data-nosnippet>460</a>        mutator.disconnected(peer).<span class="kw">await</span>;
+<a href=#461 id=461 data-nosnippet>461</a>        mutator.left(peer).<span class="kw">await</span>;
+<a href=#462 id=462 data-nosnippet>462</a>
+<a href=#463 id=463 data-nosnippet>463</a>        <span class="comment">// a read error is either the client closing the stream or a bad frame,
+<a href=#464 id=464 data-nosnippet>464</a>        // both of which take precedence over any downstream write error
+<a href=#465 id=465 data-nosnippet>465</a>        </span><span class="kw">let </span>res = read_result.and(write_result);
+<a href=#466 id=466 data-nosnippet>466</a>        (send, recv, res)
+<a href=#467 id=467 data-nosnippet>467</a>    }
+<a href=#468 id=468 data-nosnippet>468</a>
+<a href=#469 id=469 data-nosnippet>469</a>    <span class="kw">async fn </span>handle_subscribe(
+<a href=#470 id=470 data-nosnippet>470</a>        req: v1::SubscribeRequest,
+<a href=#471 id=471 data-nosnippet>471</a>        peer: Peer,
+<a href=#472 id=472 data-nosnippet>472</a>        <span class="kw-2">mut </span>send: SendStream,
+<a href=#473 id=473 data-nosnippet>473</a>        subs: PubsubContext,
+<a href=#474 id=474 data-nosnippet>474</a>        qcmp_port: <span class="prelude-ty">Option</span>&lt;u16&gt;,
+<a href=#475 id=475 data-nosnippet>475</a>        mutator: <span class="kw">impl </span>DbMutator + <span class="lifetime">'static</span>,
+<a href=#476 id=476 data-nosnippet>476</a>    ) -&gt; (SendStream, <span class="prelude-ty">Result</span>&lt;(), IoLoopError&gt;) {
+<a href=#477 id=477 data-nosnippet>477</a>        <span class="comment">// Deregister on every exit path, but only for a subscriber that was
+<a href=#478 id=478 data-nosnippet>478</a>        // registered in the first place.
+<a href=#479 id=479 data-nosnippet>479</a>        </span><span class="kw">let </span>registered = req.qcmp_port.is_some() &amp;&amp; req.icao.is_some();
+<a href=#480 id=480 data-nosnippet>480</a>        <span class="kw">let </span>res =
+<a href=#481 id=481 data-nosnippet>481</a>            handle_subscribe_inner(req, peer, <span class="kw-2">&amp;mut </span>send, subs, qcmp_port, mutator.clone()).<span class="kw">await</span>;
+<a href=#482 id=482 data-nosnippet>482</a>
+<a href=#483 id=483 data-nosnippet>483</a>        <span class="kw">if </span>registered {
+<a href=#484 id=484 data-nosnippet>484</a>            mutator.left(peer).<span class="kw">await</span>;
+<a href=#485 id=485 data-nosnippet>485</a>        }
+<a href=#486 id=486 data-nosnippet>486</a>
+<a href=#487 id=487 data-nosnippet>487</a>        (send, res)
+<a href=#488 id=488 data-nosnippet>488</a>    }
+<a href=#489 id=489 data-nosnippet>489</a>
+<a href=#490 id=490 data-nosnippet>490</a>    <span class="kw">async fn </span>handle_subscribe_inner(
+<a href=#491 id=491 data-nosnippet>491</a>        req: v1::SubscribeRequest,
+<a href=#492 id=492 data-nosnippet>492</a>        peer: Peer,
+<a href=#493 id=493 data-nosnippet>493</a>        send: <span class="kw-2">&amp;mut </span>SendStream,
+<a href=#494 id=494 data-nosnippet>494</a>        subs: PubsubContext,
+<a href=#495 id=495 data-nosnippet>495</a>        qcmp_port: <span class="prelude-ty">Option</span>&lt;u16&gt;,
+<a href=#496 id=496 data-nosnippet>496</a>        mutator: <span class="kw">impl </span>DbMutator + <span class="lifetime">'static</span>,
+<a href=#497 id=497 data-nosnippet>497</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), IoLoopError&gt; {
+<a href=#498 id=498 data-nosnippet>498</a>        <span class="kw">let </span>max_buffer = req.params.max_buffer;
+<a href=#499 id=499 data-nosnippet>499</a>        <span class="kw">let </span>max_time = req.params.max_time;
+<a href=#500 id=500 data-nosnippet>500</a>
+<a href=#501 id=501 data-nosnippet>501</a>        <span class="comment">// A subscriber that told us how to reach it is registered as a node, the
+<a href=#502 id=502 data-nosnippet>502</a>        // same as a mutating peer; one that did not stays invisible.
+<a href=#503 id=503 data-nosnippet>503</a>        </span><span class="kw">let </span>registration = req.qcmp_port.zip(req.icao);
+<a href=#504 id=504 data-nosnippet>504</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>((port, icao)) = registration {
+<a href=#505 id=505 data-nosnippet>505</a>            mutator.joined(peer, icao, port).<span class="kw">await</span>;
+<a href=#506 id=506 data-nosnippet>506</a>        }
+<a href=#507 id=507 data-nosnippet>507</a>
+<a href=#508 id=508 data-nosnippet>508</a>        <span class="kw">match </span>subs.subscribe(req.params).<span class="kw">await </span>{
+<a href=#509 id=509 data-nosnippet>509</a>            <span class="prelude-val">Ok</span>(sub) =&gt; {
+<a href=#510 id=510 data-nosnippet>510</a>                send_response(
+<a href=#511 id=511 data-nosnippet>511</a>                    send,
+<a href=#512 id=512 data-nosnippet>512</a>                    v1::Response::Ok(v1::OkResponse::Subscribe(v1::SubscribeResponse {
+<a href=#513 id=513 data-nosnippet>513</a>                        id: sub.id,
+<a href=#514 id=514 data-nosnippet>514</a>                        query_hash: sub.query_hash.clone(),
+<a href=#515 id=515 data-nosnippet>515</a>                        qcmp_port,
+<a href=#516 id=516 data-nosnippet>516</a>                    })),
+<a href=#517 id=517 data-nosnippet>517</a>                )
+<a href=#518 id=518 data-nosnippet>518</a>                .<span class="kw">await</span><span class="question-mark">?</span>;
+<a href=#519 id=519 data-nosnippet>519</a>
+<a href=#520 id=520 data-nosnippet>520</a>                <span class="kw">let </span>sub_id = sub.id;
+<a href=#521 id=521 data-nosnippet>521</a>
+<a href=#522 id=522 data-nosnippet>522</a>                <span class="kw">let </span><span class="kw-2">mut </span>bs = pubsub::BufferingSubStream::new(sub, max_buffer, max_time);
+<a href=#523 id=523 data-nosnippet>523</a>
+<a href=#524 id=524 data-nosnippet>524</a>                <span class="comment">// The registration carries a timestamp the reaper measures
+<a href=#525 id=525 data-nosnippet>525</a>                // against, so a connection outliving the reap threshold has to
+<a href=#526 id=526 data-nosnippet>526</a>                // renew or it would be collected while still live.
+<a href=#527 id=527 data-nosnippet>527</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>renew = tokio::time::interval_at(
+<a href=#528 id=528 data-nosnippet>528</a>                    tokio::time::Instant::now() + NODE_REFRESH,
+<a href=#529 id=529 data-nosnippet>529</a>                    NODE_REFRESH,
+<a href=#530 id=530 data-nosnippet>530</a>                );
+<a href=#531 id=531 data-nosnippet>531</a>
+<a href=#532 id=532 data-nosnippet>532</a>                <span class="kw">let </span><span class="kw-2">mut </span>io_loop = <span class="kw">async </span>|| -&gt; <span class="prelude-ty">Result</span>&lt;(), IoLoopError&gt; {
+<a href=#533 id=533 data-nosnippet>533</a>                    <span class="kw">loop </span>{
+<a href=#534 id=534 data-nosnippet>534</a>                        <span class="macro">tokio::select!</span> {
+<a href=#535 id=535 data-nosnippet>535</a>                            <span class="kw">_ </span>= renew.tick(), <span class="kw">if </span>registration.is_some() =&gt; {
+<a href=#536 id=536 data-nosnippet>536</a>                                <span class="kw">let </span>(port, icao) = registration.expect(<span class="string">"guarded above"</span>);
+<a href=#537 id=537 data-nosnippet>537</a>                                mutator.joined(peer, icao, port).<span class="kw">await</span>;
+<a href=#538 id=538 data-nosnippet>538</a>                            }
+<a href=#539 id=539 data-nosnippet>539</a>                            buf = bs.next() =&gt; {
+<a href=#540 id=540 data-nosnippet>540</a>                                <span class="kw">if let </span><span class="prelude-val">Some</span>(buf) = buf {
+<a href=#541 id=541 data-nosnippet>541</a>                                    send.write_chunk(buf).<span class="kw">await</span><span class="question-mark">?</span>;
+<a href=#542 id=542 data-nosnippet>542</a>                                } <span class="kw">else </span>{
+<a href=#543 id=543 data-nosnippet>543</a>                                    <span class="macro">tracing::info!</span>(%peer, %sub_id, <span class="string">"subscription sender was closed"</span>);
+<a href=#544 id=544 data-nosnippet>544</a>                                    <span class="comment">// This should maybe be an error?
+<a href=#545 id=545 data-nosnippet>545</a>                                    </span><span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#546 id=546 data-nosnippet>546</a>                                }
+<a href=#547 id=547 data-nosnippet>547</a>                            }
+<a href=#548 id=548 data-nosnippet>548</a>                            res = send.stopped() =&gt; {
+<a href=#549 id=549 data-nosnippet>549</a>                                <span class="kw">match </span>res {
+<a href=#550 id=550 data-nosnippet>550</a>                                    <span class="prelude-val">Ok</span>(code) =&gt; {
+<a href=#551 id=551 data-nosnippet>551</a>                                        <span class="macro">tracing::info!</span>(%peer, %sub_id, <span class="question-mark">?</span>code, <span class="string">"subscriber disconnected with code"</span>);
+<a href=#552 id=552 data-nosnippet>552</a>                                    }
+<a href=#553 id=553 data-nosnippet>553</a>                                    <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; {
+<a href=#554 id=554 data-nosnippet>554</a>                                        <span class="macro">tracing::info!</span>(%peer, %sub_id, <span class="string">"subscriber disconnected"</span>);
+<a href=#555 id=555 data-nosnippet>555</a>                                    }
+<a href=#556 id=556 data-nosnippet>556</a>                                }
+<a href=#557 id=557 data-nosnippet>557</a>                                <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#558 id=558 data-nosnippet>558</a>                            }
+<a href=#559 id=559 data-nosnippet>559</a>                        }
+<a href=#560 id=560 data-nosnippet>560</a>                    }
+<a href=#561 id=561 data-nosnippet>561</a>                };
+<a href=#562 id=562 data-nosnippet>562</a>
+<a href=#563 id=563 data-nosnippet>563</a>                <span class="kw">let </span>res = io_loop().<span class="kw">await</span>;
+<a href=#564 id=564 data-nosnippet>564</a>                <span class="macro">tracing::debug!</span>(result = <span class="question-mark">?</span>res, <span class="string">"subscription stream ended"</span>);
+<a href=#565 id=565 data-nosnippet>565</a>
+<a href=#566 id=566 data-nosnippet>566</a>                <span class="comment">// For now we don't care about restoring subscriptions and just always do state of the world on initial
+<a href=#567 id=567 data-nosnippet>567</a>                // connection for simplicity
+<a href=#568 id=568 data-nosnippet>568</a>                </span><span class="kw">if </span>!subs.remove(<span class="kw-2">&amp;</span>sub_id).<span class="kw">await </span>{
+<a href=#569 id=569 data-nosnippet>569</a>                    <span class="macro">tracing::debug!</span>(%peer, %sub_id, <span class="string">"subscription already removed on termination"</span>);
+<a href=#570 id=570 data-nosnippet>570</a>                }
+<a href=#571 id=571 data-nosnippet>571</a>
+<a href=#572 id=572 data-nosnippet>572</a>                res
+<a href=#573 id=573 data-nosnippet>573</a>            }
+<a href=#574 id=574 data-nosnippet>574</a>            <span class="prelude-val">Err</span>(err) =&gt; {
+<a href=#575 id=575 data-nosnippet>575</a>                <span class="kw">use </span>pubsub::{MatcherError <span class="kw">as </span>Me, MatcherUpsertError <span class="kw">as </span>E};
+<a href=#576 id=576 data-nosnippet>576</a>
+<a href=#577 id=577 data-nosnippet>577</a>                <span class="kw">let </span>err_str = err.to_string();
+<a href=#578 id=578 data-nosnippet>578</a>                <span class="kw">let </span>code = <span class="kw">match </span>err {
+<a href=#579 id=579 data-nosnippet>579</a>                    E::Pool(<span class="kw">_</span>) | E::Sqlite(<span class="kw">_</span>) | E::MissingBroadcaster =&gt; {
+<a href=#580 id=580 data-nosnippet>580</a>                        ErrorCode::InternalServerError
+<a href=#581 id=581 data-nosnippet>581</a>                    }
+<a href=#582 id=582 data-nosnippet>582</a>                    E::CouldNotExpand | E::NormalizeStatement(<span class="kw">_</span>) | E::SubFromWithoutMatcher =&gt; {
+<a href=#583 id=583 data-nosnippet>583</a>                        ErrorCode::BadRequest
+<a href=#584 id=584 data-nosnippet>584</a>                    }
+<a href=#585 id=585 data-nosnippet>585</a>                    E::Matcher(me) =&gt; {
+<a href=#586 id=586 data-nosnippet>586</a>                        <span class="kw">match </span>me {
+<a href=#587 id=587 data-nosnippet>587</a>                            Me::Lexer(<span class="kw">_</span>) | Me::StatementRequired |  Me::TableRequired | Me::QualificationRequired { .. } | Me::AggPrimaryKeyMissing(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; ErrorCode::BadRequest,
+<a href=#588 id=588 data-nosnippet>588</a>                            Me::TableNotFound(<span class="kw">_</span>) | Me::TableForColumnNotFound { .. }=&gt; ErrorCode::NotFound,
+<a href=#589 id=589 data-nosnippet>589</a>                            Me::UnsupportedStatement | Me::UnsupportedExpr { .. } | Me::JoinOnExprUnsupported { .. } =&gt; ErrorCode::Unsupported,
+<a href=#590 id=590 data-nosnippet>590</a>                            Me::Sqlite(<span class="kw">_</span>) | Me::NoPrimaryKey(<span class="kw">_</span>) | Me::TableStarNotFound { .. } | Me::MissingPrimaryKeys | Me::ChangeQueueClosedOrFull <span class="comment">/* this could maybe be serviceunavailable */ </span>| Me::NoChangeInserted | Me::EventReceiverClosed | Me::Unpack(<span class="kw">_</span>) | Me::InsertSub | Me::FromSql(<span class="kw">_</span>) | Me::Io(<span class="kw">_</span>) | Me::ChangesetEncode(<span class="kw">_</span>) | Me::QueueFull | Me::CannotRestoreExisting | Me::WritePermitAcquire(<span class="kw">_</span>) | Me::NotRunning | Me::MissingSql =&gt; ErrorCode::InternalServerError,
+<a href=#591 id=591 data-nosnippet>591</a>                        }
+<a href=#592 id=592 data-nosnippet>592</a>                    }
+<a href=#593 id=593 data-nosnippet>593</a>                };
+<a href=#594 id=594 data-nosnippet>594</a>
+<a href=#595 id=595 data-nosnippet>595</a>                send_response(
+<a href=#596 id=596 data-nosnippet>596</a>                    send,
+<a href=#597 id=597 data-nosnippet>597</a>                    v1::Response::Err {
+<a href=#598 id=598 data-nosnippet>598</a>                        code: code <span class="kw">as </span>u16,
+<a href=#599 id=599 data-nosnippet>599</a>                        message: err_str,
+<a href=#600 id=600 data-nosnippet>600</a>                    },
+<a href=#601 id=601 data-nosnippet>601</a>                )
+<a href=#602 id=602 data-nosnippet>602</a>                .<span class="kw">await
+<a href=#603 id=603 data-nosnippet>603</a>            </span>}
+<a href=#604 id=604 data-nosnippet>604</a>        }
+<a href=#605 id=605 data-nosnippet>605</a>    }
+<a href=#606 id=606 data-nosnippet>606</a>
+<a href=#607 id=607 data-nosnippet>607</a>    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">async fn </span>handle_stream(
+<a href=#608 id=608 data-nosnippet>608</a>        request: proto::v1::Request,
+<a href=#609 id=609 data-nosnippet>609</a>        peer: Peer,
+<a href=#610 id=610 data-nosnippet>610</a>        send: SendStream,
+<a href=#611 id=611 data-nosnippet>611</a>        recv: RecvStream,
+<a href=#612 id=612 data-nosnippet>612</a>        mutator: <span class="kw">impl </span>DbMutator + <span class="lifetime">'static</span>,
+<a href=#613 id=613 data-nosnippet>613</a>        subs: PubsubContext,
+<a href=#614 id=614 data-nosnippet>614</a>        qcmp_port: <span class="prelude-ty">Option</span>&lt;u16&gt;,
+<a href=#615 id=615 data-nosnippet>615</a>    ) -&gt; (SendStream, RecvStream, <span class="prelude-ty">Result</span>&lt;(), IoLoopError&gt;) {
+<a href=#616 id=616 data-nosnippet>616</a>        <span class="kw">match </span>request {
+<a href=#617 id=617 data-nosnippet>617</a>            v1::Request::Mutate(mreq) =&gt; handle_mutate(mreq, peer, send, recv, mutator).<span class="kw">await</span>,
+<a href=#618 id=618 data-nosnippet>618</a>            v1::Request::Subscribe(sreq) =&gt; {
+<a href=#619 id=619 data-nosnippet>619</a>                <span class="kw">let </span>query = sreq.params.query.query().to_owned();
+<a href=#620 id=620 data-nosnippet>620</a>                <span class="kw">let </span>(send, res) = handle_subscribe(sreq, peer, send, subs, qcmp_port, mutator)
+<a href=#621 id=621 data-nosnippet>621</a>                    .instrument(
+<a href=#622 id=622 data-nosnippet>622</a>                        <span class="macro">tracing::debug_span!</span>(<span class="string">"subscribe"</span>, %peer, id = recv.id().index(), query),
+<a href=#623 id=623 data-nosnippet>623</a>                    )
+<a href=#624 id=624 data-nosnippet>624</a>                    .<span class="kw">await</span>;
+<a href=#625 id=625 data-nosnippet>625</a>                (send, recv, res)
+<a href=#626 id=626 data-nosnippet>626</a>            }
+<a href=#627 id=627 data-nosnippet>627</a>        }
+<a href=#628 id=628 data-nosnippet>628</a>    }
+<a href=#629 id=629 data-nosnippet>629</a>}
 </code></pre></div></section></main></body></html>
