@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-fb0b5461.js";
+            window.path_to_searchindex_js = "../searchindex-7b17f11c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-270f104f.js"></script>
@@ -230,6 +230,7 @@ filter being renamed or an <code>errno</code> producing different text:
 <li><code>invalid_packet</code>: the packet couldn’t be parsed as a datagram Quilkin handles. The specific parse failure is logged rather than labelled.</li>
 <li><code>session_limit</code>: the session limit was reached, so no session could be established.</li>
 <li><code>internal</code>: Quilkin lost track of state it needed to forward the packet.</li>
+<li><code>no_filter_chain</code>: the proxy hasn’t received its filter chain from the management server yet.</li>
 </ul>
 </li>
 <li>The <code>filter</code> label is the filter responsible, and is empty when the drop
