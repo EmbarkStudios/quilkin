@@ -151,6 +151,91 @@ impl<'de> Deserialize<'de> for ServerRow {
     }
 }
 
+/// A node in gossip, with its coordinate if it has solved one.
+#[derive(Debug, PartialEq)]
+pub struct NodeRow {
+    pub ip: IpAddr,
+    pub icao: IcaoCode,
+    pub qcmp_port: u16,
+    /// `None` until the node has solved a coordinate.
+    pub coordinate: Option<Coordinate>,
+}
+
+/// A node's solved position, as two equal-length vectors.
+#[derive(Debug, PartialEq)]
+pub struct Coordinate {
+    pub outgoing: Vec<f64>,
+    pub incoming: Vec<f64>,
+    pub round: u64,
+}
+
+/// Decodes base64 of little endian f64s, rejecting a length that is not a whole
+/// number of them.
+pub fn deserialize_vector(s: Option<&str>, dim: usize) -> eyre::Result<Vec<f64>> {
+    let bytes = s
+        .map(|s| data_encoding::BASE64_NOPAD.decode(s.as_bytes()))
+        .transpose()
+        .context("coordinate vector is not base64")?
+        .unwrap_or_default();
+
+    eyre::ensure!(
+        bytes.len() == dim * std::mem::size_of::<f64>(),
+        "coordinate vector is {} bytes, {dim} elements needs {}",
+        bytes.len(),
+        dim * std::mem::size_of::<f64>(),
+    );
+
+    Ok(bytes
+        .chunks_exact(std::mem::size_of::<f64>())
+        .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("chunked by size")))
+        .collect())
+}
+
+impl FromSqlValue for NodeRow {
+    fn from_sql(values: &[SqliteValue]) -> eyre::Result<Self> {
+        let ip = get_column!(req 0, "ip", values).parse::<Ipv6Addr>()?;
+        let ip = ip.to_ipv4_mapped().map_or(IpAddr::V6(ip), IpAddr::V4);
+
+        let integer = |index: usize, name: &'static str| -> eyre::Result<i64> {
+            Ok(*values
+                .get(index)
+                .with_context(|| format!("missing column '{name}'"))?
+                .as_integer()
+                .with_context(|| format!("column '{name}' is not an integer"))?)
+        };
+
+        let qcmp_port = integer(1, "port")?
+            .try_into()
+            .context("qcmp port was not within expected range")?;
+        let icao = get_column!(req 2, "icao", values).parse()?;
+
+        let dim: usize = integer(3, "dim")?
+            .try_into()
+            .context("dim was not within expected range")?;
+
+        // A node that has not solved yet carries no vectors rather than empty
+        // ones, so a reader cannot mistake it for a coordinate at the origin.
+        let coordinate = (dim > 0)
+            .then(|| -> eyre::Result<Coordinate> {
+                Ok(Coordinate {
+                    outgoing: deserialize_vector(values.get(4).and_then(|v| v.as_str()), dim)?,
+                    incoming: deserialize_vector(values.get(5).and_then(|v| v.as_str()), dim)?,
+                    round: integer(6, "round")?
+                        .try_into()
+                        .context("round was not within expected range")?,
+                })
+            })
+            .transpose()?;
+
+        Ok(Self {
+            ip,
+            icao,
+            qcmp_port,
+            coordinate,
+        })
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct DatacenterRow {
     pub ip: IpAddr,

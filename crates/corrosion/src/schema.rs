@@ -31,7 +31,17 @@ CREATE TABLE node (
     -- icao code
     icao char(4) not null default 'XXXX',
     -- when it last joined
-    joined timestamp
+    joined timestamp,
+    -- elements in each coordinate vector; 0 until the node has solved one. A
+    -- reader MUST skip a row whose dim differs from its own
+    dim int not null default 0,
+    -- base64 of dim little endian f64s, as servers.tokens does for binary
+    outgoing text,
+    incoming text,
+    -- the solve round the vectors came from, increasing per node
+    round int not null default 0,
+    -- when the vectors were last solved, for staleness
+    solved timestamp
 );
 
 CREATE TABLE filter (

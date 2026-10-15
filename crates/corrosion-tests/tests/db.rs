@@ -297,6 +297,53 @@ async fn registers_and_deregisters_nodes() {
     assert!(nodes().await.is_empty(), "the node left");
 }
 
+/// A coordinate survives the round trip through the database, and a row is
+/// only reported as having one once it does.
+#[tokio::test]
+async fn stores_and_reads_coordinates() {
+    let sp = prep("stores_and_reads_coordinates", 1).await;
+
+    let read = async || -> read::NodeRow {
+        let conn = sp.read().await.unwrap();
+        conn.query_row(corrosion::pubsub::NODE_QUERY, [], |row| {
+            let v = (0..7)
+                .map(|i| row.get::<_, SqliteValue>(i).unwrap())
+                .collect::<Vec<_>>();
+            Ok(read::NodeRow::from_sql(&v).unwrap())
+        })
+        .unwrap()
+    };
+
+    let mut v = smallvec::SmallVec::<[_; 2]>::new();
+    {
+        let mut node = write::Node(&mut v);
+        node.upsert(PREP_PEER, 7600, IcaoCode::new_testing([b'E'; 4]));
+        exec_all(node.0, &sp).await;
+    }
+
+    // Registered but unsolved: no coordinate rather than one at the origin.
+    assert_eq!(read().await.coordinate, None);
+
+    let outgoing = [1.5, 0.0, f64::MIN_POSITIVE];
+    let incoming = [2.5, 3.25, 0.125];
+    {
+        let mut node = write::Node(&mut v);
+        node.coordinate(PREP_PEER, &outgoing, &incoming, 7);
+        exec_all(node.0, &sp).await;
+    }
+
+    let row = read().await;
+    let coordinate = row.coordinate.expect("solved");
+
+    // Exact: a coordinate that drifts in storage is a coordinate that lies.
+    assert_eq!(coordinate.outgoing, outgoing);
+    assert_eq!(coordinate.incoming, incoming);
+    assert_eq!(coordinate.round, 7);
+
+    // The identity columns are untouched by a coordinate write.
+    assert_eq!(row.qcmp_port, 7600);
+}
+
 /// A node that stopped renewing is reaped, which is the backstop for a
 /// departure that was never observed.
 #[tokio::test]
