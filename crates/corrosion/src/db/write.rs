@@ -264,6 +264,18 @@ impl<'s, const N: usize> Server<'s, N> {
     }
 }
 
+/// Encodes a coordinate vector as base64 of little endian f64s, the same
+/// convention [`TokenSet`] uses for binary in a text column.
+fn encode_vector(values: &[f64]) -> SqliteParam {
+    let mut blob = smallvec::SmallVec::<[u8; 64]>::new();
+
+    for value in values {
+        blob.extend_from_slice(&value.to_le_bytes());
+    }
+
+    SqliteParam::Text(data_encoding::BASE64_NOPAD.encode(&blob).into())
+}
+
 impl ToSqlParam for Peer {
     fn to_sql(&self) -> SqliteParam {
         use std::fmt::Write as _;
@@ -294,6 +306,41 @@ impl<const N: usize> Node<'_, N> {
                 port = excluded.port,
                 icao = excluded.icao,
                 joined = unixepoch('now')"
+                .into(),
+            params,
+        ));
+    }
+
+    /// Create a statement to record a node's solved coordinate.
+    ///
+    /// Upserts, because a node may publish a coordinate before anything has
+    /// observed it connecting; the identity columns keep their defaults until
+    /// it does.
+    #[inline]
+    pub fn coordinate(&mut self, peer: Peer, outgoing: &[f64], incoming: &[f64], round: u64) {
+        debug_assert_eq!(
+            outgoing.len(),
+            incoming.len(),
+            "coordinate vectors differ in length",
+        );
+
+        let params = vec![
+            peer.to_sql(),
+            SqliteParam::Integer(outgoing.len() as _),
+            encode_vector(outgoing),
+            encode_vector(incoming),
+            SqliteParam::Integer(round as _),
+        ];
+
+        self.0.push(Statement::WithParams(
+            "INSERT INTO node (ip,dim,outgoing,incoming,round,solved)
+                VALUES (?,?,?,?,?,unixepoch('now'))
+            ON CONFLICT(ip) DO UPDATE SET
+                dim = excluded.dim,
+                outgoing = excluded.outgoing,
+                incoming = excluded.incoming,
+                round = excluded.round,
+                solved = excluded.solved"
                 .into(),
             params,
         ));
