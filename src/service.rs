@@ -460,6 +460,14 @@ impl Service {
         self
     }
 
+    /// What this node offers other nodes, from the services it runs.
+    pub fn capabilities(&self) -> quilkin_types::Capabilities {
+        quilkin_types::Capabilities::empty()
+            .with_if(quilkin_types::Capabilities::INGRESS, self.udp_enabled)
+            .with_if(quilkin_types::Capabilities::QCMP, self.qcmp_enabled)
+            .with_if(quilkin_types::Capabilities::PHOENIX, self.phoenix_enabled)
+    }
+
     /// Enables the Phoenix service.
     pub fn phoenix(mut self) -> Self {
         self.phoenix_enabled = true;
@@ -1712,5 +1720,29 @@ impl Default for XdpOptions {
             thread_priority: 99,
             pin_to_core: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use quilkin_types::Capabilities;
+
+    /// A node advertises what it offers others, not how it is built. The
+    /// "neither" case matters most: a relay takes no client traffic and hosts
+    /// no gameservers, so nothing should route to it.
+    #[test]
+    fn capabilities_describe_the_role() {
+        let relay = super::Service::default().xds().mds();
+        assert!(relay.capabilities().is_empty());
+
+        let proxy = super::Service::default().udp().qcmp().phoenix();
+        assert_eq!(
+            proxy.capabilities(),
+            Capabilities::empty()
+                .with(Capabilities::INGRESS)
+                .with(Capabilities::QCMP)
+                .with(Capabilities::PHOENIX),
+        );
+        assert!(!proxy.capabilities().contains(Capabilities::GAMESERVERS));
     }
 }

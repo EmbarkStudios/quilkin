@@ -33,10 +33,13 @@ pub(super) async fn corrosion_subscribe(
 
     // Sent at subscribe so the server can register this node, letting others
     // measure it. Absent when this node serves no QCMP.
-    let identity = state
-        .dyn_cfg
-        .qcmp_port()
-        .map(|port| (port.load(), state.dyn_cfg.icao_code.load()));
+    let identity = state.dyn_cfg.qcmp_port().map(|port| {
+        (
+            port.load(),
+            state.dyn_cfg.icao_code.load(),
+            state.dyn_cfg.capabilities(),
+        )
+    });
 
     loop {
         let connect_to_corrosion = connect_first(&endpoints, |addr| {
@@ -103,7 +106,7 @@ pub(super) async fn corrosion_subscribe(
 async fn connect_and_sub(
     addr: &crate::net::EndpointAddress,
     change_ids: &ChangeIds,
-    identity: Option<(u16, quilkin_types::IcaoCode)>,
+    identity: Option<(u16, quilkin_types::IcaoCode, quilkin_types::Capabilities)>,
 ) -> crate::Result<SubState> {
     tracing::debug!("connecting to corrosion server");
 

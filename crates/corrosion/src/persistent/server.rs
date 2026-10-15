@@ -32,7 +32,13 @@ pub trait DbMutator: Sync + Send + Clone {
     async fn connected(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16);
     /// A node joined gossip, by either stream kind. Unlike
     /// [`Self::connected`] this says nothing about what the node serves.
-    async fn joined(&self, peer: Peer, icao: IcaoCode, qcmp_port: u16);
+    async fn joined(
+        &self,
+        peer: Peer,
+        icao: IcaoCode,
+        qcmp_port: u16,
+        capabilities: quilkin_types::Capabilities,
+    );
     /// A node's gossip connection ended, by either stream kind.
     async fn left(&self, peer: Peer);
     /// Queues 1 or more database mutations, returning a channel that receives
@@ -362,7 +368,9 @@ mod v1_impl {
         mutator: impl DbMutator + 'static,
     ) -> (SendStream, RecvStream, Result<(), IoLoopError>) {
         mutator.connected(peer, req.icao, req.qcmp_port).await;
-        mutator.joined(peer, req.icao, req.qcmp_port).await;
+        mutator
+            .joined(peer, req.icao, req.qcmp_port, req.capabilities)
+            .await;
 
         if let Err(error) = send_response(
             &mut send,
@@ -380,7 +388,7 @@ mod v1_impl {
         // future part way through would desynchronise the stream.
         let renewal = tokio::spawn({
             let mutator = mutator.clone();
-            let (icao, qcmp_port) = (req.icao, req.qcmp_port);
+            let (icao, qcmp_port, capabilities) = (req.icao, req.qcmp_port, req.capabilities);
 
             async move {
                 let mut renew = tokio::time::interval_at(
@@ -390,7 +398,7 @@ mod v1_impl {
 
                 loop {
                     renew.tick().await;
-                    mutator.joined(peer, icao, qcmp_port).await;
+                    mutator.joined(peer, icao, qcmp_port, capabilities).await;
                 }
             }
         });
@@ -497,12 +505,13 @@ mod v1_impl {
     ) -> Result<(), IoLoopError> {
         let max_buffer = req.params.max_buffer;
         let max_time = req.params.max_time;
+        let capabilities = req.capabilities;
 
         // A subscriber that told us how to reach it is registered as a node, the
         // same as a mutating peer; one that did not stays invisible.
         let registration = req.qcmp_port.zip(req.icao);
         if let Some((port, icao)) = registration {
-            mutator.joined(peer, icao, port).await;
+            mutator.joined(peer, icao, port, req.capabilities).await;
         }
 
         match subs.subscribe(req.params).await {
@@ -534,7 +543,7 @@ mod v1_impl {
                         tokio::select! {
                             _ = renew.tick(), if registration.is_some() => {
                                 let (port, icao) = registration.expect("guarded above");
-                                mutator.joined(peer, icao, port).await;
+                                mutator.joined(peer, icao, port, capabilities).await;
                             }
                             buf = bs.next() => {
                                 if let Some(buf) = buf {

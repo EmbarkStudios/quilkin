@@ -72,7 +72,8 @@ pub type BodySender = mpsc::Sender<Bytes>;
 pub const SERVER_QUERY: &str = "SELECT endpoint,icao,tokens FROM servers";
 pub const DC_QUERY: &str = "SELECT ip,port,icao FROM dc";
 pub const FILTER_QUERY: &str = "SELECT filter FROM filter";
-pub const NODE_QUERY: &str = "SELECT ip,port,icao,dim,outgoing,incoming,round FROM node";
+pub const NODE_QUERY: &str =
+    "SELECT ip,port,icao,capabilities,dim,outgoing,incoming,round FROM node";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SubParamsv1 {

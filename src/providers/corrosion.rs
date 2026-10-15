@@ -196,6 +196,7 @@ impl super::Providers {
                 let (mutator, pusher) = push::corrosion_mutate(
                     qcmp,
                     icao,
+                    config.dyn_cfg.capabilities(),
                     self.corrosion_endpoints.clone(),
                     health_check.clone(),
                 );

@@ -209,7 +209,7 @@ async fn run_writer(
 ) -> eyre::Result<WriterStats> {
     let client = Client::connect_insecure(addr, metrics).await?;
     let icao: IcaoCode = "LOAD".parse().expect("valid ICAO");
-    let mc = MutationClient::connect(client, 0, icao).await?;
+    let mc = MutationClient::connect(client, 0, icao, Default::default()).await?;
 
     let interval = (params.rate > 0).then(|| Duration::from_nanos(1_000_000_000 / params.rate));
     let mut stats = WriterStats {

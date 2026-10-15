@@ -138,6 +138,14 @@ impl typemap_rev::TypeMapKey for ReferenceHosts {
     type Value = ReferenceHosts;
 }
 
+/// What this node advertises to the rest of gossip.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NodeCapabilities(pub quilkin_types::Capabilities);
+
+impl typemap_rev::TypeMapKey for NodeCapabilities {
+    type Value = NodeCapabilities;
+}
+
 #[derive(Clone, Debug)]
 pub struct DbTx {
     pub tx: tokio::sync::mpsc::UnboundedSender<Vec<corrosion::api::Statement>>,
@@ -170,6 +178,18 @@ impl DynamicConfig {
     #[inline]
     pub fn reference_hosts(&self) -> Option<ReferenceHosts> {
         self.typemap.get::<ReferenceHosts>().cloned()
+    }
+
+    #[inline]
+    pub fn capabilities(&self) -> quilkin_types::Capabilities {
+        self.typemap
+            .get::<NodeCapabilities>()
+            .map_or_else(Default::default, |c| c.0)
+    }
+
+    pub fn set_capabilities(&mut self, capabilities: quilkin_types::Capabilities) {
+        self.typemap
+            .insert::<NodeCapabilities>(NodeCapabilities(capabilities));
     }
 
     pub(crate) fn init_leader_lock(&self) -> LeaderLock {
@@ -454,6 +474,13 @@ impl Config {
         };
         insert_default::<crate::config::LeaderLock>(&mut config.dyn_cfg.typemap);
         insert_default::<crate::config::ReferenceHosts>(&mut config.dyn_cfg.typemap);
+        // Fixed for the life of the process: what this node offers is decided by
+        // how it was started, not by what is running on it at any moment.
+        let capabilities = service.capabilities().with_if(
+            quilkin_types::Capabilities::GAMESERVERS,
+            providers.gameservers(),
+        );
+        config.dyn_cfg.set_capabilities(capabilities);
         providers.init_config(&mut config);
         service.init_config(&mut config);
 

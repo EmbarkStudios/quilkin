@@ -1,6 +1,6 @@
 use crate::codec;
 pub use corro_api_types::{ExecResponse, ExecResult};
-use quilkin_types::{Endpoint, IcaoCode, TokenSet};
+use quilkin_types::{Capabilities, Endpoint, IcaoCode, TokenSet};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -130,6 +130,9 @@ pub mod v1 {
         /// The ICAO of the server
         #[serde(rename = "i")]
         pub icao: IcaoCode,
+        /// What the node offers other nodes. Empty from one predating the field.
+        #[serde(default, rename = "c")]
+        pub capabilities: Capabilities,
     }
 
     /// A request to subscribe to a database query, receiving a stream of mutations
@@ -148,6 +151,9 @@ pub mod v1 {
         /// The subscriber's ICAO code, on the same terms.
         #[serde(default, rename = "ni", skip_serializing_if = "Option::is_none")]
         pub icao: Option<IcaoCode>,
+        /// What the subscriber offers other nodes.
+        #[serde(default, rename = "nc")]
+        pub capabilities: Capabilities,
     }
 
     #[derive(Serialize, Deserialize)]
