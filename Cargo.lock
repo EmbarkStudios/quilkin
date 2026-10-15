@@ -798,6 +798,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "compact_str"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79fcda08c33bb58b97008b2cdada6622500e949e060f5913361763121abd2416"
+dependencies = [
+ "castaway",
+ "cfg-if",
+ "itoa",
+ "static_assertions",
+ "zmij",
+]
+
+[[package]]
 name = "config"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -887,7 +900,7 @@ version = "0.2.0-alpha.0"
 source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
 dependencies = [
  "camino",
- "compact_str",
+ "compact_str 0.7.1",
  "deadpool",
  "hex",
  "rusqlite",
@@ -906,7 +919,7 @@ version = "0.1.0-alpha.1"
 source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
 dependencies = [
  "camino",
- "compact_str",
+ "compact_str 0.7.1",
  "deadpool",
  "hex",
  "rangemap",
@@ -931,7 +944,7 @@ dependencies = [
  "bytes",
  "camino",
  "circular-buffer",
- "compact_str",
+ "compact_str 0.7.1",
  "config",
  "consul-client",
  "corro-api-types",
@@ -4044,7 +4057,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "camino",
- "compact_str",
+ "compact_str 0.10.0",
  "corro-api-types",
  "corro-types",
  "corro-utils",
@@ -4129,7 +4142,7 @@ dependencies = [
 name = "quilkin-types"
 version = "2026.10.0"
 dependencies = [
- "compact_str",
+ "compact_str 0.10.0",
  "data-encoding",
  "schemars",
  "serde",
