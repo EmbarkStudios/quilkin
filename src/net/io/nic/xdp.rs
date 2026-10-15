@@ -669,13 +669,18 @@ fn io_loop(
     // the owner of the actual memory map
     unsafe {
         let mut inner = || {
-            // Wait for packets to be received, note that
-            // [poll](https://www.man7.org/linux/man-pages/man2/poll.2.html) also acts
-            // as a [cancellation point](https://www.man7.org/linux/man-pages/man7/pthreads.7.html),
-            // so shutdown will cause the thread to exit here
-            let Ok(true) = socket.poll_read(POLL_TIMEOUT) else {
-                return;
-            };
+            // Wait until rx has packets we can read, or until timeout. Either way we continue so we
+            // can consume completions from the kernel and replenish the fill ring
+            if let Err(error) = socket.poll_read(POLL_TIMEOUT)
+                && error.kind() != std::io::ErrorKind::Interrupted
+            {
+                crate::metrics::errors_total(
+                    crate::metrics::Direction::Read,
+                    &io_error_to_discriminant(error),
+                    &crate::metrics::EMPTY,
+                )
+                .inc();
+            }
 
             let recvd = rx.recv(&umem, &mut rx_slab);
 
