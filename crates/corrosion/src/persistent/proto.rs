@@ -133,9 +133,22 @@ pub mod v1 {
     }
 
     /// A request to subscribe to a database query, receiving a stream of mutations
+    ///
+    /// The identity fields let the server register the subscriber as a node, as
+    /// it already does for a [`MutateRequest`]. They are flattened in, so the
+    /// encoded form is the parameters plus two optional keys.
     #[derive(Serialize, Deserialize)]
-    #[serde(transparent)]
-    pub struct SubscribeRequest(pub crate::pubsub::SubParamsv1);
+    pub struct SubscribeRequest {
+        #[serde(flatten)]
+        pub params: crate::pubsub::SubParamsv1,
+        /// The QCMP port the subscriber can be pinged on, absent if it serves
+        /// none or predates this field.
+        #[serde(default, rename = "nq", skip_serializing_if = "Option::is_none")]
+        pub qcmp_port: Option<u16>,
+        /// The subscriber's ICAO code, on the same terms.
+        #[serde(default, rename = "ni", skip_serializing_if = "Option::is_none")]
+        pub icao: Option<IcaoCode>,
+    }
 
     #[derive(Serialize, Deserialize)]
     #[serde(tag = "t", content = "r")]
@@ -161,6 +174,13 @@ pub mod v1 {
         pub id: Uuid,
         #[serde(rename = "q")]
         pub query_hash: String,
+        /// The QCMP port this server can be pinged on, mirroring the one a
+        /// client sends in [`MutateRequest`].
+        ///
+        /// `None` from a server predating the field, which a subscriber cannot
+        /// tell apart from one that serves no QCMP.
+        #[serde(rename = "p", default, skip_serializing_if = "Option::is_none")]
+        pub qcmp_port: Option<u16>,
     }
 
     /// A response to a [`Request`]

@@ -116,6 +116,28 @@ impl typemap_rev::TypeMapKey for LeaderLock {
     type Value = LeaderLock;
 }
 
+/// Hosts Phoenix solves its coordinate against.
+///
+/// Learned from the relay this instance subscribes to, which advertises its
+/// QCMP port during the subscribe handshake, so the set is empty until a
+/// subscription succeeds.
+#[derive(Clone, Debug, Default)]
+pub struct ReferenceHosts(Arc<arc_swap::ArcSwap<Vec<std::net::SocketAddr>>>);
+
+impl ReferenceHosts {
+    pub fn store(&self, hosts: Vec<std::net::SocketAddr>) {
+        self.0.store(Arc::new(hosts));
+    }
+
+    pub fn load(&self) -> Arc<Vec<std::net::SocketAddr>> {
+        self.0.load_full()
+    }
+}
+
+impl typemap_rev::TypeMapKey for ReferenceHosts {
+    type Value = ReferenceHosts;
+}
+
 #[derive(Clone, Debug)]
 pub struct DbTx {
     pub tx: tokio::sync::mpsc::UnboundedSender<Vec<corrosion::api::Statement>>,
@@ -143,6 +165,11 @@ impl DynamicConfig {
 
     pub fn datacenters(&self) -> Option<&Watch<DatacenterMap>> {
         self.typemap.get::<DatacenterMap>()
+    }
+
+    #[inline]
+    pub fn reference_hosts(&self) -> Option<ReferenceHosts> {
+        self.typemap.get::<ReferenceHosts>().cloned()
     }
 
     pub(crate) fn init_leader_lock(&self) -> LeaderLock {
@@ -426,6 +453,7 @@ impl Config {
             cancellation_token: None,
         };
         insert_default::<crate::config::LeaderLock>(&mut config.dyn_cfg.typemap);
+        insert_default::<crate::config::ReferenceHosts>(&mut config.dyn_cfg.typemap);
         providers.init_config(&mut config);
         service.init_config(&mut config);
 

@@ -252,6 +252,88 @@ async fn updates_servers() {
     insta::assert_snapshot!("update_both_us", only_row().await);
 }
 
+/// A node is registered when it joins gossip and its row goes when it leaves,
+/// so the table only names nodes something is currently connected to.
+#[tokio::test]
+async fn registers_and_deregisters_nodes() {
+    let sp = prep("registers_and_deregisters_nodes", 1).await;
+
+    let nodes = async || -> Vec<(String, u16)> {
+        let conn = sp.read().await.unwrap();
+        let mut statement = conn.prepare("SELECT ip,port FROM node").unwrap();
+        statement
+            .query_map((), |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+
+    assert!(nodes().await.is_empty(), "nothing has joined yet");
+
+    let mut v = smallvec::SmallVec::<[_; 2]>::new();
+    {
+        let mut node = write::Node(&mut v);
+        node.upsert(PREP_PEER, 7600, IcaoCode::new_testing([b'E'; 4]));
+        exec_all(node.0, &sp).await;
+    }
+
+    assert_eq!(nodes().await, vec![(PREP_PEER.ip().to_string(), 7600)]);
+
+    // Rejoining on a different port updates in place; a node is its address.
+    {
+        let mut node = write::Node(&mut v);
+        node.upsert(PREP_PEER, 7601, IcaoCode::new_testing([b'E'; 4]));
+        exec_all(node.0, &sp).await;
+    }
+
+    assert_eq!(nodes().await, vec![(PREP_PEER.ip().to_string(), 7601)]);
+
+    {
+        let mut node = write::Node(&mut v);
+        node.remove(PREP_PEER);
+        exec_all(node.0, &sp).await;
+    }
+
+    assert!(nodes().await.is_empty(), "the node left");
+}
+
+/// A node that stopped renewing is reaped, which is the backstop for a
+/// departure that was never observed.
+#[tokio::test]
+async fn reaps_nodes_that_stopped_renewing() {
+    let sp = prep("reaps_nodes_that_stopped_renewing", 1).await;
+
+    let count = async || -> usize {
+        let conn = sp.read().await.unwrap();
+        conn.query_row("SELECT COUNT(*) FROM node", (), |row| row.get(0))
+            .unwrap()
+    };
+
+    let mut v = smallvec::SmallVec::<[_; 2]>::new();
+    {
+        let mut node = write::Node(&mut v);
+        node.upsert(PREP_PEER, 7600, IcaoCode::new_testing([b'E'; 4]));
+        exec_all(node.0, &sp).await;
+    }
+
+    // A node that renewed a moment ago survives.
+    v.push(write::Node::<2>::reap_old(std::time::Duration::from_secs(
+        600,
+    )));
+    exec_all(&mut v, &sp).await;
+    assert_eq!(count().await, 1);
+
+    // Age it past the threshold.
+    v.push(corrosion::api::Statement::Simple(
+        "UPDATE node SET joined = unixepoch('now') - 1000".into(),
+    ));
+    v.push(write::Node::<2>::reap_old(std::time::Duration::from_secs(
+        600,
+    )));
+    exec_all(&mut v, &sp).await;
+    assert_eq!(count().await, 0);
+}
+
 /// Tests that datacenters can be updated
 #[tokio::test]
 async fn updates_datacenters() {

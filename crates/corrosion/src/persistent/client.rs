@@ -409,6 +409,9 @@ pub struct SubClientStream {
     pub id: Uuid,
     /// The hash of the query that was subscribed to
     pub query_hash: String,
+    /// The QCMP port the server advertised, if it serves QCMP and is recent
+    /// enough to advertise it.
+    pub qcmp_port: Option<u16>,
     /// The stream of changes that match the subscription query
     ///
     /// Dropping this will terminate the subscription on the remote server,
@@ -418,15 +421,18 @@ pub struct SubClientStream {
 }
 
 impl SubscriptionClient {
+    /// `identity` is this node's QCMP port and ICAO, which the server records so
+    /// other nodes can measure it. `None` leaves this node unregistered.
     pub async fn connect(
         inner: Client,
         params: crate::pubsub::SubParamsv1,
+        identity: Option<(u16, IcaoCode)>,
     ) -> Result<(Self, SubClientStream), ConnectError> {
         let (mut send, mut recv) = inner.conn.open_bi().await?;
 
         let query = params.query.query().to_owned();
 
-        let res = Self::handshake(&mut send, &mut recv, params).await?;
+        let res = Self::handshake(&mut send, &mut recv, params, identity).await?;
 
         let (tx, reqrx) = mpsc::unbounded_channel();
         let (stx, srx) = oneshot::channel();
@@ -436,6 +442,7 @@ impl SubscriptionClient {
         let scs = SubClientStream {
             id: res.id,
             query_hash: res.query_hash,
+            qcmp_port: res.qcmp_port,
             rx: reqrx,
         };
 
@@ -512,9 +519,15 @@ impl SubscriptionClient {
         send: &mut quinn::SendStream,
         recv: &mut quinn::RecvStream,
         params: crate::pubsub::SubParamsv1,
+        identity: Option<(u16, IcaoCode)>,
     ) -> Result<proto::v1::SubscribeResponse, ConnectError> {
         // We need to actually send something for the connection to be fully established
-        let req_buf = proto::v1::Request::Subscribe(proto::v1::SubscribeRequest(params)).write()?;
+        let req_buf = proto::v1::Request::Subscribe(proto::v1::SubscribeRequest {
+            params,
+            qcmp_port: identity.map(|(port, _)| port),
+            icao: identity.map(|(_, icao)| icao),
+        })
+        .write()?;
 
         send.write_chunk(req_buf).await.map_err(StreamError::from)?;
 
