@@ -581,6 +581,11 @@ impl Config {
                         break 'append;
                     };
 
+                    // Avoid handing out an empty chain if the filter chain is pending
+                    if filters.load().is_pending() {
+                        break 'append;
+                    }
+
                     let resource = xds::Resource::FilterChain(
                         crate::net::cluster::proto::FilterChain::try_from(filters.load().as_ref())?,
                     );

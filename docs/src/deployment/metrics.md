@@ -45,6 +45,7 @@ The proxy exposes the following general metrics:
         * `invalid_packet`: the packet couldn't be parsed as a datagram Quilkin handles. The specific parse failure is logged rather than labelled.
         * `session_limit`: the session limit was reached, so no session could be established.
         * `internal`: Quilkin lost track of state it needed to forward the packet.
+        * `no_filter_chain`: the proxy hasn't received its filter chain from the management server yet.
     * The `filter` label is the filter responsible, and is empty when the drop
       wasn't a filter's decision.
     * The `destination` label is described under

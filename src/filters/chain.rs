@@ -47,6 +47,7 @@ pub struct FilterChain {
     filters: Vec<(String, FilterInstance)>,
     filter_read_duration_seconds: Vec<Histogram>,
     filter_write_duration_seconds: Vec<Histogram>,
+    pending: bool,
 }
 
 impl FilterChain {
@@ -88,7 +89,22 @@ impl FilterChain {
                 })
                 .collect::<Result<_, prometheus::Error>>()?,
             filters,
+            pending: false,
         })
+    }
+
+    /// A placeholder for a chain that will arrive from a management server,
+    /// which rejects every read until it is replaced.
+    pub fn pending() -> Self {
+        Self {
+            pending: true,
+            ..Self::default()
+        }
+    }
+
+    #[inline]
+    pub fn is_pending(&self) -> bool {
+        self.pending
     }
 
     pub fn testing<const N: usize>(filters: [FilterInstance; N]) -> Self {
@@ -165,6 +181,10 @@ impl std::fmt::Debug for FilterChain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut filters = f.debug_struct("Filters");
 
+        if self.pending {
+            filters.field("pending", &true);
+        }
+
         for (id, instance) in &self.filters {
             filters.field(id, instance.config());
         }
@@ -175,7 +195,7 @@ impl std::fmt::Debug for FilterChain {
 
 impl PartialEq for FilterChain {
     fn eq(&self, rhs: &Self) -> bool {
-        if self.filters.len() != rhs.filters.len() {
+        if self.pending != rhs.pending || self.filters.len() != rhs.filters.len() {
             return false;
         }
 
@@ -274,6 +294,10 @@ impl schemars::JsonSchema for FilterChain {
 
 impl Filter for FilterChain {
     fn read<P: PacketMut>(&self, ctx: &mut ReadContext<'_, P>) -> Result<(), FilterError> {
+        if self.pending {
+            return Err(FilterError::NoFilterChain);
+        }
+
         for ((id, instance), histogram) in self
             .filters
             .iter()
@@ -489,6 +513,49 @@ mod tests {
             "receive:receive",
             context.metadata[&"upstream".into()].as_string().unwrap()
         );
+    }
+
+    #[test]
+    fn a_pending_chain_drops_reads() {
+        let endpoints_fixture = endpoints();
+        let mut dest = Vec::new();
+        let mut context = ReadContext::new(
+            &endpoints_fixture,
+            "127.0.0.1:70".parse().unwrap(),
+            alloc_buffer(b"hello"),
+            &mut dest,
+        );
+
+        assert_eq!(
+            FilterChain::pending().read(&mut context),
+            Err(FilterError::NoFilterChain)
+        );
+        assert!(dest.is_empty());
+    }
+
+    #[test]
+    fn a_received_empty_chain_replaces_a_pending_one() {
+        let config = crate::config::filter::FilterChainConfig::new(FilterChain::pending());
+        let mut changed = config.subscribe();
+
+        // An empty chain is a valid configuration, and must not compare equal
+        // to the placeholder or the store would be skipped
+        config.store(FilterChain::default());
+
+        assert!(!config.load().is_pending());
+        assert!(changed.try_recv().is_ok());
+
+        let endpoints_fixture = endpoints();
+        let mut dest = Vec::new();
+        let mut context = ReadContext::new(
+            &endpoints_fixture,
+            "127.0.0.1:70".parse().unwrap(),
+            alloc_buffer(b"hello"),
+            &mut dest,
+        );
+
+        config.load().read(&mut context).unwrap();
+        assert_eq!(dest.len(), endpoints_fixture.endpoints().len());
     }
 
     #[test]

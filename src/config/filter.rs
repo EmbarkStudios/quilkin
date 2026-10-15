@@ -25,6 +25,13 @@ impl FilterChainConfig {
             if (*cur).as_ref() == &new_chain {
                 return;
             }
+
+            if cur.is_pending() {
+                tracing::info!(
+                    filters = new_chain.len(),
+                    "received filter chain, forwarding client packets"
+                );
+            }
         }
 
         self.chain.store(Arc::new(new_chain));

@@ -392,6 +392,8 @@ pub enum DropReason {
     SessionLimit,
     /// Quilkin lost track of state it needs to forward the packet.
     Internal,
+    /// The filter chain hasn't been received from the management server yet.
+    NoFilterChain,
 }
 
 impl DropReason {
@@ -406,6 +408,7 @@ impl DropReason {
             Self::InvalidPacket => "invalid_packet",
             Self::SessionLimit => "session_limit",
             Self::Internal => "internal",
+            Self::NoFilterChain => "no_filter_chain",
         }
     }
 }
