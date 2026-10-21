@@ -129,25 +129,38 @@ impl<'s, const N: usize> Server<'s, N> {
     }
 
     /// Create a statement to insert a new server
+    ///
+    /// `None` for `icao` keeps the stored code, taking the column default only
+    /// for a row that is new. The server is indexed against the peer's
+    /// datacenter either way, so [`Datacenter::remove`] can still find it
     #[inline]
-    pub fn upsert(&mut self, endpoint: &Endpoint, icao: IcaoCode, tokens: &TokenSet) {
+    pub fn upsert(
+        &mut self,
+        endpoint: &Endpoint,
+        icao: impl Into<Option<IcaoCode>>,
+        tokens: &TokenSet,
+    ) {
+        let icao = icao.into();
         let peer_ip = self.peer.ip().to_string();
         let server = to_compact_str(endpoint);
+
+        let null_if_unknown = || icao.map_or(SqliteParam::Null, |icao| icao.to_sql());
+        let or_default = icao.unwrap_or_default().to_sql();
 
         self.statements.push(Statement::WithParams(
             "INSERT INTO servers (endpoint,icao,tokens,contributors,cont_update) VALUES (?,?,?,jsonb(json_object(?,json_object())),unixepoch('now'))
             ON CONFLICT(endpoint) DO UPDATE SET
                 contributors = jsonb_patch(contributors,json_object(?,json_object())),
                 cont_update = unixepoch('now'),
-                icao = ?,
+                icao = coalesce(?,icao),
                 tokens = ?".into(),
             vec![
                 endpoint.to_sql(),
-                icao.to_sql(),
+                or_default.clone(),
                 tokens.to_sql(),
                 peer_ip.clone().into(),
                 peer_ip.clone().into(),
-                icao.to_sql(),
+                null_if_unknown(),
                 tokens.to_sql(),
             ],
         ));
@@ -156,13 +169,14 @@ impl<'s, const N: usize> Server<'s, N> {
             "INSERT INTO dc (ip,port,icao,servers) VALUES (?,?,?,jsonb(json_object(?,json_object())))
             ON CONFLICT(ip) DO UPDATE SET
                 servers = jsonb_patch(servers,json_object(?,json_object()))
-            WHERE excluded.icao = dc.icao".into(),
+            WHERE ? IS NULL OR excluded.icao = dc.icao".into(),
             vec![
                 peer_ip.into(),
                 self.peer.port().into(),
-                icao.to_sql(),
+                or_default,
                 SqliteParam::Text(server.clone()),
                 SqliteParam::Text(server),
+                null_if_unknown(),
             ],
         ));
     }

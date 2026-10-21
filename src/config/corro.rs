@@ -83,14 +83,8 @@ impl<'m> Bridge<'m> {
         }
 
         // We may have inserted clusters already from this DC, if so, insert all of them
-        let Some(locality) = wsrv.locality_for_ip(ip) else {
-            return;
-        };
-
-        let Some(endpoints) = wsrv.get(&Some(locality)) else {
-            return;
-        };
-
+        if let Some(locality) = wsrv.locality_for_ip(ip)
+            && let Some(endpoints) = wsrv.get(&Some(locality))
         {
             let mut s = corrosion::db::write::Server::for_peer(peer, &mut sv);
 
@@ -122,13 +116,28 @@ impl<'m> Bridge<'m> {
 
         let peer = corrosion::ip_to_peer(ip);
 
-        let mut sv = corrosion::SmallVec::<[_; 1]>::new();
+        let mut sv = corrosion::SmallVec::<[_; 2]>::new();
         {
             let mut d = corrosion::db::write::Datacenter(&mut sv);
             d.remove(peer, None);
         }
 
         bri.statements.extend(sv);
+    }
+
+    /// Drops an agent whose stream closed, in memory and in the database
+    ///
+    /// The servers it fed stay routable until the reaper collects them, giving
+    /// a restarting agent time to renew them
+    pub fn remove_agent(&mut self, ip: IpAddr) {
+        // The janitor may have dropped the entry already; the row outlives it
+        self.remove_dc(ip);
+
+        let Some((_wdc, wsrv)) = &self.maps else {
+            return;
+        };
+
+        wsrv.remove_contributor(Some(ip));
     }
 
     pub fn remove_locality(
@@ -181,28 +190,24 @@ impl<'m> Bridge<'m> {
             return;
         }
 
-        let Some(peer) = ip.map(corrosion::ip_to_peer) else {
+        let Some((bri, peer)) = self.b.as_mut().zip(ip.map(corrosion::ip_to_peer)) else {
             return;
         };
 
-        let Some((bri, icao)) = self.b.as_mut().zip(icao) else {
-            return;
-        };
+        if icao.is_none() {
+            tracing::debug!(%peer, "applying endpoints for an unknown datacenter");
+        }
 
         let mut statements = corrosion::SmallVec::<[_; 100]>::new();
         {
             let mut stx = corrosion::db::write::Server::for_peer(peer, &mut statements);
 
-            if !rm.is_empty() {
-                for rm_srv in rm {
-                    stx.remove_deferred(&rm_srv);
-                }
+            for rm_srv in rm {
+                stx.remove_deferred(&rm_srv);
             }
 
-            if !up.is_empty() {
-                for (ep, ts) in up {
-                    stx.upsert(&ep, icao, &ts);
-                }
+            for (ep, ts) in up {
+                stx.upsert(&ep, icao, &ts);
             }
         }
 

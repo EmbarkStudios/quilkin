@@ -453,3 +453,56 @@ async fn updates_datacenters() {
 
     insta::assert_snapshot!("update_both_ud", only_row().await);
 }
+
+/// An unknown code must neither replace the one already stored, nor keep a
+/// server out of the index that lets its peer stop contributing it
+#[tokio::test]
+async fn servers_survive_an_unknown_icao() {
+    let sp = prep("servers_survive_an_unknown_icao", 1).await;
+
+    let known = make_row(0);
+    let newcomer = Endpoint {
+        address: AddressKind::Ip(Ipv6Addr::from_bits(0x5151).into()),
+        port: 5151,
+    };
+
+    let mut v = smallvec::SmallVec::<[_; 4]>::new();
+    {
+        let mut s = write::Server::for_peer(PREP_PEER, &mut v);
+        s.upsert(&known.endpoint, None, &known.tokens);
+        s.upsert(&newcomer, None, &[5151u64.to_ne_bytes()].into());
+        exec_all(s.statements, &sp).await;
+    }
+
+    assert_eq!(
+        known.icao,
+        read_server_row(1, &sp).await.icao,
+        "an unknown code replaced the one already stored"
+    );
+
+    // An hour back, so both are past the reap threshold once uncontributed
+    {
+        let mut dc = write::Datacenter(&mut v);
+        dc.remove(
+            PREP_PEER,
+            Some(time::UtcDateTime::now() - std::time::Duration::from_secs(60 * 60)),
+        );
+        exec_all(dc.0, &sp).await;
+    }
+    {
+        v.push(write::Server::<4>::reap_old(
+            std::time::Duration::from_secs(60 * 30),
+        ));
+        exec_all(&mut v, &sp).await;
+    }
+
+    let remaining: u32 = {
+        let r = sp.read().await.unwrap();
+        r.query_row("SELECT COUNT(*) FROM servers", [], |r| r.get(0))
+            .unwrap()
+    };
+    assert_eq!(
+        0, remaining,
+        "a server added under an unknown code was left uncollectable"
+    );
+}
