@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["tokio"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_PACKET_LEN"],"mod":["tokio"]};
