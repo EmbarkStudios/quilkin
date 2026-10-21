@@ -118,6 +118,8 @@ pub struct Listener {
     pub config: Arc<Config>,
     pub sessions: Arc<crate::net::sessions::SessionPool>,
     pub backend: UdpBackend,
+    /// Forward datagrams with no payload rather than dropping them
+    pub allow_empty_packets: bool,
 }
 
 impl Listener {

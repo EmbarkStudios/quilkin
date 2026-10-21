@@ -139,6 +139,7 @@ trace_test!(uring_receiver, {
             4,
         ),
         backend,
+        allow_empty_packets: false,
     }
     .spawn_io_loop(
         pending_sends,
@@ -212,7 +213,7 @@ trace_test!(
         const WORKER_COUNT: usize = 3;
 
         let (socket, addr) = sb.socket();
-        net::packet::spawn_receivers(config, socket, pending_sends, &sessions, backend, 64)
+        net::packet::spawn_receivers(config, socket, pending_sends, &sessions, backend, 64, false)
             .unwrap();
 
         let socket = std::sync::Arc::new(sb.client());

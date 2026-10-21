@@ -137,6 +137,8 @@ use crate::config;
 pub struct ConfigState {
     pub filters: config::filter::CachedFilterChain,
     pub clusters: config::Watch<crate::net::ClusterMap>,
+    /// Forward client datagrams with no payload rather than dropping them
+    pub allow_empty_packets: bool,
 }
 
 /// Matches the default session TTL
@@ -689,6 +691,12 @@ pub fn process_packets(
         } else {
             metrics::WRITE
         };
+
+        if is_client && headers.data_length() == 0 && !config_state.allow_empty_packets {
+            crate::net::packet::empty_packet_dropped();
+            umem.free_packet(buffer);
+            continue;
+        }
 
         let packet = PacketWrapper::new(buffer, headers);
 

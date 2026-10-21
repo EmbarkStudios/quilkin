@@ -140,6 +140,7 @@ fn spawn_poll_listener_impl(
         port,
         config,
         sessions,
+        allow_empty_packets,
         ..
     } = listener;
 
@@ -239,7 +240,7 @@ fn spawn_poll_listener_impl(
                             let mut buffer = buffer;
                             buffer.truncate(size);
                             let filters = fc.load();
-                            let packet = crate::net::packet::DownstreamPacket { contents: buffer, source, filters };
+                            let packet = crate::net::packet::DownstreamPacket { contents: buffer, source, filters, allow_empty: allow_empty_packets };
 
                             if let Some(last_received_at) = last_received_at {
                                 crate::metrics::set_packet_jitter(

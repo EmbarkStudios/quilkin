@@ -388,6 +388,8 @@ pub enum DropReason {
     QueueFull,
     /// The packet couldn't be parsed as a datagram we handle.
     InvalidPacket,
+    /// The packet carried no payload, and empty packets aren't allowed.
+    EmptyPacket,
     /// The session limit was reached, so no session could be established.
     SessionLimit,
     /// Quilkin lost track of state it needs to forward the packet.
@@ -406,6 +408,7 @@ impl DropReason {
             Self::SocketError => "socket_error",
             Self::QueueFull => "queue_full",
             Self::InvalidPacket => "invalid_packet",
+            Self::EmptyPacket => "empty_packet",
             Self::SessionLimit => "session_limit",
             Self::Internal => "internal",
             Self::NoFilterChain => "no_filter_chain",

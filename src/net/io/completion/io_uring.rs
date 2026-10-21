@@ -58,6 +58,7 @@ pub fn spawn_listener(
         port,
         config,
         sessions,
+        allow_empty_packets,
         ..
     } = listener;
 
@@ -80,6 +81,7 @@ pub fn spawn_listener(
                 sessions,
                 worker_id,
                 destinations: Vec::with_capacity(1),
+                allow_empty_packets,
             },
             (pqs, event_fd),
             filter_chain,
@@ -228,6 +230,7 @@ pub enum PacketProcessorCtx {
         sessions: Arc<SessionPool>,
         worker_id: usize,
         destinations: Vec<crate::net::Destination>,
+        allow_empty_packets: bool,
     },
     SessionPool {
         pool: Arc<SessionPool>,
@@ -247,6 +250,7 @@ fn process_packet(
             sessions,
             worker_id,
             destinations,
+            allow_empty_packets,
         } => {
             let received_at = UtcTimestamp::now();
             if let Some(last_received_at) = last_received_at {
@@ -262,6 +266,7 @@ fn process_packet(
                 contents: packet.buffer,
                 source: packet.source,
                 filters,
+                allow_empty: *allow_empty_packets,
             };
 
             ds_packet.process(*worker_id, config, sessions, destinations);

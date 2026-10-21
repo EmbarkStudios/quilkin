@@ -8,6 +8,12 @@ use crate::{
     signal::ShutdownHandler,
 };
 
+/// The long name of the flag that allows empty datagrams, without the dashes
+///
+/// Shared so the log that points operators at it can't name a flag that was
+/// since renamed.
+pub const ALLOW_EMPTY_PACKETS_FLAG: &str = "service.udp.allow-empty-packets";
+
 #[derive(Debug, clap::Parser)]
 #[command(next_help_heading = "Service Options")]
 pub struct Service {
@@ -86,6 +92,14 @@ pub struct Service {
         default_value_t = 5_000
     )]
     pub udp_session_limit: usize,
+    /// Forward datagrams that carry no payload. They are dropped by default,
+    /// since each one a client sends costs a session and an upstream send.
+    #[clap(
+        long = ALLOW_EMPTY_PACKETS_FLAG,
+        env = "QUILKIN_SERVICE_UDP_ALLOW_EMPTY_PACKETS",
+        default_value_t = false
+    )]
+    pub udp_allow_empty_packets: bool,
     /// The number of entries allocated in a ring buffer for receives
     #[clap(
         long = "service.udp.ringbuffer.len",
@@ -353,6 +367,7 @@ impl Default for Service {
             udp_workers: std::num::NonZeroUsize::new(num_cpus::get()).unwrap(),
             session_metrics: <_>::default(),
             udp_session_limit: 10_000,
+            udp_allow_empty_packets: false,
             udp_ring_buffer: 2048,
             session_pool_ring_buffer: 256,
             udp_backend: crate::net::io::UdpBackend::Auto,
@@ -988,6 +1003,7 @@ impl Service {
             &sessions,
             backend,
             self.udp_ring_buffer,
+            self.udp_allow_empty_packets,
         )?;
 
         let finished = shutdown.push("udp");
@@ -1048,7 +1064,11 @@ impl Service {
             .context("XDP requires a cluster map")?
             .clone();
 
-        let config = crate::net::io::nic::xdp::process::ConfigState { filters, clusters };
+        let config = crate::net::io::nic::xdp::process::ConfigState {
+            filters,
+            clusters,
+            allow_empty_packets: self.udp_allow_empty_packets,
+        };
 
         let udp_port = if self.udp_enabled { self.udp_port } else { 0 };
         let qcmp_port = if self.qcmp_enabled { self.qcmp_port } else { 0 };
