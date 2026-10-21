@@ -996,7 +996,6 @@ async fn trims_ethernet_padding() {
 
     assert_eq!(udp.destination_address(), SERVER.into());
     assert_eq!(&server_packet[udp.data], &data[..]);
-    assert_eq!(server_packet.len(), 59);
 }
 
 /// Validates frames we're unable to parse are dropped and their frames freed

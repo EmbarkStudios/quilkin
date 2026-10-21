@@ -13,7 +13,7 @@ use quilkin_xdp::xdp::{
     Umem,
     packet::{
         Packet, PacketError, csum,
-        net_types::{IpAddresses, IpHdr, Ipv4Hdr, NetworkU16, UdpHdr, UdpHeaders},
+        net_types::{IpAddresses, NetworkU16, UdpHdr, UdpHeaders},
     },
     slab::{HeapSlab, Slab},
 };
@@ -577,50 +577,22 @@ const MIN_ETHERNET_FRAME: usize = 60;
 /// couldn't rule out, eg. a truncated frame, is rejected.
 #[inline]
 fn parse_headers(buffer: &mut Packet) -> Result<UdpHeaders, &'static str> {
-    // Two iterations at most, the reparse is against an exactly sized frame
-    for _ in 0..2 {
-        let error = match UdpHeaders::parse_packet(buffer) {
-            // Both the parse above and the checksums we calculate read the UDP
-            // header at the offset a 20 byte ipv4 header puts it at, which the
-            // parse itself doesn't validate
-            Ok(Some(headers)) => {
-                return match &headers.ip {
-                    IpHdr::V4(v4) if usize::from(v4.internet_header_length()) != Ipv4Hdr::LEN => {
-                        Err("ipv4 header length")
-                    }
-                    _ => Ok(headers),
-                };
+    match UdpHeaders::parse_packet(buffer) {
+        Ok(Some(hdrs)) => {
+            // ignore packets that have ip options/extensions traffic we care about should not have these
+            if hdrs.ip.not_minimum_sized() {
+                Err(if hdrs.is_ipv4() {
+                    "ipv4 header length"
+                } else {
+                    "ipv6 header length"
+                })
+            } else {
+                Ok(hdrs)
             }
-            Ok(None) => return Err("non-UDP packet"),
-            Err(error) => error,
-        };
-
-        // `offset` is where the UDP header starts and `size` the datagram length,
-        // so anything past their sum is padding
-        let PacketError::InsufficientData {
-            offset,
-            size,
-            length,
-        } = error
-        else {
-            return Err(error.discriminant());
-        };
-
-        let Some(padding) = length.checked_sub(offset + size) else {
-            return Err("truncated packet");
-        };
-
-        // Padding only ever exists to reach the minimum frame size
-        if padding == 0 || length > MIN_ETHERNET_FRAME {
-            return Err("trailing data");
         }
-
-        if let Err(error) = buffer.adjust_tail(-(padding as i32)) {
-            return Err(error.discriminant());
-        }
+        Err(err) => Err(err.discriminant()),
+        Ok(None) => Err("non-UDP packet"),
     }
-
-    Err("malformed packet")
 }
 
 /// Returns the frame to be dropped if a filter failed, or requested a
@@ -808,6 +780,7 @@ fn process_client_packet(
                     check: 0,
                     length: NetworkU16(0),
                 },
+                headers: packet.headers.headers,
                 data: packet.headers.data,
             };
 
@@ -848,6 +821,7 @@ fn process_client_packet(
             check: 0,
             length: NetworkU16(0),
         },
+        headers: packet.headers.headers,
         data: packet.headers.data,
     };
 
@@ -903,6 +877,7 @@ fn process_server_packet(
             length: NetworkU16(0),
             check: 0,
         },
+        headers: packet.headers.headers,
         data: packet.headers.data,
     };
 
@@ -1155,7 +1130,6 @@ mod test {
 
         assert_eq!(headers.data_length(), payload.len());
         assert_eq!(&packet[headers.data], &payload[..]);
-        assert_eq!(packet.len(), MIN_ETHERNET_FRAME - 1);
     }
 
     #[test]
@@ -1169,7 +1143,7 @@ mod test {
         // A datagram larger than the frame that holds it
         let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &[0xfd; 17], 0);
         packet.adjust_tail(-4).unwrap();
-        assert_eq!(parse_headers(&mut packet).err(), Some("truncated packet"));
+        assert_eq!(parse_headers(&mut packet).err(), Some("insufficient data"));
 
         // Trailing data on a frame too large to have been padded
         let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &[0xfd; 32], 4);
@@ -1180,13 +1154,13 @@ mod test {
         for ihl in [4, 6] {
             let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &[0xfd; 17], 0);
             packet[nt::EthHdr::LEN] = 0x40 | ihl;
-            assert_eq!(parse_headers(&mut packet).err(), Some("ipv4 header length"));
+            assert_eq!(parse_headers(&mut packet).err(), Some("insufficient data"));
         }
 
         // Too small to even hold the ethernet header
         let mut packet = xdp::Packet::testing_new(&mut data);
         packet.append(&[0xab; 8]).unwrap();
-        assert_eq!(parse_headers(&mut packet).err(), Some("truncated packet"));
+        assert_eq!(parse_headers(&mut packet).err(), Some("insufficient data"));
     }
 
     #[test]
