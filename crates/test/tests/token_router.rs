@@ -44,9 +44,10 @@ async fn multiple_clients() {
         let expected = i.to_ne_bytes();
         payload[..4].copy_from_slice(&expected);
 
-        let packet = simple_loop
-            .echo(std::net::Ipv4Addr::from_bits(i).into(), 8990, &payload)
-            .unwrap();
+        // Distinct per iteration, and not the 0.0.0.0 a bare counter starts at
+        let client = std::net::Ipv4Addr::new(5, 5, (i >> 8) as u8, i as u8);
+
+        let packet = simple_loop.echo(client.into(), 8990, &payload).unwrap();
         assert_eq!(packet.payload(), &expected);
     }
 }

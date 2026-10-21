@@ -33,6 +33,9 @@ struct Config {
 fn exec(test: &'static str, config: Config) {
     use filters::firewall as fw;
 
+    // read.ip is both the rule CIDR and the client source, so it can't be an
+    // address the proxy refuses
+
     let (proc_state, cfg_state) = xdp_util::default_xdp_state(xdp_util::make_config(
         qt::filter_chain!([
             Firewall => fw::Config {
@@ -104,7 +107,7 @@ async fn ipv4_firewall_allow() {
         Config {
             read: Rule {
                 allow: true,
-                ip: "127.0.0.1".parse().unwrap(),
+                ip: "5.5.5.1".parse().unwrap(),
                 prefix: 32,
                 port: 99,
             },
@@ -125,7 +128,7 @@ async fn ipv6_firewall_allow() {
         Config {
             read: Rule {
                 allow: true,
-                ip: "::1".parse().unwrap(),
+                ip: "5::1".parse().unwrap(),
                 prefix: 128,
                 port: 2000,
             },
@@ -146,7 +149,7 @@ async fn ipv4_firewall_read_deny() {
         Config {
             read: Rule {
                 allow: false,
-                ip: "127.0.0.1".parse().unwrap(),
+                ip: "5.5.5.1".parse().unwrap(),
                 prefix: 32,
                 port: 2000,
             },
@@ -167,7 +170,7 @@ async fn ipv6_firewall_read_deny() {
         Config {
             read: Rule {
                 allow: false,
-                ip: "::1".parse().unwrap(),
+                ip: "5::1".parse().unwrap(),
                 prefix: 128,
                 port: 2000,
             },
@@ -188,7 +191,7 @@ async fn ipv4_firewall_write_deny() {
         Config {
             read: Rule {
                 allow: true,
-                ip: "::1".parse().unwrap(),
+                ip: "5::1".parse().unwrap(),
                 prefix: 32,
                 port: 2000,
             },
@@ -209,7 +212,7 @@ async fn ipv6_firewall_write_deny() {
         Config {
             read: Rule {
                 allow: true,
-                ip: "::1".parse().unwrap(),
+                ip: "5::1".parse().unwrap(),
                 prefix: 32,
                 port: 2000,
             },

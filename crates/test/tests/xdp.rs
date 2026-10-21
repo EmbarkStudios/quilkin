@@ -15,7 +15,7 @@ use quilkin::{
     time::UtcTimestamp,
 };
 use std::{
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     sync::Arc,
 };
 
@@ -593,8 +593,11 @@ async fn many_sessions() {
     for i in 1..10000u32 {
         let mut client_packet = unsafe { umem.alloc().unwrap() };
 
+        // Distinct per client, clear of the refused ranges a bare counter hits
+        let client_ip = [5, 5, (i >> 8) as u8, i as u8];
+
         etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
-            .ipv4(i.to_ne_bytes(), PROXY.ip().octets(), 64)
+            .ipv4(client_ip, PROXY.ip().octets(), 64)
             .udp(i as u16, PROXY.port())
             .write(&mut client_packet, &data)
             .unwrap();
@@ -634,7 +637,7 @@ async fn many_sessions() {
             udp.ip,
             nt::IpAddresses::V4 {
                 source: *PROXY.ip(),
-                destination: Ipv4Addr::from_bits(i.to_be())
+                destination: Ipv4Addr::from(client_ip)
             }
         );
 
@@ -1233,5 +1236,92 @@ async fn drops_empty_client_packets() {
 
         // The umem has a single frame, so this only succeeds if it came back
         unsafe { umem.alloc().expect("the frame was not freed") };
+    }
+}
+
+/// Validates client packets with a refused source are dropped and their frames freed
+#[tokio::test]
+async fn drops_disallowed_sources() {
+    const SERVER: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 1111);
+    const PROXY: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(2, 2, 2, 2), 7777);
+    const PROXY6: Ipv6Addr = Ipv6Addr::new(2, 2, 2, 2, 2, 2, 2, 2);
+
+    let mut cfg_state = make_config(
+        filters::FilterChain::default(),
+        endpoints(&[(SERVER.into(), &[])]),
+    );
+
+    let mut state = process::State {
+        external_port: PROXY.port().into(),
+        qcmp_port: 0.into(),
+        destinations: Vec::with_capacity(1),
+        addr_to_asn: Default::default(),
+        sessions: Arc::new(Default::default()),
+        local_ipv4: *PROXY.ip(),
+        local_ipv6: PROXY6,
+        last_receive: UtcTimestamp::now(),
+    };
+
+    let mut umem = xdp::Umem::map(
+        xdp::umem::UmemCfgBuilder {
+            frame_size: xdp::umem::FrameSize::TwoK,
+            head_room: 0,
+            frame_count: 1,
+            ..Default::default()
+        }
+        .build()
+        .unwrap(),
+    )
+    .unwrap();
+
+    for (source, forwarded) in [
+        (IpAddr::V4(Ipv4Addr::LOCALHOST), false),
+        (IpAddr::V4(Ipv4Addr::BROADCAST), false),
+        (IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)), false),
+        (IpAddr::V4(Ipv4Addr::UNSPECIFIED), false),
+        (IpAddr::V6(Ipv6Addr::LOCALHOST), false),
+        (
+            IpAddr::V6(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 1)),
+            false,
+        ),
+        // An ipv6 frame can carry a refused ipv4 source in mapped form
+        (IpAddr::V6(Ipv4Addr::LOCALHOST.to_ipv6_mapped()), false),
+        // Ordinary clients still get through
+        (IpAddr::V4(Ipv4Addr::new(5, 5, 5, 5)), true),
+        (IpAddr::V6(Ipv6Addr::new(5, 5, 5, 5, 5, 5, 5, 5)), true),
+    ] {
+        let mut client_packet = unsafe { umem.alloc().expect("the previous frame was not freed") };
+
+        let builder = etherparse::PacketBuilder::ethernet2([3; 6], [4; 6]);
+        match source {
+            IpAddr::V4(v4) => builder
+                .ipv4(v4.octets(), PROXY.ip().octets(), 64)
+                .udp(8888, PROXY.port())
+                .write(&mut client_packet, b"hello")
+                .unwrap(),
+            IpAddr::V6(v6) => builder
+                .ipv6(v6.octets(), PROXY6.octets(), 64)
+                .udp(8888, PROXY.port())
+                .write(&mut client_packet, b"hello")
+                .unwrap(),
+        }
+
+        let (mut rx_slab, mut tx_slab) = little_slabs();
+        rx_slab.push_front(client_packet);
+        process::process_packets(
+            &mut rx_slab,
+            &mut umem,
+            &mut tx_slab,
+            &mut cfg_state,
+            &mut state,
+        );
+
+        match tx_slab.pop_back() {
+            Some(server_packet) => {
+                assert!(forwarded, "{source} was forwarded");
+                umem.free_packet(server_packet);
+            }
+            None => assert!(!forwarded, "{source} was dropped"),
+        }
     }
 }

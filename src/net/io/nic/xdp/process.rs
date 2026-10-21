@@ -754,6 +754,12 @@ fn process_client_packet(
     let mut source_addr = packet.headers.source_address();
     source_addr.set_ip(source_addr.ip().to_canonical());
 
+    // Ungated, unlike the socket backends: a redirected frame skips the IP
+    // stack, so nothing has rejected these sources before this point
+    if let Some(ip) = crate::net::packet::disallowed_source_ip(source_addr.ip()) {
+        return Err((PipelineError::DisallowedSourceIP(ip), packet.buffer));
+    }
+
     let mut ctx =
         filters::ReadContext::new(cm, source_addr.into(), packet, &mut state.destinations);
 
