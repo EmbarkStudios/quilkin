@@ -187,7 +187,7 @@ fn layer2_caching() {
                 .expect("failed to lookup NIC")
                 .expect("failed to find expected nic");
 
-            // Note we can't query the queues counts for the virtual interface as the ioctl isn't supported for at least
+            // Note we can't query the queue counts for the virtual interface as the ioctl isn't supported for at least
             // macvlan, eg. even ethtool can't:
             // $ ip netns exec proxy ethtool -l proxyvlan
             // $ netlink error: Operation not supported
@@ -278,9 +278,7 @@ fn layer2_caching() {
             // the owner of the actual memory map
             unsafe {
                 while !srx.load(std::sync::atomic::Ordering::Relaxed) {
-                    let Ok(true) = socket.poll_read(POLL_TIMEOUT) else {
-                        continue;
-                    };
+                    let _res = socket.poll_read(POLL_TIMEOUT);
 
                     let recvd = rx.recv(&umem, &mut rx_slab);
 
@@ -293,6 +291,8 @@ fn layer2_caching() {
                         let mut udp = nt::UdpHeaders::parse_packet(&mut packet)
                             .expect("failed to parse packet")
                             .expect("expected UDP packet");
+
+                        tracing::info!("{} -> {}", udp.source_address(), udp.destination_address());
 
                         let dest_port = udp.udp.destination.host();
 
