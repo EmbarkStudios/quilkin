@@ -29,6 +29,13 @@ use std::{net::SocketAddr, sync::Arc};
 
 pub use self::queue::{PacketQueue, PacketQueueReceiver, PacketQueueSender, queue};
 
+/// The size of a single receive buffer, for a presumed MTU of 1500 rounded up
+/// to the next power of 2, which the io-uring buffer ring requires
+///
+/// A backend accepts this minus whatever metadata it keeps in the same buffer,
+/// see its `MAX_PACKET_LEN`. Larger datagrams are dropped.
+pub const RECV_BUFFER_LEN: usize = 2048;
+
 /// Representation of an immutable set of bytes pulled from the network, this trait
 /// provides an abstraction over however the packet was received (epoll, io-uring, xdp)
 ///

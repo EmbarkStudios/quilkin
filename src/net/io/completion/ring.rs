@@ -192,6 +192,17 @@ pub struct RingBuffer<'ring> {
 
 const RECV_OUT: usize = std::mem::size_of::<io_uring_recvmsg_out>();
 
+/// The largest datagram payload the completion backend accepts
+///
+/// A buffer also holds the [`io_uring_recvmsg_out`] the kernel prepends and the
+/// source address, which reserves a `sockaddr_in6` for either family since the
+/// socket is dual stack.
+pub const MAX_PACKET_LEN: usize =
+    crate::net::packet::RECV_BUFFER_LEN - RECV_OUT - std::mem::size_of::<libc::sockaddr_in6>();
+
+// A buffer that can't hold an MTU sized datagram would drop ordinary traffic
+const _: () = assert!(MAX_PACKET_LEN >= 1500);
+
 impl RingBuffer<'_> {
     #[inline]
     pub fn extract(&mut self, len: u32, hdr: &libc::msghdr) -> eyre::Result<net::SocketAddr> {
@@ -207,6 +218,13 @@ impl RingBuffer<'_> {
                 .as_ptr()
                 .cast::<io_uring_recvmsg_out>()
                 .read_unaligned();
+
+            // The kernel copies what fits and flags the truncation here, the
+            // payload length it reports is the copied one
+            eyre::ensure!(
+                out.flags & libc::MSG_TRUNC as u32 == 0,
+                "datagram larger than the {MAX_PACKET_LEN} byte maximum packet length"
+            );
 
             eyre::ensure!(
                 RECV_OUT as u32 + hdr.msg_namelen + hdr.msg_controllen as u32 + out.payload <= len,

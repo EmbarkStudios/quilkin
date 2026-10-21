@@ -208,3 +208,96 @@ trace_test!(requeues_recv, {
         }
     }
 });
+
+// A datagram too large for a recv buffer is dropped, and the buffer it arrived
+// in returns to the ring
+trace_test!(drops_oversized, {
+    let mut sc = qt::sandbox_config!();
+
+    sc.push(
+        "server",
+        ServerPailConfig {
+            packet_size: u16::MAX,
+            ..Default::default()
+        },
+        &[],
+    );
+    let mut sb = sc.spinup().await;
+
+    let (mut packet_rx, endpoint) = sb.server("server");
+
+    let mut service = quilkin::Service::builder().udp();
+    let config = std::sync::Arc::new(quilkin::Config::new(
+        None,
+        Default::default(),
+        &Default::default(),
+        &mut service,
+    ));
+    config
+        .dyn_cfg
+        .clusters()
+        .unwrap()
+        .modify(|clusters| clusters.insert_default([endpoint.into()].into()));
+
+    let socket = sb.client();
+    let (ws, addr) = sb.socket();
+
+    // XDP doesn't go through spawn_io_loop — use the best user-space backend.
+    let backend = {
+        #[cfg(target_os = "linux")]
+        {
+            quilkin::net::io::UdpBackend::probe_user_space()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            quilkin::net::io::UdpBackend::Poll
+        }
+    };
+
+    // 4 recv buffers, so a leak shows up well before the loop below ends
+    const RING_LEN: u16 = 4;
+    let pending_sends = quilkin::net::queue(100, backend).unwrap();
+
+    quilkin::net::io::Listener {
+        worker_id: 1,
+        port: addr.port(),
+        config: config.clone(),
+        sessions: quilkin::net::sessions::SessionPool::new(
+            vec![pending_sends.0.clone()],
+            config.dyn_cfg.cached_filter_chain().unwrap(),
+            config.dyn_cfg.clusters().cloned(),
+            usize::MAX,
+            backend,
+            RING_LEN,
+        ),
+        backend,
+    }
+    .spawn_io_loop(
+        pending_sends,
+        config.dyn_cfg.cached_filter_chain().unwrap(),
+        RING_LEN,
+    )
+    .expect("failed to spawn task");
+
+    drop(ws);
+
+    let oversized = vec![b'o'; 8192];
+    let small = "hello-downstream";
+
+    // Pairing the two keeps the ring from being starved by the burst itself,
+    // which would drop the small packet for a reason other than the one tested
+    for i in 0..RING_LEN as usize * 4 {
+        socket.send_to(&oversized, addr).await.unwrap();
+        socket.send_to(small.as_bytes(), addr).await.unwrap();
+
+        // The small packet arriving means the oversized one was not forwarded,
+        // whole or truncated
+        assert_eq!(
+            small,
+            sb.timeout(RECV_TIMEOUT, packet_rx.recv())
+                .await
+                .0
+                .unwrap_or_else(|| panic!("listener stopped forwarding on round {i}")),
+        );
+    }
+});

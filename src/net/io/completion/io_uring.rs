@@ -162,6 +162,17 @@ struct RecvPacket<'rb> {
     source: std::net::SocketAddr,
 }
 
+/// The outcome of a receive completion
+enum Recv<'rb> {
+    /// A datagram to process
+    Packet(RecvPacket<'rb>),
+    /// A datagram that can't be processed, the caller must enqueue the buffer
+    /// id, as that is the only way one returns to the ring
+    Rejected(u16),
+    /// No buffer was consumed
+    Empty,
+}
+
 /// A packet that is currently being sent
 ///
 /// The struct is expected to be pinned at a location in memory in a slab, as we
@@ -328,7 +339,7 @@ impl<'uring> LoopCtx<'uring> {
         &mut self,
         cqe: io_uring::cqueue::Entry,
         br: &'rb super::ring::BufferRing,
-    ) -> std::io::Result<Option<RecvPacket<'rb>>> {
+    ) -> std::io::Result<Recv<'rb>> {
         let ret = cqe.result();
         let flags = cqe.flags();
 
@@ -348,7 +359,7 @@ impl<'uring> LoopCtx<'uring> {
                 self.enqueue_recvmsg();
             }
 
-            return Ok(None);
+            return Ok(Recv::Empty);
         }
 
         // Requeue the recv if needed
@@ -370,15 +381,13 @@ impl<'uring> LoopCtx<'uring> {
         let addr = match rb.extract(ret as _, &self.recv_hdr) {
             Ok(addr) => addr,
             Err(error) => {
-                metrics::errors_total(metrics::READ, &error.to_string(), &metrics::EMPTY).inc();
-                tracing::error!(%error, "failed to extract source address");
-                // TODO: should this be terminal? not having this would indicate that the kernel is not upholding its
-                // API promise of prepending the source address before the packet contents
-                return Ok(None);
+                tracing::debug!(%error, "dropped unusable datagram");
+                metrics::packets_dropped(metrics::READ, metrics::DropReason::InvalidPacket).inc();
+                return Ok(Recv::Rejected(buffer_id));
             }
         };
 
-        Ok(Some(RecvPacket {
+        Ok(Recv::Packet(RecvPacket {
             buffer: rb,
             source: addr,
         }))
@@ -481,7 +490,8 @@ pub fn is_available() -> bool {
     fn probe() -> std::io::Result<()> {
         let ring = io_uring::IoUring::<io_uring::squeue::Entry, io_uring::cqueue::Entry>::builder()
             .build(2)?;
-        let rb = super::ring::BufferRing::new(2, 2048).map_err(std::io::Error::other)?;
+        let rb = super::ring::BufferRing::new(2, crate::net::packet::RECV_BUFFER_LEN as u16)
+            .map_err(std::io::Error::other)?;
 
         // SAFETY: we ensure the buffer ring lives as long as the io ring itself
         unsafe {
@@ -540,8 +550,7 @@ impl IoUringLoop {
 
         let rb = super::ring::BufferRing::new(
             recv_buffer_len as u16,
-            // we only deal with non-fragmented UDP with a presumed MTU of 1500, though we also need to account for the extra metadata for multishot recvmsg, so just round up to the next power of 2
-            2048,
+            crate::net::packet::RECV_BUFFER_LEN as u16,
         )
         .map_err(std::io::Error::other)?;
 
@@ -636,8 +645,12 @@ impl IoUringLoop {
                             match op {
                                 IORING_OP_RECVMSG => {
                                     let packet = match loop_ctx.pop_recv(cqe, &rb) {
-                                        Ok(Some(packet)) => packet,
-                                        Ok(None) => {
+                                        Ok(Recv::Packet(packet)) => packet,
+                                        Ok(Recv::Rejected(id)) => {
+                                            re.enqueue_by_id(id);
+                                            continue;
+                                        }
+                                        Ok(Recv::Empty) => {
                                             // A (hopefully) transient error occurred
                                             continue;
                                         }
