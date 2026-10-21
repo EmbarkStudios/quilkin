@@ -215,7 +215,9 @@ fn spawn_poll_listener_impl(
         let mut destinations = Vec::with_capacity(1);
 
         loop {
-            let buffer = bytes::BytesMut::zeroed(2048);
+            // One byte over the limit, so a filled buffer means the kernel
+            // truncated, which `recv_from` doesn't otherwise report
+            let buffer = bytes::BytesMut::zeroed(super::MAX_PACKET_LEN + 1);
 
             tokio::select! {
                 received = ps_recv_from(&socket, buffer) => {
@@ -224,6 +226,16 @@ fn spawn_poll_listener_impl(
 
                     match result {
                         Ok((size, source)) => {
+                            if size > super::MAX_PACKET_LEN {
+                                tracing::debug!(%source, "dropped datagram larger than the maximum packet length");
+                                crate::metrics::packets_dropped(
+                                    crate::metrics::READ,
+                                    crate::metrics::DropReason::InvalidPacket,
+                                )
+                                .inc();
+                                continue;
+                            }
+
                             let mut buffer = buffer;
                             buffer.truncate(size);
                             let filters = fc.load();
@@ -358,7 +370,8 @@ pub fn spawn_session(
             });
 
             loop {
-                let buf = bytes::BytesMut::zeroed(2048);
+                // The extra byte detects truncation, see the downstream loop
+                let buf = bytes::BytesMut::zeroed(super::MAX_PACKET_LEN + 1);
                 tokio::select! {
                     received = ps_recv_from(&socket, buf) => {
                         let (result, buf) = received;
@@ -366,6 +379,14 @@ pub fn spawn_session(
                             Err(error) => {
                                 tracing::trace!(%error, "error receiving packet");
                                 crate::metrics::errors_total(crate::metrics::WRITE, &error.to_string(), &crate::metrics::EMPTY).inc();
+                            },
+                            Ok((size, recv_addr)) if size > super::MAX_PACKET_LEN => {
+                                tracing::debug!(%recv_addr, "dropped datagram larger than the maximum packet length");
+                                crate::metrics::packets_dropped(
+                                    crate::metrics::WRITE,
+                                    crate::metrics::DropReason::InvalidPacket,
+                                )
+                                .inc();
                             },
                             Ok((size, recv_addr)) => {
                                 let mut buf = buf;
