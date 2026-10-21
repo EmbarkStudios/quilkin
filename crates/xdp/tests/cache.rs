@@ -247,8 +247,8 @@ fn layer2_caching() {
             use xdp::slab::Slab;
             const BATCH_SIZE: usize = 64;
 
-            let mut rx_slab = xdp::slab::StackSlab::<BATCH_SIZE>::new();
-            let mut tx_slab = xdp::slab::StackSlab::<{ BATCH_SIZE << 2 }>::new();
+            let mut rx_slab = xdp::slab::HeapSlab::with_capacity(BATCH_SIZE);
+            let mut tx_slab = xdp::slab::HeapSlab::with_capacity(BATCH_SIZE << 2);
             let mut pending_sends = 0;
 
             let mut fill = rings.fill_ring;
