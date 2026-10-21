@@ -580,6 +580,7 @@ async fn many_sessions() {
             eth: udp.eth.swapped(),
             ip: udp.ip.swapped(),
             udp: udp.udp.swapped(),
+            headers: udp.headers,
             data: udp.data,
         };
 
@@ -996,7 +997,7 @@ async fn trims_ethernet_padding() {
 
     assert_eq!(udp.destination_address(), SERVER.into());
     assert_eq!(&server_packet[udp.data], &data[..]);
-    assert_eq!(server_packet.len(), 59);
+    assert_eq!(server_packet.len(), nt::MIN_ETHERNET_FRAME - 1);
 }
 
 /// Validates frames we're unable to parse are dropped and their frames freed
