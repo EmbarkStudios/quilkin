@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["RECV_BUFFER_LEN"],"fn":["bench_process_packet","spawn_receivers"],"mod":["queue"],"trait":["Packet","PacketMut"]};
+window.SIDEBAR_ITEMS = {"constant":["RECV_BUFFER_LEN"],"fn":["bench_process_packet","disallowed_source_ip","empty_packet_dropped","spawn_receivers"],"mod":["queue"],"trait":["Packet","PacketMut"]};
