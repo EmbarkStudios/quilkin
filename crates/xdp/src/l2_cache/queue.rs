@@ -2,7 +2,7 @@ use super::*;
 use xdp::{
     Packet,
     packet::net_types::{MacAddress, UdpHeaders},
-    slab::Slab,
+    slab::{HeapSlab, Slab},
 };
 
 /// Queues packets whose destination IP has an unresolved layer 2 address
@@ -46,11 +46,11 @@ impl CacheQueue {
 
     /// Attempts to set the destination layer 2 address based on the destination IP if it is known, otherwise we queue
     /// the packet to be sent and initiate discovery of the layer 2 address
-    pub fn try_fill<const N: usize>(
+    pub fn try_fill(
         &mut self,
         mut packet: Packet,
         mut headers: UdpHeaders,
-        tx_slab: &mut xdp::slab::StackSlab<N>,
+        tx_slab: &mut HeapSlab,
     ) -> Option<(Rejected, Packet, UdpHeaders)> {
         let Some(ll) = self
             .cache
@@ -78,9 +78,9 @@ impl CacheQueue {
     /// individual packets that were thus freed without being enqueued
     ///
     /// Note that packets are not
-    pub fn update<const N: usize>(
+    pub fn update(
         &mut self,
-        tx_slab: &mut xdp::slab::StackSlab<N>,
+        tx_slab: &mut HeapSlab,
         umem: &mut xdp::Umem,
         mut overflow: impl FnMut(Packet, UdpHeaders),
         mut failed: impl FnMut(Ip, usize),

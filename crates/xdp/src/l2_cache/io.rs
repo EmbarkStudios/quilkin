@@ -131,7 +131,7 @@ pub(super) fn cache_io_loop(
             for cqe in &mut cq {
                 let ud = cqe.user_data();
 
-                match dbg!(ud & 0xff) {
+                match ud & 0xff {
                     // We've received a response to an ICMP echo request
                     code::RECV4 | code::RECV6 => {
                         let ret = cqe.result();

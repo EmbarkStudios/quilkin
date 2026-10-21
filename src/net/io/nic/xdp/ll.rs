@@ -2,17 +2,21 @@ use super::{LinkLayer, PacketWrapper};
 use crate::metrics::{self, DropReason};
 use quilkin_xdp::{
     l2_cache,
-    xdp::{self, Packet, packet::net_types::MacAddress, slab::Slab},
+    xdp::{
+        self, Packet,
+        packet::net_types::MacAddress,
+        slab::{HeapSlab, Slab},
+    },
 };
 
 pub struct Swap;
 
 impl LinkLayer for Swap {
     #[inline]
-    fn try_fill<const N: usize>(
+    fn try_fill(
         &mut self,
         mut packet: PacketWrapper,
-        tx_slab: &mut xdp::slab::StackSlab<N>,
+        tx_slab: &mut HeapSlab,
         _to_client: bool,
     ) -> Option<(Packet, DropReason)> {
         packet.headers.eth = packet.headers.eth.swapped();
@@ -61,10 +65,10 @@ impl LinkLayer for Local {
         }
     }
 
-    fn try_fill<const N: usize>(
+    fn try_fill(
         &mut self,
         mut packet: PacketWrapper,
-        tx_slab: &mut xdp::slab::StackSlab<N>,
+        tx_slab: &mut HeapSlab,
         to_client: bool,
     ) -> Option<(Packet, DropReason)> {
         if to_client {
@@ -92,11 +96,7 @@ impl LinkLayer for Local {
             })
     }
 
-    fn update<const N: usize>(
-        &mut self,
-        tx_slab: &mut xdp::slab::StackSlab<N>,
-        umem: &mut xdp::Umem,
-    ) {
+    fn update(&mut self, tx_slab: &mut HeapSlab, umem: &mut xdp::Umem) {
         if !self.overflow.is_empty() && tx_slab.available() > 0 {
             while let Some(of) = self.overflow.pop_front() {
                 if let Some(nospace) = tx_slab.push_front(of) {

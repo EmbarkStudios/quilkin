@@ -82,6 +82,7 @@ impl IcmpSocket {
             UdpSocket::from_raw_fd(socket)
         };
 
+        // SAFETY: syscall, the arguments are valid, barring kernel bugs this is safe
         let in4 = unsafe {
             let socket = libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP);
             if socket < 0 {

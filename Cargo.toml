@@ -258,6 +258,7 @@ quilkin = { path = "." }
 quilkin-proto = { path = "crates/quilkin-proto" }
 quilkin-system = { path = "crates/system" }
 quilkin-types = { path = "crates/types" }
+quilkin-uring = { path = "crates/uring" }
 quilkin-xds = { path = "crates/xds" }
 rand = "0.10"
 regex = "1.12.2"

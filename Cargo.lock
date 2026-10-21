@@ -4137,7 +4137,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-uring"
-version = "0.10.1"
+version = "2026.10.1"
 dependencies = [
  "eyre",
  "io-uring",
@@ -4159,7 +4159,7 @@ dependencies = [
  "libc",
  "quilkin-uring",
  "smallvec",
- "thiserror 2.0.18",
+ "thiserror 2.0.20",
  "tracing",
  "tracing-test",
  "xdp",

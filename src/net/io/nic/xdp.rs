@@ -7,6 +7,7 @@ use quilkin_xdp::{
         self,
         nic::{NicIndex, NicName},
         packet::net_types::MacAddress,
+        slab::{HeapSlab, Slab},
     },
 };
 use std::sync::Arc;
@@ -101,10 +102,7 @@ pub struct XdpWorkers {
     ipv6: std::net::Ipv6Addr,
     ipv4: std::net::Ipv4Addr,
     worker_thread_scheduling: WorkerThreadScheduling,
-    ip_to_mac: Option<(
-        aya::maps::RingBuf<aya::maps::MapData>,
-        super::cache::types::MacAddr,
-    )>,
+    ip_to_mac: Option<aya::maps::RingBuf<aya::maps::MapData>>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -544,6 +542,19 @@ impl XdpLoop {
     }
 }
 
+pub trait LinkLayer {
+    #[inline]
+    fn update_gateway(&mut self, _addr: MacAddress, _v4: bool) {}
+    fn try_fill(
+        &mut self,
+        packet: PacketWrapper,
+        tx_slab: &mut HeapSlab,
+        to_client: bool,
+    ) -> Option<(xdp::Packet, crate::metrics::DropReason)>;
+    #[inline]
+    fn update(&mut self, _tx_slab: &mut HeapSlab, _umem: &mut xdp::Umem) {}
+}
+
 fn spawn_worker<F, T>(
     i: usize,
     scheduling: WorkerThreadScheduling,
@@ -642,34 +653,67 @@ pub fn spawn(
         let shutdown = shutdown.clone();
         let terminate = terminate.clone();
 
-        let jh = spawn_worker(i, workers.worker_thread_scheduling, move || {
-            // Enqueue buffers to the fill ring to ensure that we don't miss any packets
-            // SAFETY: we keep the umem alive for as long as the socket is alive
-            unsafe {
-                if let Err(error) =
-                    worker
-                        .fill
-                        .enqueue(&mut worker.umem, worker.ring_len >> 2, true)
-                {
-                    tracing::error!(%error, "failed to kick fill ring during initial spinup");
-                }
-            };
+        let jh = if let Some(cache) = l2_cache.as_ref().map(|(c, _)| c.clone()) {
+            let rx = rxs.pop().expect("invalid number of cache receivers");
 
-            io_loop(
-                worker,
-                external_port,
-                qcmp_port,
-                cfg,
-                ss,
-                ipv4,
-                ipv6,
-                shutdown.clone(),
-                terminate.clone(),
-            );
-        })
-        .map_err(XdpSpawnError::Thread)?;
+            spawn_worker(i, workers.worker_thread_scheduling, move || {
+                // Enqueue buffers to the fill ring to ensure that we don't miss any packets
+                // SAFETY: we keep the umem alive for as long as the socket is alive
+                unsafe {
+                    if let Err(error) =
+                        worker
+                            .fill
+                            .enqueue(&mut worker.umem, worker.ring_len >> 2, true)
+                    {
+                        tracing::error!(%error, "failed to kick fill ring during initial spinup");
+                    }
+                };
 
-        threads.push(jh);
+                let ll = ll::Local::new(cache, rx, i as u8);
+
+                io_loop(
+                    worker,
+                    external_port,
+                    qcmp_port,
+                    cfg,
+                    ss,
+                    ipv4,
+                    ipv6,
+                    shutdown.clone(),
+                    terminate.clone(),
+                    ll,
+                );
+            })
+        } else {
+            spawn_worker(i, workers.worker_thread_scheduling, move || {
+                // Enqueue buffers to the fill ring to ensure that we don't miss any packets
+                // SAFETY: we keep the umem alive for as long as the socket is alive
+                unsafe {
+                    if let Err(error) =
+                        worker
+                            .fill
+                            .enqueue(&mut worker.umem, worker.ring_len >> 2, true)
+                    {
+                        tracing::error!(%error, "failed to kick fill ring during initial spinup");
+                    }
+                };
+
+                io_loop(
+                    worker,
+                    external_port,
+                    qcmp_port,
+                    cfg,
+                    ss,
+                    ipv4,
+                    ipv6,
+                    shutdown.clone(),
+                    terminate.clone(),
+                    ll::Swap,
+                );
+            })
+        };
+
+        threads.push(jh.map_err(XdpSpawnError::Thread)?);
     }
 
     tracing::info!(?nic, queue_count, "XDP is running");
@@ -705,6 +749,7 @@ fn io_loop<LL: LinkLayer>(
     local_ipv4: std::net::Ipv4Addr,
     local_ipv6: std::net::Ipv6Addr,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
+    terminate: Arc<std::sync::atomic::AtomicBool>,
     mut ll: LL,
 ) {
     let quilkin_xdp::XdpWorker {
@@ -730,8 +775,6 @@ fn io_loop<LL: LinkLayer>(
         local_ipv6,
         last_receive: UtcTimestamp::now(),
     };
-
-    use xdp::slab::{HeapSlab, Slab};
 
     let mut rx_slab = HeapSlab::with_capacity(ring_len);
     let mut tx_slab = HeapSlab::with_capacity(ring_len);
