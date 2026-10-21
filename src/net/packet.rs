@@ -25,7 +25,10 @@ use crate::{
         sessions::{SessionKey, SessionManager, SessionPool},
     },
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
 pub use self::queue::{PacketQueue, PacketQueueReceiver, PacketQueueSender, queue};
 
@@ -35,6 +38,24 @@ pub use self::queue::{PacketQueue, PacketQueueReceiver, PacketQueueSender, queue
 /// A backend accepts this minus whatever metadata it keeps in the same buffer,
 /// see its `MAX_PACKET_LEN`. Larger datagrams are dropped.
 pub const RECV_BUFFER_LEN: usize = 2048;
+
+/// Returns the canonical form of `ip` when it is a source we never forward, as
+/// a reply to a spoofed one of these would make the proxy a UDP amplifier
+///
+/// Dual stack sockets report ipv4 peers as ipv4-mapped ipv6, which matches none
+/// of the ipv6 predicates, so the mapping is undone before the check.
+pub fn disallowed_source_ip(ip: IpAddr) -> Option<IpAddr> {
+    let ip = ip.to_canonical();
+
+    let disallowed = match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback() || v4.is_multicast() || v4.is_broadcast() || v4.is_unspecified()
+        }
+        IpAddr::V6(v6) => v6.is_loopback() || v6.is_multicast() || v6.is_unspecified(),
+    };
+
+    disallowed.then_some(ip)
+}
 
 /// Representation of an immutable set of bytes pulled from the network, this trait
 /// provides an abstraction over however the packet was received (epoll, io-uring, xdp)
@@ -163,19 +184,8 @@ impl<P: PacketMut> DownstreamPacket<'_, P> {
         };
 
         #[cfg(not(debug_assertions))]
-        {
-            match self.source.ip() {
-                std::net::IpAddr::V4(ipv4) => {
-                    if ipv4.is_loopback() || ipv4.is_multicast() || ipv4.is_broadcast() {
-                        return Err(PipelineError::DisallowedSourceIP(self.source.ip()));
-                    }
-                }
-                std::net::IpAddr::V6(ipv6) => {
-                    if ipv6.is_loopback() || ipv6.is_multicast() {
-                        return Err(PipelineError::DisallowedSourceIP(self.source.ip()));
-                    }
-                }
-            }
+        if let Some(ip) = disallowed_source_ip(self.source.ip()) {
+            return Err(PipelineError::DisallowedSourceIP(ip));
         }
 
         let cm = clusters.clone_value();
@@ -285,21 +295,68 @@ pub fn spawn_receivers(
 
 #[cfg(test)]
 mod tests {
-    #![cfg(not(debug_assertions))]
-
-    use quilkin_xds::locality::Locality;
-
-    use crate::net::Endpoint;
-    use crate::test::alloc_buffer;
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
     use super::*;
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-    use std::net::{SocketAddrV4, SocketAddrV6};
 
-    // Ensure we disallow certain source IP addresses to protect against UDP amplification attacks
+    /// A dual stack socket reports an ipv4 peer in ipv4-mapped form, so every
+    /// ipv4 source has to be caught in both spellings
+    #[test]
+    fn disallows_amplification_sources() {
+        for v4 in [
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::BROADCAST,
+            Ipv4Addr::UNSPECIFIED,
+            // multicast = 224.0.0.0/4
+            Ipv4Addr::new(224, 0, 0, 0),
+            Ipv4Addr::new(239, 255, 255, 255),
+        ] {
+            let canonical = Some(IpAddr::V4(v4));
+            assert_eq!(disallowed_source_ip(v4.into()), canonical, "{v4}");
+            assert_eq!(
+                disallowed_source_ip(v4.to_ipv6_mapped().into()),
+                canonical,
+                "::ffff:{v4}"
+            );
+        }
+
+        for v6 in [
+            Ipv6Addr::LOCALHOST,
+            Ipv6Addr::UNSPECIFIED,
+            // multicast = any address starting with 0xff
+            Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0),
+        ] {
+            assert_eq!(
+                disallowed_source_ip(v6.into()),
+                Some(IpAddr::V6(v6)),
+                "{v6}"
+            );
+        }
+
+        // Ordinary clients, in every spelling they can arrive in
+        let routable = Ipv4Addr::new(203, 0, 113, 1);
+        for allowed in [
+            IpAddr::V4(routable),
+            IpAddr::V6(routable.to_ipv6_mapped()),
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+        ] {
+            assert_eq!(disallowed_source_ip(allowed), None, "{allowed}");
+        }
+    }
+}
+
+/// Covers the wiring the unit tests above can't reach, since the guard is only
+/// compiled into release builds. Which addresses are refused is covered there.
+#[cfg(all(test, not(debug_assertions)))]
+mod release_tests {
+    use super::*;
+    use crate::{net::Endpoint, test::alloc_buffer};
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
+
+    /// A disallowed source is refused by the pipeline, in the ipv4-mapped form
+    /// a dual stack socket reports it in
     #[tokio::test]
     async fn disallowed_ips() {
-        let nl1 = Locality::with_region("nl-1");
         let endpoint = Endpoint::new((Ipv4Addr::LOCALHOST, 7777).into());
 
         let providers = crate::Providers::default();
@@ -308,45 +365,43 @@ mod tests {
         // FilterChain is not inserted by Service::default() unless a network
         // service is enabled; insert it manually for this test.
         crate::config::insert_default::<crate::filters::FilterChain>(&mut config.dyn_cfg.typemap);
-        config.dyn_cfg.clusters().unwrap().modify(|clusters| {
-            clusters.insert(None, Some(nl1.clone()), [endpoint.clone()].into());
-        });
+        config
+            .dyn_cfg
+            .clusters()
+            .unwrap()
+            .modify(|clusters| clusters.insert_default([endpoint].into()));
         let config = Arc::new(config);
 
-        let cached_filter_chain = config.dyn_cfg.cached_filter_chain().unwrap();
         let session_manager = SessionPool::new(
             vec![],
-            cached_filter_chain,
+            config.dyn_cfg.cached_filter_chain().unwrap(),
             None,
             usize::MAX,
             crate::net::io::UdpBackend::default(),
+            4,
         );
 
         let filter_chain = crate::filters::FilterChain::default();
-        let packet_data: [u8; 4] = [1, 2, 3, 4];
-        for ip in [
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            IpAddr::V4(Ipv4Addr::BROADCAST),
-            // multicast = 224.0.0.0/4
-            IpAddr::V4(Ipv4Addr::new(224, 0, 0, 0)),
-            IpAddr::V4(Ipv4Addr::new(239, 255, 255, 255)),
-            IpAddr::V6(Ipv6Addr::LOCALHOST),
-            // multicast = any address starting with 0xff
-            IpAddr::V6(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0)),
+
+        for (source, expected) in [
+            (
+                SocketAddrV6::new(Ipv4Addr::LOCALHOST.to_ipv6_mapped(), 7777, 0, 0),
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+            ),
+            (
+                SocketAddrV6::new(Ipv6Addr::LOCALHOST, 7777, 0, 0),
+                IpAddr::V6(Ipv6Addr::LOCALHOST),
+            ),
         ] {
             let packet = DownstreamPacket {
-                contents: alloc_buffer(packet_data),
-                source: match ip {
-                    IpAddr::V4(ipv4) => SocketAddr::V4(SocketAddrV4::new(ipv4, 0)),
-                    IpAddr::V6(ipv6) => SocketAddr::V6(SocketAddrV6::new(ipv6, 0, 0, 0)),
-                },
+                contents: alloc_buffer([1, 2, 3, 4]),
+                source: SocketAddr::V6(source),
                 filters: &filter_chain,
             };
 
-            let mut endpoints = vec![endpoint.address.clone()];
-            let res = packet.process_inner(&config, &session_manager, &mut endpoints);
+            let res = packet.process_inner(&config, &session_manager, &mut Vec::new());
 
-            assert_eq!(res, Err(PipelineError::DisallowedSourceIP(ip)));
+            assert_eq!(res, Err(PipelineError::DisallowedSourceIP(expected)));
         }
     }
 }
