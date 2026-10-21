@@ -36,6 +36,47 @@ pub use self::queue::{PacketQueue, PacketQueueReceiver, PacketQueueSender, queue
 /// see its `MAX_PACKET_LEN`. Larger datagrams are dropped.
 pub const RECV_BUFFER_LEN: usize = 2048;
 
+/// How often [`empty_packet_dropped`] may log
+const EMPTY_PACKET_LOG_INTERVAL: i64 = 5 * 60 * 1_000_000_000;
+
+/// When [`empty_packet_dropped`] last logged, as unix nanos
+static EMPTY_PACKET_LOGGED_AT: std::sync::atomic::AtomicI64 =
+    std::sync::atomic::AtomicI64::new(i64::MIN);
+
+/// Records an empty datagram being dropped
+///
+/// Counted every time, but logged at most once per [`EMPTY_PACKET_LOG_INTERVAL`],
+/// as a client that sends these sends them at whatever rate it ticks at.
+pub fn empty_packet_dropped() {
+    use crate::service::ALLOW_EMPTY_PACKETS_FLAG;
+
+    metrics::packets_dropped(metrics::READ, metrics::DropReason::EmptyPacket).inc();
+
+    let now = crate::time::UtcTimestamp::now().unix_nanos();
+
+    if claim_log_slot(&EMPTY_PACKET_LOGGED_AT, now, EMPTY_PACKET_LOG_INTERVAL) {
+        tracing::warn!(
+            "empty packets are dropped by default, enable --{ALLOW_EMPTY_PACKETS_FLAG} to allow them"
+        );
+    }
+}
+
+/// Whether `now` is at least `interval` past the timestamp in `last`, taking
+/// the slot for `now` when it is
+///
+/// Every worker reaches this for the same packet storm, so the slot is taken by
+/// a swap and only the thread that wins it logs.
+fn claim_log_slot(last: &std::sync::atomic::AtomicI64, now: i64, interval: i64) -> bool {
+    use std::sync::atomic::Ordering;
+
+    let previous = last.load(Ordering::Relaxed);
+
+    now.saturating_sub(previous) >= interval
+        && last
+            .compare_exchange(previous, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+}
+
 /// Representation of an immutable set of bytes pulled from the network, this trait
 /// provides an abstraction over however the packet was received (epoll, io-uring, xdp)
 ///
@@ -112,6 +153,7 @@ pub(crate) struct DownstreamPacket<'stack, P> {
     pub(crate) contents: P,
     pub(crate) source: SocketAddr,
     pub(crate) filters: &'stack crate::filters::FilterChain,
+    pub(crate) allow_empty: bool,
 }
 
 impl<P: PacketMut> DownstreamPacket<'_, P> {
@@ -153,6 +195,11 @@ impl<P: PacketMut> DownstreamPacket<'_, P> {
         sessions: &S,
         destinations: &mut Vec<crate::net::Destination>,
     ) -> Result<(), PipelineError> {
+        if self.contents.is_empty() && !self.allow_empty {
+            empty_packet_dropped();
+            return Ok(());
+        }
+
         let Some(clusters) = config
             .dyn_cfg
             .clusters()
@@ -245,6 +292,7 @@ pub fn bench_process_packet(
         contents: payload,
         source,
         filters: filter_chain,
+        allow_empty: true,
     }
     .process(0, config, &Noop, destinations);
 }
@@ -261,6 +309,7 @@ pub fn spawn_receivers(
     sessions: &Arc<SessionPool>,
     backend: crate::net::io::UdpBackend,
     recv_ring_len: u16,
+    allow_empty_packets: bool,
 ) -> crate::Result<()> {
     let port = crate::net::socket_port(&socket);
 
@@ -275,6 +324,7 @@ pub fn spawn_receivers(
             config: config.clone(),
             sessions: sessions.clone(),
             backend,
+            allow_empty_packets,
         };
 
         worker.spawn_io_loop(ws, pfc.clone(), recv_ring_len)?;
@@ -348,5 +398,75 @@ mod tests {
 
             assert_eq!(res, Err(PipelineError::DisallowedSourceIP(ip)));
         }
+    }
+}
+
+#[cfg(test)]
+mod empty_packets {
+    use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+
+    use super::*;
+
+    #[derive(Default)]
+    struct CountingSessions(AtomicUsize);
+
+    impl SessionManager for CountingSessions {
+        fn send(
+            &self,
+            _key: SessionKey,
+            _contents: bytes::Bytes,
+            _cluster: Option<crate::net::endpoint::Locality>,
+        ) -> Result<(), PipelineError> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    /// An empty datagram reaches the upstream only when it is allowed to
+    #[test]
+    fn forwarded_only_when_allowed() {
+        let providers = crate::Providers::default();
+        let mut service = crate::Service::default();
+        let mut config = Config::new(None, Default::default(), &providers, &mut service);
+        crate::config::insert_default::<crate::filters::FilterChain>(&mut config.dyn_cfg.typemap);
+        config.dyn_cfg.clusters().unwrap().modify(|clusters| {
+            clusters
+                .insert_default([crate::net::Endpoint::new(([1, 1, 1, 1], 7777).into())].into());
+        });
+        let config = Arc::new(config);
+        let filters = crate::filters::FilterChain::default();
+
+        for (allow_empty, forwarded) in [(false, 0), (true, 1)] {
+            let sessions = CountingSessions::default();
+            let packet = DownstreamPacket {
+                contents: crate::test::alloc_buffer([]),
+                source: ([198, 51, 100, 1], 9999).into(),
+                filters: &filters,
+                allow_empty,
+            };
+
+            packet
+                .process_inner(&config, &sessions, &mut Vec::new())
+                .expect("an empty packet is dropped, not an error");
+
+            assert_eq!(
+                sessions.0.load(Ordering::Relaxed),
+                forwarded,
+                "{allow_empty}"
+            );
+        }
+    }
+
+    #[test]
+    fn log_slot_is_claimed_once_per_interval() {
+        const INTERVAL: i64 = 5 * 60 * 1_000_000_000;
+        let last = AtomicI64::new(i64::MIN);
+
+        // The first ever packet logs, however long the process has been up
+        assert!(claim_log_slot(&last, 0, INTERVAL));
+        assert!(!claim_log_slot(&last, 0, INTERVAL));
+        assert!(!claim_log_slot(&last, INTERVAL - 1, INTERVAL));
+        assert!(claim_log_slot(&last, INTERVAL, INTERVAL));
+        assert!(!claim_log_slot(&last, INTERVAL, INTERVAL));
     }
 }

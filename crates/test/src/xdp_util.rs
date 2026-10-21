@@ -17,6 +17,7 @@ pub fn make_config(
     process::ConfigState {
         filters: fc.cached(),
         clusters: quilkin::config::Watch::new(cm),
+        allow_empty_packets: false,
     }
 }
 

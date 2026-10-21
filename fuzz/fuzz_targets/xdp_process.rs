@@ -106,6 +106,9 @@ impl Harness {
             cfg: process::ConfigState {
                 filters: quilkin::config::filter::FilterChainConfig::new(chain).cached(),
                 clusters: quilkin::config::Watch::new(cm),
+                // Both settings are reachable in production, this is the one
+                // that lets an empty payload reach the filter chain
+                allow_empty_packets: true,
             },
         }
     }

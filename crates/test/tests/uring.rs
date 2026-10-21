@@ -170,6 +170,7 @@ trace_test!(requeues_recv, {
             4,
         ),
         backend,
+        allow_empty_packets: false,
     }
     .spawn_io_loop(
         pending_sends,
@@ -271,6 +272,7 @@ trace_test!(drops_oversized, {
             RING_LEN,
         ),
         backend,
+        allow_empty_packets: false,
     }
     .spawn_io_loop(
         pending_sends,

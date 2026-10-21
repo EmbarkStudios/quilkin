@@ -1163,3 +1163,74 @@ async fn drops_packets_filters_cant_modify() {
 
     unsafe { umem.alloc().expect("a dropped packet wasn't freed") };
 }
+
+/// Validates empty client datagrams are dropped unless they're allowed, and
+/// that the frame is freed either way
+#[tokio::test]
+async fn drops_empty_client_packets() {
+    const SERVER: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 1111);
+    const PROXY: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(2, 2, 2, 2), 7777);
+    const CLIENT: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(5, 5, 5, 5), 8888);
+
+    for (allow_empty_packets, forwarded) in [(false, false), (true, true)] {
+        let mut cfg_state = make_config(
+            filters::FilterChain::default(),
+            endpoints(&[(SERVER.into(), &[])]),
+        );
+        cfg_state.allow_empty_packets = allow_empty_packets;
+
+        let mut state = process::State {
+            external_port: PROXY.port().into(),
+            qcmp_port: 0.into(),
+            destinations: Vec::with_capacity(1),
+            addr_to_asn: Default::default(),
+            sessions: Arc::new(Default::default()),
+            local_ipv4: *PROXY.ip(),
+            local_ipv6: Ipv6Addr::from_bits(0),
+            last_receive: UtcTimestamp::now(),
+        };
+
+        let mut umem = xdp::Umem::map(
+            xdp::umem::UmemCfgBuilder {
+                frame_size: xdp::umem::FrameSize::TwoK,
+                head_room: 0,
+                frame_count: 1,
+                ..Default::default()
+            }
+            .build()
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut client_packet = unsafe { umem.alloc().unwrap() };
+        etherparse::PacketBuilder::ethernet2([3, 3, 3, 3, 3, 3], [4, 4, 4, 4, 4, 4])
+            .ipv4(CLIENT.ip().octets(), PROXY.ip().octets(), 64)
+            .udp(CLIENT.port(), PROXY.port())
+            .write(&mut client_packet, &[])
+            .unwrap();
+
+        let (mut rx_slab, mut tx_slab) = little_slabs();
+        rx_slab.push_front(client_packet);
+        process::process_packets(
+            &mut rx_slab,
+            &mut umem,
+            &mut tx_slab,
+            &mut cfg_state,
+            &mut state,
+        );
+
+        match tx_slab.pop_back() {
+            Some(server_packet) => {
+                assert!(forwarded, "empty packet was forwarded while disallowed");
+                let udp = UdpHeaders::parse_packet(&server_packet).unwrap().unwrap();
+                assert_eq!(udp.destination_address(), SERVER.into());
+                assert_eq!(udp.data_length(), 0);
+                umem.free_packet(server_packet);
+            }
+            None => assert!(!forwarded, "empty packet was dropped while allowed"),
+        }
+
+        // The umem has a single frame, so this only succeeds if it came back
+        unsafe { umem.alloc().expect("the frame was not freed") };
+    }
+}
