@@ -52,7 +52,11 @@ default = ["jemalloc"]
 instrument = []
 mimalloc = ["dep:mimalloc"]
 heap-stats = ["dep:crossbeam-utils"]
-jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl", "dep:jemalloc_pprof"]
+jemalloc = [
+    "dep:tikv-jemallocator",
+    "dep:tikv-jemalloc-ctl",
+    "dep:jemalloc_pprof",
+]
 
 [lints]
 workspace = true
@@ -94,7 +98,9 @@ hyper-rustls = { version = "0.27", default-features = false, features = [
     "webpki-roots",
     "ring",
 ] }
-ipnetwork = { version = "0.21.1", features = ["serde"] } # keep in sync with maxmind
+ipnetwork = { version = "0.21.1", features = [
+    "serde",
+] } # keep in sync with maxmind
 kube-lease-manager.workspace = true
 k8s-openapi.workspace = true
 maxminddb = "0.32.0"
@@ -223,7 +229,9 @@ bytes = { version = "1.11.1", features = ["serde"] }
 compact_str = "0.7"
 corrosion = { path = "crates/corrosion", package = "quilkin-corrosion" }
 data-encoding = "2.10"
-ethtool = { version = "0.2.9", default-features = false, features = ["tokio_socket"] }
+ethtool = { version = "0.2.9", default-features = false, features = [
+    "tokio_socket",
+] }
 eyre = "0.6.12"
 fixedstr = { version = "0.5", features = ["flex-str"] }
 futures = "0.3.31"
@@ -235,9 +243,7 @@ kube = { version = "4.2", features = [
     "rustls-tls",
     "client",
 ], default-features = false }
-kube-core = { version = "4.2", default-features = false, features = [
-    "schema",
-] }
+kube-core = { version = "4.2", default-features = false, features = ["schema"] }
 kube-lease-manager = "0.12.0"
 k8s-openapi = { version = "=0.28.0", features = ["v1_33", "schemars"] }
 libc = "0.2"
@@ -264,7 +270,10 @@ socket2 = { version = "0.6", features = ["all"] }
 tempfile = "3.24.0"
 thiserror = "2.0.17"
 tikv-jemalloc-ctl = { version = "0.7", features = ["stats"] }
-tikv-jemallocator = { version = "0.7", features = ["profiling", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { version = "0.7", features = [
+    "profiling",
+    "unprefixed_malloc_on_supported_platforms",
+] }
 time = { version = "0.3", default-features = false, features = ["std"] }
 tokio = { version = "1.49.0", features = [
     "rt-multi-thread",
@@ -276,7 +285,12 @@ tokio = { version = "1.49.0", features = [
 ] }
 tokio-stream = { version = "0.1.18", features = ["net", "sync"] }
 tokio-util = "0.7.18"
-tonic = { version = "0.14", default-features = false, features = ["codegen", "router", "tls-ring", "transport"] }
+tonic = { version = "0.14", default-features = false, features = [
+    "codegen",
+    "router",
+    "tls-ring",
+    "transport",
+] }
 tonic-prost = "0.14"
 tower = "0.5"
 tracing = "0.1.44"

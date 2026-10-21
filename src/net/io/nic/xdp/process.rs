@@ -564,10 +564,6 @@ impl SessionState {
     }
 }
 
-/// The minimum ethernet frame size, the 4 byte frame check sequence is stripped
-/// before we see it
-const MIN_ETHERNET_FRAME: usize = 60;
-
 /// Parses the headers of a received frame, returning the reason it couldn't be
 /// parsed, which is used as the drop metric label.
 ///
@@ -587,6 +583,15 @@ fn parse_headers(buffer: &mut Packet) -> Result<UdpHeaders, &'static str> {
                     "ipv6 header length"
                 })
             } else {
+                // If this was ethernet padded, remove the padding bytes
+                let padding = buffer
+                    .len()
+                    .saturating_sub(hdrs.header_length() + hdrs.data_length());
+                if padding > 0 {
+                    buffer
+                        .adjust_tail(-(padding as i32))
+                        .map_err(|err| err.discriminant())?;
+                }
                 Ok(hdrs)
             }
         }
@@ -780,7 +785,7 @@ fn process_client_packet(
                     check: 0,
                     length: NetworkU16(0),
                 },
-                headers: packet.headers.headers,
+                headers: (0..0).into(), // This is corrected in fill_packet
                 data: packet.headers.data,
             };
 
@@ -924,7 +929,7 @@ fn fill_packet(
     data_checksum: csum::DataChecksum,
     frame: &mut Packet,
 ) -> Result<(), PacketError> {
-    let hdr_len = headers.header_length();
+    let hdr_len = headers.canonical_header_length();
     frame.adjust_tail(hdr_len as i32)?;
     headers.calc_checksum(data_checksum);
     headers.set_packet_headers(frame)?;
@@ -1125,11 +1130,12 @@ mod test {
         let mut data = [0u8; 2048];
         let mut packet = ipv4_packet(&mut data, nt::IpProto::Udp, &payload, 1);
 
-        assert_eq!(packet.len(), MIN_ETHERNET_FRAME);
+        assert_eq!(packet.len(), nt::MIN_ETHERNET_FRAME);
         let headers = parse_headers(&mut packet).expect("failed to parse padded packet");
 
         assert_eq!(headers.data_length(), payload.len());
         assert_eq!(&packet[headers.data], &payload[..]);
+        assert_eq!(packet.len(), nt::MIN_ETHERNET_FRAME - 1);
     }
 
     #[test]

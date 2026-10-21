@@ -6447,7 +6447,7 @@ dependencies = [
 [[package]]
 name = "xdp"
 version = "0.8.0"
-source = "git+https://codeberg.org/ca1ne/xdp?branch=main#0f113ca67f2c63e6d5f38ca93ca10315bde37948"
+source = "git+https://codeberg.org/ca1ne/xdp?branch=main#2ee72d1a6cee7bbad85a2dcfe7e3b7269ed4d796"
 
 [[package]]
 name = "yansi"
