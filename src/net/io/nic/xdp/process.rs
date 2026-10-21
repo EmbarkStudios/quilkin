@@ -10,16 +10,13 @@ use crate::{
     time::UtcTimestamp,
 };
 pub use quilkin_xdp::xdp;
-use quilkin_xdp::{
-    l2_cache::{self as cache, types::LinkLayerAddr},
-    xdp::{
-        Umem,
-        packet::{
-            Packet, PacketError, csum,
-            net_types::{IpAddresses, MacAddress, NetworkU16, UdpHdr, UdpHeaders},
-        },
-        slab::{HeapSlab, Slab},
+use quilkin_xdp::xdp::{
+    Umem,
+    packet::{
+        Packet, PacketError, csum,
+        net_types::{IpAddresses, NetworkU16, UdpHdr, UdpHeaders},
     },
+    slab::{HeapSlab, Slab},
 };
 use std::{
     collections::hash_map::Entry,
@@ -573,13 +570,11 @@ pub fn process_packets<LL: LinkLayer>(
             metrics::WRITE
         };
 
-        if is_client && headers.data_length() == 0 && !config_state.allow_empty_packets {
+        if is_client && packet.headers.data_length() == 0 && !config_state.allow_empty_packets {
             crate::net::packet::empty_packet_dropped();
-            umem.free_packet(buffer);
+            umem.free_packet(packet.buffer);
             continue;
         }
-
-        let packet = PacketWrapper::new(buffer, headers);
 
         let res = {
             let _timer = metrics::processing_time(direction).start_timer();

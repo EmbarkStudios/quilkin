@@ -82,6 +82,7 @@ pub fn spawn_listener(
                 sessions,
                 worker_id,
                 destinations: Vec::with_capacity(1),
+                allow_empty_packets,
             },
             (pqs, event_fd),
             filter_chain,
