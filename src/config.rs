@@ -405,19 +405,8 @@ impl quilkin_xds::config::Configuration for Config {
     }
 
     fn client_disconnected(&self, ip: std::net::IpAddr) {
-        if let Some(dc) = self.dyn_cfg.datacenters() {
-            dc.modify(|dc| {
-                tracing::debug!(%ip, "removing agent");
-                dc.remove(ip);
-            });
-        }
-        if let Some(cl) = self.dyn_cfg.clusters() {
-            cl.modify(|cl| {
-                // Make sure we remove this agent as a contributor to any locality that it has
-                // contributed endpoints for
-                cl.remove_contributor(Some(ip));
-            });
-        }
+        tracing::debug!(%ip, "removing agent");
+        corro::Bridge::new(self).remove_agent(ip);
     }
 }
 
@@ -537,6 +526,9 @@ impl Config {
                             let ip = node.ip();
                             if let Some(config) = janitor_config_ref.upgrade() {
                                 if let Some(datacenters) = config.dyn_cfg.datacenters() {
+                                    // Reachability from here, not existence;
+                                    // the row outlasts this and carries the
+                                    // index `Bridge::remove_agent` needs
                                     datacenters.modify(|wg| {
                                         tracing::warn!(%ip, "removing datacenter from local state");
                                         wg.remove(ip);
@@ -1041,6 +1033,38 @@ impl clap::ValueEnum for crate::config::AddrKind {
 mod tests {
     use super::*;
 
+    type Written = tokio::sync::mpsc::UnboundedReceiver<Vec<corrosion::api::Statement>>;
+
+    /// A relay, plus the statements its bridge hands to the database
+    fn relay_with_db() -> (Config, Written) {
+        let mut relay = Config::new(
+            None,
+            Default::default(),
+            &crate::Providers::default().fs(),
+            &mut crate::Service::default().xds(),
+        );
+
+        let (tx, db) = tokio::sync::mpsc::unbounded_channel();
+        relay.dyn_cfg.typemap.insert::<DbTx>(DbTx { tx });
+
+        (relay, db)
+    }
+
+    fn agent() -> std::net::IpAddr {
+        "2001:db8::a".parse().unwrap()
+    }
+
+    fn datacenter() -> Datacenter {
+        Datacenter {
+            qcmp_port: 7600,
+            icao_code: "EFLP".parse().unwrap(),
+        }
+    }
+
+    fn gameserver(address: &str) -> crate::net::endpoint::Endpoint {
+        crate::net::endpoint::Endpoint::new(address.parse().unwrap())
+    }
+
     #[test]
     fn a_proxy_drops_the_datacenters_the_relay_removed() {
         let relay = Config::new(
@@ -1104,5 +1128,111 @@ mod tests {
             "proxy kept {old_agent} after the relay removed it"
         );
         assert!(proxy_dcs.read().get(&new_agent).is_some());
+    }
+
+    /// The reaper only collects servers nothing contributes to, so an agent
+    /// has to stop contributing in the database, not just in memory
+    #[test]
+    fn a_disconnected_agent_stops_contributing_in_the_database() {
+        use quilkin_xds::config::Configuration as _;
+
+        let (relay, mut db) = relay_with_db();
+        let (agent, dc) = (agent(), datacenter());
+
+        {
+            let mut bridge = corro::Bridge::new(&relay);
+            bridge.insert_dc(agent, dc);
+            bridge.apply_changes(
+                Some(agent),
+                Some(crate::net::endpoint::Locality::new("agones", "", "")),
+                Some(dc.icao_code),
+                cluster::EndpointSet::new([gameserver("203.0.113.1:7777")].into()),
+            );
+        }
+        db.try_recv()
+            .expect("the agent's gameservers should have reached the database");
+
+        relay.client_disconnected(agent);
+
+        let statements = db
+            .try_recv()
+            .expect("the disconnect should have reached the database");
+        let addressed = statements.iter().any(|statement| {
+            let corrosion::api::Statement::WithParams(_, params) = statement else {
+                return false;
+            };
+            params.iter().any(|param| {
+                matches!(param, corrosion::api::SqliteParam::Text(text) if *text == agent.to_string())
+            })
+        });
+        assert!(
+            addressed,
+            "nothing the disconnect sent names {agent}: {statements:#?}"
+        );
+
+        assert!(
+            relay
+                .dyn_cfg
+                .datacenters()
+                .unwrap()
+                .read()
+                .get(&agent)
+                .is_none()
+        );
+        // Routable until the reaper takes them
+        assert_eq!(
+            relay.dyn_cfg.clusters().unwrap().read().num_of_endpoints(),
+            1
+        );
+    }
+
+    /// Phoenix retiring a datacenter leaves the relay without an ICAO for the
+    /// agent behind it, which is still connected and still feeding gameservers
+    #[test]
+    fn gameservers_reach_the_database_without_a_known_datacenter() {
+        let (relay, mut db) = relay_with_db();
+
+        // No datacenter is registered for the agent
+        let agent = agent();
+        let locality = crate::net::endpoint::Locality::new("agones", "", "");
+        let (kept, retired) = (
+            gameserver("203.0.113.1:7777"),
+            gameserver("203.0.113.2:7777"),
+        );
+
+        {
+            let mut bridge = corro::Bridge::new(&relay);
+            bridge.apply_changes(
+                Some(agent),
+                Some(locality.clone()),
+                None,
+                cluster::EndpointSet::new([kept.clone(), retired].into()),
+            );
+        }
+        db.try_recv()
+            .expect("an unknown datacenter withheld the gameservers");
+
+        {
+            let mut bridge = corro::Bridge::new(&relay);
+            bridge.apply_changes(
+                Some(agent),
+                Some(locality),
+                None,
+                cluster::EndpointSet::new([kept].into()),
+            );
+        }
+        db.try_recv()
+            .expect("an unknown datacenter withheld the gameserver that went away");
+    }
+
+    /// An agent registers its datacenter before it has anything to contribute
+    #[test]
+    fn a_datacenter_reaches_the_database_before_any_gameservers() {
+        let (relay, mut db) = relay_with_db();
+
+        corro::Bridge::new(&relay).insert_dc(agent(), datacenter());
+
+        db.try_recv()
+            .expect("a datacenter with no gameservers never reached the database");
     }
 }
