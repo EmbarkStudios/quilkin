@@ -77,6 +77,47 @@ impl Default for XdpConfig<'_> {
     }
 }
 
+fn frame_bytes(frame_size: xdp::umem::FrameSize) -> u64 {
+    match frame_size {
+        xdp::umem::FrameSize::TwoK => 2 * 1024,
+        xdp::umem::FrameSize::FourK => 4 * 1024,
+    }
+}
+
+/// A driver rejects a frame size it can't bind zero copy with `EINVAL` (eg
+/// `ena` below the page size); other errors aren't worth a larger retry.
+fn is_frame_size_rejected(err: &quilkin_xdp::BindError) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(err) = source {
+        if let Some(io) = err.downcast_ref::<std::io::Error>() {
+            return io.raw_os_error() == Some(libc::EINVAL);
+        }
+        source = err.source();
+    }
+    false
+}
+
+/// Live RX queue count from sysfs (one `rx-N` dir per queue).
+fn sysfs_rx_queue_count(name: &NicName) -> Option<u32> {
+    let dir = std::fs::read_dir(format!("/sys/class/net/{}/queues", name.as_str()?)).ok()?;
+    let count = dir
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("rx-"))
+        .count();
+    (count > 0).then_some(count as u32)
+}
+
+/// Queues to bind a socket to. Drivers that only report combined channels
+/// (eg `ena`) have an ethtool rx count of 0, so fall back to sysfs.
+fn usable_queue_count(name: &NicName, queues: &xdp::nic::Queues) -> u32 {
+    let count = queues.rx_count();
+    if count > 0 || !queues.combined() {
+        return count;
+    }
+
+    sysfs_rx_queue_count(name).unwrap_or(0)
+}
+
 pub struct XdpWorkers {
     ebpf_prog: quilkin_xdp::EbpfProgram,
     workers: Vec<quilkin_xdp::XdpWorker>,
@@ -111,6 +152,8 @@ pub enum XdpSetupError {
     AddressQuery(NicName, #[source] std::io::Error),
     #[error("`XDP_ZEROCOPY` is unavailable for {0}")]
     ZeroCopyUnavailable(NicName),
+    #[error("{0} reports no queues XDP could bind to")]
+    NoQueues(NicName),
     #[error("`XDP_TXMD_FLAGS_TIMESTAMP` is unavailable for {0}")]
     TxChecksumUnavailable(NicName),
     #[error(
@@ -175,24 +218,25 @@ fn next_queue_count_to_try(current: u32) -> Option<u32> {
     (half >= 1).then_some(half)
 }
 
-/// Loads and attaches `ebpf_prog` to `nic`, starting at `initial_channels`'
-/// current queue count and only shrinking it reactively on an attach failure
-/// — NICs that don't need it are never touched. Returns the link and the
-/// queue count XDP ended up using.
+/// Loads and attaches `ebpf_prog` to `nic`. Starts at `queue_count`, halving it
+/// only when an attach is rejected, so NICs that accept the full count keep it.
+/// Returns the link and the queue count that attached.
 fn attach_xdp_program(
     ebpf_prog: &mut quilkin_xdp::EbpfProgram,
     nic: NicIndex,
     queues: &mut quilkin_xdp::xdp::nic::Queues,
-) -> Result<quilkin_xdp::aya::programs::xdp::XdpLinkId, quilkin_xdp::aya::programs::ProgramError> {
+    mut queue_count: u32,
+) -> Result<
+    (quilkin_xdp::aya::programs::xdp::XdpLinkId, u32),
+    quilkin_xdp::aya::programs::ProgramError,
+> {
     ebpf_prog.load_into_kernel()?;
 
     let mode = quilkin_xdp::aya::programs::xdp::XdpMode::default();
-    // We've already synchronized the tx and rx counts if needed before this function
-    let mut queue_count = queues.rx_count();
 
     loop {
         match ebpf_prog.attach(nic, mode) {
-            Ok(link) => return Ok(link),
+            Ok(link) => return Ok((link, queue_count)),
             Err(error) => {
                 let reduced = queue_count / 2;
                 if reduced < 1 {
@@ -299,10 +343,6 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         })
         .map_err(|err| XdpSetupError::AddressQuery(name, err))?;
 
-    // We don't support unaligned chunks, so this size can only be 2k or 4k,
-    // and we only need 2k since we only care about non-fragmented UDP packets
-    const PACKET_SIZE: u64 = 2 * 1024;
-
     // It's extremely unlikely these number will ever differ, but if they do we take the minimum
     let rx_count = device_caps.queues.rx_count();
     let tx_count = device_caps.queues.tx_count();
@@ -327,33 +367,43 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         }
     }
 
+    let queue_count = usable_queue_count(&name, &device_caps.queues);
+    if queue_count == 0 {
+        tracing::error!(?device_caps, nic = ?nic, "no queues to bind XDP sockets to");
+        return Err(XdpSetupError::NoQueues(name));
+    }
+    tracing::info!(nic = ?nic, queue_count, combined = device_caps.queues.combined(), "XDP queues");
+
     let mut ebpf_prog = quilkin_xdp::EbpfProgram::load(config.external_port, config.qcmp_port)?;
 
     // Attach before binding: some drivers (eg gve) need XDP already enabled
     // before a socket can bind a queue with `XDP_ZEROCOPY`.
-    let xdp_link = attach_xdp_program(&mut ebpf_prog, nic, &mut device_caps.queues)?;
+    let (xdp_link, queue_count) =
+        attach_xdp_program(&mut ebpf_prog, nic, &mut device_caps.queues, queue_count)?;
 
     // In GCP, and possibly (probably?) other virtualized environments, the NIC will report the full theoretical speed
     // even if in reality the amount of bandwidth will be shared among multiple tenants, maybe even other instances of
     // this proxy, so rather than try to account for the amount of variation between clouds/virtualized/physical capabilities,
     // we just require the operator to specify the number of packets they want to support
 
-    let umem_cfg = xdp::umem::UmemCfgBuilder {
-        frame_size: xdp::umem::FrameSize::TwoK,
-        // Provide enough headroom so that we can convert an ipv4 header to ipv6
-        // header without needing to copy any bytes. note this doesn't take into
-        // account if a filter adds or removes bytes from the beginning of the
-        // data payload
-        head_room: (xdp::packet::net_types::Ipv6Hdr::LEN - xdp::packet::net_types::Ipv4Hdr::LEN)
-            as u32,
-        frame_count: config.packets_per_queue,
-        // TODO: This should be done in the type system so we can avoid logic
-        // that doesn't change during the course of operation, but for now just
-        // do it at runtime
-        tx_checksum: device_caps.tx_metadata.checksum(),
-        ..Default::default()
-    }
-    .build()?;
+    let umem_cfg = |frame_size| {
+        xdp::umem::UmemCfgBuilder {
+            frame_size,
+            // Provide enough headroom so that we can convert an ipv4 header to ipv6
+            // header without needing to copy any bytes. note this doesn't take into
+            // account if a filter adds or removes bytes from the beginning of the
+            // data payload
+            head_room: (xdp::packet::net_types::Ipv6Hdr::LEN - xdp::packet::net_types::Ipv4Hdr::LEN)
+                as u32,
+            frame_count: config.packets_per_queue,
+            // TODO: This should be done in the type system so we can avoid logic
+            // that doesn't change during the course of operation, but for now just
+            // do it at runtime
+            tx_checksum: device_caps.tx_metadata.checksum(),
+            ..Default::default()
+        }
+        .build()
+    };
 
     let ring_size = config.packets_per_queue >> 2;
 
@@ -365,8 +415,32 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     }
     .build()?;
     let ring_heap = ring_cfg.heap_size();
-    let workers =
-        ebpf_prog.create_and_bind_sockets(nic, umem_cfg, &device_caps, ring_cfg, ring_size)?;
+
+    let mut bind = |frame_size| {
+        ebpf_prog.create_and_bind_sockets(
+            nic,
+            umem_cfg(frame_size)?,
+            &device_caps,
+            ring_cfg,
+            ring_size,
+            queue_count,
+        )
+    };
+
+    // Retry at 4K when a driver (eg ena) rejects a 2K zero-copy bind with EINVAL.
+    let (frame_size, workers) = match bind(xdp::umem::FrameSize::TwoK) {
+        Ok(workers) => (xdp::umem::FrameSize::TwoK, workers),
+        Err(error) if is_frame_size_rejected(&error) => {
+            tracing::warn!(%error, nic = ?nic, "2K bind rejected, retrying at 4K");
+            (
+                xdp::umem::FrameSize::FourK,
+                bind(xdp::umem::FrameSize::FourK)?,
+            )
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let packet_size = frame_bytes(frame_size);
+    tracing::info!(nic = ?nic, frame_size = packet_size, "UMEM frame size");
 
     // Report the amount of heap memory we're using specifically for XDP
     fn byte_units(b: u64) -> String {
@@ -387,7 +461,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
             // The amount of memory mapped for each of the rings shared between the kernel and userspace
             ring_heap as u64
             // The amount of memory mapped in each Umem
-            + config.packets_per_queue as u64 * PACKET_SIZE
+            + config.packets_per_queue as u64 * packet_size
             // The amount of memory allocated for the RX and TX slabs
             + ring_size as u64 * std::mem::size_of::<xdp::Packet>() as u64
         ) * workers.len() as u64,
@@ -782,5 +856,17 @@ mod tests {
     fn next_queue_count_stops_at_one() {
         assert_eq!(next_queue_count_to_try(1), None);
         assert_eq!(next_queue_count_to_try(0), None);
+    }
+}
+
+#[cfg(test)]
+mod frame_size_tests {
+    use super::frame_bytes;
+    use quilkin_xdp::xdp::umem::FrameSize;
+
+    #[test]
+    fn frame_bytes_match_their_sizes() {
+        assert_eq!(frame_bytes(FrameSize::TwoK), 2048);
+        assert_eq!(frame_bytes(FrameSize::FourK), 4096);
     }
 }

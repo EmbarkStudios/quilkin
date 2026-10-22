@@ -158,14 +158,13 @@ impl EbpfProgram {
         device_caps: &xdp::nic::NetdevCapabilities,
         ring_cfg: xdp::RingConfig,
         ring_len: u32,
+        queue_count: u32,
     ) -> Result<Vec<XdpWorker>, BindError> {
         use std::os::fd::AsRawFd as _;
 
         let mut xsk_map = aya::maps::XskMap::try_from(
             self.bpf.map_mut("XSK").expect("failed to retrieve XSK map"),
         )?;
-
-        let queue_count = device_caps.queues.rx_count();
 
         let mut entries = Vec::with_capacity(queue_count as _);
         for i in 0..queue_count {
