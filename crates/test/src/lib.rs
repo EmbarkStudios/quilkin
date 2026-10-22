@@ -66,6 +66,21 @@ pub fn install_crypto_provider() {
     });
 }
 
+/// Writes a client certificate for `named`, returning its cert and key paths.
+fn write_client_identity(
+    td: &std::path::Path,
+    pail: &str,
+    tls: &RelayTls,
+    named: &str,
+) -> (PathBuf, PathBuf) {
+    let (cert_pem, key_pem) = tls.pki.issue_client(named);
+    let cert = td.join(format!("{pail}-client.pem"));
+    let key = td.join(format!("{pail}-client-key.pem"));
+    std::fs::write(&cert, cert_pem).unwrap();
+    std::fs::write(&key, key_pem).unwrap();
+    (cert, key)
+}
+
 /// A CA and the server certificate it signed, for a relay serving TLS.
 ///
 /// The leaf is signed by a separate CA rather than being its own anchor:
@@ -74,6 +89,8 @@ pub struct TestPki {
     pub ca_pem: String,
     pub cert_pem: String,
     pub key_pem: String,
+    ca_params: rcgen::CertificateParams,
+    ca_key: rcgen::KeyPair,
 }
 
 impl TestPki {
@@ -107,7 +124,27 @@ impl TestPki {
             ca_pem: ca_cert.pem(),
             cert_pem: cert.pem(),
             key_pem: key.serialize_pem(),
+            ca_params,
+            ca_key,
         }
+    }
+
+    /// Issues a client certificate whose only DNS name is `name`.
+    ///
+    /// The relay checks that name against the identifier the peer claims over
+    /// xDS or mDS, so it has to be the pail's name.
+    pub fn issue_client(&self, name: &str) -> (String, String) {
+        use rcgen::{CertificateParams, DnType, ExtendedKeyUsagePurpose, Issuer, KeyPair};
+
+        let mut params = CertificateParams::new(vec![name.to_owned()]).unwrap();
+        params.distinguished_name.push(DnType::CommonName, name);
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+
+        let key = KeyPair::generate().unwrap();
+        let issuer = Issuer::from_params(&self.ca_params, &self.ca_key);
+        let cert = params.signed_by(&key, &issuer).unwrap();
+
+        (cert.pem(), key.serialize_pem())
     }
 }
 
@@ -171,6 +208,18 @@ pub struct RelayPailConfig {
     /// Serve xDS and mDS over TLS. Dependent pails verify it against the CA
     /// this generates, without having to be told about it.
     pub tls: bool,
+    /// Require a certificate from dependent pails and check the identifier
+    /// each one claims against it. Implies `tls`.
+    pub mtls: bool,
+}
+
+/// What a relay serving TLS publishes to the pails that depend on it.
+#[derive(Clone)]
+pub struct RelayTls {
+    pub ca_path: PathBuf,
+    pub pki: Arc<TestPki>,
+    /// The relay requires a client certificate naming the peer.
+    pub mutual: bool,
 }
 
 #[derive(Default)]
@@ -179,6 +228,11 @@ pub struct ProxyPailConfig {
     pub corrosion: bool,
     /// Verify the relay against a CA that did not sign its certificate.
     pub mismatched_tls_ca: bool,
+    /// Present a client certificate naming something other than this pail,
+    /// which is the identifier it claims over xDS.
+    pub client_cert_name: Option<&'static str>,
+    /// Present no client certificate, even to a relay that requires one.
+    pub no_client_cert: bool,
 }
 
 #[derive(Default)]
@@ -289,8 +343,8 @@ abort_task!(ServerPail);
 pub struct RelayPail {
     pub xds_port: u16,
     pub mds_port: u16,
-    /// Path to the CA that signed this relay's certificate, when it serves TLS.
-    pub tls_ca_path: Option<PathBuf>,
+    /// Set when this relay serves TLS.
+    pub tls: Option<RelayTls>,
     pub corrosion_port: Option<u16>,
     pub task: Option<JoinHandle>,
     pub provider_task: JoinSet,
@@ -461,12 +515,16 @@ impl Pail {
                 let (shutdown, shutdown_rx) = quilkin::signal::channel();
                 let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
 
-                let tls_ca_path = rpc.tls.then(|| {
+                let tls = (rpc.tls || rpc.mtls).then(|| {
                     install_crypto_provider();
                     let pki = TestPki::generate();
                     let ca_path = td.join(format!("{}-ca.pem", spc.name));
                     std::fs::write(&ca_path, &pki.ca_pem).unwrap();
-                    (ca_path, pki)
+                    RelayTls {
+                        ca_path,
+                        pki: Arc::new(pki),
+                        mutual: rpc.mtls,
+                    }
                 });
 
                 let providers = quilkin::Providers::default().fs().fs_path(path);
@@ -479,8 +537,14 @@ impl Pail {
                     .corrosion_port(0)
                     .testing();
 
-                if let Some((_, pki)) = &tls_ca_path {
-                    svc = svc.tls_pem(&pki.cert_pem, &pki.key_pem);
+                if let Some(tls) = &tls {
+                    svc = svc.tls_pem(&tls.pki.cert_pem, &tls.pki.key_pem);
+
+                    // The relay's own CA also signs the peers, so the same
+                    // bundle verifies both directions.
+                    if tls.mutual {
+                        svc = svc.tls_client_ca_path(&tls.ca_path);
+                    }
                 }
 
                 let config = crate::Config::new_rc(
@@ -507,7 +571,7 @@ impl Pail {
                 Self::Relay(RelayPail {
                     xds_port: ports.xds.expect("xds not spawned"),
                     mds_port: ports.mds.expect("mds not spawned"),
-                    tls_ca_path: tls_ca_path.map(|(path, _)| path),
+                    tls,
                     corrosion_port: ports.corrosion,
                     task: Some(task),
                     provider_task,
@@ -543,21 +607,16 @@ impl Pail {
                 let path = td.join(spc.name);
                 tc.write_to_file(&path);
 
-                let mut relay_ca = None;
+                let mut relay_tls = None;
                 let relay_servers = spc
                     .dependencies
                     .iter()
                     .filter_map(|dname| {
-                        let Pail::Relay(RelayPail {
-                            mds_port,
-                            tls_ca_path,
-                            ..
-                        }) = &pails[dname]
-                        else {
+                        let Pail::Relay(RelayPail { mds_port, tls, .. }) = &pails[dname] else {
                             return None;
                         };
-                        let scheme = if tls_ca_path.is_some() {
-                            relay_ca = tls_ca_path.clone();
+                        let scheme = if tls.is_some() {
+                            relay_tls = tls.clone();
                             "https"
                         } else {
                             "http"
@@ -580,9 +639,14 @@ impl Pail {
                     .fs_path(path)
                     .grpc_push_endpoints(relay_servers);
 
-                if let Some(ca) = relay_ca {
+                if let Some(tls) = relay_tls {
                     install_crypto_provider();
-                    providers = providers.grpc_push_tls_ca_path(ca);
+                    providers = providers.grpc_push_tls_ca_path(&tls.ca_path);
+
+                    if tls.mutual {
+                        let (cert, key) = write_client_identity(td, spc.name, &tls, spc.name);
+                        providers = providers.grpc_push_tls_identity_paths(cert, key);
+                    }
                 }
 
                 let corrosion_eps = spc
@@ -670,21 +734,16 @@ impl Pail {
                         .corrosion_endpoints(corrosion_eps)
                         .corrosion_mode(quilkin::providers::corrosion::CorrosionMode::Pull)
                 } else {
-                    let mut relay_ca = None;
+                    let mut relay_tls = None;
                     let management_servers: Vec<_> = spc
                         .dependencies
                         .iter()
                         .filter_map(|dname| {
-                            let Pail::Relay(RelayPail {
-                                xds_port,
-                                tls_ca_path,
-                                ..
-                            }) = &pails[dname]
-                            else {
+                            let Pail::Relay(RelayPail { xds_port, tls, .. }) = &pails[dname] else {
                                 return None;
                             };
-                            let scheme = if tls_ca_path.is_some() {
-                                relay_ca = tls_ca_path.clone();
+                            let scheme = if tls.is_some() {
+                                relay_tls = tls.clone();
                                 "https"
                             } else {
                                 "http"
@@ -700,7 +759,7 @@ impl Pail {
                     let mut providers =
                         quilkin::Providers::default().grpc_pull_endpoints(management_servers);
 
-                    if let Some(ca) = relay_ca {
+                    if let Some(tls) = relay_tls {
                         install_crypto_provider();
 
                         // A CA that signed nothing in this sandbox, for asserting
@@ -710,10 +769,18 @@ impl Pail {
                             std::fs::write(&path, TestPki::generate().ca_pem).unwrap();
                             path
                         } else {
-                            ca
+                            tls.ca_path.clone()
                         };
 
                         providers = providers.grpc_pull_tls_ca_path(ca);
+
+                        if tls.mutual && !ppc.no_client_cert {
+                            // Naming anything but the pail makes the identifier it
+                            // claims over xDS disagree with its certificate.
+                            let named = ppc.client_cert_name.unwrap_or(spc.name);
+                            let (cert, key) = write_client_identity(td, spc.name, &tls, named);
+                            providers = providers.grpc_pull_tls_identity_paths(cert, key);
+                        }
                     }
 
                     providers

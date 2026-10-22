@@ -78,13 +78,106 @@ fn get_external_remote_addr<T>(request: &tonic::Request<T>) -> Option<std::net::
 #[derive(Clone)]
 pub struct TlsIdentity {
     identity: tonic::transport::Identity,
+    client_ca: Option<tonic::transport::Certificate>,
+    client_auth_optional: bool,
 }
 
 impl TlsIdentity {
     pub fn from_raw(cert: &[u8], key: &[u8]) -> Self {
         Self {
             identity: tonic::transport::Identity::from_pem(cert, key),
+            client_ca: None,
+            client_auth_optional: false,
         }
+    }
+
+    /// Verifies client certificates against `ca`.
+    ///
+    /// `optional` still serves a client that offers no certificate; one that
+    /// does offer a certificate is verified either way.
+    pub fn verifying_clients(mut self, ca: &[u8], optional: bool) -> Self {
+        self.client_ca = Some(tonic::transport::Certificate::from_pem(ca));
+        self.client_auth_optional = optional;
+        self
+    }
+
+    /// Whether a peer has to present a certificate to be served at all, and so
+    /// whether the identity it claims can be checked against one.
+    pub fn requires_client_auth(&self) -> bool {
+        self.client_ca.is_some() && !self.client_auth_optional
+    }
+
+    fn into_server_config(self) -> tonic::transport::ServerTlsConfig {
+        let config = tonic::transport::ServerTlsConfig::new().identity(self.identity);
+
+        match self.client_ca {
+            Some(ca) => config
+                .client_ca_root(ca)
+                .client_auth_optional(self.client_auth_optional),
+            None => config,
+        }
+    }
+}
+
+/// What a peer's certificate says it is.
+///
+/// `None` when client certificates are not required, which leaves the
+/// identifier in the request self-asserted, as it is without them.
+#[derive(Clone, Debug, Default)]
+pub struct PeerIdentity(Option<Vec<String>>);
+
+impl PeerIdentity {
+    /// Reads the DNS names out of the peer's certificate chain.
+    fn from_request<T>(request: &tonic::Request<T>, verify: bool) -> Self {
+        if !verify {
+            return Self(None);
+        }
+
+        let mut names = Vec::new();
+
+        // Only the end entity certificate, which is what the peer proved it
+        // holds the key for. The rest of the chain is its issuers.
+        if let Some(leaf) = request.peer_certs().as_deref().and_then(|c| c.first())
+            && let Ok((_, leaf)) = x509_parser::parse_x509_certificate(leaf)
+            && let Ok(Some(san)) = leaf.subject_alternative_name()
+        {
+            names.extend(
+                san.value
+                    .general_names
+                    .iter()
+                    .filter_map(|name| match name {
+                        x509_parser::extensions::GeneralName::DNSName(name) => {
+                            Some((*name).to_owned())
+                        }
+                        _ => None,
+                    }),
+            );
+        }
+
+        Self(Some(names))
+    }
+
+    /// Checks the identifier a peer claims against its certificate.
+    ///
+    /// The identifier arrives in the request body, so without this a peer
+    /// holding any certificate the CA signed could claim to be any node.
+    fn verify(&self, claimed: &str) -> Result<(), tonic::Status> {
+        let Some(names) = &self.0 else {
+            return Ok(());
+        };
+
+        if names.iter().any(|name| name == claimed) {
+            return Ok(());
+        }
+
+        tracing::warn!(
+            %claimed,
+            certificate = ?names,
+            "rejecting a peer claiming an identifier its certificate is not valid for"
+        );
+        Err(tonic::Status::permission_denied(format!(
+            "identifier `{claimed}` is not a DNS name in the peer certificate"
+        )))
     }
 }
 
@@ -137,6 +230,9 @@ pub struct ControlPlane<C> {
     pub idle_request_interval: Duration,
     tx: tokio::sync::broadcast::Sender<&'static str>,
     pub shutdown: ShutdownSignal,
+    /// Set when the server requires client certificates, which is what makes
+    /// the identifier in a request checkable.
+    verify_peer_identity: bool,
 }
 
 impl<C> Clone for ControlPlane<C> {
@@ -146,6 +242,7 @@ impl<C> Clone for ControlPlane<C> {
             idle_request_interval: self.idle_request_interval,
             tx: self.tx.clone(),
             shutdown: self.shutdown.clone(),
+            verify_peer_identity: self.verify_peer_identity,
         }
     }
 }
@@ -163,6 +260,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
             idle_request_interval,
             tx,
             shutdown,
+            verify_peer_identity: false,
         }
     }
 
@@ -173,10 +271,12 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
     }
 
     pub fn management_server(
-        self,
+        mut self,
         listener: TcpListener,
         tls: Option<TlsIdentity>,
     ) -> eyre::Result<impl std::future::Future<Output = crate::Result<()>>> {
+        self.verify_peer_identity = tls.as_ref().is_some_and(TlsIdentity::requires_client_auth);
+
         let srx = self.shutdown.clone();
         tokio::spawn({
             let this = self.clone();
@@ -189,7 +289,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         let builder = Self::server_builder();
 
         let mut builder = if let Some(tls) = tls {
-            builder.tls_config(tonic::transport::ServerTlsConfig::new().identity(tls.identity))?
+            builder.tls_config(tls.into_server_config())?
         } else {
             builder
         };
@@ -204,10 +304,12 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
     }
 
     pub fn relay_server(
-        self,
+        mut self,
         listener: TcpListener,
         tls: Option<TlsIdentity>,
     ) -> eyre::Result<impl std::future::Future<Output = crate::Result<()>>> {
+        self.verify_peer_identity = tls.as_ref().is_some_and(TlsIdentity::requires_client_auth);
+
         let srx = self.shutdown.clone();
         tokio::spawn({
             let this = self.clone();
@@ -220,7 +322,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         let builder = Self::server_builder();
 
         let mut builder = if let Some(tls) = tls {
-            builder.tls_config(tonic::transport::ServerTlsConfig::new().identity(tls.identity))?
+            builder.tls_config(tls.into_server_config())?
         } else {
             builder
         };
@@ -250,6 +352,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
     pub async fn delta_aggregated_resources<S>(
         &self,
         mut streaming: S,
+        peer: PeerIdentity,
     ) -> Result<
         impl Stream<Item = Result<DeltaDiscoveryResponse, tonic::Status>> + Send + use<S, C>,
         tonic::Status,
@@ -272,6 +375,8 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
             tracing::error!("Node identifier was not found");
             return Err(tonic::Status::invalid_argument("Node identifier required"));
         };
+
+        peer.verify(&node_id)?;
 
         let mut rx = self.tx.subscribe();
         let id = self.config.identifier();
@@ -524,8 +629,10 @@ impl<C: crate::config::Configuration> AggregatedDiscoveryService for ControlPlan
         &self,
         request: tonic::Request<tonic::Streaming<DeltaDiscoveryRequest>>,
     ) -> Result<tonic::Response<Self::DeltaAggregatedResourcesStream>, tonic::Status> {
+        let peer = PeerIdentity::from_request(&request, self.verify_peer_identity);
+
         Ok(tonic::Response::new(Box::pin(
-            self.delta_aggregated_resources(request.into_inner())
+            self.delta_aggregated_resources(request.into_inner(), peer)
                 .in_current_span()
                 .await?,
         )))
@@ -558,6 +665,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
     ) -> Result<tonic::Response<Self::DeltaAggregatedResourcesStream>, tonic::Status> {
         let remote_addr = get_external_remote_addr(&responses)
             .ok_or_else(|| tonic::Status::invalid_argument("no remote address available"))?;
+        let peer = PeerIdentity::from_request(&responses, self.verify_peer_identity);
 
         tracing::info!("control plane discovery delta stream attempt");
         let mut responses = responses.into_inner();
@@ -580,6 +688,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
             .ok_or_else(|| tonic::Status::cancelled("received empty first response"))??;
 
         let (identifier, server_version) = handle_first_response(first_response)?;
+        peer.verify(&identifier)?;
 
         tracing::info!(identifier, "new control plane delta discovery stream");
         let config = self.config.clone();
@@ -693,6 +802,7 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
         requests: tonic::Request<tonic::Streaming<DeltaDiscoveryRequest>>,
     ) -> Result<tonic::Response<Self::SubscribeDeltaResourcesStream>, tonic::Status> {
         tracing::debug!("starting delta stream");
+        let peer = PeerIdentity::from_request(&requests, self.verify_peer_identity);
         let mut requests = requests.into_inner();
         let message = requests.next().await.ok_or_else(|| {
             tracing::error!("No message found");
@@ -705,6 +815,8 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
             tracing::error!("Node identifier was not found");
             return Err(tonic::Status::invalid_argument("Node identifier required"));
         };
+
+        peer.verify(&node_id)?;
 
         let mut rx = self.tx.subscribe();
         let id = self.config.identifier();

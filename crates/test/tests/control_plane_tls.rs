@@ -88,3 +88,123 @@ trace_test!(tls_relay_rejects_an_unknown_ca, {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
 });
+
+// A relay requiring client certificates still carries configuration, with the
+// agent and proxy each presenting one that names it.
+trace_test!(mtls_relay_carries_configuration, {
+    let mut sc = qt::sandbox_config!();
+
+    sc.push("server", ServerPailConfig::default(), &[]);
+    sc.push(
+        "relay",
+        RelayPailConfig {
+            mtls: true,
+            ..Default::default()
+        },
+        &[],
+    );
+    sc.push(
+        "agent",
+        AgentPailConfig {
+            endpoints: vec![("server", &[])],
+            ..Default::default()
+        },
+        &["server", "relay"],
+    );
+    sc.push("proxy", ProxyPailConfig::default(), &["relay"]);
+
+    let mut sandbox = sc.spinup().await;
+
+    let (mut server_rx, server_addr) = sandbox.server("server");
+    let (proxy_address, _) = sandbox.proxy("proxy");
+    let mut agent_config = sandbox.config_file("agent");
+
+    sandbox.block_until_ready("proxy").await;
+
+    agent_config.update(|config| {
+        config
+            .clusters
+            .insert_default([Endpoint::new(server_addr.into())].into());
+    });
+
+    let client = sandbox.client();
+    sandbox
+        .block_until_packet_gets_through(b"hello", "hello", &client, &proxy_address, &mut server_rx)
+        .await;
+});
+
+// A peer holding a certificate the CA signed can still only claim the
+// identifier that certificate names. Without this, any issued certificate
+// would let a peer impersonate any node.
+trace_test!(mtls_relay_rejects_a_mismatched_identifier, {
+    let mut sc = qt::sandbox_config!();
+
+    sc.push("server", ServerPailConfig::default(), &[]);
+    sc.push(
+        "relay",
+        RelayPailConfig {
+            mtls: true,
+            ..Default::default()
+        },
+        &[],
+    );
+    sc.push(
+        "proxy",
+        ProxyPailConfig {
+            config: Some(TestConfig::new()),
+            client_cert_name: Some("somebody-else"),
+            ..Default::default()
+        },
+        &["relay"],
+    );
+
+    let sandbox = sc.spinup().await;
+    let proxy = &sandbox.pails["proxy"];
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        assert!(
+            !proxy.is_healthy(),
+            "the proxy became ready while claiming an identifier its certificate does not name"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+});
+
+// A relay requiring certificates serves no one who offers none.
+trace_test!(mtls_relay_rejects_a_peer_without_a_certificate, {
+    let mut sc = qt::sandbox_config!();
+
+    sc.push("server", ServerPailConfig::default(), &[]);
+    sc.push(
+        "relay",
+        RelayPailConfig {
+            // TLS without `mtls`, so the proxy inherits the CA but presents
+            // nothing, while the relay is told to require a certificate.
+            mtls: true,
+            ..Default::default()
+        },
+        &[],
+    );
+    sc.push(
+        "proxy",
+        ProxyPailConfig {
+            config: Some(TestConfig::new()),
+            no_client_cert: true,
+            ..Default::default()
+        },
+        &["relay"],
+    );
+
+    let sandbox = sc.spinup().await;
+    let proxy = &sandbox.pails["proxy"];
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        assert!(
+            !proxy.is_healthy(),
+            "the proxy became ready without presenting a certificate"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+});

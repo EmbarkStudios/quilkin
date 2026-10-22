@@ -47,9 +47,13 @@ const MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
 const XDS_ENDPOINTS_FLAG: &str = "provider.xds.endpoints";
 const XDS_TLS_CA_FLAG: &str = "provider.xds.tls.ca-path";
 const XDS_TLS_SERVER_NAME_FLAG: &str = "provider.xds.tls.server-name";
+const XDS_TLS_CERT_FLAG: &str = "provider.xds.tls.cert-path";
+const XDS_TLS_KEY_FLAG: &str = "provider.xds.tls.key-path";
 const MDS_ENDPOINTS_FLAG: &str = "provider.mds.endpoints";
 const MDS_TLS_CA_FLAG: &str = "provider.mds.tls.ca-path";
 const MDS_TLS_SERVER_NAME_FLAG: &str = "provider.mds.tls.server-name";
+const MDS_TLS_CERT_FLAG: &str = "provider.mds.tls.cert-path";
+const MDS_TLS_KEY_FLAG: &str = "provider.mds.tls.key-path";
 
 /// The flags one provider's client TLS is configured from.
 #[derive(Clone, Copy)]
@@ -57,19 +61,34 @@ struct TlsFlags {
     endpoints: &'static str,
     ca_path: &'static str,
     server_name: &'static str,
+    cert_path: &'static str,
+    key_path: &'static str,
 }
 
 const XDS_TLS_FLAGS: TlsFlags = TlsFlags {
     endpoints: XDS_ENDPOINTS_FLAG,
     ca_path: XDS_TLS_CA_FLAG,
     server_name: XDS_TLS_SERVER_NAME_FLAG,
+    cert_path: XDS_TLS_CERT_FLAG,
+    key_path: XDS_TLS_KEY_FLAG,
 };
 
 const MDS_TLS_FLAGS: TlsFlags = TlsFlags {
     endpoints: MDS_ENDPOINTS_FLAG,
     ca_path: MDS_TLS_CA_FLAG,
     server_name: MDS_TLS_SERVER_NAME_FLAG,
+    cert_path: MDS_TLS_CERT_FLAG,
+    key_path: MDS_TLS_KEY_FLAG,
 };
+
+/// What one provider was told to present and verify.
+#[derive(Clone, Copy, Default)]
+struct ClientTls<'a> {
+    ca_path: Option<&'a std::path::Path>,
+    server_name: Option<&'a str>,
+    cert_path: Option<&'a std::path::Path>,
+    key_path: Option<&'a std::path::Path>,
+}
 
 /// Attaches the trust an `https` endpoint is verified against.
 ///
@@ -78,11 +97,27 @@ const MDS_TLS_FLAGS: TlsFlags = TlsFlags {
 /// than left to the connection itself.
 fn with_client_tls(
     endpoints: Vec<tonic::transport::Endpoint>,
-    ca_path: Option<&std::path::Path>,
-    server_name: Option<&str>,
+    client: ClientTls<'_>,
     flags: TlsFlags,
 ) -> crate::Result<Vec<tonic::transport::Endpoint>> {
     use eyre::WrapErr as _;
+
+    let ClientTls {
+        ca_path,
+        server_name,
+        cert_path,
+        key_path,
+    } = client;
+
+    let identity = match (cert_path, key_path) {
+        (None, None) => None,
+        (Some(cert), Some(key)) => Some((cert, key)),
+        _ => eyre::bail!(
+            "--{} and --{} have to be supplied together",
+            flags.cert_path,
+            flags.key_path
+        ),
+    };
 
     let secure = endpoints
         .iter()
@@ -103,6 +138,13 @@ fn with_client_tls(
                 flags.endpoints
             );
         }
+        if identity.is_some() {
+            eyre::bail!(
+                "--{} is only presented over TLS, so --{} is required as well",
+                flags.cert_path,
+                flags.ca_path
+            );
+        }
         return Ok(endpoints);
     };
 
@@ -120,6 +162,14 @@ fn with_client_tls(
 
     if let Some(server_name) = server_name {
         tls = tls.domain_name(server_name);
+    }
+
+    if let Some((cert_path, key_path)) = identity {
+        let cert =
+            crate::tls::read_pem_file(cert_path, flags.cert_path, crate::tls::validate_pem_cert)?;
+        let key =
+            crate::tls::read_pem_file(key_path, flags.key_path, crate::tls::validate_pem_key)?;
+        tls = tls.identity(tonic::transport::Identity::from_pem(cert, key));
     }
 
     endpoints
@@ -259,6 +309,20 @@ pub struct Providers {
         hide = true
     )]
     mds_tls_server_name: Option<String>,
+    /// Path to a PEM encoded certificate presented to the server when it asks for one.
+    #[clap(
+        long = MDS_TLS_CERT_FLAG,
+        env = "QUILKIN_PROVIDERS_MDS_TLS_CERT_PATH",
+        hide = true
+    )]
+    mds_tls_cert_path: Option<std::path::PathBuf>,
+    /// Path to the private key for the presented certificate.
+    #[clap(
+        long = MDS_TLS_KEY_FLAG,
+        env = "QUILKIN_PROVIDERS_MDS_TLS_KEY_PATH",
+        hide = true
+    )]
+    mds_tls_key_path: Option<std::path::PathBuf>,
     /// The remote URL or local file path to retrieve the Maxmind database.
     #[clap(
         long = "provider.mmdb.endpoints",
@@ -303,6 +367,20 @@ pub struct Providers {
         hide = true
     )]
     xds_tls_server_name: Option<String>,
+    /// Path to a PEM encoded certificate presented to the server when it asks for one.
+    #[clap(
+        long = XDS_TLS_CERT_FLAG,
+        env = "QUILKIN_PROVIDERS_XDS_TLS_CERT_PATH",
+        hide = true
+    )]
+    xds_tls_cert_path: Option<std::path::PathBuf>,
+    /// Path to the private key for the presented certificate.
+    #[clap(
+        long = XDS_TLS_KEY_FLAG,
+        env = "QUILKIN_PROVIDERS_XDS_TLS_KEY_PATH",
+        hide = true
+    )]
+    xds_tls_key_path: Option<std::path::PathBuf>,
     /// One or more `quilkin relay` endpoints to push or pull configuration changes to/from
     #[clap(
         long = "provider.corrosion.endpoints",
@@ -440,6 +518,26 @@ impl Providers {
 
     pub fn grpc_pull_tls_server_name(mut self, name: impl Into<String>) -> Self {
         self.xds_tls_server_name = Some(name.into());
+        self
+    }
+
+    pub fn grpc_push_tls_identity_paths(
+        mut self,
+        cert: impl Into<std::path::PathBuf>,
+        key: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        self.mds_tls_cert_path = Some(cert.into());
+        self.mds_tls_key_path = Some(key.into());
+        self
+    }
+
+    pub fn grpc_pull_tls_identity_paths(
+        mut self,
+        cert: impl Into<std::path::PathBuf>,
+        key: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        self.xds_tls_cert_path = Some(cert.into());
+        self.xds_tls_key_path = Some(key.into());
         self
     }
 
@@ -911,16 +1009,24 @@ impl Providers {
         let relay = std::mem::take(&mut self.relay);
         self.relay = with_client_tls(
             relay,
-            self.mds_tls_ca_path.as_deref(),
-            self.mds_tls_server_name.as_deref(),
+            ClientTls {
+                ca_path: self.mds_tls_ca_path.as_deref(),
+                server_name: self.mds_tls_server_name.as_deref(),
+                cert_path: self.mds_tls_cert_path.as_deref(),
+                key_path: self.mds_tls_key_path.as_deref(),
+            },
             MDS_TLS_FLAGS,
         )?;
 
         let xds_endpoints = std::mem::take(&mut self.xds_endpoints);
         self.xds_endpoints = with_client_tls(
             xds_endpoints,
-            self.xds_tls_ca_path.as_deref(),
-            self.xds_tls_server_name.as_deref(),
+            ClientTls {
+                ca_path: self.xds_tls_ca_path.as_deref(),
+                server_name: self.xds_tls_server_name.as_deref(),
+                cert_path: self.xds_tls_cert_path.as_deref(),
+                key_path: self.xds_tls_key_path.as_deref(),
+            },
             XDS_TLS_FLAGS,
         )?;
 
@@ -1108,22 +1214,56 @@ mod tests {
             )]
         };
         let ca = std::path::Path::new("ca.pem");
-        let rejected = |endpoints, ca, name| {
-            with_client_tls(endpoints, ca, name, XDS_TLS_FLAGS)
+        let rejected = |endpoints, client| {
+            with_client_tls(endpoints, client, XDS_TLS_FLAGS)
                 .expect_err("an unusable combination must not resolve")
                 .to_string()
         };
 
-        let error = rejected(secure(), None, None);
+        let error = rejected(secure(), ClientTls::default());
         assert!(error.contains(XDS_TLS_CA_FLAG), "{error}");
 
-        let error = rejected(plain(), Some(ca), None);
+        let error = rejected(
+            plain(),
+            ClientTls {
+                ca_path: Some(ca),
+                ..Default::default()
+            },
+        );
         assert!(error.contains("no endpoint"), "{error}");
 
-        let error = rejected(plain(), None, Some("relay"));
+        let error = rejected(
+            plain(),
+            ClientTls {
+                server_name: Some("relay"),
+                ..Default::default()
+            },
+        );
         assert!(error.contains(XDS_TLS_SERVER_NAME_FLAG), "{error}");
 
+        // A client certificate is only ever presented over TLS.
+        let error = rejected(
+            plain(),
+            ClientTls {
+                cert_path: Some(ca),
+                key_path: Some(ca),
+                ..Default::default()
+            },
+        );
+        assert!(error.contains(XDS_TLS_CA_FLAG), "{error}");
+
+        // Half an identity is a certificate that would never be presented.
+        let error = rejected(
+            secure(),
+            ClientTls {
+                ca_path: Some(ca),
+                cert_path: Some(ca),
+                ..Default::default()
+            },
+        );
+        assert!(error.contains(XDS_TLS_KEY_FLAG), "{error}");
+
         // Plain endpoints and no TLS flags is the untouched default.
-        assert!(with_client_tls(plain(), None, None, XDS_TLS_FLAGS).is_ok());
+        assert!(with_client_tls(plain(), ClientTls::default(), XDS_TLS_FLAGS).is_ok());
     }
 }

@@ -4181,6 +4181,7 @@ dependencies = [
  "tryhard",
  "url",
  "uuid",
+ "x509-parser",
 ]
 
 [[package]]
