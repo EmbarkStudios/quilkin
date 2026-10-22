@@ -14,6 +14,65 @@ use crate::{
 /// since renamed.
 pub const ALLOW_EMPTY_PACKETS_FLAG: &str = "service.udp.allow-empty-packets";
 
+// The long names of the TLS flags, without the dashes. Shared so the error
+// that tells operators which pair to supply can't name a flag that was since
+// renamed.
+const TLS_CERT_FLAG: &str = "service.tls.cert";
+const TLS_KEY_FLAG: &str = "service.tls.key";
+const TLS_CERT_PATH_FLAG: &str = "service.tls.cert-path";
+const TLS_KEY_PATH_FLAG: &str = "service.tls.key-path";
+
+/// Checks that `pem` holds a certificate.
+fn validate_pem_cert(pem: &[u8]) -> Result<(), String> {
+    use rustls::pki_types::{CertificateDer, pem::PemObject as _};
+
+    CertificateDer::from_pem_slice(pem)
+        .map(drop)
+        .map_err(|error| format!("not a PEM encoded certificate: {error}"))
+}
+
+/// Checks that `pem` holds a private key.
+fn validate_pem_key(pem: &[u8]) -> Result<(), String> {
+    use rustls::pki_types::{PrivateKeyDer, pem::PemObject as _};
+
+    PrivateKeyDer::from_pem_slice(pem)
+        .map(drop)
+        .map_err(|error| format!("not a PEM encoded private key: {error}"))
+}
+
+/// Checks that `raw` holds a PEM certificate, returning it unchanged.
+///
+/// Parsing here rather than at the point of use means clap reports the failure
+/// against the flag the value came from.
+fn parse_pem_cert(raw: &str) -> Result<String, String> {
+    validate_pem_cert(raw.as_bytes()).map(|()| raw.into())
+}
+
+/// Checks that `raw` holds a PEM private key, returning it unchanged.
+fn parse_pem_key(raw: &str) -> Result<String, String> {
+    validate_pem_key(raw.as_bytes()).map(|()| raw.into())
+}
+
+/// Reads a PEM file, naming the flag it came from when it cannot be used.
+///
+/// The path flags are checked here rather than in a clap value parser, which
+/// sees the path and not the content behind it.
+fn read_pem_file(
+    path: &std::path::Path,
+    flag: &str,
+    validate: fn(&[u8]) -> Result<(), String>,
+) -> crate::Result<Vec<u8>> {
+    use eyre::WrapErr as _;
+
+    let pem = std::fs::read(path)
+        .with_context(|| format!("--{flag}: failed to read {}", path.display()))?;
+
+    match validate(&pem) {
+        Ok(()) => Ok(pem),
+        Err(error) => Err(eyre::eyre!("--{flag}: {}: {error}", path.display())),
+    }
+}
+
 #[derive(Debug, clap::Parser)]
 #[command(next_help_heading = "Service Options")]
 pub struct Service {
@@ -149,36 +208,41 @@ pub struct Service {
     )]
     grpc_enabled: bool,
     /// A PEM encoded certificate, if supplied, applies to the mds and xds service(s)
+    ///
+    /// Pair with `--service.tls.key`. The path pair is the alternative; the two
+    /// pairs cannot be mixed.
     #[clap(
-        long = "service.tls.cert",
+        long = TLS_CERT_FLAG,
         env = "QUILKIN_SERVICE_TLS_CERT",
-        requires("tls_key"),
+        value_parser = parse_pem_cert,
+        // PEM opens with `-----BEGIN`, which clap reads as a flag otherwise.
+        allow_hyphen_values = true,
         hide = true
     )]
-    tls_cert: Option<Vec<u8>>,
+    tls_cert: Option<String>,
     /// The private key for the cert
     #[clap(
-        long = "service.tls.key",
+        long = TLS_KEY_FLAG,
         env = "QUILKIN_SERVICE_TLS_KEY",
-        requires("tls_cert"),
+        value_parser = parse_pem_key,
+        // PEM opens with `-----BEGIN`, which clap reads as a flag otherwise.
+        allow_hyphen_values = true,
         hide = true
     )]
-    tls_key: Option<Vec<u8>>,
+    tls_key: Option<String>,
     /// Path to a PEM encoded certificate, if supplied, applies to the mds and xds service(s)
+    ///
+    /// Pair with `--service.tls.key-path`.
     #[clap(
-        long = "service.tls.cert-path",
+        long = TLS_CERT_PATH_FLAG,
         env = "QUILKIN_SERVICE_TLS_CERT_PATH",
-        requires("tls_key_path"),
-        conflicts_with("tls_cert"),
         hide = true
     )]
     tls_cert_path: Option<std::path::PathBuf>,
     /// Path to the private key for the cert
     #[clap(
-        long = "service.tls.key-path",
+        long = TLS_KEY_PATH_FLAG,
         env = "QUILKIN_SERVICE_TLS_KEY_PATH",
-        requires("tls_cert_path"),
-        conflicts_with("tls_key"),
         hide = true
     )]
     tls_key_path: Option<std::path::PathBuf>,
@@ -583,17 +647,51 @@ impl Service {
         self
     }
 
+    /// The TLS flags that were supplied, for the half-configured error.
+    fn tls_flags_supplied(&self) -> String {
+        [
+            (self.tls_cert.is_some(), TLS_CERT_FLAG),
+            (self.tls_key.is_some(), TLS_KEY_FLAG),
+            (self.tls_cert_path.is_some(), TLS_CERT_PATH_FLAG),
+            (self.tls_key_path.is_some(), TLS_KEY_PATH_FLAG),
+        ]
+        .into_iter()
+        .filter_map(|(supplied, flag)| supplied.then_some(format!("--{flag}")))
+        .collect::<Vec<_>>()
+        .join(" and ")
+    }
+
+    /// Resolves the certificate and key for the mds and xds services.
+    ///
+    /// Cert and key must come from the same pair. Any other combination is an
+    /// error rather than `None`, since falling through to `None` serves the
+    /// control plane in plaintext without saying so.
     fn tls_identity(&self) -> crate::Result<Option<quilkin_xds::server::TlsIdentity>> {
-        if let Some((cert, key)) = self.tls_cert.as_ref().zip(self.tls_key.as_ref()) {
-            Ok(Some(quilkin_xds::server::TlsIdentity::from_raw(cert, key)))
-        } else if let Some((certp, keyp)) =
-            self.tls_cert_path.as_ref().zip(self.tls_key_path.as_ref())
-        {
-            Ok(Some(quilkin_xds::server::TlsIdentity::from_files(
-                certp, keyp,
-            )?))
-        } else {
-            Ok(None)
+        match (
+            self.tls_cert.as_ref(),
+            self.tls_key.as_ref(),
+            self.tls_cert_path.as_ref(),
+            self.tls_key_path.as_ref(),
+        ) {
+            (None, None, None, None) => Ok(None),
+            (Some(cert), Some(key), None, None) => Ok(Some(
+                quilkin_xds::server::TlsIdentity::from_raw(cert.as_bytes(), key.as_bytes()),
+            )),
+            (None, None, Some(cert), Some(key)) => {
+                let cert = read_pem_file(cert, TLS_CERT_PATH_FLAG, validate_pem_cert)?;
+                let key = read_pem_file(key, TLS_KEY_PATH_FLAG, validate_pem_key)?;
+                Ok(Some(quilkin_xds::server::TlsIdentity::from_raw(
+                    &cert, &key,
+                )))
+            }
+            _ => {
+                let supplied = self.tls_flags_supplied();
+                Err(eyre::eyre!(
+                    "TLS is half configured: supplied {supplied}. Supply either \
+                     --{TLS_CERT_FLAG} with --{TLS_KEY_FLAG}, or --{TLS_CERT_PATH_FLAG} \
+                     with --{TLS_KEY_PATH_FLAG}"
+                ))
+            }
         }
     }
 
@@ -618,15 +716,20 @@ impl Service {
             corrosion: None,
         };
 
+        // Resolved before anything binds, so a half-configured pair fails while
+        // no listener is up.
+        let tls = self.tls_identity()?;
+
         {
             let shutdown = &mut shutdown;
-            self.publish_mds(config, shutdown, &mut ports).await?;
+            self.publish_mds(config, shutdown, &mut ports, tls.clone())
+                .await?;
             self.publish_phoenix(config, shutdown, &mut ports)?;
             // We need to call this before qcmp since if we use XDP we handle QCMP
             // internally without a separate task
             self.publish_udp(config, shutdown, &mut ports)?;
             self.publish_qcmp(config, shutdown, &mut ports)?;
-            self.publish_xds(config, shutdown, &mut ports)?;
+            self.publish_xds(config, shutdown, &mut ports, tls)?;
         }
 
         Ok((
@@ -765,6 +868,7 @@ impl Service {
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
         ports: &mut ServicePorts,
+        tls: Option<quilkin_xds::server::TlsIdentity>,
     ) -> crate::Result<()> {
         if !self.xds_enabled && !self.grpc_enabled {
             return Ok(());
@@ -781,7 +885,7 @@ impl Service {
             crate::components::admin::IDLE_REQUEST_INTERVAL,
             srx,
         )
-        .management_server(listener, self.tls_identity()?)?;
+        .management_server(listener, tls)?;
 
         tokio::spawn(async move {
             let res = xds_server.await;
@@ -797,6 +901,7 @@ impl Service {
         config: &Arc<Config>,
         shutdown: &mut ShutdownHandler,
         ports: &mut ServicePorts,
+        tls: Option<quilkin_xds::server::TlsIdentity>,
     ) -> crate::Result<()> {
         if !self.mds_enabled {
             return Ok(());
@@ -823,7 +928,7 @@ impl Service {
             crate::components::admin::IDLE_REQUEST_INTERVAL,
             srx,
         )
-        .relay_server(listener, self.tls_identity()?)?;
+        .relay_server(listener, tls)?;
 
         tokio::spawn(async move {
             let res = mds_server.await;
@@ -1745,7 +1850,26 @@ impl Default for XdpOptions {
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser as _;
     use quilkin_types::Capabilities;
+
+    const CERT: &str = "-----BEGIN CERTIFICATE-----\nMIIBhDCCASugAwIBAgIULoRNveo8xDO1HQfk9DRlHBbwTtIwCgYIKoZIzj0EAwIw\nFzEVMBMGA1UEAwwMcXVpbGtpbi10ZXN0MCAXDTI2MTAyMjExMTQ1M1oYDzIxMjYw\nOTI4MTExNDUzWjAXMRUwEwYDVQQDDAxxdWlsa2luLXRlc3QwWTATBgcqhkjOPQIB\nBggqhkjOPQMBBwNCAAQMLifsWPZiGTxAZhjvOGMNd5aL8Y3tbHPx1QO7YrHE1oMh\n9J10tavPtNa59o36QsAUAxwAgRdnT11pw4Uy5Fmlo1MwUTAdBgNVHQ4EFgQUxTfr\nVa26UI40YQAm4FsC7FDmDUcwHwYDVR0jBBgwFoAUxTfrVa26UI40YQAm4FsC7FDm\nDUcwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNHADBEAiAqP9ui6Pxshhs/\nBMiScja+O7iYBSjRcfEQSF67NyS5lQIgTpThxbsbipMYgfExzcKyzHTxpbsUgQ0d\nebzBBXaf1p0=\n-----END CERTIFICATE-----\n";
+    const KEY: &str = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgZmCZmw4saRvJeIj7\nWD7NvuE1ns/kvJApZ6h1vIelzKWhRANCAAQMLifsWPZiGTxAZhjvOGMNd5aL8Y3t\nbHPx1QO7YrHE1oMh9J10tavPtNa59o36QsAUAxwAgRdnT11pw4Uy5Fml\n-----END PRIVATE KEY-----\n";
+
+    fn service_with_tls(
+        cert: Option<&str>,
+        key: Option<&str>,
+        cert_path: Option<&str>,
+        key_path: Option<&str>,
+    ) -> super::Service {
+        super::Service {
+            tls_cert: cert.map(String::from),
+            tls_key: key.map(String::from),
+            tls_cert_path: cert_path.map(Into::into),
+            tls_key_path: key_path.map(Into::into),
+            ..super::Service::default()
+        }
+    }
 
     /// A node advertises what it offers others, not how it is built. The
     /// "neither" case matters most: a relay takes no client traffic and hosts
@@ -1764,5 +1888,124 @@ mod tests {
                 .with(Capabilities::PHOENIX),
         );
         assert!(!proxy.capabilities().contains(Capabilities::GAMESERVERS));
+    }
+
+    /// The flags took a `Vec<u8>`, so clap parsed every value as a single
+    /// integer and rejected certificates outright. Both the flag and the env
+    /// form have to carry PEM in one value.
+    #[test]
+    fn tls_flags_carry_pem() {
+        let service = super::Service::try_parse_from([
+            "quilkin",
+            "--service.tls.cert",
+            CERT,
+            "--service.tls.key",
+            KEY,
+        ])
+        .unwrap();
+
+        assert_eq!(service.tls_cert.as_deref(), Some(CERT));
+        assert_eq!(service.tls_key.as_deref(), Some(KEY));
+        assert!(service.tls_identity().unwrap().is_some());
+    }
+
+    /// Content that is not PEM is reported against the flag it came from,
+    /// rather than failing later inside the TLS stack.
+    #[test]
+    fn non_pem_is_rejected_by_flag() {
+        let error =
+            super::Service::try_parse_from(["quilkin", "--service.tls.cert", "/etc/certs/tls.crt"])
+                .unwrap_err()
+                .to_string();
+
+        assert!(error.contains("--service.tls.cert"), "{error}");
+        assert!(error.contains("not a PEM encoded certificate"), "{error}");
+    }
+
+    /// The content behind a path flag never passes through clap, so the check
+    /// has to name both the flag and the file itself.
+    #[test]
+    fn non_pem_file_is_rejected_by_path_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let cert_path = dir.path().join("tls.crt");
+        let key_path = dir.path().join("tls.key");
+        let service = || service_with_tls(None, None, cert_path.to_str(), key_path.to_str());
+        let rejection = || {
+            service()
+                .tls_identity()
+                .err()
+                .expect("an unusable file must not resolve")
+                .to_string()
+        };
+
+        std::fs::write(&cert_path, CERT).unwrap();
+        std::fs::write(&key_path, KEY).unwrap();
+        assert!(service().tls_identity().unwrap().is_some());
+
+        // A DER certificate is the likely mistake: a real certificate, but not
+        // in the encoding the flag takes.
+        std::fs::write(&cert_path, b"\x30\x82\x01\x0a").unwrap();
+        let error = rejection();
+        assert!(error.contains("--service.tls.cert-path"), "{error}");
+        assert!(error.contains("tls.crt"), "{error}");
+        assert!(error.contains("not a PEM encoded certificate"), "{error}");
+
+        // The key is checked too, not just the certificate.
+        std::fs::write(&cert_path, CERT).unwrap();
+        std::fs::write(&key_path, "nonsense").unwrap();
+        let error = rejection();
+        assert!(error.contains("--service.tls.key-path"), "{error}");
+        assert!(error.contains("not a PEM encoded private key"), "{error}");
+
+        // A path that does not resolve names the flag as well, since a wrong
+        // mount point looks the same as a wrong flag otherwise.
+        std::fs::remove_file(&key_path).unwrap();
+        let error = rejection();
+        assert!(error.contains("--service.tls.key-path"), "{error}");
+        assert!(error.contains("failed to read"), "{error}");
+    }
+
+    /// Taking the cert from one pair and the key from the other used to
+    /// resolve to `None`, which served the control plane in plaintext without
+    /// saying so.
+    #[test]
+    fn half_configured_tls_is_rejected() {
+        for (cert, key, cert_path, key_path, expected) in [
+            (
+                Some(CERT),
+                None,
+                None,
+                Some("key.pem"),
+                "--service.tls.cert and --service.tls.key-path",
+            ),
+            (
+                None,
+                Some(KEY),
+                Some("cert.pem"),
+                None,
+                "--service.tls.key and --service.tls.cert-path",
+            ),
+            (Some(CERT), None, None, None, "--service.tls.cert"),
+            (None, None, None, Some("key.pem"), "--service.tls.key-path"),
+        ] {
+            let error = service_with_tls(cert, key, cert_path, key_path)
+                .tls_identity()
+                .err()
+                .expect("a half configured pair must not resolve")
+                .to_string();
+
+            assert!(error.contains("half configured"), "{error}");
+            for flag in expected.split(" and ") {
+                assert!(error.contains(flag), "{error} should name {flag}");
+            }
+        }
+
+        assert!(
+            service_with_tls(None, None, None, None)
+                .tls_identity()
+                .unwrap()
+                .is_none(),
+            "no TLS flags should leave TLS off"
+        );
     }
 }
