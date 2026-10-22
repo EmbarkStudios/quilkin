@@ -97,27 +97,6 @@ fn is_frame_size_rejected(err: &quilkin_xdp::BindError) -> bool {
     false
 }
 
-/// Live RX queue count from sysfs (one `rx-N` dir per queue).
-fn sysfs_rx_queue_count(name: &NicName) -> Option<u32> {
-    let dir = std::fs::read_dir(format!("/sys/class/net/{}/queues", name.as_str()?)).ok()?;
-    let count = dir
-        .flatten()
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("rx-"))
-        .count();
-    (count > 0).then_some(count as u32)
-}
-
-/// Queues to bind a socket to. Drivers that only report combined channels
-/// (eg `ena`) have an ethtool rx count of 0, so fall back to sysfs.
-fn usable_queue_count(name: &NicName, queues: &xdp::nic::Queues) -> u32 {
-    let count = queues.rx_count();
-    if count > 0 || !queues.combined() {
-        return count;
-    }
-
-    sysfs_rx_queue_count(name).unwrap_or(0)
-}
-
 pub struct XdpWorkers {
     ebpf_prog: quilkin_xdp::EbpfProgram,
     workers: Vec<quilkin_xdp::XdpWorker>,
@@ -367,7 +346,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         }
     }
 
-    let queue_count = usable_queue_count(&name, &device_caps.queues);
+    let queue_count = device_caps.queues.rx_count();
     if queue_count == 0 {
         tracing::error!(?device_caps, nic = ?nic, "no queues to bind XDP sockets to");
         return Err(XdpSetupError::NoQueues(name));
