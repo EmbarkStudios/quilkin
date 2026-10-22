@@ -22,6 +22,20 @@ const TLS_CERT_FLAG: &str = "service.tls.cert";
 const TLS_KEY_FLAG: &str = "service.tls.key";
 const TLS_CERT_PATH_FLAG: &str = "service.tls.cert-path";
 const TLS_KEY_PATH_FLAG: &str = "service.tls.key-path";
+const TLS_CLIENT_CA_PATH_FLAG: &str = "service.tls.client-ca-path";
+const TLS_CLIENT_AUTH_FLAG: &str = "service.tls.client-auth";
+
+/// Whether the mds and xds services ask a connecting peer for a certificate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum ClientAuth {
+    /// Serve any peer, without asking for a certificate.
+    None,
+    /// Ask for a certificate, and verify one that is offered, but serve a peer
+    /// that offers none.
+    Optional,
+    /// Serve only a peer that presents a certificate signed by the client CA.
+    Required,
+}
 
 #[derive(Debug, clap::Parser)]
 #[command(next_help_heading = "Service Options")]
@@ -196,6 +210,23 @@ pub struct Service {
         hide = true
     )]
     tls_key_path: Option<std::path::PathBuf>,
+    /// Path to a PEM encoded CA bundle that connecting proxies and agents are verified against.
+    ///
+    /// Supplying this requires a client certificate unless
+    /// `--service.tls.client-auth` says otherwise.
+    #[clap(
+        long = TLS_CLIENT_CA_PATH_FLAG,
+        env = "QUILKIN_SERVICE_TLS_CLIENT_CA_PATH",
+        hide = true
+    )]
+    tls_client_ca_path: Option<std::path::PathBuf>,
+    /// Whether a connecting peer has to present a certificate.
+    #[clap(
+        long = TLS_CLIENT_AUTH_FLAG,
+        env = "QUILKIN_SERVICE_TLS_CLIENT_AUTH",
+        hide = true
+    )]
+    tls_client_auth: Option<ClientAuth>,
 
     // START CORROSION OPTIONS
     #[clap(
@@ -393,6 +424,8 @@ impl Default for Service {
             tls_key: None,
             tls_cert_path: None,
             tls_key_path: None,
+            tls_client_ca_path: None,
+            tls_client_auth: None,
             corrosion_port: 7901,
             corrosion_db_path: None,
             corrosion_server_reap: None,
@@ -540,6 +573,12 @@ impl Service {
         self
     }
 
+    /// Requires peers to present a certificate signed by this CA.
+    pub fn tls_client_ca_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.tls_client_ca_path = Some(path.into());
+        self
+    }
+
     pub fn testing(mut self) -> Self {
         self.testing = true;
         self
@@ -652,6 +691,49 @@ impl Service {
         }
     }
 
+    /// Resolves the TLS configuration the mds and xds services are served with.
+    ///
+    /// Client verification is layered onto the server's own identity, since
+    /// there is nothing to verify a peer on without a TLS connection to begin
+    /// with.
+    fn tls_config(&self) -> crate::Result<Option<quilkin_xds::server::TlsIdentity>> {
+        let identity = self.tls_identity()?;
+
+        let optional = match (self.tls_client_ca_path.as_deref(), self.tls_client_auth) {
+            (None, None | Some(ClientAuth::None)) => return Ok(identity),
+            (None, Some(mode)) => {
+                let mode = format!("{mode:?}").to_lowercase();
+                eyre::bail!(
+                    "--{TLS_CLIENT_AUTH_FLAG} {mode} needs --{TLS_CLIENT_CA_PATH_FLAG} to verify \
+                     peers against"
+                );
+            }
+            (Some(_), Some(ClientAuth::None)) => {
+                eyre::bail!(
+                    "--{TLS_CLIENT_AUTH_FLAG} none contradicts --{TLS_CLIENT_CA_PATH_FLAG}; drop \
+                     one of them"
+                );
+            }
+            (Some(_), Some(ClientAuth::Optional)) => true,
+            (Some(_), Some(ClientAuth::Required) | None) => false,
+        };
+
+        let Some(identity) = identity else {
+            eyre::bail!(
+                "--{TLS_CLIENT_CA_PATH_FLAG} verifies peers over TLS, so this service needs its \
+                 own certificate: supply --{TLS_CERT_PATH_FLAG} with --{TLS_KEY_PATH_FLAG}"
+            );
+        };
+
+        let ca = read_pem_file(
+            self.tls_client_ca_path.as_deref().expect("checked above"),
+            TLS_CLIENT_CA_PATH_FLAG,
+            validate_pem_cert,
+        )?;
+
+        Ok(Some(identity.verifying_clients(&ca, optional)))
+    }
+
     /// The main entrypoint for listening network servers.
     ///
     /// When called will spawn any and all enabled services, if successful
@@ -675,7 +757,7 @@ impl Service {
 
         // Resolved before anything binds, so a half-configured pair fails while
         // no listener is up.
-        let tls = self.tls_identity()?;
+        let tls = self.tls_config()?;
 
         {
             let shutdown = &mut shutdown;
@@ -1920,6 +2002,56 @@ mod tests {
         let error = rejection();
         assert!(error.contains("--service.tls.key-path"), "{error}");
         assert!(error.contains("failed to read"), "{error}");
+    }
+
+    /// A client CA is only meaningful alongside the server's own certificate
+    /// and a mode that asks for one, so every other combination is rejected
+    /// rather than quietly serving unauthenticated peers.
+    #[test]
+    fn client_auth_needs_a_ca_and_an_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let ca_path = dir.path().join("ca.pem");
+        std::fs::write(&ca_path, CERT).unwrap();
+
+        let service = |ca: Option<&std::path::Path>, auth, identity: bool| super::Service {
+            tls_cert: identity.then(|| CERT.to_owned()),
+            tls_key: identity.then(|| KEY.to_owned()),
+            tls_client_ca_path: ca.map(Into::into),
+            tls_client_auth: auth,
+            ..super::Service::default()
+        };
+        let rejected = |ca, auth, identity| {
+            service(ca, auth, identity)
+                .tls_config()
+                .err()
+                .expect("an unusable combination must not resolve")
+                .to_string()
+        };
+
+        let error = rejected(None, Some(super::ClientAuth::Required), true);
+        assert!(error.contains(super::TLS_CLIENT_CA_PATH_FLAG), "{error}");
+
+        let error = rejected(Some(&ca_path), Some(super::ClientAuth::None), true);
+        assert!(error.contains("contradicts"), "{error}");
+
+        // Verifying peers over TLS that this service does not serve.
+        let error = rejected(Some(&ca_path), None, false);
+        assert!(error.contains(super::TLS_CERT_PATH_FLAG), "{error}");
+
+        // A CA on its own means peers must authenticate.
+        let required = service(Some(&ca_path), None, true)
+            .tls_config()
+            .unwrap()
+            .expect("a certificate was supplied");
+        assert!(required.requires_client_auth());
+
+        // Optional leaves a peer offering nothing still served, so the
+        // identifier it claims stays unchecked.
+        let optional = service(Some(&ca_path), Some(super::ClientAuth::Optional), true)
+            .tls_config()
+            .unwrap()
+            .expect("a certificate was supplied");
+        assert!(!optional.requires_client_auth());
     }
 
     /// Taking the cert from one pair and the key from the other used to

@@ -37,6 +37,7 @@ tracing-futures.workspace = true
 tracing.workspace = true
 tryhard.workspace = true
 uuid.workspace = true
+x509-parser = "0.18"
 url.workspace = true
 http = "1.4.0"
 tower = { workspace = true, features = ["tokio", "tracing"] }

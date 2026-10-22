@@ -307,7 +307,7 @@ impl MdsClient {
                         });
 
                         tokio::select! {
-                            res = control_plane.delta_aggregated_resources(stream) => {
+                            res = control_plane.delta_aggregated_resources(stream, Default::default()) => {
                                 match res {
                                     Ok(mut stream) => {
                                         loop {
