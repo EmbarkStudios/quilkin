@@ -56,6 +56,7 @@ trace_test!(relay_routing, {
                 .unwrap(),
                 ..Default::default()
             }),
+            ..Default::default()
         },
         &[],
     );
@@ -268,6 +269,7 @@ trace_test!(filter_update, {
                 .unwrap(),
                 ..Default::default()
             }),
+            ..Default::default()
         },
         &[],
     );

@@ -42,6 +42,97 @@ const RETRIES: u32 = u32::MAX;
 const BACKOFF_STEP: std::time::Duration = std::time::Duration::from_millis(250);
 const MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
 
+// The long names of the client TLS flags, without the dashes. Shared so the
+// errors that tell operators what is missing can't name a renamed flag.
+const XDS_ENDPOINTS_FLAG: &str = "provider.xds.endpoints";
+const XDS_TLS_CA_FLAG: &str = "provider.xds.tls.ca-path";
+const XDS_TLS_SERVER_NAME_FLAG: &str = "provider.xds.tls.server-name";
+const MDS_ENDPOINTS_FLAG: &str = "provider.mds.endpoints";
+const MDS_TLS_CA_FLAG: &str = "provider.mds.tls.ca-path";
+const MDS_TLS_SERVER_NAME_FLAG: &str = "provider.mds.tls.server-name";
+
+/// The flags one provider's client TLS is configured from.
+#[derive(Clone, Copy)]
+struct TlsFlags {
+    endpoints: &'static str,
+    ca_path: &'static str,
+    server_name: &'static str,
+}
+
+const XDS_TLS_FLAGS: TlsFlags = TlsFlags {
+    endpoints: XDS_ENDPOINTS_FLAG,
+    ca_path: XDS_TLS_CA_FLAG,
+    server_name: XDS_TLS_SERVER_NAME_FLAG,
+};
+
+const MDS_TLS_FLAGS: TlsFlags = TlsFlags {
+    endpoints: MDS_ENDPOINTS_FLAG,
+    ca_path: MDS_TLS_CA_FLAG,
+    server_name: MDS_TLS_SERVER_NAME_FLAG,
+};
+
+/// Attaches the trust an `https` endpoint is verified against.
+///
+/// tonic refuses to connect to an `https` endpoint that carries no TLS
+/// configuration, so this has to be applied before the client is built rather
+/// than left to the connection itself.
+fn with_client_tls(
+    endpoints: Vec<tonic::transport::Endpoint>,
+    ca_path: Option<&std::path::Path>,
+    server_name: Option<&str>,
+    flags: TlsFlags,
+) -> crate::Result<Vec<tonic::transport::Endpoint>> {
+    use eyre::WrapErr as _;
+
+    let secure = endpoints
+        .iter()
+        .any(|endpoint| endpoint.uri().scheme_str() == Some("https"));
+
+    let Some(ca_path) = ca_path else {
+        if secure {
+            eyre::bail!(
+                "--{} has an https endpoint, so --{} is required to verify it",
+                flags.endpoints,
+                flags.ca_path
+            );
+        }
+        if server_name.is_some() {
+            eyre::bail!(
+                "--{} only applies to an https endpoint, and --{} has none",
+                flags.server_name,
+                flags.endpoints
+            );
+        }
+        return Ok(endpoints);
+    };
+
+    if !secure {
+        eyre::bail!(
+            "--{} was supplied, but no endpoint in --{} uses https",
+            flags.ca_path,
+            flags.endpoints
+        );
+    }
+
+    let ca = crate::tls::read_pem_file(ca_path, flags.ca_path, crate::tls::validate_pem_cert)?;
+    let mut tls = tonic::transport::ClientTlsConfig::new()
+        .ca_certificate(tonic::transport::Certificate::from_pem(ca));
+
+    if let Some(server_name) = server_name {
+        tls = tls.domain_name(server_name);
+    }
+
+    endpoints
+        .into_iter()
+        .map(|endpoint| {
+            let uri = endpoint.uri().clone();
+            endpoint
+                .tls_config(tls.clone())
+                .with_context(|| format!("failed to configure TLS for {uri}"))
+        })
+        .collect()
+}
+
 /// The available xDS source provider.
 #[derive(Clone, Debug, Default, clap::Args)]
 #[command(next_help_heading = "Provider Options")]
@@ -154,6 +245,20 @@ pub struct Providers {
         hide = true
     )]
     relay: Vec<tonic::transport::Endpoint>,
+    /// Path to a PEM encoded CA bundle the `quilkin relay` certificate is verified against.
+    #[clap(
+        long = MDS_TLS_CA_FLAG,
+        env = "QUILKIN_PROVIDERS_MDS_TLS_CA_PATH",
+        hide = true
+    )]
+    mds_tls_ca_path: Option<std::path::PathBuf>,
+    /// The name to expect in the relay certificate, when it is not the endpoint's host.
+    #[clap(
+        long = MDS_TLS_SERVER_NAME_FLAG,
+        env = "QUILKIN_PROVIDERS_MDS_TLS_SERVER_NAME",
+        hide = true
+    )]
+    mds_tls_server_name: Option<String>,
     /// The remote URL or local file path to retrieve the Maxmind database.
     #[clap(
         long = "provider.mmdb.endpoints",
@@ -184,6 +289,20 @@ pub struct Providers {
         hide = true
     )]
     xds_endpoints: Vec<tonic::transport::Endpoint>,
+    /// Path to a PEM encoded CA bundle the xDS server certificate is verified against.
+    #[clap(
+        long = XDS_TLS_CA_FLAG,
+        env = "QUILKIN_PROVIDERS_XDS_TLS_CA_PATH",
+        hide = true
+    )]
+    xds_tls_ca_path: Option<std::path::PathBuf>,
+    /// The name to expect in the xDS server certificate, when it is not the endpoint's host.
+    #[clap(
+        long = XDS_TLS_SERVER_NAME_FLAG,
+        env = "QUILKIN_PROVIDERS_XDS_TLS_SERVER_NAME",
+        hide = true
+    )]
+    xds_tls_server_name: Option<String>,
     /// One or more `quilkin relay` endpoints to push or pull configuration changes to/from
     #[clap(
         long = "provider.corrosion.endpoints",
@@ -301,6 +420,26 @@ impl Providers {
         endpoints: impl Into<Vec<tonic::transport::Endpoint>>,
     ) -> Self {
         self.xds_endpoints = endpoints.into();
+        self
+    }
+
+    pub fn grpc_push_tls_ca_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.mds_tls_ca_path = Some(path.into());
+        self
+    }
+
+    pub fn grpc_pull_tls_ca_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.xds_tls_ca_path = Some(path.into());
+        self
+    }
+
+    pub fn grpc_push_tls_server_name(mut self, name: impl Into<String>) -> Self {
+        self.mds_tls_server_name = Some(name.into());
+        self
+    }
+
+    pub fn grpc_pull_tls_server_name(mut self, name: impl Into<String>) -> Self {
+        self.xds_tls_server_name = Some(name.into());
         self
     }
 
@@ -760,19 +899,37 @@ impl Providers {
     }
 
     pub fn spawn_providers(
-        self,
+        mut self,
         config: &Arc<config::Config>,
         health_check: Arc<AtomicBool>,
         locality: Option<crate::net::endpoint::Locality>,
         notifier: Option<tokio::sync::mpsc::UnboundedSender<String>>,
         shutdown: tokio::sync::watch::Receiver<()>,
-    ) -> tokio::task::JoinSet<crate::Result<()>> {
+    ) -> crate::Result<tokio::task::JoinSet<crate::Result<()>>> {
+        // Resolved before anything spawns: provider tasks retry with backoff,
+        // so a connection they can never make has to fail here instead.
+        let relay = std::mem::take(&mut self.relay);
+        self.relay = with_client_tls(
+            relay,
+            self.mds_tls_ca_path.as_deref(),
+            self.mds_tls_server_name.as_deref(),
+            MDS_TLS_FLAGS,
+        )?;
+
+        let xds_endpoints = std::mem::take(&mut self.xds_endpoints);
+        self.xds_endpoints = with_client_tls(
+            xds_endpoints,
+            self.xds_tls_ca_path.as_deref(),
+            self.xds_tls_server_name.as_deref(),
+            XDS_TLS_FLAGS,
+        )?;
+
         let mut providers = tokio::task::JoinSet::new();
 
         if !self.any_provider_enabled() {
             tracing::info!("no configuration providers specified");
             health_check.store(true, std::sync::atomic::Ordering::Relaxed);
-            return providers;
+            return Ok(providers);
         }
 
         tracing::info!(providers=?[
@@ -880,7 +1037,7 @@ impl Providers {
             providers
         );
 
-        providers
+        Ok(providers)
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
@@ -933,5 +1090,40 @@ mod tests {
     #[test]
     fn standalone_provider_starts_with_not_pending_filters() {
         assert!(!filters_are_pending(&Providers::default().fs()));
+    }
+
+    /// tonic refuses an `https` endpoint carrying no TLS configuration, so a
+    /// missing CA is a connection that can never be made. The provider tasks
+    /// retry with backoff, which would otherwise bury it.
+    #[test]
+    fn client_tls_flags_must_agree_with_the_endpoint_scheme() {
+        let secure = || {
+            vec![tonic::transport::Endpoint::from_static(
+                "https://localhost:7800",
+            )]
+        };
+        let plain = || {
+            vec![tonic::transport::Endpoint::from_static(
+                "http://localhost:7800",
+            )]
+        };
+        let ca = std::path::Path::new("ca.pem");
+        let rejected = |endpoints, ca, name| {
+            with_client_tls(endpoints, ca, name, XDS_TLS_FLAGS)
+                .expect_err("an unusable combination must not resolve")
+                .to_string()
+        };
+
+        let error = rejected(secure(), None, None);
+        assert!(error.contains(XDS_TLS_CA_FLAG), "{error}");
+
+        let error = rejected(plain(), Some(ca), None);
+        assert!(error.contains("no endpoint"), "{error}");
+
+        let error = rejected(plain(), None, Some("relay"));
+        assert!(error.contains(XDS_TLS_SERVER_NAME_FLAG), "{error}");
+
+        // Plain endpoints and no TLS flags is the untouched default.
+        assert!(with_client_tls(plain(), None, None, XDS_TLS_FLAGS).is_ok());
     }
 }

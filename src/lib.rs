@@ -32,6 +32,7 @@ pub mod providers;
 pub mod service;
 pub mod signal;
 pub mod time;
+pub(crate) mod tls;
 pub mod xds;
 
 #[doc(hidden)]

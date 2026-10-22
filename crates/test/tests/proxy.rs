@@ -71,6 +71,7 @@ trace_test!(with_filter, {
         ProxyPailConfig {
             config: Some(TestConfig::new()),
             corrosion: false,
+            ..Default::default()
         },
         &["server"],
     );
@@ -268,6 +269,7 @@ trace_test!(xds_bridge_to_corrosion, {
                 .unwrap(),
                 ..Default::default()
             }),
+            ..Default::default()
         },
         &[],
     );
