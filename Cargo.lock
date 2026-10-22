@@ -988,7 +988,7 @@ dependencies = [
 
 [[package]]
 name = "corrosion-tests"
-version = "2026.10.1"
+version = "2026.10.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4095,7 +4095,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-macros"
-version = "2026.10.1"
+version = "2026.10.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4104,7 +4104,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-proto"
-version = "2026.10.1"
+version = "2026.10.2"
 dependencies = [
  "prost",
  "prost-types",
@@ -4114,7 +4114,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-system"
-version = "2026.10.1"
+version = "2026.10.2"
 dependencies = [
  "axum",
  "futures",
@@ -4129,7 +4129,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-types"
-version = "2026.10.1"
+version = "2026.10.2"
 dependencies = [
  "compact_str",
  "data-encoding",
@@ -4152,7 +4152,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-xds"
-version = "2026.10.1"
+version = "2026.10.2"
 dependencies = [
  "async-stream",
  "eyre",

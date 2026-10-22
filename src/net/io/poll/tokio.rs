@@ -171,6 +171,7 @@ fn spawn_poll_listener_impl(
 
                 for packet in sends_double_buffer.drain(..sends_double_buffer.len()) {
                     let destination = packet.destination;
+                    let payload_size = packet.data.len();
                     let (result, _) = ps_send_to(&send_socket, packet.data, destination).await;
                     let asn_info = packet.asn_info.as_ref().into();
                     let locality = &*packet.cluster;
@@ -184,6 +185,11 @@ fn spawn_poll_listener_impl(
                             .inc();
                             crate::metrics::bytes_total(crate::metrics::WRITE, &asn_info, locality)
                                 .inc_by(size as u64);
+                            crate::net::metrics::observe_forwarded_packet(
+                                crate::metrics::WRITE,
+                                locality,
+                                size,
+                            );
                         }
                         Err(error) => {
                             let kind = crate::metrics::io_error_kind(&error);
@@ -196,6 +202,12 @@ fn spawn_poll_listener_impl(
                                 locality,
                             )
                             .inc();
+                            crate::net::metrics::observe_dropped_packet(
+                                crate::metrics::WRITE,
+                                locality,
+                                payload_size,
+                                crate::metrics::DropReason::SocketError,
+                            );
                         }
                     }
                 }
@@ -234,6 +246,7 @@ fn spawn_poll_listener_impl(
                                     crate::metrics::DropReason::InvalidPacket,
                                 )
                                 .inc();
+                                crate::net::metrics::observe_invalid_packet(crate::metrics::READ, size);
                                 continue;
                             }
 
@@ -327,9 +340,10 @@ pub fn spawn_session(
 
                     for packet in sends_double_buffer.drain(..sends_double_buffer.len()) {
                         let destination = packet.destination;
+                        let payload_size = packet.data.len();
                         tracing::trace!(
                             %destination,
-                            length = packet.data.len(),
+                            length = payload_size,
                             "sending packet upstream"
                         );
                         let (result, _) = ps_send_to(&socket2, packet.data, destination).await;
@@ -349,6 +363,11 @@ pub fn spawn_session(
                                     locality,
                                 )
                                 .inc_by(size as u64);
+                                crate::net::metrics::observe_forwarded_packet(
+                                    crate::metrics::READ,
+                                    locality,
+                                    size,
+                                );
                             }
                             Err(error) => {
                                 tracing::trace!(%error, "sending packet upstream failed");
@@ -362,6 +381,12 @@ pub fn spawn_session(
                                     locality,
                                 )
                                 .inc();
+                                crate::net::metrics::observe_dropped_packet(
+                                    crate::metrics::READ,
+                                    locality,
+                                    payload_size,
+                                    crate::metrics::DropReason::SocketError,
+                                );
                             }
                         }
                     }
@@ -388,6 +413,7 @@ pub fn spawn_session(
                                     crate::metrics::DropReason::InvalidPacket,
                                 )
                                 .inc();
+                                crate::net::metrics::observe_invalid_packet(crate::metrics::WRITE, size);
                             },
                             Ok((size, recv_addr)) => {
                                 let mut buf = buf;

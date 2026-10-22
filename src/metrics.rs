@@ -22,6 +22,7 @@ use prometheus::{
 };
 
 pub use prometheus::Result;
+use prometheus_client::encoding::{EncodeLabelValue, LabelValueEncoder};
 
 /// "event" is used as a label for Metrics that can apply to both Filter
 /// `read` and `write` executions.
@@ -114,6 +115,7 @@ pub fn register_metrics(registry: &mut prometheus_client::registry::Registry, id
         ),
     ]));
 
+    crate::net::metrics::register_metrics(registry);
     quilkin_system::register_metrics(registry);
 }
 
@@ -342,7 +344,7 @@ pub(crate) mod qcmp {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub enum Direction {
     Read,
     Write,
@@ -368,13 +370,40 @@ impl Direction {
     }
 }
 
+impl EncodeLabelValue for Direction {
+    fn encode(
+        &self,
+        encoder: &mut LabelValueEncoder<'_>,
+    ) -> std::prelude::v1::Result<(), std::fmt::Error> {
+        // New metrics uses the nomenclature "direction: (upstream|downstream)" instead of "event: (read|write)"
+        // where "upstream" means client -> server and "downstream" means client <- server
+        match self {
+            Direction::Read => EncodeLabelValue::encode(&"upstream", encoder),
+            Direction::Write => EncodeLabelValue::encode(&"downstream", encoder),
+        }
+    }
+}
+
+// Inline string type for Locality labels to avoid heap allocation
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct LocalityLabel(pub fixedstr::Flexstr<64>);
+
+impl EncodeLabelValue for LocalityLabel {
+    fn encode(
+        &self,
+        encoder: &mut LabelValueEncoder<'_>,
+    ) -> std::prelude::v1::Result<(), std::fmt::Error> {
+        EncodeLabelValue::encode(&self.0.as_str(), encoder)
+    }
+}
+
 /// Why a packet was dropped.
 ///
 /// Deliberately a closed set: drop breakdowns are built on these values, so they
 /// must survive a filter being renamed and an `errno` producing different text on
 /// a different kernel. Anything variable belongs in a log, or in
 /// [`FILTER_LABEL`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum DropReason {
     /// No endpoint was available, or none matched the packet's routing token.
     NoEndpointMatch,
@@ -413,6 +442,15 @@ impl DropReason {
             Self::Internal => "internal",
             Self::NoFilterChain => "no_filter_chain",
         }
+    }
+}
+
+impl EncodeLabelValue for DropReason {
+    fn encode(
+        &self,
+        encoder: &mut LabelValueEncoder<'_>,
+    ) -> std::prelude::v1::Result<(), std::fmt::Error> {
+        EncodeLabelValue::encode(&self.label(), encoder)
     }
 }
 

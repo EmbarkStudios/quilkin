@@ -388,6 +388,7 @@ impl<'uring> LoopCtx<'uring> {
             Err(error) => {
                 tracing::debug!(%error, "dropped unusable datagram");
                 metrics::packets_dropped(metrics::READ, metrics::DropReason::InvalidPacket).inc();
+                crate::net::metrics::observe_invalid_packet(metrics::READ, ret as usize);
                 return Ok(Recv::Rejected(buffer_id));
             }
         };
@@ -727,8 +728,15 @@ impl IoUringLoop {
                                                 locality,
                                             )
                                             .inc();
+                                            crate::net::metrics::observe_dropped_packet(
+                                                send_dir,
+                                                locality,
+                                                zs.data.len(),
+                                                metrics::DropReason::SocketError,
+                                            );
                                         } else if ret as usize != zs.data.len() {
                                             metrics::packets_total(send_dir, &asn_info, locality).inc();
+                                            crate::net::metrics::observe_forwarded_packet(send_dir, locality, ret as usize);
                                             metrics::errors_total(
                                                 send_dir,
                                                 "sent bytes != packet length",
@@ -739,6 +747,7 @@ impl IoUringLoop {
                                             metrics::packets_total(send_dir, &asn_info, locality).inc();
                                             metrics::bytes_total(send_dir, &asn_info, locality)
                                                 .inc_by(ret as u64);
+                                            crate::net::metrics::observe_forwarded_packet(send_dir, locality, ret as usize);
                                         }
                                     }
 
