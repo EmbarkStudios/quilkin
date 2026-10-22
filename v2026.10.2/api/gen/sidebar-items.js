@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["VERSION","VERSION_PROTOC"],"fn":["check_version","copy","execute","install","install_protoc","main"]};

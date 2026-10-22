@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Mutation"],"struct":["Accumulator","LocalState","Pusher","ServerMutator"]};

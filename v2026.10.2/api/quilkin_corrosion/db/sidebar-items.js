@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["WalSynchronous"],"fn":["is_disk_full","reap_tombstones","recover_space"],"mod":["read","write"],"struct":["DBLimits","DBMaintenance","InitializedDb"],"trait":["SplitPoolReadExt"]};

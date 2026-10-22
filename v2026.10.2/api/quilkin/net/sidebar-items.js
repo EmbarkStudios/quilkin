@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["raw_socket_with_reuse","raw_socket_with_reuse_and_address","session_socket","socket_port"],"mod":["cluster","endpoint","error","io","packet","phoenix","servers","sessions"],"struct":["DualStackEpollSocket","DualStackLocalSocket","TcpListener"],"type":["DualStackLocalSocketRc"]};

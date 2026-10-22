@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ResourceSpecifier"],"struct":["InlineEntry"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BindError","LoadError"],"struct":["EbpfProgram","NicIndex","XdpWorker"]};
