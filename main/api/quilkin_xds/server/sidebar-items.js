@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["ControlPlane","TlsIdentity"]};
+window.SIDEBAR_ITEMS = {"struct":["ControlPlane","PeerIdentity","TlsIdentity"]};
