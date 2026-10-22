@@ -8,7 +8,7 @@ use bytes::BytesMut;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::{
     hint::black_box,
-    net::{Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
@@ -128,14 +128,38 @@ fn udp_roundtrip(client: &std::net::UdpSocket, payload: &[u8], buf: &mut [u8]) {
     }
 }
 
+/// A local address the proxy accepts packets from.
+///
+/// `disallowed_source_ip` drops loopback sources, and benches build without
+/// debug assertions, so the client cannot sit on 127.0.0.1. Asking the kernel
+/// which address it would use to reach an off-link destination names an
+/// interface address; connecting a UDP socket sends nothing.
+fn non_loopback_local_ip() -> Option<IpAddr> {
+    let probe = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    // TEST-NET-1, which is never routed.
+    probe.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
+    let ip = probe.local_addr().ok()?.ip();
+
+    (!ip.is_loopback() && !ip.is_unspecified()).then_some(ip)
+}
+
 fn bench_io_backend(c: &mut Criterion, rt: &tokio::runtime::Runtime, backend: UdpBackend) {
     let name = format!("{backend:?}").to_lowercase();
+
+    let Some(client_ip) = non_loopback_local_ip() else {
+        eprintln!(
+            "skipping {name} benches: no non-loopback local address, and release \
+             builds drop loopback sources"
+        );
+        return;
+    };
 
     let (echo_port, _echo) = rt.block_on(spawn_echo_server());
     let (proxy_port, _shutdown) = rt.block_on(spawn_proxy(echo_port, backend));
 
-    let client = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    client.connect(("127.0.0.1", proxy_port)).unwrap();
+    // The proxy binds the wildcard address, so it receives on `client_ip` too.
+    let client = std::net::UdpSocket::bind((client_ip, 0)).unwrap();
+    client.connect((client_ip, proxy_port)).unwrap();
     client
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
