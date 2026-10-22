@@ -55,6 +55,62 @@ macro_rules! temp_file {
 
 pub use tracing::{Level, subscriber::DefaultGuard};
 
+/// Installs the rustls crypto provider the TLS paths need.
+///
+/// `quilkin` does this in `main`, which no test runs. Tests in a binary share
+/// the process, so only the first call installs and the rest are no-ops.
+pub fn install_crypto_provider() {
+    static INSTALLED: std::sync::Once = std::sync::Once::new();
+    INSTALLED.call_once(|| {
+        drop(rustls::crypto::ring::default_provider().install_default());
+    });
+}
+
+/// A CA and the server certificate it signed, for a relay serving TLS.
+///
+/// The leaf is signed by a separate CA rather than being its own anchor:
+/// rustls rejects a self-signed leaf offered as its own trust root.
+pub struct TestPki {
+    pub ca_pem: String,
+    pub cert_pem: String,
+    pub key_pem: String,
+}
+
+impl TestPki {
+    pub fn generate() -> Self {
+        use rcgen::{
+            BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer,
+            KeyPair, KeyUsagePurpose,
+        };
+
+        let mut ca_params = CertificateParams::new(Vec::new()).unwrap();
+        ca_params
+            .distinguished_name
+            .push(DnType::CommonName, "quilkin test ca");
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+        let ca_key = KeyPair::generate().unwrap();
+        let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+
+        // The pails address the relay as `localhost`, so that is what the
+        // certificate has to be valid for.
+        let mut params = CertificateParams::new(vec!["localhost".to_owned()]).unwrap();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "localhost");
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        let key = KeyPair::generate().unwrap();
+        let issuer = Issuer::from_params(&ca_params, &ca_key);
+        let cert = params.signed_by(&key, &issuer).unwrap();
+
+        Self {
+            ca_pem: ca_cert.pem(),
+            cert_pem: cert.pem(),
+            key_pem: key.serialize_pem(),
+        }
+    }
+}
+
 pub fn init_logging(level: Level, test_pkg: &'static str) {
     use tracing_subscriber::{Layer as _, layer::SubscriberExt as _};
     let layer = tracing_subscriber::fmt::layer()
@@ -112,12 +168,17 @@ pub struct AdminPailConfig;
 #[derive(Default)]
 pub struct RelayPailConfig {
     pub config: Option<quilkin::test::TestConfig>,
+    /// Serve xDS and mDS over TLS. Dependent pails verify it against the CA
+    /// this generates, without having to be told about it.
+    pub tls: bool,
 }
 
 #[derive(Default)]
 pub struct ProxyPailConfig {
     pub config: Option<quilkin::test::TestConfig>,
     pub corrosion: bool,
+    /// Verify the relay against a CA that did not sign its certificate.
+    pub mismatched_tls_ca: bool,
 }
 
 #[derive(Default)]
@@ -228,6 +289,8 @@ abort_task!(ServerPail);
 pub struct RelayPail {
     pub xds_port: u16,
     pub mds_port: u16,
+    /// Path to the CA that signed this relay's certificate, when it serves TLS.
+    pub tls_ca_path: Option<PathBuf>,
     pub corrosion_port: Option<u16>,
     pub task: Option<JoinHandle>,
     pub provider_task: JoinSet,
@@ -398,6 +461,14 @@ impl Pail {
                 let (shutdown, shutdown_rx) = quilkin::signal::channel();
                 let pail_token = quilkin::signal::cancellation_token(shutdown_rx.clone());
 
+                let tls_ca_path = rpc.tls.then(|| {
+                    install_crypto_provider();
+                    let pki = TestPki::generate();
+                    let ca_path = td.join(format!("{}-ca.pem", spc.name));
+                    std::fs::write(&ca_path, &pki.ca_pem).unwrap();
+                    (ca_path, pki)
+                });
+
                 let providers = quilkin::Providers::default().fs().fs_path(path);
                 let mut svc = quilkin::Service::default()
                     .xds()
@@ -407,6 +478,10 @@ impl Pail {
                     .grpc()
                     .corrosion_port(0)
                     .testing();
+
+                if let Some((_, pki)) = &tls_ca_path {
+                    svc = svc.tls_pem(&pki.cert_pem, &pki.key_pem);
+                }
 
                 let config = crate::Config::new_rc(
                     Some("test-relay".into()),
@@ -418,13 +493,9 @@ impl Pail {
 
                 *config.dyn_cfg.id.lock() = spc.name.into();
                 let healthy = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                let provider_task = providers.spawn_providers(
-                    &config,
-                    healthy.clone(),
-                    None,
-                    None,
-                    shutdown_rx.clone(),
-                );
+                let provider_task = providers
+                    .spawn_providers(&config, healthy.clone(), None, None, shutdown_rx.clone())
+                    .expect("failed to configure providers");
                 let (task, ports) = svc
                     .spawn_services(
                         &config,
@@ -436,6 +507,7 @@ impl Pail {
                 Self::Relay(RelayPail {
                     xds_port: ports.xds.expect("xds not spawned"),
                     mds_port: ports.mds.expect("mds not spawned"),
+                    tls_ca_path: tls_ca_path.map(|(path, _)| path),
                     corrosion_port: ports.corrosion,
                     task: Some(task),
                     provider_task,
@@ -471,15 +543,27 @@ impl Pail {
                 let path = td.join(spc.name);
                 tc.write_to_file(&path);
 
+                let mut relay_ca = None;
                 let relay_servers = spc
                     .dependencies
                     .iter()
                     .filter_map(|dname| {
-                        let Pail::Relay(RelayPail { mds_port, .. }) = &pails[dname] else {
+                        let Pail::Relay(RelayPail {
+                            mds_port,
+                            tls_ca_path,
+                            ..
+                        }) = &pails[dname]
+                        else {
                             return None;
                         };
+                        let scheme = if tls_ca_path.is_some() {
+                            relay_ca = tls_ca_path.clone();
+                            "https"
+                        } else {
+                            "http"
+                        };
                         Some(
-                            format!("http://localhost:{mds_port}")
+                            format!("{scheme}://localhost:{mds_port}")
                                 .parse()
                                 .expect("failed to parse endpoint"),
                         )
@@ -491,10 +575,15 @@ impl Pail {
 
                 let config_path = path.clone();
                 let mut svc = quilkin::Service::default().qcmp().qcmp_port(0);
-                let providers = quilkin::Providers::default()
+                let mut providers = quilkin::Providers::default()
                     .fs()
                     .fs_path(path)
                     .grpc_push_endpoints(relay_servers);
+
+                if let Some(ca) = relay_ca {
+                    install_crypto_provider();
+                    providers = providers.grpc_push_tls_ca_path(ca);
+                }
 
                 let corrosion_eps = spc
                     .dependencies
@@ -530,13 +619,9 @@ impl Pail {
                 *config.dyn_cfg.id.lock() = spc.name.into();
                 let acfg = config.clone();
                 let healthy = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                let provider_task = providers.spawn_providers(
-                    &config,
-                    healthy.clone(),
-                    None,
-                    None,
-                    shutdown_rx.clone(),
-                );
+                let provider_task = providers
+                    .spawn_providers(&config, healthy.clone(), None, None, shutdown_rx.clone())
+                    .expect("failed to configure providers");
                 let (task, ports) = svc
                     .spawn_services(
                         &config,
@@ -585,22 +670,53 @@ impl Pail {
                         .corrosion_endpoints(corrosion_eps)
                         .corrosion_mode(quilkin::providers::corrosion::CorrosionMode::Pull)
                 } else {
+                    let mut relay_ca = None;
                     let management_servers: Vec<_> = spc
                         .dependencies
                         .iter()
                         .filter_map(|dname| {
-                            let Pail::Relay(RelayPail { xds_port, .. }) = &pails[dname] else {
+                            let Pail::Relay(RelayPail {
+                                xds_port,
+                                tls_ca_path,
+                                ..
+                            }) = &pails[dname]
+                            else {
                                 return None;
                             };
+                            let scheme = if tls_ca_path.is_some() {
+                                relay_ca = tls_ca_path.clone();
+                                "https"
+                            } else {
+                                "http"
+                            };
                             Some(
-                                format!("http://localhost:{xds_port}")
+                                format!("{scheme}://localhost:{xds_port}")
                                     .parse()
                                     .expect("failed to parse endpoint"),
                             )
                         })
                         .collect();
 
-                    quilkin::Providers::default().grpc_pull_endpoints(management_servers)
+                    let mut providers =
+                        quilkin::Providers::default().grpc_pull_endpoints(management_servers);
+
+                    if let Some(ca) = relay_ca {
+                        install_crypto_provider();
+
+                        // A CA that signed nothing in this sandbox, for asserting
+                        // that verification is actually performed.
+                        let ca = if ppc.mismatched_tls_ca {
+                            let path = td.join(format!("{}-wrong-ca.pem", spc.name));
+                            std::fs::write(&path, TestPki::generate().ca_pem).unwrap();
+                            path
+                        } else {
+                            ca
+                        };
+
+                        providers = providers.grpc_pull_tls_ca_path(ca);
+                    }
+
+                    providers
                 };
 
                 let mut svc = quilkin::Service::default()
@@ -660,13 +776,15 @@ impl Pail {
                 let (rttx, rtrx) = tokio::sync::mpsc::unbounded_channel();
 
                 let healthy = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                let provider_task = providers.spawn_providers(
-                    &config,
-                    healthy.clone(),
-                    None,
-                    Some(rttx),
-                    shutdown_rx.clone(),
-                );
+                let provider_task = providers
+                    .spawn_providers(
+                        &config,
+                        healthy.clone(),
+                        None,
+                        Some(rttx),
+                        shutdown_rx.clone(),
+                    )
+                    .expect("failed to configure providers");
                 let (task, ports) = svc
                     .spawn_services(
                         &config,

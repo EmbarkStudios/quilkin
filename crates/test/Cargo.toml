@@ -43,6 +43,9 @@ quilkin.workspace = true
 quilkin-types.workspace = true
 quilkin-xds.workspace = true
 rand.workspace = true
+rcgen = "0.14"
+# ring is enabled through tonic's tls-ring in the same graph.
+rustls = { version = "0.23", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 socket2.workspace = true

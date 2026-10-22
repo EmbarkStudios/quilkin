@@ -3915,6 +3915,8 @@ dependencies = [
  "quilkin-types",
  "quilkin-xds",
  "rand 0.10.3",
+ "rcgen",
+ "rustls",
  "serde",
  "serde_json",
  "socket2",

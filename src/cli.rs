@@ -297,7 +297,7 @@ impl Cli {
             locality.clone(),
             None,
             shutdown_handler.shutdown_rx(),
-        );
+        )?;
 
         let shutdown_tx = shutdown_handler.shutdown_tx();
         let (mut service_task, _) = self
