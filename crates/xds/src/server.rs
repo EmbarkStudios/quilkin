@@ -86,17 +86,6 @@ impl TlsIdentity {
             identity: tonic::transport::Identity::from_pem(cert, key),
         }
     }
-
-    pub fn from_files(cert: &std::path::Path, key: &std::path::Path) -> eyre::Result<Self> {
-        use eyre::WrapErr as _;
-        let cert = std::fs::read(cert)
-            .with_context(|| format!("failed to read PEM certificate from {cert:?}"))?;
-        let key = std::fs::read(key).with_context(|| format!("failed to read key from {key:?}"))?;
-
-        Ok(Self {
-            identity: tonic::transport::Identity::from_pem(cert, key),
-        })
-    }
 }
 
 const RESPONSE_PROPAGATION_INTERVAL: Duration = Duration::from_millis(100);
