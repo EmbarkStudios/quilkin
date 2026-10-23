@@ -62,6 +62,7 @@ start_relay:
     cargo run -- \
         --admin.address=127.0.0.1:1800{{ id }} \
         --service.id=relay-{{ id }} \
+        --service.udp.backend completion \
         --service.qcmp --service.qcmp.port=1760{{ id }} \
         --service.xds --service.xds.port=1780{{ id }} \
         --service.mds --service.mds.port=1790{{ id }}
@@ -70,6 +71,7 @@ start_relay_corrosion:
     cargo run -- \
         --admin.address=127.0.0.1:1800{{ id }} \
         --service.id=relay-{{ id }} \
+        --service.udp.backend completion \
         --service.qcmp --service.qcmp.port=1760{{ id }} \
         --service.mds \
         --service.corrosion.port=1780{{ id }} \
@@ -83,6 +85,7 @@ start_proxy relay_id="0":
         --service.qcmp --service.qcmp.port=2760{{ id }} \
         --service.phoenix --service.phoenix.port=2760{{ id }} \
         --service.udp \
+        --service.udp.backend completion \
         --provider.xds.endpoints=http://127.0.0.1:1780{{ relay_id }}
 
 start_proxy_corrosion relay_id="0":
@@ -92,6 +95,7 @@ start_proxy_corrosion relay_id="0":
         --service.qcmp --service.qcmp.port=2760{{ id }} \
         --service.phoenix --service.phoenix.port=2760{{ id }} \
         --service.udp \
+        --service.udp.backend completion \
         --provider.corrosion.mode="pull" \
         --provider.corrosion.endpoints=[::1]:1780{{ relay_id }}
 
@@ -103,6 +107,7 @@ start_agent relay_id="0": _check_agent_config
         --config={{ _agent_config_path }} \
         --locality.icao={{ icao }} \
         --locality.region={{ region }} \
+        --service.udp.backend completion \
         --service.qcmp --service.qcmp.port=3760{{ id }} \
         --provider.mds.endpoints=http://localhost:1790{{ relay_id }}
 
@@ -112,6 +117,7 @@ start_agent_corrosion relay_id="0":
         --service.id=agent-{{ id }} \
         --locality.icao={{ icao }} \
         --locality.region={{ region }} \
+        --service.udp.backend completion \
         --service.qcmp --service.qcmp.port=3760{{ id }} \
         --provider.static.endpoints="127.0.0.1:26001" \
         --provider.static.endpoint-tokens="1:4" \

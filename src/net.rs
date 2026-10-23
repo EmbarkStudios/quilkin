@@ -19,6 +19,7 @@ pub mod endpoint;
 pub mod error;
 pub mod io;
 pub(crate) mod maxmind_db;
+pub mod metrics;
 pub mod packet;
 pub mod phoenix;
 pub mod servers;

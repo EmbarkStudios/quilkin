@@ -54,6 +54,12 @@ pub fn empty_packet_dropped() {
     use crate::service::ALLOW_EMPTY_PACKETS_FLAG;
 
     metrics::packets_dropped(metrics::READ, metrics::DropReason::EmptyPacket).inc();
+    crate::net::metrics::observe_dropped_packet(
+        metrics::READ,
+        "",
+        0,
+        metrics::DropReason::EmptyPacket,
+    );
 
     let now = crate::time::UtcTimestamp::now().unix_nanos();
 
@@ -186,9 +192,10 @@ impl<P: PacketMut> DownstreamPacket<'_, P> {
         sessions: &S,
         destinations: &mut Vec<crate::net::Destination>,
     ) {
+        let payload_size = self.contents.len();
         tracing::trace!(
             id = worker_id,
-            size = self.contents.len(),
+            size = payload_size,
             source = %self.source,
             "received packet from downstream"
         );
@@ -203,6 +210,13 @@ impl<P: PacketMut> DownstreamPacket<'_, P> {
                 "",
             )
             .inc();
+            crate::net::metrics::observe_dropped_packet_with_filter(
+                metrics::READ,
+                "",
+                payload_size,
+                error.drop_reason(),
+                error.filter_name(),
+            );
         }
 
         timer.stop_and_record();
