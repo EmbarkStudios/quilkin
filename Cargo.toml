@@ -217,7 +217,7 @@ members = [
 [workspace.package]
 license = "Apache-2.0"
 edition = "2024"
-version = "2026.10.2"
+version = "2026.10.3"
 
 [workspace.dependencies]
 arc-swap = { version = "1.8.0", features = ["serde"] }
