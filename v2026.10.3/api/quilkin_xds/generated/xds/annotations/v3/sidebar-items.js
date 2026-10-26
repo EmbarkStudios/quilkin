@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PackageVersionStatus"],"struct":["FieldStatusAnnotation","FileStatusAnnotation","MessageStatusAnnotation","StatusAnnotation"]};

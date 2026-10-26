@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["aggregated_discovery_service_client","aggregated_discovery_service_server","resource"],"struct":["AdsDummy","DeltaDiscoveryRequest","DeltaDiscoveryResponse","DiscoveryRequest","DiscoveryResponse","Resource"]};

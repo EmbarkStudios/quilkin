@@ -1,0 +1,2762 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Quilkin Book</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-e96d0476.css">
+        <link rel="stylesheet" href="css/chrome-d279d366.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-7b17f11c.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-270f104f.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Quilkin Book</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="overview"><a class="header" href="#overview">Overview</a></h1>
+<p>Quilkin is a UDP proxy, specifically designed for use with multiplayer dedicated game servers.</p>
+<h2 id="what-is-quilkin"><a class="header" href="#what-is-quilkin">What is Quilkin?</a></h2>
+<p>Quilkin on open source is a non-transparent UDP proxy specifically designed for use with large scale multiplayer
+dedicated game servers deployments, to ensure security, access control, telemetry data, metrics and more.</p>
+<p>It is designed to be used behind game clients as well as in front of dedicated game servers.</p>
+<p>Quilkin’s aim is to pull the above functionality out of bespoke, monolithic dedicated game servers and clients, and
+provide standard, composable modules that can be reused across a wide set of multiplayer games, so that game
+developers can instead focus on their game specific aspects of building a multiplayer game.</p>
+<h2 id="why-use-quilkin"><a class="header" href="#why-use-quilkin">Why use Quilkin?</a></h2>
+<p>Some of Quilkin’s advantages:</p>
+<ul>
+<li>Lower development and operational costs for securing, monitoring and making reliable multiplayer game servers and
+their communications.</li>
+<li>Provide entry-point redundancy for your game clients to connect to - making it much harder to take down your game
+servers.</li>
+<li>Multiple integration patterns, allowing you to choose the level of integration that makes sense for your
+architecture.</li>
+<li>Remove non-game specific computation out of your game server’s processing loop - and save that precious CPU for
+your game simulation!</li>
+</ul>
+<h2 id="major-features"><a class="header" href="#major-features">Major Features</a></h2>
+<p>Quilkin incorporates these abilities:</p>
+<ul>
+<li>Non-transparent proxying of UDP data, the internal state of your game architecture is not visible to bad actors.</li>
+<li>Out of the box metrics for UDP packet information.</li>
+<li>Composable tools for access control and security.</li>
+<li>Able to be utilised as a standalone binary, with no client/server changes required or as a Rust library
+depending on how deep an integration you wish for your system.</li>
+<li>Integration with Game Server hosting platforms such as <a href="https://agones.dev">Agones</a>.</li>
+<li>Can be integrated with C/C++ code bases via FFI.</li>
+</ul>
+<h2 id="quilkin-architecture"><a class="header" href="#quilkin-architecture">Quilkin Architecture</a></h2>
+<p>Quilkin is broken up into three main components</p>
+<ul>
+<li><strong>Providers</strong> are data collection sources to enable quilkin to see its environment.</li>
+<li><strong>Services</strong> provide the the core business logic for handling UDP traffic as well meta control-plane functionality.</li>
+<li><strong>Configuration</strong> controls what a given instance is able to do, what services it runs, and providers it pulls from.</li>
+</ul>
+<pre class="mermaid">architecture-beta
+    group services(cloud)[Services]
+    group public(cloud)[Public Client API] in services
+    group private(cloud)[Internal Service API] in services
+    group providers(cloud)[Providers]
+    group config(cloud)[Configuration]
+
+    service udp(internet)[UDP] in public
+    service qcmp(internet)[QCMP] in public
+    junction sp1 in services
+    junction sp3 in services
+
+    service http(internet)[HTTP] in private
+    junction sp2 in services
+    junction sp4 in services
+
+    service k8s(cloud)[Kubernetes] in providers
+    service fs(disk)[Filesystem] in providers
+    service cli(disk)[CLI] in providers
+    junction p1 in providers
+    junction p2 in providers
+
+    service filters(disk)[Filterchains] in config
+    service endpoints(disk)[Endpoints] in config
+    service gameservers(server)[Game Servers] in config
+    service mmdb(server)[Maxmind DB] in config
+    junction c1 in config
+    junction c2 in config
+
+    service quilkin(server)[Quilkin]
+
+    sp1:T -- R:udp
+    sp1:L -- R:qcmp
+    sp1:B -- T:sp3
+
+    sp2:T -- B:sp3
+    sp4:B -- R:http
+    sp4:T -- B:sp2
+    sp3:R -- L:quilkin
+
+    quilkin:R -- L:p1
+    p1:T -- L:fs
+    p1:R -- L:k8s
+    p1:B -- T:p2
+    p2:B -- L:cli
+    c2:L -- R:mmdb
+    c2:R -- L:gameservers
+    c1:T -- B:c2
+    c1:R -- L:endpoints
+    c1:L -- R:filters
+    c1:B -- T:quilkin
+</pre>
+
+<h2 id="what-next"><a class="header" href="#what-next">What Next?</a></h2>
+<p>Quilkin provides a variety of different services depending on your use-case.
+The primary service is <a href="services/proxy.html"><code>proxy</code></a>, which runs a reverse UDP
+proxy. To see a basic usage of the command-line interface run through the
+<a href="#quickstart-quilkin-with-netcat">netcat with Quilkin quickstart</a>.</p>
+<p>For more advanced usage, you might also be interested in:</p>
+<ul>
+<li>Checking out the <a href="#installation">installation guide</a></li>
+<li>Having a look at the <a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples">example projects</a> for basic configuration examples.</li>
+<li>Checking out the <a href="#quilkin-integration-examples">example deployment architecture</a>
+for deploying quilkin for your game network.</li>
+</ul>
+<pre><code class="language-shell">$ quilkin --help
+{{#include ../../target/quilkin.commands}}
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="installation"><a class="header" href="#installation">Installation</a></h1>
+<p>There are variety of automated and manual methods for installing Quilkin onto
+your system. For cloud deployments Quilkin provides a <a href="#oci-image">container image</a>
+to make it easily to immediately start using it. You can also install Quilkin on
+your local machine through <a href="#cargo">Cargo</a>.</p>
+<h2 id="distributions"><a class="header" href="#distributions">Distributions</a></h2>
+<h3 id="oci-image"><a class="header" href="#oci-image"><a href="https://github.com/embarkstudios/quilkin/pkgs/container/quilkin">OCI Image</a></a></h3>
+<dl>
+  
+<dt><strong>Source / Method</strong></dt>
+
+  
+<dd>
+<pre><code class="language-shell"># A release.
+docker pull ghcr.io/embarkstudios/quilkin:&lt;version&gt;
+# A specific commit built from `main`.
+docker pull ghcr.io/embarkstudios/quilkin:&lt;short_commit&gt;
+</code></pre>
+  </dd>
+
+  
+<dt><strong>Notes</strong></dt>
+
+  
+<dd>Pre-built Quilkin binary with no preset arguments. Releases are tagged
+  <code>YYYY.M.PATCH</code> and <code>latest</code>; builds from <code>main</code> are tagged
+  with the commit's short SHA, such as <code>41673c8</code>.</dd>
+
+</dl>
+
+<h3 id="cargo"><a class="header" href="#cargo">Cargo</a></h3>
+<dl>
+  
+<dt><strong>Source / Method</strong></dt>
+
+  
+<dd>
+<pre><code>cargo install --git https://github.com/EmbarkStudios/quilkin --tag v&lt;version&gt; quilkin
+</code></pre>
+  </dd>
+
+  
+<dt><strong>Notes</strong></dt>
+
+  
+<dd>Compiled from source using cargo. Quilkin is not published to crates.io,
+  so this installs from the Git tag.</dd>
+
+</dl>
+
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="faq"><a class="header" href="#faq">FAQ</a></h1>
+<h2 id="just-how-fast-is-quilkin-what-sort-of-performance-can-i-expect"><a class="header" href="#just-how-fast-is-quilkin-what-sort-of-performance-can-i-expect">Just how fast is Quilkin? What sort of performance can I expect?</a></h2>
+<p>Our current testing shows that on Quilkin shows that it process packets <em>quite fast</em>!</p>
+<p>We won’t be publishing performance benchmarks, as performance will always
+change depending on the underlying hardware, number of filters, configurations and more.</p>
+<p>We highly recommend you run your own load tests on your platform and configuration, matching your production
+workload and configuration as close as possible.</p>
+<p>We are always investigating further performance improvements in upcoming releases, both from an optimisation and observability perspective as well.</p>
+<h2 id="can-i-integrate-quilkin-with-c-code"><a class="header" href="#can-i-integrate-quilkin-with-c-code">Can I integrate Quilkin with C++ code?</a></h2>
+<p>Quilkin is also a library, so it can be integrated with an external codebase as necessary. It is not
+published to crates.io — its Rust API is not a stable interface and may change in any release — so depend
+on it from Git, pinned to a tag:</p>
+<pre><code class="language-toml">quilkin = { git = "https://github.com/EmbarkStudios/quilkin", tag = "v2026.10.0" }
+</code></pre>
+<p>Using Rust code inside a C or C++ project mostly consists of two parts.</p>
+<ul>
+<li>Creating a C-friendly API in Rust</li>
+<li>Embedding your Rust project into an external build system</li>
+</ul>
+<p>See <a href="https://docs.rust-embedded.org/book/interoperability/rust-with-c.html">A little Rust with your C</a> for more
+information.</p>
+<p>Over time, we will be expanding documentation on how to integrate with specific engines if running Quilkin as a
+separate binary is not an option.</p>
+<h2 id="i-would-like-to-run-quilkin-as-a-client-side-proxy-on-a-console-can-i-do-that"><a class="header" href="#i-would-like-to-run-quilkin-as-a-client-side-proxy-on-a-console-can-i-do-that">I would like to run Quilkin as a client side proxy on a console? Can I do that?</a></h2>
+<p>This is an ongoing discussion, and since console development is protected by non-disclosure agreements, we can’t
+comment on this directly.</p>
+<p>That being said, we have an <a href="#quilkin-unreal-engine-plugin">Unreal Engine</a> for games
+in circumstances where compiling Rust or providing a separate Quilkin binary as
+an executable is not an option.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="quickstart-quilkin-with-netcat"><a class="header" href="#quickstart-quilkin-with-netcat">Quickstart: Quilkin with netcat</a></h1>
+<h2 id="requirements"><a class="header" href="#requirements">Requirements</a></h2>
+<ul>
+<li>A *nix terminal</li>
+<li>A binary release of Quilkin from the <a href="https://github.com/EmbarkStudios/quilkin/releases">Github releases page</a> or by running <code>cargo install quilkin</code></li>
+<li><a href="https://www.google.com/search?q=ncat">ncat</a></li>
+<li><a href="http://netcat.sourceforge.net/">netcat</a></li>
+</ul>
+<h2 id="1-start-an-udp-echo-service"><a class="header" href="#1-start-an-udp-echo-service">1. Start an udp echo service</a></h2>
+<p>So that we have a target for sending UDP packets to, let’s use <code>ncat</code> to create a simple UDP echo process.</p>
+<p>To do this run:</p>
+<pre><code class="language-shell">ncat -e $(which cat) -k -u -l 8080
+</code></pre>
+<p>This routes all UDP packets that <code>ncat</code> receives to the local <code>cat</code> process, which echoes it back.</p>
+<h2 id="2-start-quilkin"><a class="header" href="#2-start-quilkin">2. Start Quilkin</a></h2>
+<p>Next let’s configure Quilkin in proxy mode, with a static configuration that points at the
+UDP echo service we just started.</p>
+<pre><code class="language-shell">quilkin proxy --to 127.0.0.1:8080
+</code></pre>
+<p>This configuration will start Quilkin on the <a href="services/proxy.html">default proxy port</a>, and it will
+redirect all incoming UDP traffic to a single endpoint of 127.0.0.1, port 8080.</p>
+<p>You should see an output like the following:</p>
+<pre><code class="language-shell">{"timestamp":"2023-01-19T10:16:23.399277Z","level":"INFO","fields":{"message":"Starting Quilkin","version":"0.6
+.0-dev","commit":"72176a191ffc3a597e3834ee1d0090b30caf81d4"},"target":"quilkin::cli","filename":"src/cli.rs"}
+{"timestamp":"2023-01-19T10:16:23.399771Z","level":"INFO","fields":{"message":"Starting admin endpoint","addres
+s":"0.0.0.0:8000"},"target":"quilkin::admin","filename":"src/admin.rs"}
+{"timestamp":"2023-01-19T10:16:23.400544Z","level":"INFO","fields":{"message":"Starting","port":7777,"proxy_id"
+:"7e9fc464-6ccc-41fe-afc4-6c97089de9b8"},"target":"quilkin::proxy","filename":"src/proxy.rs"}
+{"timestamp":"2023-01-19T10:16:23.401192Z","level":"INFO","fields":{"message":"Quilkin is ready"},"target":"qui
+</code></pre>
+<h2 id="3-send-a-packet"><a class="header" href="#3-send-a-packet">3. Send a packet</a></h2>
+<p>In (yet 😃) another shell, let’s use netcat to send an udp packet.</p>
+<p>Run the following to connect netcat to Quilkin’s receiving port of 7000 via UDP (<code>-u</code>):</p>
+<pre><code class="language-shell">nc -u 127.0.0.1 7777
+</code></pre>
+<p>Type the word “test” and hit enter, you should see it echoed back to you like so:</p>
+<pre><code class="language-shell">nc -u 127.0.0.1 7777
+test
+test
+</code></pre>
+<p>Feel free to send even more packets, as many as you would like 👍.</p>
+<p>Congratulations! You have successfully routed a UDP packet and back again with Quilkin!</p>
+<p>What’s next?</p>
+<ul>
+<li>Run through the <a href="#quickstart-quilkin-with-agones-and-xonotic-sidecar">Quilkin with Agones quickstart</a>.</li>
+<li>Have a look at some of <a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples">the examples</a> we have.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="quickstart-quilkin-with-agones-and-xonotic-sidecar"><a class="header" href="#quickstart-quilkin-with-agones-and-xonotic-sidecar">Quickstart: Quilkin with Agones and Xonotic (Sidecar)</a></h1>
+<h2 id="requirements-1"><a class="header" href="#requirements-1">Requirements</a></h2>
+<ul>
+<li>A terminal with <code>kubectl</code> installed</li>
+<li>A local copy of the <a href="https://xonotic.org/">Xonotic</a> client</li>
+<li>A running <a href="https://agones.dev/">Agones</a> Kubernetes cluster
+<ul>
+<li><a href="https://agones.dev/site/docs/installation/">Installation instructions</a></li>
+<li>If you aren’t familiar with Agones, we recommend working through their
+<a href="https://agones.dev/site/docs/getting-started/">Getting Started</a> guides.</li>
+</ul>
+</li>
+</ul>
+<h2 id="1-agones-fleet-with-quilkin"><a class="header" href="#1-agones-fleet-with-quilkin">1. Agones Fleet with Quilkin</a></h2>
+<p>In this step, we’re going to set up a Xonotic dedicated game server, with Quilkin running as a
+<a href="#server-proxy-as-a-sidecar">sidecar</a>, which will give us access to all the
+<a href="services/proxy/metrics.html">metrics</a> that Quilkin provides.</p>
+<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-sidecar/sidecar.yaml
+</code></pre>
+<p>This applies two resources to your cluster:</p>
+<ol>
+<li>A Kubernetes <a href="https://kubernetes.io/docs/concepts/configuration/configmap/">ConfigMap</a> with a basic Quilkin
+static configuration.</li>
+<li>An Agones <a href="https://agones.dev/site/docs/reference/fleet/">Fleet specification</a> with Quilkin running as a sidecar
+to Xonotic, such that it can process all the UDP traffic and pass it to the Xonotic dedicated game server.</li>
+</ol>
+<p>Now you can run <code>kubectl get gameservers</code> until all your Agones <code>GameServers</code> are marked as <code>Ready</code> like so:</p>
+<pre><code class="language-shell">$ kubectl get gameservers
+NAME                          STATE   ADDRESS         PORT   NODE                                    AGE
+xonotic-sidecar-htc2x-84mzm   Ready   34.94.107.201   7533   gke-agones-default-pool-0f7d8adc-7w3c   7m25s
+xonotic-sidecar-htc2x-sdp4k   Ready   34.94.107.201   7599   gke-agones-default-pool-0f7d8adc-7w3c   7m25s
+</code></pre>
+<h2 id="2-play-xonotic"><a class="header" href="#2-play-xonotic">2. Play Xonotic!</a></h2>
+<p>Usually with Agones you would
+<a href="https://agones.dev/site/docs/getting-started/create-fleet/#4-allocate-a-game-server-from-the-fleet">Allocate</a> a
+<code>GameServer</code>, but we’ll skip this step for this example.</p>
+<p>Choose one of the listed <code>GameServer</code>s from the previous step, and connect to the IP and port of the Xonotic
+server via the “Multiplayer &gt; Address” field in the Xonotic client in the format of {IP}:{PORT}.</p>
+<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address.png"><span class="img-wrapper"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address.png"></span></label></p>
+<p>You should now be playing a game of Xonotic against 4 bots!</p>
+<h2 id="3-check-out-the-metrics"><a class="header" href="#3-check-out-the-metrics">3. Check out the metrics</a></h2>
+<p>Let’s take a look at some metrics that Quilkin outputs.</p>
+<p>Grab the name of the GameServer you connected to before, and replace the <code>${gameserver}</code> value below, and run the
+command. This will forward the <a href="#administration">admin</a> interface to localhost.</p>
+<pre><code class="language-shell">kubectl port-forward ${gameserver} 8000
+</code></pre>
+<p>Then open a browser to <a href="http://localhost:9091/metrics">http://localhost:8000/metrics</a> to see the
+<a href="https://prometheus.io/">Prometheus</a> metrics that Quilkin exports.</p>
+<h2 id="5-cleanup"><a class="header" href="#5-cleanup">5. Cleanup</a></h2>
+<p>Run the following to delete the Fleet and the accompanying ConfigMap:</p>
+<pre><code class="language-shell">kubectl delete -f  https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-sidecar/sidecar.yaml
+</code></pre>
+<h2 id="6-play-xonotic-through-quilkin"><a class="header" href="#6-play-xonotic-through-quilkin">6. Play Xonotic, through Quilkin</a></h2>
+<p>Note: compression has been removed.</p>
+<p>What we will do in this step, is run Quilkin locally as a client-side proxy to compress the UDP data before it is
+sent up to our Xonotic servers that are expecting compressed data.</p>
+<p>First, grab a copy of the Quilkin configuration
+<a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples/agones-xonotic-sidecar/sidecar-compress.yaml">client-compress.yaml</a>
+locally. This has the Compress filter already configured, but we need to fill in the address to connect to.</p>
+<blockquote>
+<p>Rather than editing a file, this could also be sent through the <a href="services/xds.html">xDS API</a>, but it is easier to
+demonstrate this functionality through a static configuration.</p>
+</blockquote>
+<p>Instead of connecting Xonotic directly, take the IP and port from one of the Agones hosted <code>GameServer</code> records, and
+replace the <code>${GAMESERVER_IP}</code> and <code>${GAMESERVER_PORT}</code> values in your copy of <code>client-compress.yaml</code>.</p>
+<p>Run this configuration locally as:</p>
+<pre><code class="language-shell">quilkin -c ./client-compress.yaml proxy
+</code></pre>
+<p>Now we can connect to the local client proxy on “127.0.0.1:7777” via the “Multiplayer &gt; Address” field in the
+Xonotic client, and Quilkin will take care of compressing the data for you without having to change the game
+client!</p>
+<p>Congratulations! You are now using Quilkin to manipulate the game client to server connection, without having to
+edit either!</p>
+<h2 id="7-cleanup"><a class="header" href="#7-cleanup">7. Cleanup</a></h2>
+<p>Run the following to delete the Fleet and the accompanying ConfigMap:</p>
+<pre><code class="language-shell">kubectl delete -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-sidecar/sidecar-compress.yaml
+</code></pre>
+<h2 id="whats-next"><a class="header" href="#whats-next">What’s Next?</a></h2>
+<ul>
+<li>Have a look at the <a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples">examples</a> folder for configuration and usage examples.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="quickstart-quilkin-with-agones-and-xonotic-xds"><a class="header" href="#quickstart-quilkin-with-agones-and-xonotic-xds">Quickstart: Quilkin with Agones and Xonotic (xDS)</a></h1>
+<h2 id="requirements-2"><a class="header" href="#requirements-2">Requirements</a></h2>
+<ul>
+<li>A terminal with <code>kubectl</code> installed</li>
+<li>A local copy of the <a href="https://xonotic.org/">Xonotic</a> client</li>
+<li>A running <a href="https://agones.dev/">Agones</a> Kubernetes cluster
+<ul>
+<li><a href="https://agones.dev/site/docs/installation/">Installation instructions</a></li>
+<li>If you aren’t familiar with Agones, we recommend working through their
+<a href="https://agones.dev/site/docs/getting-started/">Getting Started</a> guides.</li>
+</ul>
+</li>
+<li>A local copy of the <a href="https://github.com/EmbarkStudios/quilkin/releases">Quilkin Binary</a>.</li>
+</ul>
+<h2 id="1-overview"><a class="header" href="#1-overview">1. Overview</a></h2>
+<p>In this quickstart, we’ll be setting up an example <a href="https://xonotic.org/">Xonotic</a> <a href="https://agones.dev/">Agones</a>
+Fleet, that will only be accessible through Quilkin that is hosted within the same cluster, utilising the
+<a href="services/proxy/filters/token_router.html">TokenRouter</a> Filter to provide routing and access control to the Allocated <code>GameServer</code> instances.</p>
+<p>To do this, we’ll take advantage of the Quilkin <a href="services/xds/providers/agones.html">Agones xDS Provider</a> to provide
+an out-of-the-box control plane for integration between Agones and <a href="services/xds.html">Quilkin’s xDS configuration API</a> with
+minimal effort.</p>
+<h2 id="2-install-quilkin-agones-xds-provider"><a class="header" href="#2-install-quilkin-agones-xds-provider">2. Install Quilkin Agones xDS Provider</a></h2>
+<p>To install Quilkin as an Agones integrated xDS control plane, we can create a deployment of Quilkin running with
+<code>provider.k8s.agones</code>, with the appropriate permissions.</p>
+<p>Run the following:</p>
+<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-xds/xds-control-plane.yaml
+</code></pre>
+<p>This applies several resources to your cluster:</p>
+<ol>
+<li>A <a href="https://kubernetes.io/docs/concepts/configuration/configmap/">ConfigMap</a> with a <a href="services/proxy/filters/capture.html">Capture</a> and <a href="services/proxy/filters/token_router.html">TokenRouter</a> Filter set up to route packets to Endpoints, to be the base
+configuration for all the Quilkin proxies.</li>
+<li>Appropriate <a href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/">RBAC</a> permissions for the
+<code>quilkin manage agones</code> process to inspect Agones resources.</li>
+<li>A matching <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Deployment</a>  that runs the
+<code>quilkin manage process</code> xDS control plane and a
+<a href="https://kubernetes.io/docs/concepts/services-networking/service/">Service</a> that the Quilkin proxies can connect to,
+to get their Filter and Endpoint configuration from.</li>
+</ol>
+<p>Now we can run <code>kubectl get pods</code> until we see that the Pod for the Deployment is up and running.</p>
+<pre><code class="language-shell">$ kubectl get pods
+NAME                                    READY   STATUS    RESTARTS   AGE
+quilkin-manage-agones-54b787654-9dbvp   1/1     Running   0          76s
+</code></pre>
+<p>We can now run <code>kubectl get service quilkin-manage-agones</code> and see the
+service that is generated in front of the above Deployment for our Quilkin proxies to connect to and receive their
+configuration information from.</p>
+<pre><code class="language-shell">$ kubectl get service quilkin-manage-agones
+NAME                    TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)   AGE
+quilkin-manage-agones   ClusterIP   10.104.2.72   &lt;none&gt;        80/TCP    1m23s
+</code></pre>
+<h2 id="3-install-quilkin-proxy-pool"><a class="header" href="#3-install-quilkin-proxy-pool">3. Install Quilkin Proxy Pool</a></h2>
+<p>To install the Quilkin Proxy pool which connects to the above xDS provider, we can create a Deployment of Quilkin
+proxy instances that point to the aforementioned Service, like so:</p>
+<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-xds/proxy-pool.yaml
+</code></pre>
+<p>This will set up three instances of Quilkin running as <code>quilkin proxy --management-server http://quilkin-manage-agones:80</code>
+all connected to the <code>quilkin-manage-agones</code> service.</p>
+<p>Now we can run <code>kubectl get pods</code> until we see that the Pods for the proxy Deployment is up and running.</p>
+<pre><code class="language-shell">$ kubectl get pods
+NAME                                    READY   STATUS    RESTARTS   AGE
+quilkin-manage-agones-54b787654-9dbvp   1/1     Running   0          5m7s
+quilkin-proxies-78965c446d-dqvjg        1/1     Running   0          6s
+quilkin-proxies-78965c446d-fr6zs        1/1     Running   0          6s
+quilkin-proxies-78965c446d-m4rr7        1/1     Running   0          6s
+</code></pre>
+<p>Let’s take this one step further, and check the configuration of the proxies that should have come from the <code>quilkin manage agones</code> instance.</p>
+<p>In another terminal, run:  <code>kubectl port-forward deployments/quilkin-proxies 8001:8000</code>, to port forward the
+<a href="#administration">admin endpoint</a> locally to port 8001, which we can then query.</p>
+<p>Go back to your original terminal and run <code>curl -s http://localhost:8001/config</code></p>
+<blockquote>
+<p>If you have <a href="https://stedolan.github.io/jq/">jq</a> installed, run <code>curl -s http://localhost:8001/config | jq</code> for a
+nicely formatted JSON output.</p>
+</blockquote>
+<pre><code class="language-shell">$ curl -s http://localhost:8001/config | jq
+{
+  "clusters": [
+    {
+      "endpoints": [],
+      "locality": null
+    }
+  ],
+  "filters": [
+    {
+      "name": "quilkin.filters.capture.v1alpha1.Capture",
+      "label": null,
+      "config": {
+        "metadataKey": "quilkin.dev/capture",
+        "suffix": {
+          "size": 3,
+          "remove": true
+        }
+      }
+    },
+    {
+      "name": "quilkin.filters.token_router.v1alpha1.TokenRouter",
+      "label": null,
+      "config": null
+    }
+  ],
+  "id": "quilkin-proxies-7d9bbbccdf-9vd59",
+  "version": "v1alpha1"
+}
+</code></pre>
+<p>This shows us the current configuration of the proxies coming from the xDS server created via <code>quilkin manage agones</code>. The most interesting part that we see here, is that we have a matching set of
+<a href="services/proxy/filters.html">Filters</a> that are found in the <code>ConfigMap</code> in the
+<a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples/agones-xonotic-xds/xds-control-plane.yaml">xds-control-plane.yaml</a>
+we installed earlier.</p>
+<h2 id="4-create-the-agones-fleet"><a class="header" href="#4-create-the-agones-fleet">4. Create the Agones Fleet</a></h2>
+<p>Now we will create an <a href="https://agones.dev/site/docs/reference/fleet/">Agones Fleet</a> to spin up all our Xonotic
+game servers.</p>
+<p>Thankfully, Agones Fleets require no specific configuration to work with Quilkin proxies, so this yaml is a
+<a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples/agones-xonotic-xds/fleet.yaml">standard Agones Fleet configuration</a></p>
+<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-xds/fleet.yaml
+</code></pre>
+<p>Run <code>kubectl get gameservers</code> until all the <code>GameServer</code> records show that they are <code>Ready</code> and able to take players.</p>
+<pre><code class="language-shell">$ kubectl get gameservers
+NAME                  STATE   ADDRESS         PORT   NODE                               AGE
+xonotic-d7rfx-55j7q   Ready   34.168.170.51   7226   gke-agones-default-534a3f8d-ifpc   34s
+xonotic-d7rfx-nx7xr   Ready   34.168.170.51   7984   gke-agones-default-534a3f8d-ifpc   34s
+xonotic-d7rfx-sn5d6   Ready   34.168.170.51   7036   gke-agones-default-534a3f8d-ifpc   34s
+</code></pre>
+<h2 id="5-allocate-a-gameserver"><a class="header" href="#5-allocate-a-gameserver">5. Allocate a <code>GameServer</code></a></h2>
+<p>To let the Quilkin xDS provider know what token will route to which <code>GameServer</code> we need to apply the
+<code>quilkin.dev/tokens</code> annotation to an allocated <code>GameServer</code>, with the token content as its value.</p>
+<blockquote>
+<p>This token would normally get generated by some kind of  player authentication service and passed to the client
+via the matchmaking service - but for demonstrative purposes, we’ve hardcoded it into the example
+<code>GameServerAllocation</code>.</p>
+</blockquote>
+<p>Since you can add annotations to <code>GameServers</code> at
+<a href="https://agones.dev/site/docs/reference/gameserverallocation/">allocation time</a>, we can both allocate a <code>GameServer</code>
+and apply the annotation at the same time!</p>
+<pre><code class="language-shell">kubectl create -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-xds/gameserverallocation.yaml
+</code></pre>
+<p>If we check our <code>GameServers</code> now, we should see that one of them has moved to the <code>Allocated</code> state, marking it as
+having players playing on it, and therefore it is protected by Agones until the game session ends.</p>
+<pre><code class="language-shell">$ kubectl get gs
+NAME                  STATE       ADDRESS         PORT   NODE                               AGE
+xonotic-d7rfx-55j7q   Allocated   34.168.170.51   7226   gke-agones-default-534a3f8d-ifpc   23m
+xonotic-d7rfx-nx7xr   Ready       34.168.170.51   7984   gke-agones-default-534a3f8d-ifpc   23m
+xonotic-d7rfx-sn5d6   Ready       34.168.170.51   7036   gke-agones-default-534a3f8d-ifpc   23m
+</code></pre>
+<blockquote>
+<p>Don’t do this more than once, as then multiple allocated <code>GameServers</code> will have the same routing token!</p>
+</blockquote>
+<p>If we <code>kubectl describe gameserver &lt;allocated-gameserver&gt;</code> and have a look at the annotations section, we
+should see something similar to this:</p>
+<pre><code class="language-shell">$ kubectl describe gameserver xonotic-d7rfx-55j7q
+Name:         xonotic-d7rfx-55j7q
+Namespace:    default
+Labels:       agones.dev/fleet=xonotic
+              agones.dev/gameserverset=xonotic-h5cfn
+Annotations:  agones.dev/last-allocated: 2022-12-19T22:59:22.099818298Z
+              agones.dev/ready-container-id: containerd://7b3d9e9dbda6f2e0381df7669f6117bf3e54171469cfacbce2670605a61ce4b8
+              agones.dev/sdk-version: 1.40.0
+              quilkin.dev/tokens: NDU2
+API Version:  agones.dev/v1
+Kind:         GameServer
+...
+</code></pre>
+<p>Where we can see that there is now an annotation of <code>quilkin.dev/tokens</code> with the base64 encoded version of <code>456</code> as
+our authentication and routing token (“NDU2”).</p>
+<blockquote>
+<p>You should use something more cryptographically random than <code>456</code> in your application.</p>
+</blockquote>
+<p>Let’s run <code>curl -s http://localhost:8001/config</code> again, so we can see what has changed!</p>
+<pre><code class="language-shell">❯ curl -s http://localhost:8001/config | jq
+{
+  "clusters": [
+    {
+      "endpoints": [
+        {
+          "address": "34.168.170.51:7226",
+          "metadata": {
+            "quilkin.dev": {
+              "tokens": [
+                "NDU2"
+              ]
+            },
+            "name": "xonotic-8ns7b-2lk5d"
+          }
+        }
+      ],
+      "locality": null
+    }
+  ],
+  "filters": [
+    {
+      "name": "quilkin.filters.capture.v1alpha1.Capture",
+      "label": null,
+      "config": {
+        "metadataKey": "quilkin.dev/capture",
+        "suffix": {
+          "size": 3,
+          "remove": true
+        }
+      }
+    },
+    {
+      "name": "quilkin.filters.token_router.v1alpha1.TokenRouter",
+      "label": null,
+      "config": null
+    }
+  ],
+  "id": "quilkin-proxies-7d9bbbccdf-9vd59",
+  "version": "v1alpha1"
+}
+</code></pre>
+<p>Looking under <code>clusters</code> &gt; <code>endpoints</code> we can see an address and token that matches up with the
+<code>GameServer</code> record we created above!</p>
+<p>The xDS process saw that allocated <code>GameServer</code>, turned it into a Quilkin <code>Endpoint</code> and applied the set the routing
+token appropriately – without you having to write a line of xDS compliant code!</p>
+<h2 id="connecting-client-side"><a class="header" href="#connecting-client-side">Connecting Client Side</a></h2>
+<p>Instead of connecting to Xonotic or an Agones <code>GameServer</code> directly, we’ll want to grab the IP and exposed port of
+the <code>Service</code> that fronts all our Quilkin proxies and connect to that instead – but we’ll have to append our
+routing token <code>456</code> from before, to ensure our traffic gets routed to the correct Xonotic <code>GameServer</code> address.</p>
+<p>Run <code>kubectl get service quilkin-proxies</code> to get the <code>EXTERNAL-IP</code> of the Service you created.</p>
+<pre><code class="language-shell">$ kubectl get service quilkin-proxies
+NAME              TYPE           CLUSTER-IP    EXTERNAL-IP     PORT(S)          AGE
+quilkin-proxies   LoadBalancer   10.109.0.12   35.246.94.14    7777:30174/UDP   3h22m
+</code></pre>
+<p>We have a <a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples/agones-xonotic-xds/client-token.yaml">Quilkin config yaml</a>
+file all ready for you, that is configured to append the routing token <code>456</code> to each
+packet that passes through it, via the power of a
+<a href="services/proxy/filters/concatenate.html">Concatenate</a> Filter.</p>
+<p>Download <code>client-token.yaml</code> locally, so you can edit it:</p>
+<pre><code class="language-shell">curl https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-xds/client-token.yaml --output client-token.yaml
+</code></pre>
+<p>We then take the EXTERNAL-IP and port from the <code>quilkin-proxies</code> service, and replace the<code>${LOADBALANCER_IP}</code>
+with it in <code>client-token.yaml</code>.</p>
+<p>Run this edited configuration locally with your quilkin binary as <code>quilkin -c ./client-token.yaml proxy</code>:</p>
+<pre><code class="language-shell">$ ./quilkin --config ./client-token.yaml proxy
+2023-10-04T20:09:07.320780Z  INFO quilkin::cli: src/cli.rs: Starting Quilkin version="0.7.0-dev" commit="d42db7e14c2e0e758e9a6eb655ccf4184941066c"
+2023-10-04T20:09:07.321711Z  INFO quilkin::admin: src/admin.rs: Starting admin endpoint address=[::]:8000
+2023-10-04T20:09:07.322089Z  INFO quilkin::cli::proxy: src/cli/proxy.rs: Starting port=7777 proxy_id="markmandel45"
+2023-10-04T20:09:07.322576Z  INFO quilkin::cli::proxy: src/cli/proxy.rs: Quilkin is ready
+2023-10-04T20:09:07.322692Z  INFO qcmp_task{v4_addr=0.0.0.0:7600 v6_addr=[::]:7600}: quilkin::protocol: src/protocol.rs: awaiting qcmp packets v4_addr=0.0.0.0:7600 v6_addr=[::]:7600
+</code></pre>
+<p>Now connect to the local client proxy on “[::1]:7777” via the “Multiplayer &gt; Address” field in the
+Xonotic client, and Quilkin will take care of appending the routing token to all your UDP packets, which the Quilkin
+proxies will route to the Allocated GameServer, and you can play a gamee!</p>
+<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address-v6.png"><span class="img-wrapper"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address-v6.png"></span></label></p>
+<p>…And you didn’t have to change the client or the dedicated game server 🤸</p>
+<h2 id="whats-next-1"><a class="header" href="#whats-next-1">What’s Next?</a></h2>
+<ul>
+<li>Check out the variety of <a href="services/proxy/filters.html">Filters</a> that are possible with Quilkin.</li>
+<li>Read into the <a href="services/xds.html">xDS Management API</a>.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="quickstart-quilkin-with-agones-and-xonotic-relay"><a class="header" href="#quickstart-quilkin-with-agones-and-xonotic-relay">Quickstart: Quilkin with Agones and Xonotic (Relay)</a></h1>
+<h2 id="requirements-3"><a class="header" href="#requirements-3">Requirements</a></h2>
+<ul>
+<li>A terminal with <code>kubectl</code> installed</li>
+<li>A local copy of the <a href="https://xonotic.org/">Xonotic</a> client</li>
+<li>A running <a href="https://agones.dev/">Agones</a> Kubernetes cluster
+<ul>
+<li><a href="https://agones.dev/site/docs/installation/">Installation instructions</a></li>
+<li>If you aren’t familiar with Agones, we recommend working through their
+<a href="https://agones.dev/site/docs/getting-started/">Getting Started</a> guides.</li>
+</ul>
+</li>
+<li>A local copy of the <a href="https://github.com/EmbarkStudios/quilkin/releases">Quilkin Binary</a>.</li>
+</ul>
+<h2 id="1-overview-1"><a class="header" href="#1-overview-1">1. Overview</a></h2>
+<p>In this quickstart, we’ll be setting up an example multi-cluster
+<a href="https://xonotic.org/">Xonotic</a> <a href="https://agones.dev/">Agones</a> Fleet, that will
+only be accessible through Quilkin, via utilising the <a href="services/proxy/filters/token_router.html">TokenRouter</a> Filter to
+provide routing and access control to the Allocated <code>GameServer</code> instances.</p>
+<p>To do this, we’ll take advantage of the Quilkin <a href="services/relay.html">Relay</a> to provide
+an out-of-the-box multi-cluster xDS control plane, and the <a href="services/agent.html">Agones Agent</a>
+to send information from the cluster(s) to the relay, which can be used as a
+management server for each of the Quilkin <a href="services/proxy.html">Proxy</a> instances.</p>
+<blockquote>
+<p>While the application of <code>quilkin relay</code> is to ultimately provide a solution where multiple clusters feed
+configuration information into a single relay endpoint via a <code>quilkin agent</code>, in this example we’ll
+use a single cluster for demonstrative purposes.</p>
+</blockquote>
+<h2 id="2-install-quilkin-relay-and-agones-agent"><a class="header" href="#2-install-quilkin-relay-and-agones-agent">2. Install Quilkin Relay and Agones Agent</a></h2>
+<p>To install Quilkin as an Agones integrated relay control plane, we can create a deployment of Quilkin running as
+<code>quilkin relay</code> with a corresponding Agones agent, <code>quilkin agent agones</code>, with the appropriate permissions.</p>
+<p>Run the following:</p>
+<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-relay/relay-control-plane.yaml
+</code></pre>
+<p>This applies several resources to your cluster:</p>
+<ol>
+<li>A <a href="https://kubernetes.io/docs/concepts/configuration/configmap/">ConfigMap</a> with a <a href="services/proxy/filters/capture.html">Capture</a> and <a href="services/proxy/filters/token_router.html">TokenRouter</a> Filter set up to route packets to Endpoints, to be the base
+configuration for all the Quilkin proxies.</li>
+<li>Appropriate <a href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/">RBAC</a> permissions for the
+<code>quilkin agent agones</code> process to inspect Agones resources.</li>
+<li>A <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Deployment</a>  that runs the
+<code>quilkin relay</code> process, a matching Deployment for the <code>quilkin agent</code> process and a
+<a href="https://kubernetes.io/docs/concepts/services-networking/service/">Service</a> that the Quilkin agents can send configuration information to, and the Proxies can connect to,
+to get their Filter and Endpoint configuration from.</li>
+</ol>
+<p>Now we can run <code>kubectl get pods</code> until we see that the Pod for the Deployment is up and running.</p>
+<pre><code class="language-shell">$ kubectl get pods
+NAME                                    READY   STATUS    RESTARTS   AGE
+quilkin-agones-agent-9dd6699bd-qh7cq    1/1     Running   0          6s
+quilkin-relay-agones-55fbd69f5d-cdh9k   1/1     Running   0          6s
+</code></pre>
+<p>We can now run <code>kubectl get service quilkin-relay-agones</code> and see the
+service that is generated in front of the above Quilkin Relay Deployment for our Quilkin Proxies to connect to and
+receive their configuration information from.</p>
+<pre><code class="language-shell">$ kubectl get service quilkin-relay-agones
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)             AGE
+quilkin-relay-agones   ClusterIP   10.103.243.246   &lt;none&gt;        7800/TCP,7900/TCP   57s
+</code></pre>
+<h2 id="3-install-quilkin-proxy-pool-1"><a class="header" href="#3-install-quilkin-proxy-pool-1">3. Install Quilkin Proxy Pool</a></h2>
+<p>To install the Quilkin Proxy pool which connects to the above Relay xDS provider, we can create a Deployment of Quilkin
+proxy instances that point to the aforementioned Service, like so:</p>
+<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-relay/proxy-pool.yaml
+</code></pre>
+<p>This will set up three instances of Quilkin running as <code>quilkin proxy --management-server http://quilkin-relay-agones:7900</code> all of which are connected to the <code>quilkin-relay-agones</code> service.</p>
+<p>Now we can run <code>kubectl get pods</code> until we see that the Pods for the proxy Deployment is up and running.</p>
+<pre><code class="language-shell">$ kubectl get pods                  
+NAME                                    READY   STATUS    RESTARTS   AGE
+quilkin-agones-agent-9dd6699bd-5brzf    1/1     Running   0          18s
+quilkin-proxies-7d9bbbccdf-5mz4l        1/1     Running   0          7s
+quilkin-proxies-7d9bbbccdf-9vd59        1/1     Running   0          7s
+quilkin-proxies-7d9bbbccdf-vwn2f        1/1     Running   0          7s
+quilkin-relay-agones-55fbd69f5d-k2n7b   1/1     Running   0          18s
+</code></pre>
+<p>Let’s take this one step further, and check the configuration of the proxies that should have come from the <code>quilkin  agent agones</code> instance and passed through the <code>quilkin relay instance</code> into each of the proxies.</p>
+<p>In another terminal, run:  <code>kubectl port-forward deployments/quilkin-proxies 8001:8000</code>, to port forward the
+<a href="#administration">admin endpoint</a> locally to port 8001, which we can then query.</p>
+<p>Go back to your original terminal and run <code>curl -s http://localhost:8001/config</code></p>
+<blockquote>
+<p>If you have <a href="https://stedolan.github.io/jq/">jq</a> installed, run <code>curl -s http://localhost:8001/config | jq</code> for a
+nicely formatted JSON output.</p>
+</blockquote>
+<pre><code class="language-shell">$ curl -s http://localhost:8001/config | jq
+{
+  "clusters": [
+    {
+      "endpoints": [],
+      "locality": null
+    }
+  ],
+  "filters": [
+    {
+      "name": "quilkin.filters.capture.v1alpha1.Capture",
+      "label": null,
+      "config": {
+        "metadataKey": "quilkin.dev/capture",
+        "suffix": {
+          "size": 3,
+          "remove": true
+        }
+      }
+    },
+    {
+      "name": "quilkin.filters.token_router.v1alpha1.TokenRouter",
+      "label": null,
+      "config": null
+    }
+  ],
+  "id": "quilkin-proxies-7d9bbbccdf-9vd59",
+  "version": "v1alpha1"
+}
+</code></pre>
+<p>This shows us the current configuration of the proxies coming from the xDS server created via <code>quilkin agent  agones</code>. The most interesting part that we see here, is that we have a matching set of
+<a href="services/proxy/filters.html">Filters</a> that are found in the <code>ConfigMap</code> in the
+<a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples/agones-xonotic-relay/relay-control-plane.yaml">relay-control-plane.yaml</a>
+we installed earlier.</p>
+<h2 id="4-create-the-agones-fleet-1"><a class="header" href="#4-create-the-agones-fleet-1">4. Create the Agones Fleet</a></h2>
+<p>Now we will create an <a href="https://agones.dev/site/docs/reference/fleet/">Agones Fleet</a> to spin up all our Xonotic
+game servers.</p>
+<p>Thankfully, Agones Fleets require no specific configuration to work with Quilkin proxies, so this yaml is a
+<a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples/agones-xonotic-relay/fleet.yaml">standard Agones Fleet configuration</a></p>
+<pre><code class="language-shell">kubectl apply -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-relay/fleet.yaml
+</code></pre>
+<p>Run <code>kubectl get gameservers</code> until all the <code>GameServer</code> records show that they are <code>Ready</code> and able to take players.</p>
+<pre><code class="language-shell">$ kubectl get gs
+NAME                  STATE       ADDRESS         PORT   NODE                               AGE
+xonotic-8ns7b-2lk5d   Ready       39.168.219.72   7015   gke-agones-default-ad8cd7e5-3b12   1m
+xonotic-8ns7b-hrc8j   Ready       39.168.219.72   7298   gke-agones-default-ad8cd7e5-3b12   1m
+xonotic-8ns7b-mldg6   Ready       39.168.219.72   7558   gke-agones-default-ad8cd7e5-3b12   1m
+</code></pre>
+<h2 id="5-allocate-a-gameserver-1"><a class="header" href="#5-allocate-a-gameserver-1">5. Allocate a <code>GameServer</code></a></h2>
+<p>To let the Quilkin Agones Agent know what token will route to which <code>GameServer</code> we need to apply the
+<code>quilkin.dev/tokens</code> annotation to an allocated <code>GameServer</code>, with the token content as its value.</p>
+<blockquote>
+<p>This token would normally get generated by some kind of  player authentication service and passed to the client
+via the matchmaking service - but for demonstrative purposes, we’ve hardcoded it into the example
+<code>GameServerAllocation</code>.</p>
+</blockquote>
+<p>Since you can add annotations to <code>GameServers</code> at
+<a href="https://agones.dev/site/docs/reference/gameserverallocation/">allocation time</a>, we can both allocate a <code>GameServer</code>
+and apply the annotation at the same time!</p>
+<pre><code class="language-shell">kubectl create -f https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-relay/gameserverallocation.yaml
+</code></pre>
+<p>If we check our <code>GameServers</code> now, we should see that one of them has moved to the <code>Allocated</code> state, marking it as
+having players playing on it, and therefore it is protected by Agones until the game session ends.</p>
+<pre><code class="language-shell">$ kubectl get gs
+NAME                  STATE       ADDRESS         PORT   NODE                               AGE
+xonotic-8ns7b-2lk5d   Allocated   39.168.219.72   7015   gke-agones-default-ad8cd7e5-3b12   17m
+xonotic-8ns7b-hrc8j   Ready       39.168.219.72   7298   gke-agones-default-ad8cd7e5-3b12   17m
+xonotic-8ns7b-mldg6   Ready       39.168.219.72   7558   gke-agones-default-ad8cd7e5-3b12   17m
+</code></pre>
+<blockquote>
+<p>Don’t do this more than once, as then multiple allocated <code>GameServers</code> will have the same routing token!</p>
+</blockquote>
+<p>If we <code>kubectl describe gameserver &lt;allocated-gameserver&gt;</code> and have a look at the annotations section, we
+should see something similar to this:</p>
+<pre><code class="language-shell">❯ kubectl describe gs xonotic-8ns7b-2lk5d
+Name:         xonotic-8ns7b-2lk5d
+Namespace:    default
+Labels:       agones.dev/fleet=xonotic
+              agones.dev/gameserverset=xonotic-8ns7b
+Annotations:  agones.dev/last-allocated: 2023-10-04T19:47:04.047026419Z
+              agones.dev/ready-container-id: containerd://b39d30965becdbc40336fd9aa642fe776421553615f642dd599e1b0d88c505b6
+              agones.dev/sdk-version: 1.40.0
+              quilkin.dev/tokens: NDU2
+API Version:  agones.dev/v1
+Kind:         GameServer
+...
+</code></pre>
+<p>Where we can see that there is now an annotation of <code>quilkin.dev/tokens</code> with the base64 encoded version of <code>456</code> as
+our authentication and routing token (“NDU2”).</p>
+<blockquote>
+<p>You should use something more cryptographically random than <code>456</code> in your application.</p>
+</blockquote>
+<p>Let’s run <code>curl -s http://localhost:8001/config</code> again, so we can see what has changed!</p>
+<pre><code class="language-shell">❯ curl -s http://localhost:8001/config | jq
+{
+  "clusters": [
+    {
+      "endpoints": [
+        {
+          "address": "39.168.219.72:7015",
+          "metadata": {
+            "quilkin.dev": {
+              "tokens": [
+                "NDU2"
+              ]
+            },
+            "name": "xonotic-8ns7b-2lk5d"
+          }
+        }
+      ],
+      "locality": null
+    }
+  ],
+  "filters": [
+    {
+      "name": "quilkin.filters.capture.v1alpha1.Capture",
+      "label": null,
+      "config": {
+        "metadataKey": "quilkin.dev/capture",
+        "suffix": {
+          "size": 3,
+          "remove": true
+        }
+      }
+    },
+    {
+      "name": "quilkin.filters.token_router.v1alpha1.TokenRouter",
+      "label": null,
+      "config": null
+    }
+  ],
+  "id": "quilkin-proxies-7d9bbbccdf-9vd59",
+  "version": "v1alpha1"
+}
+</code></pre>
+<p>Looking under <code>clusters</code> &gt; <code>endpoints</code> we can see an address and token that matches up with the
+<code>GameServer</code> record we created above!</p>
+<p>The Agones agent process saw that allocated <code>GameServer</code>, turned it into a Quilkin <code>Endpoint</code> and applied the set
+routing token appropriately – without you having to write a line of xDS compliant code!</p>
+<h2 id="connecting-client-side-1"><a class="header" href="#connecting-client-side-1">Connecting Client Side</a></h2>
+<p>Instead of connecting to Xonotic or an Agones <code>GameServer</code> directly, we’ll want to grab the IP and exposed port of
+the <code>Service</code> that fronts all our Quilkin proxies and connect to that instead – but we’ll have to append our
+routing token <code>456</code> from before, to ensure our traffic gets routed to the correct Xonotic <code>GameServer</code> address.</p>
+<p>Run <code>kubectl get service quilkin-proxies</code> to get the <code>EXTERNAL-IP</code> of the Service you created.</p>
+<pre><code class="language-shell">$ kubectl get service quilkin-proxies
+NAME              TYPE           CLUSTER-IP    EXTERNAL-IP     PORT(S)          AGE
+quilkin-proxies   LoadBalancer   10.109.0.12   35.246.94.14    7777:30174/UDP   3h22m
+</code></pre>
+<p>We have a <a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples/agones-xonotic-relay/client-token.yaml">Quilkin config yaml</a>
+file all ready for you, that is configured to append the routing token <code>456</code> to each
+packet that passes through it, via the power of a
+<a href="services/proxy/filters/concatenate.html">Concatenate</a> Filter.</p>
+<p>Download <code>client-token.yaml</code> locally, so you can edit it:</p>
+<pre><code class="language-shell">curl https://raw.githubusercontent.com/EmbarkStudios/quilkin/main/examples/agones-xonotic-relay/client-token.yaml --output client-token.yaml  
+</code></pre>
+<p>We then take the EXTERNAL-IP and port from the <code>quilkin-proxies</code> service, and replace the<code>${LOADBALANCER_IP}</code>
+with it in <code>client-token.yaml</code>.</p>
+<p>Run this edited configuration locally with your quilkin binary as <code>quilkin -c ./client-token.yaml proxy</code>:</p>
+<pre><code class="language-shell">$ ./quilkin --config ./client-token.yaml proxy
+2023-10-04T20:09:07.320780Z  INFO quilkin::cli: src/cli.rs: Starting Quilkin version="0.7.0-dev" commit="d42db7e14c2e0e758e9a6eb655ccf4184941066c"
+2023-10-04T20:09:07.321711Z  INFO quilkin::admin: src/admin.rs: Starting admin endpoint address=[::]:8000
+2023-10-04T20:09:07.322089Z  INFO quilkin::cli::proxy: src/cli/proxy.rs: Starting port=7777 proxy_id="markmandel45"
+2023-10-04T20:09:07.322576Z  INFO quilkin::cli::proxy: src/cli/proxy.rs: Quilkin is ready
+2023-10-04T20:09:07.322692Z  INFO qcmp_task{v4_addr=0.0.0.0:7600 v6_addr=[::]:7600}: quilkin::protocol: src/protocol.rs: awaiting qcmp packets v4_addr=0.0.0.0:7600 v6_addr=[::]:7600
+</code></pre>
+<p>Now connect to the local client proxy on “[::1]:7777” via the “Multiplayer &gt; Address” field in the
+Xonotic client, and Quilkin will take care of appending the routing token to all your UDP packets, which the Quilkin
+proxies will route to the Allocated GameServer, and you can play a gamee!</p>
+<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address-v6.png"><span class="img-wrapper"><img src="deployment/quickstarts/xonotic-address-v6.png" alt="xonotic-address-v6.png"></span></label></p>
+<p>…And you didn’t have to change the client or the dedicated game server 🤸</p>
+<h2 id="whats-next-2"><a class="header" href="#whats-next-2">What’s Next?</a></h2>
+<ul>
+<li>Check out the variety of <a href="services/proxy/filters.html">Filters</a> that are possible with Quilkin.</li>
+<li>Read into the <a href="services/xds.html">xDS Management API</a>.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="quilkin-control-message-protocol-qcmp"><a class="header" href="#quilkin-control-message-protocol-qcmp">Quilkin Control Message Protocol (QCMP)</a></h1>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>services</th><th>ports</th><th>Protocol</th></tr>
+</thead>
+<tbody>
+<tr><td>QCMP</td><td>7600</td><td>UDP AND TCP (IPv4 OR IPv6)</td></tr>
+</tbody>
+</table>
+</div>
+<p>In addition to the TCP based administration API, Quilkin provides a meta API
+over UDP and TCP. The purpose of this API is to provide meta operations that can
+be used by untrusted clients. Currently the API is focuses on providing pings
+for latency measurement but that may change overtime as new features are added.</p>
+<h2 id="ping"><a class="header" href="#ping">Ping</a></h2>
+<p>The main functionality currently in QCMP is pinging, measuring the latency from
+one service to another over UDP. You can also measure the distance locally using
+the <code>quilkin qcmp ping</code> command.</p>
+<pre><code>quilkin qcmp ping 127.0.0.1:7600
+</code></pre>
+<h2 id="protocol-data-unit"><a class="header" href="#protocol-data-unit">Protocol Data Unit</a></h2>
+<p>The following is a <a href="https://kaitai.io/">Kaitai Struct</a> configuration of the protocol data unit
+accepted by Quilkin proxies.</p>
+<pre><code class="language-yaml">meta:
+  id: quilkin_packet
+  endian: be
+seq:
+  - id: magic_header
+    contents: "QLKN"
+  - id: protocol_version
+    type: u1
+  - id: packet_type
+    type: u1
+  - id: packet_length
+    type: u2
+  - id: packet
+    size: packet_length
+    type:
+      switch-on: packet_type
+      cases:
+        0: ping_packet
+        1: ping_reply_packet
+
+types:
+  ping_packet:
+    doc: |
+        Sent by a client to a proxy containing the time when the client sent the
+        packet along with a unique nonce. The timestamp should be a UTC unix
+        timestamp in **nanoseconds**.
+    seq:
+      - id: nonce
+        type: u1
+      - id: client_sent_timestamp
+        type: u8
+
+  ping_reply_packet:
+    doc: |
+        A reply from a proxy containing the ping's nonce, the client sent time,
+        the server's receive time, and the server's sent time. The timestamps
+        should be UTC unix timestamps in **nanoseconds**.
+    seq:
+      - id: nonce
+        type: u1
+      - id: client_sent_timestamp
+        type: u8
+      - id: server_receive_timestamp
+        type: u8
+      - id: server_sent_timestamp
+        type: u8
+</code></pre>
+<h2 id="datacenter-latency"><a class="header" href="#datacenter-latency">Datacenter Latency</a></h2>
+<p>In addition to being able to ping Quilkin to get the latency between the client
+and proxy. In order to allow clients to send information to services like a
+matchmaker about which datacentre they are closest to, Quilkin also includes
+the ability to get a proxy’s latency to each of its connected datacentres.</p>
+<blockquote>
+<p>Note: This requires a multi-cluster relay setup, as when you set up proxies
+in the same cluster as gameservers, this measurement is redundant.</p>
+</blockquote>
+<p>All that is required to set this up is to provide an ICAO code to the agent in
+the gameserver cluster. (E.g. through the environment variable <code>ICAO_CODE</code>).
+No further setup is required. <strong>You can use duplicate ICAO codes</strong>, Quilkin will
+choose the best result amongst the duplicates to return. Quilkin assumes that
+multiple of the same ICAO code refer to the same phyiscal datacentre, so latency
+between them should negible.</p>
+<blockquote>
+<p>Why ICAO? ICAO is an international standard for airport codes, airport codes
+are an easy human readable code that makes it easy to use geo-visualisations
+in tools like Grafana, and easily allows grouping. IATA codes only cover
+major airports, ICAO codes cover practically every airport making them easy to
+more accurately represent the location of any datacentre.</p>
+</blockquote>
+<h3 id="api-and-schema"><a class="header" href="#api-and-schema">API And Schema</a></h3>
+<p>Currently the datacentre latency can be retrieved by sending a <code>GET /</code> HTTP
+request to the QCMP port.</p>
+<p>The returned data is a JSON object with each key being the ICAO code for the
+datacentre, and the value being the latency in nanoseconds.</p>
+<h3 id="network-coordinates"><a class="header" href="#network-coordinates">Network coordinates</a></h3>
+<p><code>GET /network-coordinates</code> returns each datacentre’s coordinate, keyed by ICAO
+code: <code>incoming</code> for the path towards it, <code>outgoing</code> for the path back.</p>
+<p>The <code>X-Api-Version</code> header, a <code>YYYY-MM-DD</code> date, selects the shape. On or after
+<code>2026-10-15</code>, one array per direction with an element per dimension:</p>
+<pre><code class="language-json">{ "ESSA": { "incoming": [1250000.0], "outgoing": [1310000.0] } }
+</code></pre>
+<p>Otherwise each direction is that array’s Euclidean norm, which is the element
+itself while the space has one dimension:</p>
+<pre><code class="language-json">{ "ESSA": { "incoming": 1250000.0, "outgoing": 1310000.0 } }
+</code></pre>
+<h2 id="metrics"><a class="header" href="#metrics">Metrics</a></h2>
+<ul>
+<li>
+<p><code>quilkin_phoenix_requests</code></p>
+<p>The amount of phoenix (latency) requests</p>
+</li>
+<li>
+<p><code>quilkin_phoenix_task_closed</code></p>
+<p>Whether the phoenix latency measurement task has shutdown</p>
+</li>
+<li>
+<p><code>quilkin_phoenix_server_errors</code></p>
+<p>The amount of errors attempting to spawn the phoenix HTTP server</p>
+</li>
+<li>
+<p><code>quilkin_phoenix_measurement_seconds{icao, direction}</code> (Histogram)</p>
+<p>The distribution of accepted latency measurements per datacentre.</p>
+<ul>
+<li>The <code>direction</code> label is the leg of the round trip: <code>incoming</code> is proxy to
+datacentre, <code>outgoing</code> is datacentre back to proxy.</li>
+</ul>
+</li>
+<li>
+<p><code>quilkin_phoenix_measurement_errors_total{icao}</code> (Counter)</p>
+<p>The total number of measurements that yielded no usable value, whether the peer
+failed to answer or answered implausibly. Each one raises the node’s error
+estimate, making it less likely to be picked.</p>
+</li>
+<li>
+<p><code>quilkin_phoenix_measurements_rejected_total{icao, direction, reason}</code> (Counter)</p>
+<p>The total number of measurements discarded because the reply’s timestamps don’t
+describe a network path. Implausible measurements are discarded rather than
+clamped, as one corrupts the histogram’s <code>_sum</code> permanently and wrecks the
+coordinate solve.</p>
+<p>This is the subset of <code>quilkin_phoenix_measurement_errors_total</code> the peer did
+answer, so a wrong clock is distinguishable from an unreachable datacentre.</p>
+<ul>
+<li>The <code>reason</code> label is a closed set:
+<ul>
+<li><code>negative</code>: the leg came out below zero, ie the timestamp it derives from is ahead of the clock that read it.</li>
+<li><code>too_large</code>: the leg came out longer than any network path produces, ie a zero or badly skewed peer timestamp.</li>
+</ul>
+</li>
+<li>The <code>direction</code> label is the leg that failed, named as in
+<code>quilkin_phoenix_measurement_seconds</code>. Both legs cross the two clocks, so
+skew pushes one out of range and the other towards zero; only the failing
+leg is counted, so the counter equals the measurements discarded.</li>
+</ul>
+<p>Clock skew shows up as a single <code>icao</code>, which is what separates it from a
+network problem:</p>
+<pre><code class="language-promql">sum by (icao) (rate(quilkin_phoenix_measurements_rejected_total[5m]))
+</code></pre>
+</li>
+<li>
+<p><code>quilkin_service_qcmp_active</code></p>
+<p>Whether the QCMP service is currently running, either 1 for running or 0 for not.</p>
+</li>
+<li>
+<p><code>quilkin_service_qcmp_bytes_total{kind, asn, ip_prefix}</code></p>
+<p>Total number of bytes processed through QCMP. <code>kind</code> is either <code>valid</code>, <code>invalid</code>, or <code>unsupported</code>.</p>
+</li>
+<li>
+<p><code>quilkin_service_qcmp_errors_total{asn, ip_prefix}</code></p>
+<p>Total number of errors QCMP has encountered.</p>
+</li>
+<li>
+<p><code>quilkin_service_qcmp_packets_total{kind, asn, ip_prefix}</code></p>
+<p>Total number of packets processed through QCMP. <code>kind</code> is either <code>valid</code>, <code>invalid</code>, or <code>unsupported</code>.</p>
+</li>
+<li>
+<p><code>quilkin_service_qcmp_ingress_latency_seconds{asn, ip_prefix}</code></p>
+<p>The time from when the client created the packet, to when QCMP received it.</p>
+</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="udp"><a class="header" href="#udp">UDP</a></h1>
+<p>The UDP service is the main protocol for proxying game traffic from the players to your gameservers.</p>
+<h2 id="endpoints"><a class="header" href="#endpoints">Endpoints</a></h2>
+<p>An Endpoint represents an address that Quilkin forwards packets to that it has received from the
+source port.</p>
+<p>It is represented by an IP address and port. An Endpoint can optionally be associated with an arbitrary set of
+<a href="#endpoint-metadata">metadata</a> as well.</p>
+<h2 id="proxy-filters"><a class="header" href="#proxy-filters">Proxy Filters</a></h2>
+<p>Filters are the way for a Quilkin proxy to intercept UDP packet traffic from the
+source and <a href="#endpoints">Endpoints</a> in either direction, and be able to inspect,
+manipulate, and route the packets as desired.</p>
+<p>See <a href="services/proxy/filters.html">Filters</a>  for a deeper dive into Filters, as well as the list of build in Filters that come with
+Quilkin.</p>
+<h2 id="endpoint-metadata"><a class="header" href="#endpoint-metadata">Endpoint Metadata</a></h2>
+<p>Endpoint metadata is an arbitrary set of key value pairs that are associated with an Endpoint.</p>
+<p>These are visible to Filters when processing packets and can be used to provide more context about endpoints (e.g
+whether or not to route a packet to an endpoint). Keys must be of type string otherwise the configuration is rejected.</p>
+<p>Metadata associated with an endpoint contain arbitrary key value pairs which <a href="services/proxy/filters.html">Filters</a> can consult when processing packets (e.g they can contain information that determine whether or not to route a particular packet to an endpoint).</p>
+<h3 id="specialist-endpoint-metadata"><a class="header" href="#specialist-endpoint-metadata">Specialist Endpoint Metadata</a></h3>
+<p>Access tokens that can be associated with an endpoint are simply a special piece of metadata well known to Quilkin
+and utilised by the built-in <a href="services/proxy/filters/token_router.html">TokenRouter</a> filter to route packets.</p>
+<p>Such well known values are placed within an object in the endpoint metadata, under the special key <code>quilkin.dev</code>.
+Currently, only the <code>tokens</code> key is in use.</p>
+<p>As an example, the following shows the configuration for an endpoint with its metadata:</p>
+<pre><code class="language-yaml">clusters:
+  - endpoints:
+    - address: 127.0.0.1:26000
+      metadata:
+        canary: false
+        quilkin.dev: # This object is extracted by Quilkin and is usually reserved for built-in features
+            tokens:
+            - MXg3aWp5Ng== # base64 for 1x7ijy6
+            - OGdqM3YyaQ== # base64 for 8gj3v2i
+</code></pre>
+<p>An endpoint’s metadata can be specified alongside the endpoint in <a href="services/proxy/configuration.html">static configuration</a> or using the <a href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/endpoint/v3/endpoint_components.proto#envoy-v3-api-field-config-endpoint-v3-lbendpoint-metadata">xDS endpoint metadata</a> field when using <a href="services/xds.html">dynamic configuration</a> via xDS.</p>
+<h2 id="session"><a class="header" href="#session">Session</a></h2>
+<p>A session represents ongoing communication flow between a client on a [Local Port] and an <a href="#endpoints">Endpoint</a>.</p>
+<p>Quilkin uses the “Session” concept to track traffic flowing through the proxy between any client-server pair. A
+Session serves the same purpose, and can be thought of as a lightweight version of a <code>TCP</code> session in that, while a
+TCP session requires a protocol to establish and teardown:</p>
+<ul>
+<li>A Quilkin session is automatically created upon receiving the first packet from a client via the [Local Port] to be
+sent to an upstream <a href="#endpoints">Endpoint</a>.</li>
+<li>The session is automatically deleted after a period of inactivity (where no packet was sent between either
+party) - currently 60 seconds.</li>
+</ul>
+<p>A session is identified by the 4-tuple <code>(client IP, client Port, server IP, server Port)</code> where the client is the
+downstream endpoint which initiated the communication with Quilkin and the server is one of the upstream Endpoints
+that Quilkin proxies traffic to.</p>
+<p>Sessions are established <em>after</em> the filter chain completes. The destination Endpoint of a packet is determined by
+the <a href="services/proxy/filters.html">filter chain</a>, so a Session can only be created after filter chain completion. For example, if the
+filter chain drops all packets, then no session will ever be created.</p>
+<h2 id="diagram"><a class="header" href="#diagram">Diagram</a></h2>
+<pre class="mermaid">architecture-beta
+    group player(cloud)[Player]
+
+    service game(cloud)[Game] in player
+
+    game{group}:B --&gt; T:ioj{group}
+
+    group udpstack(cloud)[Quilkin Stack]
+    group services(server)[Service Layer] in udpstack
+
+    service providers(cloud)[Providers] in udpstack
+    service config(disk)[Configuration] in udpstack
+
+    providers:L --&gt; R:config
+    config:T --&gt; B:fc{group}
+
+    group bizlayer(cloud)[Packet Processing] in services
+    service fc(server)[Filter Chain] in bizlayer
+    service prefilters(server)[preprocessing] in bizlayer
+    service postfilters(server)[postprocessing] in bizlayer
+
+    prefilters:R --&gt; L:fc
+    fc:R --&gt; L:postfilters
+
+    group iolayer(cloud)[UDP layer] in services
+    service xdp(server)[XDP] in iolayer
+    service iouring(server)[io uring] in iolayer
+    junction ioj in iolayer
+    xdp:R -- L:ioj
+    iouring:L -- R:ioj
+    ioj:B --&gt; T:fc{group}
+
+    group gs(cloud)[Game Servers]
+    service gameserver(cloud)[Game Server] in gs
+
+    postfilters{group}:R --&gt; L:gameserver
+</pre>
+
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="agones-provider"><a class="header" href="#agones-provider">Agones Provider</a></h1>
+<p>The <a href="https://agones.dev">Agones</a> Provider is built to simplify Quilkin integration with Agones
+game server hosting on top of <a href="https://kubernetes.io">Kubernetes</a>.</p>
+<p>This provider watches for changes in Agones
+<a href="https://agones.dev/site/docs/getting-started/create-gameserver/"><code>GameServer</code> resources</a> in a cluster, and
+utilises that information to provide <a href="../proxy.html#endpoints">Endpoint</a> information to connected Quilkin proxies.</p>
+<blockquote>
+<p>Currently, the Agones provider can only discover resources within the cluster it is running in.</p>
+</blockquote>
+<h2 id="endpoint-configuration"><a class="header" href="#endpoint-configuration">Endpoint Configuration</a></h2>
+<p>This provider watches the Kubernetes clusters for <code>Allocated</code>
+<a href="https://agones.dev/site/docs/reference/gameserver/#gameserver-state-diagram">Agones GameServers</a>
+and exposes their IP address and Port as <a href="../proxy.html#endpoints">Endpoints</a> to any connected Quilkin proxies.</p>
+<blockquote>
+<p>Since an Agones GameServer can have multiple ports exposed, if multiple ports are in
+use, the server will pick the first port in the port list.</p>
+</blockquote>
+<p>By default the Agones xDS provider will look in the <code>default</code> namespace for any <code>GameServer</code> resources, but it can be
+configured via the <code>--gameservers-namespace</code> argument.</p>
+<h3 id="access-tokens"><a class="header" href="#access-tokens">Access Tokens</a></h3>
+<p>The set of <a href="../proxy.html#specialist-endpoint-metadata">access tokens</a> for the associated Endpoint can be
+set by adding a comma separated standard base64 encoded strings. This must be added under an annotation
+<code>quilkin.dev/tokens</code> in the
+<a href="https://agones.dev/site/docs/reference/agones_crd_api_reference/#agones.dev/v1.GameServer">GameServer</a>’s metadata.</p>
+<p>For example:</p>
+<pre><code class="language-yaml">annotations:
+   # Sets two tokens for the corresponding endpoint with values 1x7ijy6 and 8gj3v2i respectively.
+   quilkin.dev/tokens: MXg3aWp5Ng==,OGdqM3YyaQ==
+</code></pre>
+<h2 id="filter-configuration"><a class="header" href="#filter-configuration">Filter Configuration</a></h2>
+<p>The Agones provider watches for a singular <a href="https://kubernetes.io/docs/concepts/configuration/configmap/"><code>ConfigMap</code></a>
+that has the label of <code>quilkin.dev/configmap: "true"</code>, and any changes that happen to it, and use its contents to
+send <a href="../../services/proxy/filters.html">Filter</a> configuration to any connected Quilkin proxies.</p>
+<p>The <code>ConfigMap</code> contents should be a valid Quilkin <a href="../../services/proxy/configuration.html">file configuration</a>, but with no
+Endpoint data.</p>
+<p>For example:</p>
+<pre><code class="language-yaml">apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quilkin-xds-filter-config
+  labels:
+    quilkin.dev/configmap: "true"
+data:
+  quilkin.yaml: |
+    version: v1alpha1
+    filters:
+      - name: quilkin.filters.capture.v1alpha1.Capture
+        config:
+          suffix:
+            size: 3
+            remove: true
+      - name: quilkin.filters.token_router.v1alpha1.TokenRouter
+</code></pre>
+<p>By default the Agones xDS provider will look in the <code>default</code> namespace for this <code>ConfigMap</code>, but it can be
+configured via the <code>--config-namespace</code> argument.</p>
+<h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
+<p>As an example, the following runs quilkin against a cluster (using default
+kubeconfig authentication) in the <code>default</code> namespace.</p>
+<pre><code class="language-sh">quilkin --provider.k8s.agones --provider.k8s.agones.namespace=default
+</code></pre>
+<p>For a full referenmce of deploying this provider in a Kubernetes cluster, with appropriate <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Deployments</a>, <a href="https://kubernetes.io/docs/concepts/services-networking/service/">Services</a>,
+and <a href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/">RBAC</a> Rules, there is an <a href="https://github.com/EmbarkStudios/quilkin/tree/main/examples/agones-xonotic-xds">Agones, xDS and Xonotic example</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="filesystem-provider"><a class="header" href="#filesystem-provider">Filesystem Provider</a></h1>
+<p>The filesystem provider watches a configuration file on disk and sends updates to proxies whenever that file changes.</p>
+<p>For example:</p>
+<pre><code class="language-sh">quilkin --provider.fs.path quilkin.yaml
+</code></pre>
+<p>You can find the configuration file schema in <a href="../../services/proxy/configuration.html">Configuration File</a>.</p>
+<p>Example:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+filters:
+  - name: quilkin.filters.debug.v1alpha1.Debug
+    config:
+      id: hello
+clusters:
+  - endpoints:
+     - address: 123.0.0.1:29
+       metadata:
+         'quilkin.dev':
+           tokens:
+             - 'MXg3aWp5Ng=='
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 1);
+</span><span class="boring">}</span></code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="http-provider"><a class="header" href="#http-provider">HTTP Provider</a></h1>
+<p>The HTTP provider exposes a REST API that allows game server endpoints and the active
+<a href="#packet-filters">filter chain</a> to be managed over plain HTTP. It is useful when you want to
+drive Quilkin’s configuration from an external system — such as a matchmaker, a fleet
+manager, or a test harness — without deploying Kubernetes or a shared database.</p>
+<p>By default the server listens on port <code>9000</code>:</p>
+<pre><code class="language-sh">quilkin --provider.http
+</code></pre>
+<p>A custom address can be specified with <code>--provider.http.address</code>:</p>
+<pre><code class="language-sh">quilkin --provider.http --provider.http.address 0.0.0.0:9000
+</code></pre>
+<h2 id="endpoints-api"><a class="header" href="#endpoints-api">Endpoints API</a></h2>
+<p>Quilkin routes incoming UDP packets to one or more <a href="#endpoints">endpoints</a>. The HTTP
+provider lets you add, replace, and remove endpoints at runtime.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Method</th><th>Path</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>GET</code></td><td><code>/endpoints</code></td><td>List all current endpoints</td></tr>
+<tr><td><code>POST</code></td><td><code>/endpoints</code></td><td>Upsert an endpoint (add or replace by address)</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/endpoints</code></td><td>Remove all endpoints</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/endpoints/{address}</code></td><td>Remove the endpoint at <code>{address}</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Endpoints are represented as JSON objects with an <code>address</code> field and an optional
+<code>metadata</code> field containing <a href="#specialist-endpoint-metadata">access tokens</a>:</p>
+<pre><code class="language-json">{
+  "address": "203.0.113.1:7777",
+  "metadata": {
+    "quilkin.dev": {
+      "tokens": ["MXg3aWp5Ng=="]
+    }
+  }
+}
+</code></pre>
+<p><code>POST /endpoints</code> performs an <strong>upsert</strong>: if an endpoint with the same address already
+exists its metadata is replaced; otherwise a new endpoint is added.</p>
+<p>To remove a single endpoint, include its address in the path:</p>
+<pre><code class="language-sh">curl -X DELETE http://localhost:9000/endpoints/203.0.113.1:7777
+</code></pre>
+<h2 id="filter-chain-api"><a class="header" href="#filter-chain-api">Filter Chain API</a></h2>
+<p>The filter chain determines how packets are processed before they are forwarded to an
+endpoint. See <a href="#packet-filters">Filters</a> for the full list of available filters and their
+configuration options.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Method</th><th>Path</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>GET</code></td><td><code>/filterchain</code></td><td>Get the current filter chain</td></tr>
+<tr><td><code>PUT</code></td><td><code>/filterchain</code></td><td>Replace the filter chain</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/filterchain</code></td><td>Reset the filter chain to empty</td></tr>
+</tbody>
+</table>
+</div>
+<p>The filter chain is expressed in the same JSON/YAML format used by the
+<a href="#configuration-file">configuration file</a>:</p>
+<pre><code class="language-sh">curl -X PUT http://localhost:9000/filterchain \
+  -H 'Content-Type: application/json' \
+  -d '[{"name":"quilkin.filters.debug.v1alpha1.Debug","config":{"id":"http-provider"}}]'
+</code></pre>
+<p><code>DELETE /filterchain</code> resets the chain to empty — packets are forwarded without
+any processing.</p>
+<blockquote>
+<p>Changes made through the HTTP provider are applied immediately and affect all
+in-flight configuration readers. They are not persisted to disk; if Quilkin
+restarts the provider starts with an empty configuration again.</p>
+</blockquote>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="packet-filters"><a class="header" href="#packet-filters">Packet Filters</a></h1>
+<p>In most cases, we would like Quilkin to do some preprocessing of received packets before sending them off to their destination. Because this stage is entirely specific to the use case at hand and differs between Quilkin deployments, we must have a say over what tweaks to perform - this is where filters come in.</p>
+<h2 id="filters-and-filter-chain"><a class="header" href="#filters-and-filter-chain">Filters and Filter chain</a></h2>
+<p>A filter represents a step in the tweaking/decision-making process of how we would like to process our packets. For example, at some step, we might choose to append some metadata to every packet we receive before forwarding it while at a later step, choose not to forward packets that don’t meet some criteria.</p>
+<p>Quilkin lets us specify any number of filters and connect them in a sequence to form a packet processing pipeline similar to a <a href="https://en.wikipedia.org/wiki/Pipeline_(Unix)" target="_blank">Unix pipeline</a> - we call this pipeline a <code>Filter chain</code>. The combination of filters and filter chain allows us to add new functionality to fit every scenario without changing Quilkin’s core.</p>
+<p>As an example, say we would like to perform the following steps in our processing pipeline to the packets we receive.</p>
+<ul>
+<li>Append a predetermined byte to the packet.</li>
+<li>Do not forward (drop) the packet if its length is over 512 bytes.</li>
+</ul>
+<p>We would create a filter corresponding to each step either by leveraging any <a href="#built-in-filters">existing filters</a>
+that do what we want or and connect them to form the following filter chain:</p>
+<pre><code class="language-bash">append | drop
+</code></pre>
+<p>When Quilkin consults our filter chain, it feeds the received packet into <code>append</code> and forwards the packet it receives (if any) from <code>drop</code> - i.e the output of <code>append</code> becomes the <code>input</code> into <code>drop</code> and so on in that order.</p>
+<p>There are a few things we note here:</p>
+<ul>
+<li>
+<p>Although we have in this example, a filter called <code>drop</code>, every filter in the filter chain has the same ability to <em>drop</em> or <em>update</em> a packet - if any filter drops a packet then no more work needs to be done regarding that packet so the next filter in the pipeline never has any knowledge that the dropped packet ever existed.</p>
+</li>
+<li>
+<p>The filter chain is consulted for every received packet, and its filters are traversed in reverse order for packets travelling in the opposite direction.
+A packet received downstream will be fed into <code>append</code> and the result from <code>drop</code> is forwarded upstream - a packet received upstream will be fed into <code>drop</code> and the result from <code>append</code> is forwarded downstream.</p>
+</li>
+<li>
+<p>Exactly one filter chain is specified and used to process all packets that flow through Quilkin.</p>
+</li>
+</ul>
+<h2 id="configuration-examples"><a class="header" href="#configuration-examples">Configuration Examples</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">// Wrap this example within an async main function since the
+</span><span class="boring">// local_rate_limit filter spawns a task on initialization
+</span><span class="boring">#[tokio::main]
+</span><span class="boring">async fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+filters:
+  - name: quilkin.filters.debug.v1alpha1.Debug
+    config:
+      id: debug-1
+  - name: quilkin.filters.local_rate_limit.v1alpha1.LocalRateLimit
+    config:
+      max_packets: 10
+      period: 1
+clusters:
+  - endpoints:
+    - address: 127.0.0.1:7001
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 2);
+</span><span class="boring">}</span></code></pre>
+<p>We specify our filter chain in the <code>.filters</code> section of the proxy’s configuration which has takes a sequence of <a href="#filter-config">FilterConfig</a> objects. Each object describes all information necessary to create a single filter.</p>
+<p>The above example creates a filter chain comprising a <a href="#debug">Debug</a> filter followed by a <a href="#localratelimit">LocalRateLimit</a> filter - the effect is that every packet will be logged and the proxy will not forward more than 10 packets per second.</p>
+<blockquote>
+<p>The sequence determines the filter chain order so its ordering matters - the chain starts with the filter corresponding the first filter config and ends with the filter corresponding the last filter config in the sequence.</p>
+</blockquote>
+<h2 id="filter-dynamic-metadata"><a class="header" href="#filter-dynamic-metadata">Filter Dynamic Metadata</a></h2>
+<p>A filter within the filter chain can share data within another filter further along in the filter chain by propagating the desired data alongside the packet being processed.
+This enables sharing dynamic information at runtime, e.g information about the current packet that might be useful to other filters that process that packet.</p>
+<p>At packet processing time each packet is associated with <em>filter dynamic metadata</em> (a set of key-value pairs). Each key is a unique string while its value is an associated <a href="../../../api/quilkin/net/endpoint/metadata/enum.Value.html"><code>quilkin::metadata::Value</code></a>.
+When a filter processes a packet, it can choose to consult the associated dynamic metadata for more information or itself add/update or remove key-values from the set.</p>
+<p>As an example, the built-in [CaptureBytes] filter is one such filter that populates a packet’s filter metadata.
+[CaptureBytes] extracts information (a configurable byte sequence) from each packet and appends it to the packet’s dynamic metadata for other filters to leverage.
+On the other hand, the built-in <a href="#tokenrouter">TokenRouter</a> filter selects what endpoint to route a packet by consulting the packet’s dynamic metadata for a routing token.
+Consequently, we can build a filter chain with a [CaptureBytes] filter preceeding a <a href="#tokenrouter">TokenRouter</a> filter, both configured to write and read the same key in the dynamic metadata entry. The effect would be that packets are routed to upstream endpoints based on token information extracted from their contents.</p>
+<h3 id="well-known-dynamic-metadata"><a class="header" href="#well-known-dynamic-metadata">Well Known Dynamic Metadata</a></h3>
+<p>The following metadata are currently used by Quilkin core and built-in filters.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>quilkin.dev/captured</code></td><td><code>Bytes</code></td><td>The default key under which the <a href="#capture">Capture</a> filter puts the byte slices it extracts from each packet.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="built-in-filters"><a class="header" href="#built-in-filters">Built-in filters <a name="built-in-filters"></a></a></h2>
+<p>Quilkin includes several filters out of the box.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Filter</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="#capture">Capture</a></td><td>Capture specific bytes from a packet and store them in <a href="#filter-dynamic-metadata">filter dynamic metadata</a>.</td></tr>
+<tr><td><a href="#concatenate">Concatenate</a></td><td>Add authentication tokens to packets.</td></tr>
+<tr><td><a href="#debug">Debug</a></td><td>Logs every packet.</td></tr>
+<tr><td><a href="#drop">Drop</a></td><td>Drop all packets</td></tr>
+<tr><td><a href="#firewall">Firewall</a></td><td>Allowing/blocking traffic by IP and port.</td></tr>
+<tr><td><a href="#loadbalancer">LoadBalancer</a></td><td>Distributes downstream packets among upstream endpoints.</td></tr>
+<tr><td><a href="#localratelimit">LocalRateLimit</a></td><td>Limit the frequency of packets.</td></tr>
+<tr><td><a href="#match">Match</a></td><td>Change Filter behaviour based on dynamic metadata</td></tr>
+<tr><td><a href="#pass">Pass</a></td><td>Allow all packets through</td></tr>
+<tr><td><a href="#timestamp">Timestamp</a></td><td>Accepts a UNIX timestamp from metadata and observes the duration between that timestamp and now.</td></tr>
+<tr><td><a href="#tokenrouter">TokenRouter</a></td><td>Send packets to endpoints based on metadata.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="filterconfig"><a class="header" href="#filterconfig">FilterConfig <a name="filter-config"></a></a></h2>
+<p>Represents configuration for a filter instance.</p>
+<pre><code class="language-yaml">properties:
+  name:
+    type: string
+    description: |
+      Identifies the type of filter to be created.
+      This value is unique for every filter type - please consult the documentation for the particular filter for this value.
+
+  config:
+    type: object
+    description: |
+      The configuration value to be passed onto the created filter.
+      This is passed as an object value since it is specific to the filter's type and is validated by the filter
+      implementation. Please consult the documentation for the particular filter for its schema.
+
+required: [ 'name' ]
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="capture"><a class="header" href="#capture">Capture</a></h1>
+<p>The <code>Capture</code> filter’s job is to find a series of bytes within a packet, and capture it into
+<a href="#filter-dynamic-metadata">Filter Dynamic Metadata</a>, so that it can be utilised by filters further
+down the chain.</p>
+<p>This is often used as a way of retrieving authentication tokens from a packet, and used in combination with
+<a href="#concatenate">Concatenate</a> and
+<a href="#tokenrouter">TokenRouter</a> filter to provide common packet routing utilities.</p>
+<h2 id="capture-strategies"><a class="header" href="#capture-strategies">Capture strategies</a></h2>
+<p>There are multiple strategies for capturing bytes from the packet.</p>
+<h3 id="suffix"><a class="header" href="#suffix">Suffix</a></h3>
+<p>Captures bytes from the end of the packet.</p>
+<h3 id="prefix"><a class="header" href="#prefix">Prefix</a></h3>
+<p>Captures bytes from the start of the packet.</p>
+<h3 id="regex"><a class="header" href="#regex">Regex</a></h3>
+<p>Captures bytes using a regular expression. Unlike other capture strategies,
+the regular expression can return one or many values if there are
+multiple matches.</p>
+<h3 id="quic-destination-connection-id"><a class="header" href="#quic-destination-connection-id">QUIC Destination Connection ID</a></h3>
+<p>Captures DCID from <a href="https://datatracker.ietf.org/doc/html/rfc9000">QUIC</a> conforming packets.</p>
+<h2 id="filter-name"><a class="header" href="#filter-name">Filter name</a></h2>
+<pre><code class="language-text">quilkin.filters.capture.v1alpha1.Capture
+</code></pre>
+<h2 id="configuration-examples-1"><a class="header" href="#configuration-examples-1">Configuration Examples</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+filters:
+  - name: quilkin.filters.capture.v1alpha1.Capture
+    config:
+      metadataKey: myapp.com/myownkey
+      prefix:
+        size: 3
+        remove: false
+clusters:
+  - endpoints:
+      - address: 127.0.0.1:7001
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 1);
+</span><span class="boring">}</span></code></pre>
+<h2 id="configuration-options-rust-doc"><a class="header" href="#configuration-options-rust-doc">Configuration Options (<a href="../../api/quilkin/filters/capture/struct.Config.html">Rust Doc</a>)</a></h2>
+<pre><code class="language-yaml">{{#include ../../../target/quilkin.filters.capture.v1alpha1.yaml}}
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="concatenate"><a class="header" href="#concatenate">Concatenate</a></h1>
+<p>The <code>Concatenate</code> filter’s job is to add a byte packet to either the beginning or end of each UDP packet that passes
+through. This is commonly used to provide an auth token to each packet, so they can be routed appropriately.</p>
+<h2 id="filter-name-1"><a class="header" href="#filter-name-1">Filter name</a></h2>
+<pre><code class="language-text">quilkin.filters.concatenate.v1alpha1.Concatenate
+</code></pre>
+<h2 id="configuration-examples-2"><a class="header" href="#configuration-examples-2">Configuration Examples</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+filters:
+  - name: quilkin.filters.concatenate.v1alpha1.Concatenate
+    config:
+        on_read: APPEND
+        on_write: DO_NOTHING
+        bytes: MXg3aWp5Ng==
+clusters:
+  - endpoints:
+      - address: 127.0.0.1:7001
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 1);
+</span><span class="boring">}</span></code></pre>
+<h2 id="configuration-options-rust-doc-1"><a class="header" href="#configuration-options-rust-doc-1">Configuration Options (<a href="../api/quilkin/filters/concatenate/struct.Config.html">Rust Doc</a>)</a></h2>
+<pre><code class="language-yaml">{{#include ../../../target/quilkin.filters.concatenate.v1alpha1.yaml}}
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="debug"><a class="header" href="#debug">Debug</a></h1>
+<p>The Debug filter logs all incoming and outgoing packets to standard output.</p>
+<p>This filter is useful in debugging deployments where the packets strictly contain valid <code>UTF-8</code> encoded strings. A generic error message is instead logged if conversion from bytes to <code>UTF-8</code> fails.</p>
+<h3 id="filter-name-2"><a class="header" href="#filter-name-2">Filter name</a></h3>
+<pre><code class="language-text">quilkin.filters.debug_filter.v1alpha1.Debug
+</code></pre>
+<h2 id="configuration-examples-3"><a class="header" href="#configuration-examples-3">Configuration Examples</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+filters:
+  - name: quilkin.filters.debug.v1alpha1.Debug
+    config:
+      id: debug-1
+clusters:
+  - endpoints:
+      - address: 127.0.0.1:7001
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 1);
+</span><span class="boring">}</span></code></pre>
+<h2 id="configuration-options-rust-doc-2"><a class="header" href="#configuration-options-rust-doc-2">Configuration Options (<a href="../api/quilkin/filters/debug/struct.Config.html">Rust Doc</a>)</a></h2>
+<pre><code class="language-yaml">{{#include ../../../target/quilkin.filters.debug.v1alpha1.yaml}}
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="drop"><a class="header" href="#drop">Drop</a></h1>
+<p>The <code>Drop</code> filter always drops any packet passed through it. This is useful in
+combination with conditional flow filters like <a href="#match"><code>Matches</code></a></p>
+<h2 id="filter-name-3"><a class="header" href="#filter-name-3">Filter name</a></h2>
+<pre><code class="language-text">quilkin.filters.drop.v1alpha1.Drop
+</code></pre>
+<h2 id="configuration-examples-4"><a class="header" href="#configuration-examples-4">Configuration Examples</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+clusters: 
+  - endpoints:
+    - address: 127.0.0.1:26000
+    - address: 127.0.0.1:26001
+filters:
+  - name: quilkin.filters.capture.v1alpha1.Capture
+    config:
+      metadataKey: myapp.com/token
+      prefix:
+        size: 3
+        remove: false
+  - name: quilkin.filters.match.v1alpha1.Match
+    config:
+      on_read:
+        metadataKey: myapp.com/token
+        branches:
+          - value: abc
+            name: quilkin.filters.pass.v1alpha1.Pass
+        fallthrough:
+          name: quilkin.filters.drop.v1alpha1.Drop
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 2);
+</span><span class="boring">}</span></code></pre>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<p>No defined configuration options.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="firewall"><a class="header" href="#firewall">Firewall</a></h1>
+<p>The <code>Firewall</code> filter’s job is to allow or block traffic depending on if the incoming traffic’s IP and port matches
+the rules set on the Firewall filter.</p>
+<h2 id="filter-name-4"><a class="header" href="#filter-name-4">Filter name</a></h2>
+<pre><code class="language-text">quilkin.filters.firewall.v1alpha1.Firewall
+</code></pre>
+<h2 id="configuration-examples-5"><a class="header" href="#configuration-examples-5">Configuration Examples</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+filters:
+  - name: quilkin.filters.firewall.v1alpha1.Firewall
+    config:
+      on_read:
+        - action: ALLOW
+          sources:
+            - 192.168.51.0/24
+          ports:
+            - 10
+            - 1000-7000
+      on_write:
+        - action: DENY
+          sources:
+            - 192.168.51.0/24
+          ports:
+            - 7000
+clusters:
+  - endpoints:
+      - address: 127.0.0.1:7001
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 1);
+</span><span class="boring">}</span></code></pre>
+<h2 id="configuration-options-rust-doc-3"><a class="header" href="#configuration-options-rust-doc-3">Configuration Options (<a href="../api/quilkin/filters/firewall/struct.Config.html">Rust Doc</a>)</a></h2>
+<pre><code class="language-yaml">{{#include ../../../target/quilkin.filters.firewall.v1alpha1.yaml}}
+</code></pre>
+<h3 id="rule-evaluation"><a class="header" href="#rule-evaluation">Rule Evaluation</a></h3>
+<p>The Firewall filter supports DENY and ALLOW actions for access control. When multiple DENY and ALLOW actions are used
+for a workload at the same time, the evaluation is processed in the order it is configured, with the first matching
+rule deciding if the request is allowed or denied:</p>
+<ol>
+<li>If a rule action is ALLOW, and it matches the request, then the entire request is allowed.</li>
+<li>If a rule action is DENY and it matches the request, then the entire request is denied.</li>
+<li>If none of the configured rules match, then the request is denied.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="loadbalancer"><a class="header" href="#loadbalancer">LoadBalancer</a></h1>
+<p>The <code>LoadBalancer</code> filter distributes packets received downstream among all upstream endpoints.</p>
+<h2 id="filter-name-5"><a class="header" href="#filter-name-5">Filter name</a></h2>
+<pre><code class="language-text">quilkin.filters.load_balancer.v1alpha1.LoadBalancer
+</code></pre>
+<h2 id="configuration-examples-6"><a class="header" href="#configuration-examples-6">Configuration Examples</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#[tokio::main]
+</span><span class="boring">async fn main() {
+</span><span class="boring">  let yaml = "
+</span>version: v1alpha1
+filters:
+  - name: quilkin.filters.load_balancer.v1alpha1.LoadBalancer
+    config:
+      policy: ROUND_ROBIN
+clusters:
+  - endpoints:
+      - address: 127.0.0.1:7001
+<span class="boring">";
+</span><span class="boring">  let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 1);
+</span><span class="boring">}</span></code></pre>
+<p>The load balancing policy (the strategy to use to select what endpoint to send traffic to) is configurable.
+In the example above, packets will be distributed by selecting endpoints in turn, in round robin fashion.</p>
+<h2 id="configuration-options-rust-doc-4"><a class="header" href="#configuration-options-rust-doc-4">Configuration Options (<a href="../api/quilkin/filters/load_balancer/struct.Config.html">Rust Doc</a>)</a></h2>
+<pre><code class="language-yaml">{{#include ../../../target/quilkin.filters.load_balancer.v1alpha1.yaml}}
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="localratelimit"><a class="header" href="#localratelimit">LocalRateLimit</a></h1>
+<p>The LocalRateLimit filter controls the frequency at which packets received downstream are forwarded upstream by the proxy.
+Rate limiting is done independently per source (IP, Port) combination.</p>
+<h2 id="filter-name-6"><a class="header" href="#filter-name-6">Filter name</a></h2>
+<pre><code class="language-text">quilkin.filters.local_rate_limit.v1alpha1.LocalRateLimit
+</code></pre>
+<h2 id="configuration-examples-7"><a class="header" href="#configuration-examples-7">Configuration Examples</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">// Wrap this example within an async main function since the
+</span><span class="boring">// local_rate_limit filter spawns a task on initialization
+</span><span class="boring">#[tokio::main]
+</span><span class="boring">async fn main() {
+</span><span class="boring">  let yaml = "
+</span>version: v1alpha1
+filters:
+  - name: quilkin.filters.local_rate_limit.v1alpha1.LocalRateLimit
+    config:
+      max_packets: 1000
+      period: 1
+clusters:
+  - endpoints:
+    - address: 127.0.0.1:7001
+<span class="boring">";
+</span><span class="boring">  let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 1);
+</span><span class="boring">}</span></code></pre>
+<p>To configure a rate limiter, we specify the maximum rate at which the proxy is allowed to forward packets. In the example above, we configured the proxy to forward a maximum of 1000 packets per second).</p>
+<blockquote>
+<p>Be aware that due to some optimizations in the current rate limiter implementation, the enforced maximum number of packets is not always exact.
+It is in theory possible that the rate limiter allows a few packets through, however in practice this would be a rare occurrence
+and the maximum number of such packets that is in the worse case <code>N-1</code> where <code>N</code> is the number of threads used to process packets.
+For example, a configuration allowing 1000 packets per second could potentially allow 1004 packets during some time window if we have up to 4 threads.</p>
+</blockquote>
+<blockquote>
+<p>Packets that that exceeds the maximum configured rate are dropped.</p>
+</blockquote>
+<h2 id="configuration-options-rust-doc-5"><a class="header" href="#configuration-options-rust-doc-5">Configuration Options (<a href="../api/quilkin/filters/local_rate_limit/struct.Config.html">Rust Doc</a>)</a></h2>
+<pre><code class="language-yaml">{{#include ../../../target/quilkin.filters.local_rate_limit.v1alpha1.yaml}}
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="match"><a class="header" href="#match">Match</a></h1>
+<p>The <code>Match</code> filter’s job is to provide a mechanism to change behaviour based
+on dynamic metadata. This filter behaves similarly to the <code>match</code> expression
+in Rust or <code>switch</code> statements in other languages.</p>
+<h2 id="filter-name-7"><a class="header" href="#filter-name-7">Filter name</a></h2>
+<pre><code class="language-text">quilkin.filters.match.v1alpha1.Match
+</code></pre>
+<h2 id="configuration-examples-8"><a class="header" href="#configuration-examples-8">Configuration Examples</a></h2>
+<!-- ANCHOR: example -->
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+clusters: 
+  - endpoints:
+    - address: 127.0.0.1:26000
+    - address: 127.0.0.1:26001
+filters:
+  - name: quilkin.filters.capture.v1alpha1.Capture
+    config:
+      metadataKey: myapp.com/token
+      prefix:
+        size: 3
+        remove: false
+  - name: quilkin.filters.match.v1alpha1.Match
+    config:
+      on_read:
+        metadataKey: myapp.com/token
+        branches:
+          - value: abc
+            name: quilkin.filters.pass.v1alpha1.Pass
+        fallthrough:
+          name: quilkin.filters.drop.v1alpha1.Drop
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 2);
+</span><span class="boring">}</span></code></pre>
+<!--  ANCHOR_END: example -->
+<h2 id="configuration-options-rust-doc-6"><a class="header" href="#configuration-options-rust-doc-6">Configuration Options (<a href="../api/quilkin/filters/match/struct.Config.html">Rust Doc</a>)</a></h2>
+<pre><code class="language-yaml">{{#include ../../../target/quilkin.filters.match.v1alpha1.yaml}}
+</code></pre>
+<p>View the <a href="../api/quilkin/filters/match/struct.Config.html">Match</a> filter documentation for more details.</p>
+<h2 id="metrics-1"><a class="header" href="#metrics-1">Metrics</a></h2>
+<ul>
+<li><code>quilkin_filter_int_counter{label="packets_matched_total"}</code>
+A counter of the total number of packets where the dynamic metadata matches a branch value.</li>
+<li><code>quilkin_filter_int_counter{label="packets_fallthrough_total"}</code>
+A counter of the total number of packets that are processed by the fallthrough configuration.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="pass"><a class="header" href="#pass">Pass</a></h1>
+<p>The <code>Pass</code> filter that always passes any packet through it. This is useful in
+combination with conditional flow filters like <a href="#match"><code>Matches</code></a></p>
+<h2 id="filter-name-8"><a class="header" href="#filter-name-8">Filter name</a></h2>
+<pre><code class="language-text">quilkin.filters.pass.v1alpha1.Pass
+</code></pre>
+<h2 id="configuration-examples-9"><a class="header" href="#configuration-examples-9">Configuration Examples</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+clusters: 
+  - endpoints:
+    - address: 127.0.0.1:26000
+    - address: 127.0.0.1:26001
+filters:
+  - name: quilkin.filters.capture.v1alpha1.Capture
+    config:
+      metadataKey: myapp.com/token
+      prefix:
+        size: 3
+        remove: false
+  - name: quilkin.filters.match.v1alpha1.Match
+    config:
+      on_read:
+        metadataKey: myapp.com/token
+        branches:
+          - value: abc
+            name: quilkin.filters.pass.v1alpha1.Pass
+        fallthrough:
+          name: quilkin.filters.drop.v1alpha1.Drop
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 2);
+</span><span class="boring">}</span></code></pre>
+<h2 id="configuration-1"><a class="header" href="#configuration-1">Configuration</a></h2>
+<p>No defined configuration options.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="timestamp"><a class="header" href="#timestamp">Timestamp</a></h1>
+<p>The <code>Timestamp</code> filter accepts a UNIX timestamp from metadata and observes the
+duration between that timestamp and now. Mostly useful in combination with other
+filters such as <code>Capture</code> to pull timestamp data from packets.</p>
+<h2 id="filter-name-9"><a class="header" href="#filter-name-9">Filter name</a></h2>
+<pre><code class="language-text">quilkin.filters.timestamp.v1alpha1.Timestamp
+</code></pre>
+<h2 id="configuration-examples-10"><a class="header" href="#configuration-examples-10">Configuration Examples</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+filters:
+  - name: quilkin.filters.capture.v1alpha1.Capture
+    config:
+      metadataKey: example.com/session_duration
+      prefix:
+        size: 3
+        remove: false
+  - name: quilkin.filters.timestamp.v1alpha1.Timestamp
+    config:
+        metadataKey: example.com/session_duration
+clusters:
+  - endpoints:
+    - address: 127.0.0.1:26000
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">}</span></code></pre>
+<h2 id="configuration-options-rust-doc-7"><a class="header" href="#configuration-options-rust-doc-7">Configuration Options (<a href="../api/quilkin/filters/timestamp/struct.Config.html">Rust Doc</a>)</a></h2>
+<pre><code class="language-yaml">{{#include ../../../target/quilkin.filters.timestamp.v1alpha1.yaml}}
+</code></pre>
+<h2 id="metrics-2"><a class="header" href="#metrics-2">Metrics</a></h2>
+<ul>
+<li><code>quilkin_filter_histogram{label="duration"}</code>
+A histogram of durations from <code>metadata_key</code> to now in the packet <code>direction</code>.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="tokenrouter"><a class="header" href="#tokenrouter">TokenRouter</a></h1>
+<p>The <code>TokenRouter</code> filter’s job is to provide a mechanism to declare which Endpoints a packet should be sent to.</p>
+<p>This Filter provides this functionality by comparing a byte array token found in the
+<a href="#filter-dynamic-metadata">Filter Dynamic Metadata</a> from a previous Filter, and comparing it to
+<a href="../proxy.html#endpoints">Endpoint’s tokens</a>, and sending packets to those Endpoints only if there is a match.</p>
+<h2 id="filter-name-10"><a class="header" href="#filter-name-10">Filter name</a></h2>
+<pre><code class="language-text">quilkin.filters.token_router.v1alpha1.TokenRouter
+</code></pre>
+<h2 id="configuration-examples-11"><a class="header" href="#configuration-examples-11">Configuration Examples</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+filters:
+  - name: quilkin.filters.token_router.v1alpha1.TokenRouter
+    config:
+        metadataKey: myapp.com/myownkey
+clusters:
+  - endpoints:
+    - address: 127.0.0.1:26000
+      metadata:
+        quilkin.dev:
+          tokens:
+            - MXg3aWp5Ng== # Authentication is provided by these ids, and matched against
+            - OGdqM3YyaQ== # the value stored in Filter dynamic metadata
+    - address: 127.0.0.1:26001
+      metadata:
+        quilkin.dev:
+          tokens:
+            - bmt1eTcweA==
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 1);
+</span><span class="boring">}</span></code></pre>
+<p>View the <a href="#capture">CaptureBytes</a> filter documentation for more details.</p>
+<h2 id="configuration-options-rust-doc-8"><a class="header" href="#configuration-options-rust-doc-8">Configuration Options (<a href="../api/quilkin/filters/token_router/struct.Config.html">Rust Doc</a>)</a></h2>
+<pre><code class="language-yaml">{{#include ../../../target/quilkin.filters.token_router.v1alpha1.yaml}}
+</code></pre>
+<h2 id="metrics-3"><a class="header" href="#metrics-3">Metrics</a></h2>
+<ul>
+<li><code>quilkin_filter_TokenRouter_packets_dropped_total</code>
+A counter of the total number of packets that have been dropped. This is also provided with a <code>Reason</code> label, as there
+are differing reasons for packets to be dropped:
+<ul>
+<li><code>NoEndpointMatch</code> - The token provided via the Filter dynamic metadata does not match any Endpoint’s tokens.</li>
+<li><code>NoTokenFound</code> - No token has been found in the Filter dynamic metadata.</li>
+<li><code>InvalidToken</code> - The data found for the token in the Filter dynamic metadata is not of the correct data type
+(<code>Vec&lt;u8&gt;</code>)</li>
+</ul>
+</li>
+</ul>
+<h2 id="sample-applications"><a class="header" href="#sample-applications">Sample Applications</a></h2>
+<h3 id="packet-authentication"><a class="header" href="#packet-authentication">Packet Authentication</a></h3>
+<p>In combination with several other filters, the <code>TokenRouter</code> can be utilised as an authentication and access control
+mechanism for all incoming packets.</p>
+<p>Capturing the authentication token from an incoming packet can be implemented via the <a href="#capture">CaptureByte</a>
+filter, with an example outlined below, or any other filter that populates the configured dynamic metadata key for the
+authentication token to reside.</p>
+<p>It is assumed that the endpoint tokens that are used for authentication are generated by an external system, are
+appropriately cryptographically random and sent to each proxy securely.</p>
+<p>For example, a configuration would look like:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">let yaml = "
+</span>version: v1alpha1
+filters:
+  - name: quilkin.filters.capture.v1alpha1.Capture # Capture and remove the authentication token
+    config:
+      suffix:
+          size: 3
+          remove: true
+  - name: quilkin.filters.token_router.v1alpha1.TokenRouter
+clusters:
+  - endpoints:
+    - address: 127.0.0.1:26000
+      metadata:
+        quilkin.dev:
+          tokens:
+            - MXg3aWp5Ng== # Authentication is provided by these ids, and matched against
+            - OGdqM3YyaQ== # the value stored in Filter dynamic metadata
+    - address: 127.0.0.1:26001
+      metadata:
+        quilkin.dev:
+          tokens:
+             - bmt1eTcweA==
+<span class="boring">";
+</span><span class="boring">let config = quilkin::config::Config::from_reader(yaml.as_bytes()).unwrap();
+</span><span class="boring">assert_eq!(config.filters.load().len(), 2);
+</span><span class="boring">}</span></code></pre>
+<p>On the game client side the <a href="#concatenate">Concatenate</a> filter could also be used to add authentication
+tokens to outgoing packets.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="quilkin-unreal-engine-plugin"><a class="header" href="#quilkin-unreal-engine-plugin">Quilkin Unreal Engine Plugin</a></h1>
+<p>This is an unreal engine 5 plugin for Quilkin, a UDP proxy for gameservers. The plugin provides several features that you can use with Quilkin deployments, such as proxying game traffic, and latency measurement.</p>
+<p>You can also find guide level documentation on how the proxy works in the <a href="https://embarkstudios.github.io/quilkin/main/book/">Quilkin Book</a>.</p>
+<h3 id="configuration-2"><a class="header" href="#configuration-2">Configuration</a></h3>
+<p>Static configuration is available in the editor through <code>UQuilkinDeveloperSettings</code> in “Project Settings”.</p>
+<p>Dynamic configuration is available through <code>UQuilkinConfigSubsystem</code>, it is initialised from the settings provided in <code>UQuilkinDeveloperSettings</code>, but can also be updated in code, and users can bind individual properties to delegates allowing them to dynamically set based on custom logic.</p>
+<ul>
+<li><code>bool Enabled</code> Whether the plugin will attach a versioned routing token to UDP packets to allow load balancers forward traffic to the correct gameserver. This also requires the address the clients connect to be a Quilkin load balancer, if connected directly to a gameserver the client will be rejected.</li>
+<li><code>bool EnabledInPie</code> By default <code>Enabled</code> is disabled in editor to prevent interfering with local clients and gameservers, you can override this behaviour by also enabling <code>EnabledInPie</code>.</li>
+<li><code>TArray&lt;uint8&gt; RoutingToken</code> The routing token representing the gameserver a client wants to reach, the token <strong>must</strong> be 16 bytes exactly. Currently the plugin only supports using <code>Enabled</code> with a routing token to create the following layout.</li>
+</ul>
+<pre><code>&lt;packet&gt; | token    | version
+ X bytes | 16 bytes | 1 byte
+</code></pre>
+<ul>
+<li><code>TArray&lt;FQuilkinEndpoint&gt; Endpoints</code> A set of Quilkin load balancer endpoints that can be used for the following features.</li>
+<li><code>bool MeasureEndpoints</code> When enabled, the plugin will start a new <code>Tick</code> task that executes at a fixed interval (currently 30 seconds), where it will spawn a new background task that will ping each endpoint in <code>Endpoints</code>, and track its measurement in a fixed size circular buffer.
+Pings are handled through Quilkin Control Message Protocol, this is a bespoke protocol for UDP to be able to support situations where for example using ICMP is not possible, see the <a href="https://EmbarkStudios.github.io/quilkin/main/book/services/proxy/qcmp.html">Quilkin Book</a> for more details on the protocol data unit.
+<strong>Note</strong> <code>MeasureEndpoints</code> is orthogonal to <code>Enabled</code> and <code>UseEndpoints</code> meaning that you can use <code>MeasureEndpoints</code> for latency measurements without being required to also use Quilkin for game traffic.</li>
+<li><code>bool UseEndpoints</code> Whether to use <code>Endpoints</code> for game traffic. When enabled, instead of using the provided <code>FInternetAddr</code>, the plugin will choose the lowest latency endpoint available and send traffic through that endpoint to connect to the gameserver, and if the latency should exceed <code>JitterThreshold</code> then the plugin will attempt to redirect traffic to the next available endpoint with the lowest latency.</li>
+</ul>
+<h3 id="delegates"><a class="header" href="#delegates">Delegates</a></h3>
+<p>Quilkin exposes a number of delegates to be able to access certain information, they can be accessed through the <code>FQuilkinDelegates</code> class.</p>
+<ul>
+<li>
+<p><code>GetQuilkinEndpointMeasurements</code> returns <code>TArray&lt;EndpointPair&gt;</code> representing each endpoint set in <code>Endpoints</code> with their median latency. The array will be empty if no endpoints have been set and <code>MeasureEndpoints</code> is not enabled.</p>
+</li>
+<li>
+<p><code>GetLowestLatencyEndpoint</code> returns <code>TOptional&lt;EndpointPair&gt;</code> is a specialisation of <code>GetQuilkinEndpointMeasurements</code> returning the lowest latency endpoint and its median latency. The delegate will return <code>None</code> if the array is empty and <code>MeasureEndpoints</code> is not enabled.</p>
+</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="configuration-file"><a class="header" href="#configuration-file">Configuration File</a></h1>
+<p>While much of Quilkin’s proxy configuration can be configured via its
+<a href="proxy.html">command line interface</a>, if you have a larger or more complex configuration
+it might be useful to use a configuration file instead.</p>
+<p>The following is the schema and reference for Quilkin’s proxy configuration
+file. See the <a href="https://github.com/EmbarkStudios/quilkin/blob/main/examples">examples</a> folder for example configuration files.</p>
+<p>By default, Quilkin will look for a configuration file named <code>quilkin.yaml</code> in
+its current running directory first, then if not present, in
+<code>/etc/quilkin/quilkin.yaml</code> on UNIX systems. This can be overridden with the
+<code>-c/--config</code> command-line argument, or the <code>QUILKIN_FILENAME</code>
+environment variable.</p>
+<h2 id="static-configuration"><a class="header" href="#static-configuration">Static Configuration</a></h2>
+<p>Example of a full configuration for <code>quilkin proxy</code> that utlisies a static
+endpoint configuration to specify two endpoints with <code>token</code> metadata attached to each:</p>
+<pre><code class="language-yaml">{{#include ../../examples/proxy.yaml:17:100}}
+</code></pre>
+<p>This is a great use of a static configuration file, as we only get a singular <code>--to</code> endpoint address via the
+command line arguments.</p>
+<p>We can also configure <a href="deployment/filters.html">Filters</a> via the configuration file. See that section for documentation.</p>
+<h2 id="dynamic-configuration"><a class="header" href="#dynamic-configuration">Dynamic Configuration</a></h2>
+<p>If you need to dynamically change either Filters and/or Endpoints at runtime, see the <a href="xds.html">Control Plane</a>
+documentation on the configuration API surface, and built in dynamic management providers.</p>
+<h2 id="json-schema"><a class="header" href="#json-schema">Json Schema</a></h2>
+<p>The full <a href="https://json-schema.org/">JSON Schema</a> for the YAML configuration file.</p>
+<pre><code class="language-yaml">type: object
+properties:
+  version:
+    type: string
+    description: |
+      The configuration file version to use.
+    enum:
+      - v1alpha1
+  id:
+      type: string
+      description: |
+          An identifier for the proxy instance.
+      default: On linux, the machine hostname is used as default. On all other platforms a UUID is generated for the proxy.
+  port:
+      type: integer
+      description: |
+          The listening port. In "proxy" mode, the port for traffic to be sent to. In "manage" mode, the port to connect to the xDS API.
+      default: 7000
+  maxmind_db:
+    type: string
+    description: |
+      The remote URL or local file path to retrieve the Maxmind database (requires licence).
+  filters:
+    type: array
+    description: |
+      A filter chain.
+    items:
+      '$ref': {} # Refer to the Filter documentation for a filter configuration schema.
+  clusters:
+    type: array
+    description: |
+      grouping of endpoints, per cluster.
+    items:
+      type: object
+      properties:
+        endpoints:
+          type: array
+          description: |
+            A list of upstream endpoints to forward packets to.
+          items:
+            type: object
+            description: |
+              An upstream endpoint
+            properties:
+              address:
+                type: string
+                description: |
+                  Socket address of the endpoint. This must be of the ´IP:Port` form e.g `192.168.1.1:7001`
+                metadata:
+                  type: object
+                  description: |
+                    Arbitrary key value pairs that is associated with the endpoint.
+                    These are visible to Filters when processing packets and can be used to provide more context about endpoints (e.g whether or not to route a packet to an endpoint).
+                    Keys must be of type string otherwise the configuration is rejected.
+            required:
+              - address
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="proxy-metrics"><a class="header" href="#proxy-metrics">Proxy Metrics</a></h1>
+<p>The following are metrics that Quilkin provides while in Proxy Mode.</p>
+<h1 id="asn-maxmind-information"><a class="header" href="#asn-maxmind-information">ASN Maxmind Information</a></h1>
+<p>If Quilkin is provided a a MaxmindDB GeoIP database, Quilkin will log the
+following information in the <code>maxmind information</code> log. Only <code>country_code</code>, on
+<code>quilkin_session_active</code>, and <code>asn</code>, on the connection quality metrics below, are
+exported as labels; the rest are too high in cardinality to be.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>asn</code></td><td>ASN Number</td></tr>
+<tr><td><code>organization</code></td><td>The organisation responsible for the ASN</td></tr>
+<tr><td><code>country_code</code></td><td>The corresponding country code</td></tr>
+<tr><td><code>ip_prefix</code></td><td>The IP prefix CIDR address</td></tr>
+<tr><td><code>prefix_entity</code></td><td>The name of the entity for the prefix address</td></tr>
+<tr><td><code>prefix_name</code></td><td>The name of the prefix address</td></tr>
+</tbody>
+</table>
+</div>
+<blockquote>
+<p>Maxmind databases often require a licence and/or fee, so they aren’t included
+by default with Quilkin.</p>
+</blockquote>
+<h2 id="general-metrics"><a class="header" href="#general-metrics">General Metrics</a></h2>
+<p>The proxy exposes the following general metrics:</p>
+<ul>
+<li>
+<p><code>quilkin_packets_processing_duration_seconds{event, asn, ip_prefix}</code> (Histogram)</p>
+<p>The total duration of time in seconds that it took to process a packet.</p>
+<ul>
+<li>The <code>event</code> label is either:
+<ul>
+<li><code>read</code>: when the proxy receives data from a downstream connection on the listening port.</li>
+<li><code>write</code>: when the proxy sends data to a downstream connection via the listening port.</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p><code>quilkin_packets_dropped_total{event, reason, filter, destination}</code> (Counter)</p>
+<p>The total number of packets that were dropped by the proxy.</p>
+<ul>
+<li>The <code>reason</code> label is a closed set, so a breakdown built on it survives a
+filter being renamed or an <code>errno</code> producing different text:
+<ul>
+<li><code>no_endpoint_match</code>: no upstream endpoint was available, or none matched the packet’s routing token.</li>
+<li><code>filter_drop</code>: a filter chose to drop the packet, ie the chain worked as configured.</li>
+<li><code>filter_error</code>: a filter failed to process the packet.</li>
+<li><code>socket_error</code>: the socket refused the packet, or the packet couldn’t be built for it.</li>
+<li><code>queue_full</code>: a send or receive queue was full.</li>
+<li><code>invalid_packet</code>: the packet couldn’t be parsed as a datagram Quilkin handles. The specific parse failure is logged rather than labelled.</li>
+<li><code>session_limit</code>: the session limit was reached, so no session could be established.</li>
+<li><code>internal</code>: Quilkin lost track of state it needed to forward the packet.</li>
+<li><code>no_filter_chain</code>: the proxy hasn’t received its filter chain from the management server yet.</li>
+</ul>
+</li>
+<li>The <code>filter</code> label is the filter responsible, and is empty when the drop
+wasn’t a filter’s decision.</li>
+<li>The <code>destination</code> label is described under
+<a href="#general-metrics"><code>quilkin_bytes_total</code></a>, and is empty for packets dropped
+before they were routed.</li>
+</ul>
+</li>
+<li>
+<p><code>quilkin_cluster_active</code></p>
+<p>The number of currently active clusters.</p>
+</li>
+<li>
+<p><code>quilkin_cluster_active_endpoints</code></p>
+<p>The number of currently active upstream endpoints. Note that this tracks the number of endpoints that the proxy
+knows of rather than those that it is connected to (see <a href="#session-metrics">Session Metrics</a> instead for those)</p>
+</li>
+<li>
+<p><code>quilkin_bytes_total{event, destination}</code></p>
+<p>The total number of bytes sent or received</p>
+<ul>
+<li>
+<p>The <code>event</code> label is either:</p>
+<ul>
+<li><code>read</code>: when the proxy receives data from a downstream connection on the listening port.</li>
+<li><code>write</code>: when the proxy sends data to a downstream connection via the listening port.</li>
+</ul>
+</li>
+<li>
+<p>The <code>destination</code> label is the cluster the packet was routed to, so traffic
+can be attributed to a gameserver fleet rather than only counted in aggregate.
+It carries the same values as <code>quilkin_active_endpoints</code>, so the two can be
+joined.</p>
+<p>The cluster comes from the routing decision itself, not from looking the
+address up afterwards, so it is the cluster the packet actually went through
+even when the same endpoint is configured in more than one. It is empty when
+the destination didn’t come from a cluster with a locality, which includes
+destinations a filter decoded from the packet rather than selecting from the
+cluster map. Note that <code>event=write</code> traffic carries the cluster of the
+gameserver that sent it, not of the client it is going to.</p>
+</li>
+</ul>
+</li>
+<li>
+<p><code>quilkin_packets_total{event, destination}</code></p>
+<p>The total number of packets sent or recieved.</p>
+<ul>
+<li>The labels are the same as <a href="#general-metrics"><code>quilkin_bytes_total</code></a>.</li>
+</ul>
+</li>
+<li>
+<p><code>quilkin_packet_jitter{event}</code></p>
+<p>The time between packets arriving at an I/O loop (in nanoseconds). This covers
+every session the loop serves, so it is a whole-proxy figure; for the
+distribution across players use <code>quilkin_session_jitter_seconds</code>.</p>
+<p>The series stops being exported when no packet arrived during an aggregation
+interval, rather than continuing to publish the last value the proxy saw.</p>
+</li>
+<li>
+<p><code>quilkin_errors_total{event, reason}</code></p>
+<p>The total number of errors encountered while reading a packet from the upstream endpoint.</p>
+<ul>
+<li>The <code>reason</code> label is a closed set, replacing the previous free-text <code>display</code>
+label. For I/O errors it names the <code>errno</code>, eg <code>invalid_input</code>,
+<code>no_buffer_space</code> or <code>message_too_long</code>, rather than interpolating the
+platform’s error string.</li>
+</ul>
+</li>
+<li>
+<p><code>quilkin_game_traffic_tasks</code></p>
+<p>The amount of game traffic tasks that have spawned</p>
+</li>
+<li>
+<p><code>quilkin_game_traffic_task_closed</code></p>
+<p>The amount of game traffic tasks that have shutdown</p>
+</li>
+</ul>
+<h2 id="session-metrics"><a class="header" href="#session-metrics">Session Metrics</a></h2>
+<p>The proxy exposes the following metrics around sessions:</p>
+<ul>
+<li>
+<p><code>quilkin_session_active{asn, organization, country_code, ip_prefix, prefix_entity, prefix_name}</code></p>
+<p>The number of currently active sessions. If a maxmind database has been
+provided, the labels are populated:</p>
+<ul>
+<li>The <code>asn</code> label is the <a href="https://en.wikipedia.org/wiki/Autonomous_system_(Internet)">ASN</a> number of the connecting
+client.</li>
+<li>The <code>ip_prefix</code>label is the IP prefix of the connecting client.</li>
+</ul>
+</li>
+<li>
+<p><code>quilkin_session_duration_secs</code> (Histogram)</p>
+<p>A histogram over how long sessions lasted before they were torn down. Note that, by definition, active sessions are not included in this metric.</p>
+</li>
+<li>
+<p><code>quilkin_session_total</code> (Counter)</p>
+<p>The total number of sessions that have been created.</p>
+</li>
+<li>
+<p><code>quilkin_sessions_closed_total{reason}</code> (Counter)</p>
+<p>The total number of sessions that have ended, by why they ended. A fall in
+session count otherwise looks the same whether players left or their endpoints
+vanished.</p>
+<ul>
+<li><code>idle_timeout</code>: no traffic within the session TTL. UDP has no close, so this
+is what a player leaving normally looks like.</li>
+<li><code>endpoint_gone</code>: the endpoint the session was routed to is no longer in the
+cluster map. Only reported for destinations that were in the cluster map when
+the session was created, so an endpoint configured by name is never
+misattributed here.</li>
+<li><code>shutdown</code>: the proxy is shutting down.</li>
+</ul>
+</li>
+</ul>
+<h2 id="connection-quality-metrics"><a class="header" href="#connection-quality-metrics">Connection Quality Metrics</a></h2>
+<p>A player’s jitter and their ISP are per-player facts, so neither can be a metric
+label: concurrent sessions and the thousands of ASNs seen in a day of traffic both
+blow up cardinality. Instead the proxy tracks quality per session internally and
+periodically exports a projection whose series count is bounded by configuration
+rather than by traffic. See the <code>--service.udp.metrics.*</code> options for the
+tunables.</p>
+<p>Note the division of labour. Whether an individual <em>session</em> is having a bad time
+is a judgement the proxy makes, because it is the only thing holding that
+session’s packet timing. Whether an <em>ISP</em> is having a bad time is left to the
+consumer of these metrics: a proxy carries on the order of a hundred concurrent
+sessions spread over thousands of ASNs, so no single one sees enough of any ASN to
+threshold on. The proxy exports the numerator and the denominator per ASN and
+expects them to be summed across the fleet before any conclusion is drawn.</p>
+<p>Interarrival jitter is measured against a monotonic clock, and gaps longer than a
+second are treated as the stream restarting rather than as jitter, so a player
+pausing doesn’t register as a player with a bad connection.</p>
+<p>Sessions the proxy saw no traffic for during an interval are counted, but
+contribute no quality judgement.</p>
+<ul>
+<li>
+<p><code>quilkin_session_jitter_seconds</code> (Histogram)</p>
+<p>The distribution of per-session interarrival jitter of downstream packets, as
+the RFC 3550 estimator. A histogram rather than a mean, because a mean of 0.5 ms
+is compatible with a few percent of players at 80 ms, and those are the players
+worth knowing about — <code>histogram_quantile</code> over this answers “what does the 99th
+percentile player at this proxy see”.</p>
+<p>Only jitter is exported per session. Loss and round-trip time on the client’s
+leg need either packet sequence numbers or a client-side timestamp, and the
+proxy has neither.</p>
+</li>
+<li>
+<p><code>quilkin_sessions_active_by_asn{asn}</code> (Gauge)</p>
+<p>Active sessions by the client’s ASN, for the largest
+<code>--service.udp.metrics.top-asns</code> ASNs at this proxy, and the denominator for the
+metric below.</p>
+<p>Sessions belonging to any other ASN are counted under <code>asn="other"</code>, so the
+breakdown always sums to the session total. Sessions whose client IP resolved to
+no ASN are counted under <code>asn="unknown"</code>. Setting <code>--top-asns</code> to 0 disables
+per-ASN reporting entirely.</p>
+</li>
+<li>
+<p><code>quilkin_client_sessions_degraded{asn, reason}</code> (Gauge)</p>
+<p>The number of sessions breaching a quality threshold, by the client’s ASN. Only
+ASNs currently breaching are exported, so a healthy proxy publishes nothing
+here and the series count follows the number of ISPs actually in trouble.</p>
+<ul>
+<li><code>reason = jitter</code>: sessions at or above <code>--service.udp.metrics.jitter-threshold-ms</code>.</li>
+</ul>
+<p>This is a count, not a verdict. For the affected share of an ISP, divide by
+<code>quilkin_sessions_active_by_asn</code> — summing both across proxies first, since one
+proxy’s view of a single ASN is too small a sample to threshold on:</p>
+<pre><code class="language-promql">sum by (asn) (quilkin_client_sessions_degraded{reason="jitter"})
+  / sum by (asn) (quilkin_sessions_active_by_asn)
+</code></pre>
+</li>
+<li>
+<p><code>quilkin_client_sessions_degraded_total{reason}</code> (Counter)</p>
+<p>The total number of times a session was observed breaching a threshold, for
+alerting on a rate without depending on a share the proxy would have to pick a
+cut-off for.</p>
+</li>
+</ul>
+<h2 id="filter-metrics"><a class="header" href="#filter-metrics">Filter Metrics</a></h2>
+<p>Quilkin’s filters use a set of generic metric keys, to make it easier to build visualisations that can account for
+a dynamic set of filters that can be added, removed, or updated at runtime with different configurations. All of
+these metrics share a common set of labels.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Label</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>id</code></td><td>The ID of the filter that used the metric.</td></tr>
+<tr><td><code>label</code></td><td>The name of the metric being measured.</td></tr>
+<tr><td><code>help</code></td><td>The description of the filter metric.</td></tr>
+<tr><td><code>direction</code></td><td>The direction of packet flow (e.g. read/write).</td></tr>
+</tbody>
+</table>
+</div>
+<ul>
+<li>
+<p><code>quilkin_filter_int_counter{id, label, help, direction}</code>
+Generic filter counter, see help label for more specific info.</p>
+</li>
+<li>
+<p><code>quilkin_filter_histogram{id, label, help, direction, shared_metadata_1}</code>
+generic filter histogram, see help label for more specific info.</p>
+</li>
+<li>
+<p><code>quilkin_filter_read_duration_seconds{filter}</code></p>
+<p>The duration it took for a <code>filter</code>’s <code>read</code> implementation to execute.</p>
+<ul>
+<li>The<code>filter</code> label is the name of the filter being executed.</li>
+</ul>
+</li>
+<li>
+<p><code>quilkin_filter_write_duration_seconds{filter}</code></p>
+<p>The duration it took for a <code>filter</code>’s <code>write</code> implementation to execute.</p>
+<ul>
+<li>The <code>filter</code> label is the name of the filter being executed.</li>
+</ul>
+</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="administration"><a class="header" href="#administration">Administration</a></h1>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>services</th><th>ports</th><th>Protocol</th></tr>
+</thead>
+<tbody>
+<tr><td>Administration</td><td>8000</td><td>HTTP (IPv4 OR IPv6)</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="logging"><a class="header" href="#logging">Logging</a></h2>
+<p>By default, Quilkin will log <code>INFO</code> level events, you can change this by setting
+the <code>RUST_LOG</code> environment variable. See <a href="https://docs.rs/env_logger/latest/env_logger/#enabling-logging"><code>log</code> documentation</a> for
+more advanced usage.</p>
+<blockquote>
+<p>If you are debugging Quilkin set the <code>RUST_LOG</code> environment variable to <code>quilkin=trace</code>, to filter trace level
+logging to only Quilkin components.</p>
+</blockquote>
+<blockquote>
+<p>Verbose logging in Quilkin will affect performance considerably, so we recommend only
+turning it on for debugging purposes.</p>
+</blockquote>
+<h2 id="http-api"><a class="header" href="#http-api">HTTP API</a></h2>
+<p>Quilkin exposes an HTTP interface to query different aspects of the server.</p>
+<blockquote>
+<p>It is assumed that the administration interface will only ever be able to be accessible on <code>localhost</code>.</p>
+</blockquote>
+<p>By default, the administration interface is bound to <code>[::]:8000</code>, but it can be
+configured with the <code>--admin-address</code> CLI flag or the <code>QUILKIN_ADMIN_ADDRESS</code>
+environment.</p>
+<h2 id="endpoints-1"><a class="header" href="#endpoints-1">Endpoints</a></h2>
+<p>The admin interface provides the following endpoints:</p>
+<h3 id="live"><a class="header" href="#live">/live</a></h3>
+<p>This provides a liveness probe endpoint, most commonly used in
+<a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-a-liveness-command">Kubernetes based systems</a>.</p>
+<p>Liveness is defined as “hasn’t panicked”, as long as the process has not
+panicked quilkin is considered live.</p>
+<h3 id="ready"><a class="header" href="#ready">/ready</a></h3>
+<p>This provides a readiness probe endpoint, most commonly used in
+<a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-readiness-probes">Kubernetes based systems</a>.</p>
+<p>Readiness is service and provider specific, so based on what you’re running
+there will be different criteria for a service to be considered ready. Here’s
+a list of the criteria for each service an provider.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Service</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>Proxy</td><td>Management server is connected (or always true if config is static)  OR if there is more than one endpoint configured</td></tr>
+<tr><td>Manage</td><td>Provider is ready</td></tr>
+<tr><td>Relay</td><td>Provider is ready</td></tr>
+<tr><td>Agent</td><td>Provider is ready AND connected to relay</td></tr>
+</tbody>
+</table>
+</div>
+<br />
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Provider</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>Agones</td><td>The service is connected to kube-api</td></tr>
+<tr><td>File</td><td>The service has found and watches the file</td></tr>
+</tbody>
+</table>
+</div>
+<p>When setting thresholds for your <code>proxy</code> probes, you generally want to set a low
+check period (e.g.  <code>periodSeconds=1</code>) and a low success threshold
+(e.g. <code>successThreshold=1</code>), but a high <code>failureThreshold</code>
+(e.g. <code>failureThreshold=60</code>) and <code>terminationGracePeriodSeconds</code> to allow for
+backoff attempts and existing player sessions to continue without disruption.</p>
+<h4 id="proxy-mode"><a class="header" href="#proxy-mode">Proxy Mode</a></h4>
+<p>Will return an HTTP status of 200 when there is at least one endpoint to send data to. This is primarily to ensure
+that new proxies that have yet to get configuration information from an <a href="services/xds.html">xDS server</a> aren’t send data
+until they are fully populated.</p>
+<h4 id="xds-provider-mode"><a class="header" href="#xds-provider-mode">xDS Provider Mode</a></h4>
+<p>Will return an HTTP status of 200 when all health checks pass.</p>
+<h3 id="metrics-4"><a class="header" href="#metrics-4">/metrics</a></h3>
+<p>Outputs <a href="https://prometheus.io/">Prometheus</a> formatted metrics for this instance.</p>
+<p>See the <a href="services/proxy/metrics.html">Proxy Metrics</a> documentation for what proxy metrics are available.</p>
+<p>See the <a href="services/xds/metrics.html">xDS Metrics</a> documentation for what xDS metrics are available.</p>
+<h4 id="heap-allocation-metrics"><a class="header" href="#heap-allocation-metrics">Heap Allocation Metrics</a></h4>
+<p>Quilkin exposes the following metrics on heap allocations, which are useful for performance observability:</p>
+<ul>
+<li>
+<p><code>quilkin_allocation_bytes_total</code> (Counter)</p>
+<p>The total number of allocated bytes.</p>
+</li>
+<li>
+<p><code>quilkin_allocation_total</code> (Counter)</p>
+<p>The total number of allocations.</p>
+</li>
+<li>
+<p><code>quilkin_extant_allocation_size</code> (Gauge)</p>
+<p>The current total of extant allocation bytes.</p>
+</li>
+<li>
+<p><code>quilkin_extant_allocation_count</code> (Gauge)</p>
+<p>The current number of extant allocations</p>
+</li>
+<li>
+<p><code>quilkin_shutdown_initiated</code></p>
+<p>Shutdown process has been started</p>
+</li>
+</ul>
+<h3 id="debugpprofprofile"><a class="header" href="#debugpprofprofile">/debug/pprof/profile</a></h3>
+<p>This provides a endpoint to profile Quilkin’s performance. You can use with any
+system which supports pprof output such as <a href="https://pyroscope.io">Pyroscope</a>.</p>
+<p>This requires setting up a writable <code>/tmp</code> directory in the Quilkin container. E.g.</p>
+<pre><code class="language-yaml">apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: quilkin
+        # ...Other container configuration...
+          volumeMounts:
+            - mountPath: /tmp
+              name: tmp
+              subPath: tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+</code></pre>
+<h3 id="config"><a class="header" href="#config">/config</a></h3>
+<p>Returns a JSON representation of the cluster and filterchain configuration that the instance is running
+with at the time of invocation.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="quilkin-integration-examples"><a class="header" href="#quilkin-integration-examples">Quilkin Integration Examples</a></h1>
+<p>The Quilkin proxy can be integrated with your dedicated game servers in several ways,
+each providing different capabilities and complexity tradeoffs.</p>
+<p>Below captures several of the most useful and prevalent architectural patterns to give you inspiration
+on how you can use Quilkin in your multiplayer game networking architecture.</p>
+<p>These <a href="https://github.com/EmbarkStudios/quilkin/tree/main/examples">examples</a>
+as well many others are available on Github repository.</p>
+<h2 id="server-proxy-as-a-sidecar"><a class="header" href="#server-proxy-as-a-sidecar"><a href="https://github.com/EmbarkStudios/quilkin/tree/main/examples/agones-xonotic-sidecar">Server Proxy as a Sidecar</a></a></h2>
+<pre><code class="language-text">                  |
+                  |
+               Internet
+                  |
+                  |
+                  |
+┌─────────┐       |          ┌────────────────┐ ┌────────────────┐
+│  Game   │       |          │ Quilkin        │ │ Dedicated      │
+│  Client ◄──────────────────► (Server Proxy) │ │ Game Server    │
+└─────────┘       |          │                ◄─►                │
+                  |          └────────────────┘ └────────────────┘
+                  |
+                  |
+                  |          ┌────────────────┐ ┌────────────────┐
+                  |          │ Quilkin        │ │ Dedicated      │
+                  |          │ (Server Proxy) │ │ Game Server    │
+                  |          │                ◄─►                │
+                  |          └────────────────┘ └────────────────┘
+                  |
+                  |
+                  |
+                  |
+</code></pre>
+<p>This is the simplest integration and configuration option with Quilkin, but does provide the smallest number
+of possible feature implementations and ability to provide redundancy.</p>
+<p>That being said, this is a low risk way to integrate Quilkin, and take advantage of the out-of-the-box telemetry
+and metric information that comes with Quilkin.</p>
+<ul>
+<li>In this example, the Server proxy is running alongside the dedicated game server - on the same public IP/machine/container.
+<ul>
+<li>This is often referred to as a sidecar pattern.</li>
+</ul>
+</li>
+<li>Communication between the Server Proxy and the Dedicated Game Server occurs over the localhost network, with a
+separate port for each Game Client connection.</li>
+<li>Clients connect to the Server Proxy’s public port/IP combination, and the Server Proxy routes all traffic directly
+to the dedicated game server.</li>
+<li>The Server Proxy can still use filters such as rate limiting, compression, firewall rules, etc
+as long as the Game Client conforms to the standard protocols utilised by those filters as appropriate.</li>
+</ul>
+<h2 id="client-proxy-to-sidecar-server-proxy"><a class="header" href="#client-proxy-to-sidecar-server-proxy">Client Proxy to Sidecar Server Proxy</a></h2>
+<pre><code class="language-text">                                    |
+                                    |
+                                 Internet
+                                    |
+                                    |
+                                    |
+┌─────────┐    ┌────────────────┐   |        ┌────────────────┐ ┌────────────────┐
+│  Game   │    │ Quilkin        │   |        │ Quilkin        │ │ Dedicated      │
+│  Client ◄────► (Client Proxy) ◄────────────► (Server Proxy) │ │ Game Server    │
+└─────────┘    └────────────────┘   |        │                ◄─►                │
+                                    |        └────────────────┘ └────────────────┘
+                                    |
+                                    |
+                                    |        ┌────────────────┐ ┌────────────────┐
+                                    |        │ Quilkin        │ │ Dedicated      │
+                                    |        │ (Server Proxy) │ │ Game Server    │
+                                    |        │                ◄─►                │
+                                    |        └────────────────┘ └────────────────┘
+                                    |
+                                    |
+                                    |
+                                    |
+</code></pre>
+<p>This example is the same as the above, but puts a Client Proxy between the Game Client, and the Server Proxy to take
+advantage of Client Proxy functionality.</p>
+<ul>
+<li>The Client Proxy may be integrated as a standalone binary, directly into the client with communication
+occurring over a localhost port or it may be possible utlise one of our client SDKs such as <a href="#quilkin-unreal-engine-plugin">Unreal Engine</a>.</li>
+<li>The Client Proxy can now utilise filters, such as compression, without having to change the Game Client.</li>
+<li>The Game Client will need to communicate to the Client Proxy what IP it should connect to when the Client is
+match-made with a Game Server.</li>
+</ul>
+<h2 id="client-proxy-to-separate-server-proxies-pools"><a class="header" href="#client-proxy-to-separate-server-proxies-pools"><a href="https://github.com/EmbarkStudios/quilkin/tree/main/examples/agones-xonotic-xds">Client Proxy to Separate Server Proxies Pools</a></a></h2>
+<pre><code class="language-text">                                       |                             |
+                                       |                             |
+                                    Internet                      Private
+                                       |                          Network
+                                       |     ┌────────────────┐      |       ┌────────────────┐
+                                       |     │ Quilkin        │      |       │ Dedicated      │
+                                       |  ┌──► (Server Proxy) ◄──────────┬───► Game Server    │
+┌─────────┐      ┌────────────────┐    |  │  │                │      |   │   │                │
+│  Game   │      │ Quilkin        ◄───────┤  └────────────────┘      |   │   └────────────────┘
+│  Client ◄──────► (Client Proxy) │    |  │                          |   │
+└─────────┘      └────────────────┘    |  │  ┌────────────────┐      |   │   ┌────────────────┐
+                                       |  │  │ Quilkin        │      |   │   │ Dedicated      │
+                                       |  └──► (Server Proxy) ◄──────────┘   │ Game Server    │
+                                       |     │                │      |       │                │
+                                       |     └────────────────┘      |       └────────────────┘
+                                       |                             |
+                                       |     ┌────────────────┐      |       ┌────────────────┐
+                                       |     │ Quilkin        │      |       │ Dedicated      │
+                                       |     │ (Server Proxy) │      |       │ Game Server    │
+                                       |     │                │      |       │                │
+                                       |     └────────────────┘      |       └────────────────┘
+                                       |                 ▲           |              ▲
+                                                         │                          │
+                                                         │              ┌───────────┴────┐
+                                                         │              │ xDS            │
+                                                         └──────────────┤ Control Plane  │
+                                                                        └────────────────┘
+
+
+
+
+</code></pre>
+<p>This is the most complex configuration, but enables the most reuse of Quilkin’s functionality,
+while also providing the most redundancy and security for your dedicated game servers.</p>
+<ul>
+<li>The Game client sends and receives packets from the Quilkin client proxy.</li>
+<li>The Client Proxy may be integrated as a standalone binary, with communication occurring over a localhost port, or
+it could be integrated directly with the game client as a library, or the client could utilise one of our
+[client SDKs] if Rust integration is not possible.</li>
+<li>The Client Proxy can utilise the full set of filters, such as concatenation (for routing), compression or load
+balancing, without having to change the Game Client.</li>
+<li>A hosted set of Quilkin Server proxies that have public IP addresses, are connected to an
+<a href="services/xds.html">xDS Control Plane</a> to coordinate routing and access control to the dedicated game servers, which are
+on private IP addresses.</li>
+<li>The Client Proxy is made aware of one or more Server proxies to connect to, possibly via their Game Client matchmaker
+or another service, with an authentication token to pass to the Server proxies, such that the UDP packets can be
+routed correctly to the dedicated game server they should connect to.</li>
+<li>Dedicated game servers receive traffic as per normal from the Server Proxies, and send data back to the proxies
+directly.</li>
+<li>If the dedicated game server always expects traffic from only a single ip/port combination for client connection,
+then traffic will always need to be sent through a single Server Proxy. Otherwise, UDP packets can be load
+balanced via the Client Proxy to multiple Server Proxies for even greater redundancy.</li>
+</ul>
+<h2 id="what-next-1"><a class="header" href="#what-next-1">What Next?</a></h2>
+<ul>
+<li>Have a look at the <a href="#administration">Administration API</a>.</li>
+<li>Review the <a href="services/proxy/filters.html">set of filters</a> that are available.</li>
+</ul>
+<hr>
+<p>Diagrams powered by <a href="http://asciiflow.com/" target="_blank">asciiflow.com</a></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="third-party-videos-and-presentations"><a class="header" href="#third-party-videos-and-presentations">Third Party Videos and Presentations</a></h1>
+<h2 id="gdc-2023-open-source-game-development-summit-agones-and-quilkin-oss-multiplayer-game-server-service-mesh-on-kubernetes"><a class="header" href="#gdc-2023-open-source-game-development-summit-agones-and-quilkin-oss-multiplayer-game-server-service-mesh-on-kubernetes">GDC 2023: Open Source Game Development Summit: Agones and Quilkin: OSS Multiplayer Game Server Service Mesh on Kubernetes</a></h2>
+<a href="https://www.gdcvault.com/play/1029264/Open-Source-Game-Development-Summit" target="_blank">
+<img src="third-party/vault.png" alt="Presentation recording" />
+</a>
+<p>(Does not require GDCVault access to watch)</p>
+<p>Previous talks have looked at two open source projects: Agones, the platform for orchestrating and scaling
+dedicated multiplayer game servers on top of Kubernetes, and Quilkin, an extensible UDP proxy specifically built
+for protecting, observing and authenticating game server communications.</p>
+<p>On the surface this seems like a very powerful combination, but manually integrating the two can be a tricky and
+intimidating process. You need to know and understand the Kubernetes API and its client libraries, and then tie it
+into Quilkin’s xDS compliant API implementation all through some custom code - which is a large and complex amount
+of work (and a lot of acronyms).</p>
+<p>In this talk, Mark Mandel, Developer Advocate at Google Cloud, will look at how anyone can utilize Quilkin’s native
+Agones integration to provide a turnkey solution for proxying UDP traffic to game servers providing an extra layer
+of protection and observability when orchestrating game servers on top of Kubernetes.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-09f2665d.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid-eefea253.min.js"></script>
+        <script src="mermaid-init-ccf746f1.js"></script>
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>

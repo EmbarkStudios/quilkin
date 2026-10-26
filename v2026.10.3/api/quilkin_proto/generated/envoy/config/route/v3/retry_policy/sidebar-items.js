@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ResetHeaderFormat"],"mod":["retry_host_predicate","retry_priority"],"struct":["RateLimitedRetryBackOff","ResetHeader","RetryBackOff","RetryHostPredicate","RetryPriority"]};

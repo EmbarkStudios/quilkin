@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CLUSTER_TYPE","DATACENTER_TYPE","FILTER_CHAIN_TYPE"],"enum":["Resource","ResourceType"]};

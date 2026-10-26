@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["collection_entry","resource_locator"],"struct":["Authority","CollectionEntry","ContextParams","ResourceLocator","ResourceName","TypedExtensionConfig"]};

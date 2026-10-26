@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AddressKind","IcaoError"],"struct":["Capabilities","Endpoint","IcaoCode","TokenSet"]};

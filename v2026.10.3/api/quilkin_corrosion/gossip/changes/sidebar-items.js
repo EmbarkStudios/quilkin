@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["handle_changes","spawn_buffered_apply","spawn_buffered_cleanup","spawn_changes_handler"],"struct":["ChangeCtx","ChangeOptions"],"type":["ChangeApply"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ClusterNotFoundResponseCode","ClusterSpecifier","HostRewriteSpecifier","InternalRedirectAction"],"mod":["hash_policy","upgrade_config"],"struct":["HashPolicy","MaxStreamDuration","RequestMirrorPolicy","UpgradeConfig"]};

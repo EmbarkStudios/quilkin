@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Marker"],"struct":["ReadGuard","Watch","WatchGuard"],"trait":["Watchable"]};

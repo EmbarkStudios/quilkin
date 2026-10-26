@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BiPayloadEncodeError","BiPayloadSendError","SyncError","SyncRecvError","SyncSendError","TransportError"]};
