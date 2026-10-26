@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["observe_dropped_packet","observe_dropped_packet_with_filter","observe_forwarded_packet","observe_invalid_packet","register_metrics"]};
