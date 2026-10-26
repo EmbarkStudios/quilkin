@@ -227,6 +227,7 @@ impl SessionPool {
         }
         *last_received_at = Some(received_at);
 
+        let payload_size = packet.len();
         let result = {
             let _timer = metrics::processing_time(metrics::WRITE).start_timer();
             Self::process_recv_packet(
@@ -261,6 +262,13 @@ impl SessionPool {
                     &cluster,
                 )
                 .inc();
+                crate::net::metrics::observe_dropped_packet_with_filter(
+                    metrics::WRITE,
+                    &cluster,
+                    payload_size,
+                    error.drop_reason(),
+                    error.filter_name(),
+                );
                 metrics::errors_total(metrics::WRITE, error.discriminant(), &asn_metric_info).inc();
             }
         }

@@ -642,6 +642,7 @@ pub fn process_packets(
         // right now, and only the first buffer has headers, so check before parsing
         if buffer.is_continued() {
             metrics::packets_dropped(metrics::READ, metrics::DropReason::InvalidPacket).inc();
+            crate::net::metrics::observe_invalid_packet(metrics::READ, buffer.len());
             umem.free_packet(buffer);
             continue;
         }
@@ -651,6 +652,7 @@ pub fn process_packets(
             Err(reason) => {
                 tracing::debug!(reason, length = buffer.len(), "dropped unparsable packet");
                 metrics::packets_dropped(metrics::READ, metrics::DropReason::InvalidPacket).inc();
+                crate::net::metrics::observe_invalid_packet(metrics::READ, buffer.len());
                 umem.free_packet(buffer);
                 continue;
             }
@@ -668,8 +670,9 @@ pub fn process_packets(
         } else {
             metrics::WRITE
         };
+        let payload_size = headers.data_length();
 
-        if is_client && headers.data_length() == 0 && !config_state.allow_empty_packets {
+        if is_client && payload_size == 0 && !config_state.allow_empty_packets {
             crate::net::packet::empty_packet_dropped();
             umem.free_packet(buffer);
             continue;
@@ -701,6 +704,13 @@ pub fn process_packets(
                     "",
                 )
                 .inc();
+                crate::net::metrics::observe_dropped_packet_with_filter(
+                    direction,
+                    "",
+                    payload_size,
+                    error.drop_reason(),
+                    error.filter_name(),
+                );
 
                 umem.free_packet(packet);
             }
@@ -728,15 +738,28 @@ fn push_packet(
         Ok(()) => {
             if let Some(packet) = tx_slab.push_front(packet) {
                 metrics::packets_dropped(direction, metrics::DropReason::QueueFull).inc();
+                crate::net::metrics::observe_dropped_packet(
+                    direction,
+                    cluster,
+                    data_length,
+                    metrics::DropReason::QueueFull,
+                );
                 umem.free_packet(packet);
             } else {
                 metrics::packets_total(direction, &asn, cluster).inc();
                 metrics::bytes_total(direction, &asn, cluster).inc_by(data_length as u64);
+                crate::net::metrics::observe_forwarded_packet(direction, cluster, data_length);
             }
         }
         Err(err) => {
             metrics::errors_total(direction, err.discriminant(), &metrics::EMPTY).inc();
             metrics::packets_dropped(direction, metrics::DropReason::SocketError).inc();
+            crate::net::metrics::observe_dropped_packet(
+                direction,
+                cluster,
+                data_length,
+                metrics::DropReason::SocketError,
+            );
             umem.free_packet(packet);
         }
     }
