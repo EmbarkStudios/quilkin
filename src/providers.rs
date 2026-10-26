@@ -183,6 +183,77 @@ fn with_client_tls(
         .collect()
 }
 
+/// A provider's endpoints, replaced in place when the certificate they present
+/// is rotated.
+type SharedEndpoints = Arc<arc_swap::ArcSwap<Vec<tonic::transport::Endpoint>>>;
+
+/// Rebuilds one provider's endpoints when the files its TLS came from change.
+struct ClientTlsReloader {
+    /// The endpoints as configured, before any TLS was attached.
+    base: Vec<tonic::transport::Endpoint>,
+    client: OwnedClientTls,
+    flags: TlsFlags,
+    endpoints: SharedEndpoints,
+    reconnect: Arc<tokio::sync::Notify>,
+}
+
+/// The owned form of [`ClientTls`], for re-reading after the flags are gone.
+#[derive(Clone)]
+struct OwnedClientTls {
+    ca_path: std::path::PathBuf,
+    server_name: Option<String>,
+    cert_path: Option<std::path::PathBuf>,
+    key_path: Option<std::path::PathBuf>,
+}
+
+impl ClientTlsReloader {
+    /// The files this reads, which are the ones worth watching.
+    fn paths(&self) -> Vec<std::path::PathBuf> {
+        [
+            Some(&self.client.ca_path),
+            self.client.cert_path.as_ref(),
+            self.client.key_path.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect()
+    }
+
+    fn rebuild(&self) -> crate::Result<Vec<tonic::transport::Endpoint>> {
+        with_client_tls(
+            self.base.clone(),
+            ClientTls {
+                ca_path: Some(&self.client.ca_path),
+                server_name: self.client.server_name.as_deref(),
+                cert_path: self.client.cert_path.as_deref(),
+                key_path: self.client.key_path.as_deref(),
+            },
+            self.flags,
+        )
+    }
+
+    /// Reconnects with whatever is on disk whenever it changes.
+    fn spawn(self, shutdown: tokio::sync::watch::Receiver<()>) -> crate::Result<()> {
+        let paths = self.paths();
+        let subject = self.flags.endpoints.to_owned();
+
+        crate::tls::spawn_reload(subject, paths, shutdown, move || {
+            self.endpoints.store(Arc::new(self.rebuild()?));
+            // The provider reconnects through its ordinary retry path, so
+            // nothing else has to know about rotation.
+            self.reconnect.notify_waiters();
+
+            // The certificate presented to the server, which is the one whose
+            // expiry matters here. Without one there is nothing to report.
+            Ok(match self.client.cert_path.as_deref() {
+                Some(cert) => std::fs::read(cert)?,
+                None => Vec::new(),
+            })
+        })
+    }
+}
+
 /// The available xDS source provider.
 #[derive(Clone, Debug, Default, clap::Args)]
 #[command(next_help_heading = "Provider Options")]
@@ -860,27 +931,39 @@ impl Providers {
         health_check: Arc<AtomicBool>,
         locality: Option<crate::net::endpoint::Locality>,
         shutdown: tokio::sync::watch::Receiver<()>,
+        endpoints: SharedEndpoints,
+        reconnect: Arc<tokio::sync::Notify>,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let config = config.clone();
-        let endpoints = self.relay.clone();
         let control_plane_id = locality.map_or_else(|| config.id(), |l| l.region().to_string());
         Self::task("mds_provider".into(), health_check.clone(), move || {
             let config = config.clone();
             let endpoints = endpoints.clone();
             let control_plane_id = control_plane_id.clone();
             let health_check = health_check.clone();
+            let reconnect = reconnect.clone();
             let shutdown = shutdown.clone();
             async move {
-                let stream =
-                    crate::net::xds::client::MdsClient::connect(control_plane_id, endpoints)
-                        .await?
-                        .delta_stream(config.clone(), health_check.clone(), shutdown)
-                        .await
-                        .map_err(|_err| eyre::eyre!("failed to acquire delta stream"))?;
+                loop {
+                    let mut stream = crate::net::xds::client::MdsClient::connect(
+                        control_plane_id.clone(),
+                        endpoints.load().as_ref().clone(),
+                    )
+                    .await?
+                    .delta_stream(config.clone(), health_check.clone(), shutdown.clone())
+                    .await
+                    .map_err(|_err| eyre::eyre!("failed to acquire delta stream"))?;
 
-                health_check.store(true, Ordering::SeqCst);
+                    health_check.store(true, Ordering::SeqCst);
 
-                stream.await.wrap_err("join handle error")?
+                    tokio::select! {
+                        res = &mut stream => return res.wrap_err("join handle error")?,
+                        // A rotated certificate only reaches the server on a
+                        // new connection, so the current one is dropped and
+                        // the ordinary connect path runs again.
+                        () = reconnect.notified() => stream.abort(),
+                    }
+                }
             }
         })
     }
@@ -890,32 +973,62 @@ impl Providers {
         config: Arc<config::Config>,
         health_check: Arc<AtomicBool>,
         notifier: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+        endpoints: SharedEndpoints,
+        reconnect: Arc<tokio::sync::Notify>,
     ) -> impl Future<Output = crate::Result<()>> + 'static {
         let config = config.clone();
-        let endpoints = self.xds_endpoints.clone();
 
         Self::task("xds_provider".into(), health_check.clone(), move || {
             let config = config.clone();
             let endpoints = endpoints.clone();
             let health_check = health_check.clone();
+            let reconnect = reconnect.clone();
             let tx = notifier.clone();
             async move {
-                let identifier = config.id();
-                let stream = crate::net::xds::delta_subscribe(
-                    config,
-                    identifier,
-                    endpoints,
-                    health_check.clone(),
-                    tx,
-                    Self::SUBS,
-                )
-                .await
-                .map_err(|_err| eyre::eyre!("failed to acquire delta stream"))?;
+                loop {
+                    let identifier = config.id();
+                    let mut stream = crate::net::xds::delta_subscribe(
+                        config.clone(),
+                        identifier,
+                        endpoints.load().as_ref().clone(),
+                        health_check.clone(),
+                        tx.clone(),
+                        Self::SUBS,
+                    )
+                    .await
+                    .map_err(|_err| eyre::eyre!("failed to acquire delta stream"))?;
 
-                health_check.store(true, Ordering::SeqCst);
+                    health_check.store(true, Ordering::SeqCst);
 
-                stream.await.wrap_err("join handle error")?
+                    tokio::select! {
+                        res = &mut stream => return res.wrap_err("join handle error")?,
+                        // A rotated certificate only reaches the server on a
+                        // new connection, so the current one is dropped and
+                        // the ordinary connect path runs again.
+                        () = reconnect.notified() => stream.abort(),
+                    }
+                }
             }
+        })
+    }
+
+    /// The mds client TLS flags, when they name files that can be rotated.
+    fn owned_mds_tls(&self) -> Option<OwnedClientTls> {
+        Some(OwnedClientTls {
+            ca_path: self.mds_tls_ca_path.clone()?,
+            server_name: self.mds_tls_server_name.clone(),
+            cert_path: self.mds_tls_cert_path.clone(),
+            key_path: self.mds_tls_key_path.clone(),
+        })
+    }
+
+    /// The xds client TLS flags, when they name files that can be rotated.
+    fn owned_xds_tls(&self) -> Option<OwnedClientTls> {
+        Some(OwnedClientTls {
+            ca_path: self.xds_tls_ca_path.clone()?,
+            server_name: self.xds_tls_server_name.clone(),
+            cert_path: self.xds_tls_cert_path.clone(),
+            key_path: self.xds_tls_key_path.clone(),
         })
     }
 
@@ -1007,6 +1120,7 @@ impl Providers {
         // Resolved before anything spawns: provider tasks retry with backoff,
         // so a connection they can never make has to fail here instead.
         let relay = std::mem::take(&mut self.relay);
+        let relay_base = relay.clone();
         self.relay = with_client_tls(
             relay,
             ClientTls {
@@ -1019,6 +1133,7 @@ impl Providers {
         )?;
 
         let xds_endpoints = std::mem::take(&mut self.xds_endpoints);
+        let xds_base = xds_endpoints.clone();
         self.xds_endpoints = with_client_tls(
             xds_endpoints,
             ClientTls {
@@ -1029,6 +1144,49 @@ impl Providers {
             },
             XDS_TLS_FLAGS,
         )?;
+
+        // Shared so a rotated client certificate reaches the next connection
+        // attempt without rebuilding the provider.
+        let relay_endpoints: SharedEndpoints =
+            Arc::new(arc_swap::ArcSwap::from_pointee(self.relay.clone()));
+        let xds_endpoints: SharedEndpoints =
+            Arc::new(arc_swap::ArcSwap::from_pointee(self.xds_endpoints.clone()));
+        let relay_reconnect = Arc::new(tokio::sync::Notify::new());
+        let xds_reconnect = Arc::new(tokio::sync::Notify::new());
+
+        for (base, client, flags, endpoints, reconnect) in [
+            (
+                relay_base,
+                self.owned_mds_tls(),
+                MDS_TLS_FLAGS,
+                &relay_endpoints,
+                &relay_reconnect,
+            ),
+            (
+                xds_base,
+                self.owned_xds_tls(),
+                XDS_TLS_FLAGS,
+                &xds_endpoints,
+                &xds_reconnect,
+            ),
+        ] {
+            let Some(client) = client else { continue };
+
+            if let Some(cert) = client.cert_path.as_deref()
+                && let Ok(pem) = std::fs::read(cert)
+            {
+                crate::tls::report_certificate(flags.endpoints, &pem);
+            }
+
+            ClientTlsReloader {
+                base,
+                client,
+                flags,
+                endpoints: endpoints.clone(),
+                reconnect: reconnect.clone(),
+            }
+            .spawn(shutdown.clone())?;
+        }
 
         let mut providers = tokio::task::JoinSet::new();
 
@@ -1066,6 +1224,8 @@ impl Providers {
                 health_check.clone(),
                 locality.clone(),
                 shutdown.clone(),
+                relay_endpoints.clone(),
+                relay_reconnect.clone(),
             ));
         }
 
@@ -1084,6 +1244,8 @@ impl Providers {
                 config.clone(),
                 health_check.clone(),
                 notifier,
+                xds_endpoints.clone(),
+                xds_reconnect.clone(),
             ));
         }
 

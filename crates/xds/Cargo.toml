@@ -14,7 +14,10 @@ test = true
 [dependencies]
 quilkin-proto.workspace = true
 
+arc-swap.workspace = true
 async-stream.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
 eyre.workspace = true
 fixedstr.workspace = true
 forwarded-header-value = "0.1.1"
@@ -37,7 +40,7 @@ tracing-futures.workspace = true
 tracing.workspace = true
 tryhard.workspace = true
 uuid.workspace = true
-x509-parser = "0.18"
+x509-parser.workspace = true
 url.workspace = true
 http = "1.4.0"
 tower = { workspace = true, features = ["tokio", "tracing"] }
