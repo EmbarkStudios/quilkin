@@ -37,6 +37,57 @@ pub enum ClientAuth {
     Required,
 }
 
+/// Re-reads the mds and xds listener's TLS materials from the files they came
+/// from.
+struct TlsReloader {
+    cert: std::path::PathBuf,
+    key: std::path::PathBuf,
+    client_ca: Option<std::path::PathBuf>,
+    client_auth_optional: bool,
+}
+
+/// Names this listener in the reload logs and metrics.
+const SUBJECT: &str = "xds and mds listener";
+
+impl TlsReloader {
+    fn materials(&self) -> crate::Result<quilkin_xds::server::TlsMaterials> {
+        Ok(quilkin_xds::server::TlsMaterials {
+            cert: read_pem_file(&self.cert, TLS_CERT_PATH_FLAG, validate_pem_cert)?,
+            key: read_pem_file(&self.key, TLS_KEY_PATH_FLAG, validate_pem_key)?,
+            client_ca: self
+                .client_ca
+                .as_deref()
+                .map(|ca| read_pem_file(ca, TLS_CLIENT_CA_PATH_FLAG, validate_pem_cert))
+                .transpose()?,
+            client_auth_optional: self.client_auth_optional,
+        })
+    }
+
+    /// The files this reads, which are the ones worth watching.
+    fn paths(&self) -> Vec<std::path::PathBuf> {
+        [Some(&self.cert), Some(&self.key), self.client_ca.as_ref()]
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect()
+    }
+
+    /// Serves new connections with whatever is on disk whenever it changes.
+    fn spawn(
+        self,
+        tls: quilkin_xds::server::TlsIdentity,
+        shutdown: tokio::sync::watch::Receiver<()>,
+    ) -> crate::Result<()> {
+        let paths = self.paths();
+
+        crate::tls::spawn_reload(SUBJECT.into(), paths, shutdown, move || {
+            let materials = self.materials()?;
+            tls.reload(&materials)?;
+            Ok(materials.cert)
+        })
+    }
+}
+
 #[derive(Debug, clap::Parser)]
 #[command(next_help_heading = "Service Options")]
 pub struct Service {
@@ -657,12 +708,12 @@ impl Service {
         .join(" and ")
     }
 
-    /// Resolves the certificate and key for the mds and xds services.
+    /// Reads the certificate and key for the mds and xds services.
     ///
     /// Cert and key must come from the same pair. Any other combination is an
     /// error rather than `None`, since falling through to `None` serves the
     /// control plane in plaintext without saying so.
-    fn tls_identity(&self) -> crate::Result<Option<quilkin_xds::server::TlsIdentity>> {
+    fn tls_identity_pem(&self) -> crate::Result<Option<(Vec<u8>, Vec<u8>)>> {
         match (
             self.tls_cert.as_ref(),
             self.tls_key.as_ref(),
@@ -670,15 +721,13 @@ impl Service {
             self.tls_key_path.as_ref(),
         ) {
             (None, None, None, None) => Ok(None),
-            (Some(cert), Some(key), None, None) => Ok(Some(
-                quilkin_xds::server::TlsIdentity::from_raw(cert.as_bytes(), key.as_bytes()),
-            )),
+            (Some(cert), Some(key), None, None) => {
+                Ok(Some((cert.as_bytes().to_vec(), key.as_bytes().to_vec())))
+            }
             (None, None, Some(cert), Some(key)) => {
                 let cert = read_pem_file(cert, TLS_CERT_PATH_FLAG, validate_pem_cert)?;
                 let key = read_pem_file(key, TLS_KEY_PATH_FLAG, validate_pem_key)?;
-                Ok(Some(quilkin_xds::server::TlsIdentity::from_raw(
-                    &cert, &key,
-                )))
+                Ok(Some((cert, key)))
             }
             _ => {
                 let supplied = self.tls_flags_supplied();
@@ -691,16 +740,25 @@ impl Service {
         }
     }
 
-    /// Resolves the TLS configuration the mds and xds services are served with.
+    /// Reads everything the mds and xds listeners are configured from.
     ///
-    /// Client verification is layered onto the server's own identity, since
+    /// Client verification is layered onto the service's own identity, since
     /// there is nothing to verify a peer on without a TLS connection to begin
     /// with.
-    fn tls_config(&self) -> crate::Result<Option<quilkin_xds::server::TlsIdentity>> {
-        let identity = self.tls_identity()?;
+    fn tls_materials(&self) -> crate::Result<Option<quilkin_xds::server::TlsMaterials>> {
+        let identity = self.tls_identity_pem()?;
 
         let optional = match (self.tls_client_ca_path.as_deref(), self.tls_client_auth) {
-            (None, None | Some(ClientAuth::None)) => return Ok(identity),
+            (None, None | Some(ClientAuth::None)) => {
+                return Ok(
+                    identity.map(|(cert, key)| quilkin_xds::server::TlsMaterials {
+                        cert,
+                        key,
+                        client_ca: None,
+                        client_auth_optional: false,
+                    }),
+                );
+            }
             (None, Some(mode)) => {
                 let mode = format!("{mode:?}").to_lowercase();
                 eyre::bail!(
@@ -718,20 +776,37 @@ impl Service {
             (Some(_), Some(ClientAuth::Required) | None) => false,
         };
 
-        let Some(identity) = identity else {
+        let Some((cert, key)) = identity else {
             eyre::bail!(
                 "--{TLS_CLIENT_CA_PATH_FLAG} verifies peers over TLS, so this service needs its \
                  own certificate: supply --{TLS_CERT_PATH_FLAG} with --{TLS_KEY_PATH_FLAG}"
             );
         };
 
-        let ca = read_pem_file(
+        let client_ca = read_pem_file(
             self.tls_client_ca_path.as_deref().expect("checked above"),
             TLS_CLIENT_CA_PATH_FLAG,
             validate_pem_cert,
         )?;
 
-        Ok(Some(identity.verifying_clients(&ca, optional)))
+        Ok(Some(quilkin_xds::server::TlsMaterials {
+            cert,
+            key,
+            client_ca: Some(client_ca),
+            client_auth_optional: optional,
+        }))
+    }
+
+    /// Re-reads the listener's materials from disk, when they came from files.
+    ///
+    /// Inline PEM is not reloadable: there is no file behind it to change.
+    fn tls_reloader(&self) -> Option<TlsReloader> {
+        Some(TlsReloader {
+            cert: self.tls_cert_path.clone()?,
+            key: self.tls_key_path.clone()?,
+            client_ca: self.tls_client_ca_path.clone(),
+            client_auth_optional: self.tls_client_auth == Some(ClientAuth::Optional),
+        })
     }
 
     /// The main entrypoint for listening network servers.
@@ -757,7 +832,21 @@ impl Service {
 
         // Resolved before anything binds, so a half-configured pair fails while
         // no listener is up.
-        let tls = self.tls_config()?;
+        let tls = self
+            .tls_materials()?
+            .map(|materials| {
+                // Reported now as well as on reload, so the expiry gauge is
+                // there to alert on before anything has rotated.
+                crate::tls::report_certificate(SUBJECT, &materials.cert);
+                quilkin_xds::server::TlsIdentity::new(&materials)
+            })
+            .transpose()?;
+
+        if let Some(tls) = &tls
+            && let Some(reloader) = self.tls_reloader()
+        {
+            reloader.spawn(tls.clone(), shutdown.shutdown_rx())?;
+        }
 
         {
             let shutdown = &mut shutdown;
@@ -1891,9 +1980,13 @@ impl Default for XdpOptions {
 mod tests {
     use clap::Parser as _;
     use quilkin_types::Capabilities;
+    use std::sync::Arc;
 
     const CERT: &str = "-----BEGIN CERTIFICATE-----\nMIIBhDCCASugAwIBAgIULoRNveo8xDO1HQfk9DRlHBbwTtIwCgYIKoZIzj0EAwIw\nFzEVMBMGA1UEAwwMcXVpbGtpbi10ZXN0MCAXDTI2MTAyMjExMTQ1M1oYDzIxMjYw\nOTI4MTExNDUzWjAXMRUwEwYDVQQDDAxxdWlsa2luLXRlc3QwWTATBgcqhkjOPQIB\nBggqhkjOPQMBBwNCAAQMLifsWPZiGTxAZhjvOGMNd5aL8Y3tbHPx1QO7YrHE1oMh\n9J10tavPtNa59o36QsAUAxwAgRdnT11pw4Uy5Fmlo1MwUTAdBgNVHQ4EFgQUxTfr\nVa26UI40YQAm4FsC7FDmDUcwHwYDVR0jBBgwFoAUxTfrVa26UI40YQAm4FsC7FDm\nDUcwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNHADBEAiAqP9ui6Pxshhs/\nBMiScja+O7iYBSjRcfEQSF67NyS5lQIgTpThxbsbipMYgfExzcKyzHTxpbsUgQ0d\nebzBBXaf1p0=\n-----END CERTIFICATE-----\n";
     const KEY: &str = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgZmCZmw4saRvJeIj7\nWD7NvuE1ns/kvJApZ6h1vIelzKWhRANCAAQMLifsWPZiGTxAZhjvOGMNd5aL8Y3t\nbHPx1QO7YrHE1oMh9J10tavPtNa59o36QsAUAxwAgRdnT11pw4Uy5Fml\n-----END PRIVATE KEY-----\n";
+
+    const ROTATED_CERT: &str = "-----BEGIN CERTIFICATE-----\nMIIBizCCATGgAwIBAgIURsDOsXolzltVP1TgteC26L/Md4MwCgYIKoZIzj0EAwIw\nGjEYMBYGA1UEAwwPcXVpbGtpbi1yb3RhdGVkMCAXDTI2MTAyNjA5MjIwOFoYDzIx\nMjYxMDAyMDkyMjA4WjAaMRgwFgYDVQQDDA9xdWlsa2luLXJvdGF0ZWQwWTATBgcq\nhkjOPQIBBggqhkjOPQMBBwNCAAReHEMmipwR+exb9sU055b6v7froYPJrbFWdt43\nq01CDNI/kZWXfup/O0O2zfxYFYvzhZHckQ6jHAi3+Ebte1Xko1MwUTAdBgNVHQ4E\nFgQUvDgFYoS69sQeTAZwB2EolyRmNeMwHwYDVR0jBBgwFoAUvDgFYoS69sQeTAZw\nB2EolyRmNeMwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNIADBFAiA9BQoA\nkCJx72p04lQl7lI2kP/EhG5oAGR4agsL9v3H+QIhAN1nHeNiEitsOzXKYN1p2g39\nWCSr+1fgW97F4NAYD012\n-----END CERTIFICATE-----\n";
+    const ROTATED_KEY: &str = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgn6iKKa4+1nL1qUON\nJRDrK8k+t+jRFGgY0x4B7xOXPU2hRANCAAReHEMmipwR+exb9sU055b6v7froYPJ\nrbFWdt43q01CDNI/kZWXfup/O0O2zfxYFYvzhZHckQ6jHAi3+Ebte1Xk\n-----END PRIVATE KEY-----\n";
 
     fn service_with_tls(
         cert: Option<&str>,
@@ -1945,7 +2038,7 @@ mod tests {
 
         assert_eq!(service.tls_cert.as_deref(), Some(CERT));
         assert_eq!(service.tls_key.as_deref(), Some(KEY));
-        assert!(service.tls_identity().unwrap().is_some());
+        assert!(service.tls_identity_pem().unwrap().is_some());
     }
 
     /// Content that is not PEM is reported against the flag it came from,
@@ -1971,15 +2064,14 @@ mod tests {
         let service = || service_with_tls(None, None, cert_path.to_str(), key_path.to_str());
         let rejection = || {
             service()
-                .tls_identity()
-                .err()
-                .expect("an unusable file must not resolve")
+                .tls_identity_pem()
+                .expect_err("an unusable file must not resolve")
                 .to_string()
         };
 
         std::fs::write(&cert_path, CERT).unwrap();
         std::fs::write(&key_path, KEY).unwrap();
-        assert!(service().tls_identity().unwrap().is_some());
+        assert!(service().tls_identity_pem().unwrap().is_some());
 
         // A DER certificate is the likely mistake: a real certificate, but not
         // in the encoding the flag takes.
@@ -2004,6 +2096,58 @@ mod tests {
         assert!(error.contains("failed to read"), "{error}");
     }
 
+    /// Rotation has to be all-or-nothing: a usable replacement takes over, and
+    /// anything else leaves the running certificate serving.
+    ///
+    /// A certificate and its key are written separately, so the window where
+    /// one has landed and the other has not is the case that matters, and it
+    /// is the reason the watcher debounces rather than reading on every event.
+    #[test]
+    fn a_reload_swaps_only_a_usable_pair() {
+        let dir = tempfile::tempdir().unwrap();
+        let cert_path = dir.path().join("tls.crt");
+        let key_path = dir.path().join("tls.key");
+        let write = |cert: &str, key: &str| {
+            std::fs::write(&cert_path, cert).unwrap();
+            std::fs::write(&key_path, key).unwrap();
+        };
+
+        write(CERT, KEY);
+        let service = service_with_tls(None, None, cert_path.to_str(), key_path.to_str());
+        let reloader = service.tls_reloader().expect("the paths are reloadable");
+        let tls = quilkin_xds::server::TlsIdentity::new(
+            &service
+                .tls_materials()
+                .unwrap()
+                .expect("a certificate was supplied"),
+        )
+        .unwrap();
+
+        let reload = || reloader.materials().and_then(|m| tls.reload(&m));
+        let serving = tls.config();
+
+        // A different, usable pair takes over.
+        write(ROTATED_CERT, ROTATED_KEY);
+        reload().expect("a usable pair must be accepted");
+        let rotated = tls.config();
+        assert!(
+            !Arc::ptr_eq(&serving, &rotated),
+            "a usable pair should have replaced the running configuration"
+        );
+
+        // The torn write: the new certificate, still the old key.
+        write(ROTATED_CERT, KEY);
+        let error = reload().expect_err("a mismatched pair must be refused");
+        assert!(
+            format!("{error:#}").contains("do not make a usable pair"),
+            "the refusal should name the mismatch, not some earlier failure: {error:#}"
+        );
+        assert!(
+            Arc::ptr_eq(&rotated, &tls.config()),
+            "a refused reload must leave the running configuration in place: {error}"
+        );
+    }
+
     /// A client CA is only meaningful alongside the server's own certificate
     /// and a mode that asks for one, so every other combination is rejected
     /// rather than quietly serving unauthenticated peers.
@@ -2022,7 +2166,7 @@ mod tests {
         };
         let rejected = |ca, auth, identity| {
             service(ca, auth, identity)
-                .tls_config()
+                .tls_materials()
                 .err()
                 .expect("an unusable combination must not resolve")
                 .to_string()
@@ -2040,18 +2184,19 @@ mod tests {
 
         // A CA on its own means peers must authenticate.
         let required = service(Some(&ca_path), None, true)
-            .tls_config()
+            .tls_materials()
             .unwrap()
             .expect("a certificate was supplied");
-        assert!(required.requires_client_auth());
+        assert!(required.client_ca.is_some());
+        assert!(!required.client_auth_optional);
 
         // Optional leaves a peer offering nothing still served, so the
         // identifier it claims stays unchecked.
         let optional = service(Some(&ca_path), Some(super::ClientAuth::Optional), true)
-            .tls_config()
+            .tls_materials()
             .unwrap()
             .expect("a certificate was supplied");
-        assert!(!optional.requires_client_auth());
+        assert!(optional.client_auth_optional);
     }
 
     /// Taking the cert from one pair and the key from the other used to
@@ -2078,9 +2223,8 @@ mod tests {
             (None, None, None, Some("key.pem"), "--service.tls.key-path"),
         ] {
             let error = service_with_tls(cert, key, cert_path, key_path)
-                .tls_identity()
-                .err()
-                .expect("a half configured pair must not resolve")
+                .tls_identity_pem()
+                .expect_err("a half configured pair must not resolve")
                 .to_string();
 
             assert!(error.contains("half configured"), "{error}");
@@ -2091,7 +2235,7 @@ mod tests {
 
         assert!(
             service_with_tls(None, None, None, None)
-                .tls_identity()
+                .tls_identity_pem()
                 .unwrap()
                 .is_none(),
             "no TLS flags should leave TLS off"

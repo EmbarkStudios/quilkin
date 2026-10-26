@@ -16,7 +16,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use futures::{Stream, TryFutureExt};
+use futures::Stream;
 use tokio_stream::StreamExt;
 use tracing_futures::Instrument;
 
@@ -75,48 +75,151 @@ fn get_external_remote_addr<T>(request: &tonic::Request<T>) -> Option<std::net::
         .map(|ip| ip.to_canonical())
 }
 
+/// How long a peer gets to complete a TLS handshake before its connection is
+/// dropped, so a stalled one cannot hold a task open indefinitely.
+const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The PEM a TLS listener is configured from.
+pub struct TlsMaterials {
+    pub cert: Vec<u8>,
+    pub key: Vec<u8>,
+    /// Verify peer certificates against this PEM bundle.
+    pub client_ca: Option<Vec<u8>>,
+    /// Serve a peer that offers no certificate.
+    pub client_auth_optional: bool,
+}
+
+/// The TLS configuration new connections are accepted with.
+///
+/// Held behind an `ArcSwap` so a rotated certificate reaches new connections
+/// without rebinding the listener. A connection already established keeps the
+/// configuration it was accepted with.
 #[derive(Clone)]
 pub struct TlsIdentity {
-    identity: tonic::transport::Identity,
-    client_ca: Option<tonic::transport::Certificate>,
-    client_auth_optional: bool,
+    config: Arc<arc_swap::ArcSwap<rustls::ServerConfig>>,
+    requires_client_auth: bool,
 }
 
 impl TlsIdentity {
-    pub fn from_raw(cert: &[u8], key: &[u8]) -> Self {
-        Self {
-            identity: tonic::transport::Identity::from_pem(cert, key),
-            client_ca: None,
-            client_auth_optional: false,
-        }
+    pub fn new(materials: &TlsMaterials) -> eyre::Result<Self> {
+        Ok(Self {
+            // Whether a peer must authenticate comes from flags rather than
+            // the files, so a reload cannot change it.
+            requires_client_auth: materials.client_ca.is_some() && !materials.client_auth_optional,
+            config: Arc::new(arc_swap::ArcSwap::from_pointee(server_config(materials)?)),
+        })
     }
 
-    /// Verifies client certificates against `ca`.
+    /// Serves new connections with `materials`.
     ///
-    /// `optional` still serves a client that offers no certificate; one that
-    /// does offer a certificate is verified either way.
-    pub fn verifying_clients(mut self, ca: &[u8], optional: bool) -> Self {
-        self.client_ca = Some(tonic::transport::Certificate::from_pem(ca));
-        self.client_auth_optional = optional;
-        self
+    /// The replacement is built before anything is swapped, so materials that
+    /// do not make a usable configuration leave the running one in place.
+    pub fn reload(&self, materials: &TlsMaterials) -> eyre::Result<()> {
+        self.config.store(Arc::new(server_config(materials)?));
+        Ok(())
     }
 
     /// Whether a peer has to present a certificate to be served at all, and so
     /// whether the identity it claims can be checked against one.
     pub fn requires_client_auth(&self) -> bool {
-        self.client_ca.is_some() && !self.client_auth_optional
+        self.requires_client_auth
     }
 
-    fn into_server_config(self) -> tonic::transport::ServerTlsConfig {
-        let config = tonic::transport::ServerTlsConfig::new().identity(self.identity);
+    /// The configuration new connections are currently accepted with.
+    pub fn config(&self) -> Arc<rustls::ServerConfig> {
+        self.config.load_full()
+    }
+}
 
-        match self.client_ca {
-            Some(ca) => config
-                .client_ca_root(ca)
-                .client_auth_optional(self.client_auth_optional),
-            None => config,
+fn server_config(materials: &TlsMaterials) -> eyre::Result<rustls::ServerConfig> {
+    use eyre::Context as _;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject as _};
+
+    let certs = CertificateDer::pem_slice_iter(&materials.cert)
+        .collect::<Result<Vec<_>, _>>()
+        .context("failed to read the certificate chain")?;
+    let key =
+        PrivateKeyDer::from_pem_slice(&materials.key).context("failed to read the private key")?;
+
+    let builder = rustls::ServerConfig::builder();
+    let builder = match &materials.client_ca {
+        Some(ca) => {
+            let mut roots = rustls::RootCertStore::empty();
+            for cert in CertificateDer::pem_slice_iter(ca) {
+                roots
+                    .add(cert.context("failed to read the client CA bundle")?)
+                    .context("failed to trust a client CA certificate")?;
+            }
+
+            let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(roots));
+            let verifier = if materials.client_auth_optional {
+                verifier.allow_unauthenticated()
+            } else {
+                verifier
+            };
+
+            builder.with_client_cert_verifier(
+                verifier
+                    .build()
+                    .context("failed to build the client certificate verifier")?,
+            )
         }
-    }
+        None => builder.with_no_client_auth(),
+    };
+
+    let mut config = builder
+        .with_single_cert(certs, key)
+        .context("the certificate and key do not make a usable pair")?;
+
+    // tonic serves gRPC over HTTP/2 only, and nothing else negotiates ALPN for
+    // us now that the handshake is ours.
+    config.alpn_protocols = vec![b"h2".to_vec()];
+
+    Ok(config)
+}
+
+/// Accepts TLS connections, yielding streams tonic reads connection info from.
+///
+/// Each handshake runs in its own task, so a peer that stalls partway through
+/// one cannot hold up the accept loop. The configuration is read per
+/// connection, which is what lets a rotated certificate take effect.
+fn tls_incoming(
+    listener: tokio::net::TcpListener,
+    tls: TlsIdentity,
+    mut shutdown: ShutdownSignal,
+) -> impl Stream<Item = Result<tokio_rustls::server::TlsStream<tokio::net::TcpStream>, std::io::Error>>
+{
+    let (tx, rx) = tokio::sync::mpsc::channel(128);
+
+    tokio::spawn(async move {
+        loop {
+            let accepted = tokio::select! {
+                accepted = listener.accept() => accepted,
+                _ = shutdown.changed() => return,
+            };
+
+            let (stream, peer) = match accepted {
+                Ok(accepted) => accepted,
+                Err(error) => {
+                    tracing::warn!(%error, "failed to accept a connection");
+                    continue;
+                }
+            };
+
+            let acceptor = tokio_rustls::TlsAcceptor::from(tls.config());
+            let tx = tx.clone();
+
+            tokio::spawn(async move {
+                match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
+                    Ok(Ok(stream)) => drop(tx.send(Ok(stream)).await),
+                    Ok(Err(error)) => tracing::debug!(%peer, %error, "tls handshake failed"),
+                    Err(_) => tracing::debug!(%peer, "tls handshake timed out"),
+                }
+            });
+        }
+    });
+
+    tokio_stream::wrappers::ReceiverStream::new(rx)
 }
 
 /// What a peer's certificate says it is.
@@ -277,6 +380,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
     ) -> eyre::Result<impl std::future::Future<Output = crate::Result<()>>> {
         self.verify_peer_identity = tls.as_ref().is_some_and(TlsIdentity::requires_client_auth);
 
+        let accept_srx = self.shutdown.clone();
         let srx = self.shutdown.clone();
         tokio::spawn({
             let this = self.clone();
@@ -286,21 +390,31 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         let mut shutdown = self.shutdown.clone();
         let server = AggregatedDiscoveryServiceServer::new(self)
             .max_encoding_message_size(crate::config::max_grpc_message_size());
-        let builder = Self::server_builder();
+        let server = Self::server_builder().add_service(server);
+        tracing::info!("serving management server on port `{}`", listener.port());
 
-        let mut builder = if let Some(tls) = tls {
-            builder.tls_config(tls.into_server_config())?
-        } else {
-            builder
+        let stop = async move {
+            drop(shutdown.changed().await);
         };
 
-        let server = builder.add_service(server);
-        tracing::info!("serving management server on port `{}`", listener.port());
-        Ok(server
-            .serve_with_incoming_shutdown(listener.into_stream()?, async move {
-                drop(shutdown.changed().await);
-            })
-            .map_err(From::from))
+        Ok(async move {
+            match tls {
+                Some(tls) => {
+                    server
+                        .serve_with_incoming_shutdown(
+                            tls_incoming(listener.into_tokio()?, tls, accept_srx),
+                            stop,
+                        )
+                        .await
+                }
+                None => {
+                    server
+                        .serve_with_incoming_shutdown(listener.into_stream()?, stop)
+                        .await
+                }
+            }
+            .map_err(From::from)
+        })
     }
 
     pub fn relay_server(
@@ -310,6 +424,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
     ) -> eyre::Result<impl std::future::Future<Output = crate::Result<()>>> {
         self.verify_peer_identity = tls.as_ref().is_some_and(TlsIdentity::requires_client_auth);
 
+        let accept_srx = self.shutdown.clone();
         let srx = self.shutdown.clone();
         tokio::spawn({
             let this = self.clone();
@@ -319,21 +434,31 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         let mut shutdown = self.shutdown.clone();
         let server = AggregatedControlPlaneDiscoveryServiceServer::new(self)
             .max_encoding_message_size(crate::config::max_grpc_message_size());
-        let builder = Self::server_builder();
+        let server = Self::server_builder().add_service(server);
+        tracing::info!("serving relay server on port `{}`", listener.port());
 
-        let mut builder = if let Some(tls) = tls {
-            builder.tls_config(tls.into_server_config())?
-        } else {
-            builder
+        let stop = async move {
+            drop(shutdown.changed().await);
         };
 
-        let server = builder.add_service(server);
-        tracing::info!("serving relay server on port `{}`", listener.port());
-        Ok(server
-            .serve_with_incoming_shutdown(listener.into_stream()?, async move {
-                drop(shutdown.changed().await);
-            })
-            .map_err(From::from))
+        Ok(async move {
+            match tls {
+                Some(tls) => {
+                    server
+                        .serve_with_incoming_shutdown(
+                            tls_incoming(listener.into_tokio()?, tls, accept_srx),
+                            stop,
+                        )
+                        .await
+                }
+                None => {
+                    server
+                        .serve_with_incoming_shutdown(listener.into_stream()?, stop)
+                        .await
+                }
+            }
+            .map_err(From::from)
+        })
     }
 
     #[inline]
