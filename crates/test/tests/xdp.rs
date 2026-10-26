@@ -51,6 +51,9 @@ async fn simple_forwarding() {
         sessions: Arc::new(Default::default()),
         local_ipv4: *PROXY.ip(),
         local_ipv6: Ipv6Addr::from_bits(0),
+        local_mac: nt::MacAddress([0; 6]),
+        next_hops: None,
+        kernel: None,
         last_receive: UtcTimestamp::now(),
     };
 
@@ -133,6 +136,9 @@ async fn changes_ip_version() {
         sessions: Arc::new(Default::default()),
         local_ipv4: *PROXY4.ip(),
         local_ipv6: *PROXY6.ip(),
+        local_mac: nt::MacAddress([0; 6]),
+        next_hops: None,
+        kernel: None,
         last_receive: UtcTimestamp::now(),
     };
 
@@ -269,6 +275,9 @@ async fn packet_manipulation() {
             sessions: Arc::new(Default::default()),
             local_ipv4: *PROXY.ip(),
             local_ipv6: Ipv6Addr::from_bits(0),
+            local_mac: nt::MacAddress([0; 6]),
+            next_hops: None,
+            kernel: None,
             last_receive: UtcTimestamp::now(),
         };
 
@@ -326,6 +335,9 @@ async fn packet_manipulation() {
             sessions: Arc::new(Default::default()),
             local_ipv4: *PROXY.ip(),
             local_ipv6: Ipv6Addr::from_bits(0),
+            local_mac: nt::MacAddress([0; 6]),
+            next_hops: None,
+            kernel: None,
             last_receive: UtcTimestamp::now(),
         };
 
@@ -390,6 +402,9 @@ async fn packet_manipulation() {
             sessions: Arc::new(Default::default()),
             local_ipv4: *PROXY.ip(),
             local_ipv6: Ipv6Addr::from_bits(0),
+            local_mac: nt::MacAddress([0; 6]),
+            next_hops: None,
+            kernel: None,
             last_receive: UtcTimestamp::now(),
         };
 
@@ -491,6 +506,9 @@ async fn multiple_servers() {
         sessions: Arc::new(Default::default()),
         local_ipv4: Ipv4Addr::from_bits(0),
         local_ipv6: *PROXY.ip(),
+        local_mac: nt::MacAddress([0; 6]),
+        next_hops: None,
+        kernel: None,
         last_receive: UtcTimestamp::now(),
     };
 
@@ -563,6 +581,9 @@ async fn many_sessions() {
         sessions: Arc::new(Default::default()),
         local_ipv4: *PROXY.ip(),
         local_ipv6: Ipv6Addr::from_bits(0),
+        local_mac: nt::MacAddress([0; 6]),
+        next_hops: None,
+        kernel: None,
         last_receive: UtcTimestamp::now(),
     };
 
@@ -682,6 +703,9 @@ async fn frees_dropped_packets() {
         sessions: Arc::new(Default::default()),
         local_ipv4: *PROXY4.ip(),
         local_ipv6: *PROXY6.ip(),
+        local_mac: nt::MacAddress([0; 6]),
+        next_hops: None,
+        kernel: None,
         last_receive: UtcTimestamp::now(),
     };
 
@@ -797,6 +821,9 @@ async fn qcmp() {
         sessions: Arc::new(Default::default()),
         local_ipv4: *PROXY.ip(),
         local_ipv6: Ipv6Addr::from_bits(0),
+        local_mac: nt::MacAddress([0; 6]),
+        next_hops: None,
+        kernel: None,
         last_receive: UtcTimestamp::now(),
     };
 
@@ -965,6 +992,9 @@ async fn trims_ethernet_padding() {
         sessions: Arc::new(Default::default()),
         local_ipv4: *PROXY.ip(),
         local_ipv6: Ipv6Addr::from_bits(0),
+        local_mac: nt::MacAddress([0; 6]),
+        next_hops: None,
+        kernel: None,
         last_receive: UtcTimestamp::now(),
     };
 
@@ -1034,6 +1064,9 @@ async fn drops_unparsable_packets() {
         sessions: Arc::new(Default::default()),
         local_ipv4: *PROXY.ip(),
         local_ipv6: Ipv6Addr::from_bits(0),
+        local_mac: nt::MacAddress([0; 6]),
+        next_hops: None,
+        kernel: None,
         last_receive: UtcTimestamp::now(),
     };
 
@@ -1153,6 +1186,9 @@ async fn drops_packets_filters_cant_modify() {
             sessions: Arc::new(Default::default()),
             local_ipv4: *PROXY.ip(),
             local_ipv6: Ipv6Addr::from_bits(0),
+            local_mac: nt::MacAddress([0; 6]),
+            next_hops: None,
+            kernel: None,
             last_receive: UtcTimestamp::now(),
         };
 
@@ -1204,6 +1240,9 @@ async fn drops_empty_client_packets() {
             sessions: Arc::new(Default::default()),
             local_ipv4: *PROXY.ip(),
             local_ipv6: Ipv6Addr::from_bits(0),
+            local_mac: nt::MacAddress([0; 6]),
+            next_hops: None,
+            kernel: None,
             last_receive: UtcTimestamp::now(),
         };
 
@@ -1273,6 +1312,9 @@ async fn drops_disallowed_sources() {
         sessions: Arc::new(Default::default()),
         local_ipv4: *PROXY.ip(),
         local_ipv6: PROXY6,
+        local_mac: nt::MacAddress([0; 6]),
+        next_hops: None,
+        kernel: None,
         last_receive: UtcTimestamp::now(),
     };
 
@@ -1371,6 +1413,9 @@ async fn qcmp_refusals() {
             sessions: Arc::new(Default::default()),
             local_ipv4: *PROXY.ip(),
             local_ipv6: Ipv6Addr::from_bits(0),
+            local_mac: nt::MacAddress([0; 6]),
+            next_hops: None,
+            kernel: None,
             last_receive: UtcTimestamp::now(),
         };
 
