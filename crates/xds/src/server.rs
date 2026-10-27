@@ -531,7 +531,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         });
 
         use crate::config::ClientTracker;
-        let mut client_tracker = ClientTracker::track_client(node_id.clone());
+        let mut client_tracker = crate::config::TrackedClient::track_client(node_id.clone());
 
         let responder_control_plane = control_plane.clone();
         let client = node_id.clone();
@@ -695,12 +695,10 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
                             continue;
                         }
 
-                        let id = client_request.node.as_ref().map_or(node_id.as_str(), |node| node.id.as_str());
-
                         tracing::trace!(resource_type = client_request.type_url, "new delta message");
 
                         if let Some(error) = &client_request.error_detail {
-                            metrics::nacks(id, &client_request.type_url).inc();
+                            metrics::nacks(&node_id, &client_request.type_url).inc();
                             tracing::error!(nonce = %client_request.response_nonce, ?error, "NACK");
                         } else if let Ok(nonce) = uuid::Uuid::parse_str(&client_request.response_nonce) {
                             match client_tracker.apply_ack(nonce) {
@@ -713,7 +711,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
                                 }
                             }
 
-                            metrics::delta_discovery_requests(id, &client_request.type_url).inc();
+                            metrics::delta_discovery_requests(&node_id, &client_request.type_url).inc();
                             continue;
                         }
 

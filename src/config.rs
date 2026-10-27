@@ -1064,6 +1064,19 @@ mod tests {
         }
     }
 
+    /// The `control_plane` label values `metric` currently carries.
+    fn labelled_peers(metric: &str) -> Vec<String> {
+        crate::metrics::registry()
+            .gather()
+            .into_iter()
+            .filter(|family| family.name() == metric)
+            .flat_map(|family| family.get_metric().to_vec())
+            .flat_map(|m| m.get_label().to_vec())
+            .filter(|label| label.name() == "control_plane")
+            .map(|label| label.value().to_owned())
+            .collect()
+    }
+
     fn gameserver(address: &str) -> crate::net::endpoint::Endpoint {
         crate::net::endpoint::Endpoint::new(address.parse().unwrap())
     }
@@ -1187,6 +1200,56 @@ mod tests {
             relay.dyn_cfg.clusters().unwrap().read().num_of_endpoints(),
             1
         );
+    }
+
+    /// Counter series outlive the peers they describe, so a peer's identity has
+    /// to be the one its stream announced. Taking it from each message leaves a
+    /// series behind for every pod that ever rolled.
+    #[tokio::test]
+    async fn stream_counters_are_keyed_by_the_stream_not_the_message() {
+        use futures::StreamExt as _;
+
+        quilkin_xds::metrics::set_registry(crate::metrics::registry());
+
+        let relay = Config::new(
+            None,
+            Default::default(),
+            &crate::Providers::default().fs(),
+            &mut crate::Service::default().xds(),
+        );
+
+        // One stream, whose messages name a different sender each time, as an
+        // agent does across a pod replacement
+        let from = |sender: &str| {
+            Ok(quilkin_xds::discovery::DeltaDiscoveryResponse {
+                type_url: xds::DATACENTER_TYPE.into(),
+                control_plane: Some(quilkin_xds::core::ControlPlane {
+                    identifier: sender.into(),
+                }),
+                ..Default::default()
+            })
+        };
+
+        let mut acks = quilkin_xds::config::handle_delta_discovery_responses(
+            "the-stream".to_owned(),
+            futures::stream::iter([from("pod-a"), from("pod-b")]),
+            Arc::new(relay),
+            Arc::new(quilkin_xds::config::LocalVersions::new(
+                [xds::DATACENTER_TYPE].into_iter(),
+            )),
+            None,
+            None,
+        );
+        while acks.next().await.is_some() {}
+
+        let peers = labelled_peers("xds_acks");
+        assert!(peers.contains(&"the-stream".to_owned()), "{peers:?}");
+        for message_sender in ["pod-a", "pod-b"] {
+            assert!(
+                !peers.contains(&message_sender.to_owned()),
+                "a message's sender became a series: {peers:?}"
+            );
+        }
     }
 
     /// A locality another address owns is held, not rejected, and must not be
