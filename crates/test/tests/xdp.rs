@@ -45,6 +45,7 @@ async fn simple_forwarding() {
     let mut state = process::State {
         external_port: PROXY.port().into(),
         qcmp_port: 0.into(),
+        qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
         destinations: Vec::with_capacity(1),
         addr_to_asn: Default::default(),
         sessions: Arc::new(Default::default()),
@@ -126,6 +127,7 @@ async fn changes_ip_version() {
     let mut state = process::State {
         external_port: PROXY4.port().into(),
         qcmp_port: 0.into(),
+        qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
         destinations: Vec::with_capacity(1),
         addr_to_asn: Default::default(),
         sessions: Arc::new(Default::default()),
@@ -261,6 +263,7 @@ async fn packet_manipulation() {
         let mut state = process::State {
             external_port: PROXY.port().into(),
             qcmp_port: 0.into(),
+            qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
             destinations: Vec::with_capacity(1),
             addr_to_asn: Default::default(),
             sessions: Arc::new(Default::default()),
@@ -317,6 +320,7 @@ async fn packet_manipulation() {
         let mut state = process::State {
             external_port: PROXY.port().into(),
             qcmp_port: 0.into(),
+            qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
             destinations: Vec::with_capacity(1),
             addr_to_asn: Default::default(),
             sessions: Arc::new(Default::default()),
@@ -380,6 +384,7 @@ async fn packet_manipulation() {
         let mut state = process::State {
             external_port: PROXY.port().into(),
             qcmp_port: 0.into(),
+            qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
             destinations: Vec::with_capacity(1),
             addr_to_asn: Default::default(),
             sessions: Arc::new(Default::default()),
@@ -480,6 +485,7 @@ async fn multiple_servers() {
     let mut state = process::State {
         external_port: PROXY.port().into(),
         qcmp_port: 0.into(),
+        qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
         destinations: Vec::with_capacity(1),
         addr_to_asn: Default::default(),
         sessions: Arc::new(Default::default()),
@@ -551,6 +557,7 @@ async fn many_sessions() {
     let mut state = process::State {
         external_port: PROXY.port().into(),
         qcmp_port: 0.into(),
+        qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
         destinations: Vec::with_capacity(1),
         addr_to_asn: Default::default(),
         sessions: Arc::new(Default::default()),
@@ -669,6 +676,7 @@ async fn frees_dropped_packets() {
     let mut state = process::State {
         external_port: PROXY4.port().into(),
         qcmp_port: 0.into(),
+        qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
         destinations: Vec::with_capacity(1),
         addr_to_asn: Default::default(),
         sessions: Arc::new(Default::default()),
@@ -783,6 +791,7 @@ async fn qcmp() {
     let mut state = process::State {
         external_port: 7777.into(),
         qcmp_port: PROXY.port().into(),
+        qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
         destinations: Vec::with_capacity(1),
         addr_to_asn: Default::default(),
         sessions: Arc::new(Default::default()),
@@ -950,6 +959,7 @@ async fn trims_ethernet_padding() {
     let mut state = process::State {
         external_port: PROXY.port().into(),
         qcmp_port: 0.into(),
+        qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
         destinations: Vec::with_capacity(1),
         addr_to_asn: Default::default(),
         sessions: Arc::new(Default::default()),
@@ -1018,6 +1028,7 @@ async fn drops_unparsable_packets() {
     let mut state = process::State {
         external_port: PROXY.port().into(),
         qcmp_port: 0.into(),
+        qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
         destinations: Vec::with_capacity(1),
         addr_to_asn: Default::default(),
         sessions: Arc::new(Default::default()),
@@ -1136,6 +1147,7 @@ async fn drops_packets_filters_cant_modify() {
         let mut state = process::State {
             external_port: PROXY.port().into(),
             qcmp_port: 0.into(),
+            qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
             destinations: Vec::with_capacity(1),
             addr_to_asn: Default::default(),
             sessions: Arc::new(Default::default()),
@@ -1186,6 +1198,7 @@ async fn drops_empty_client_packets() {
         let mut state = process::State {
             external_port: PROXY.port().into(),
             qcmp_port: 0.into(),
+            qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
             destinations: Vec::with_capacity(1),
             addr_to_asn: Default::default(),
             sessions: Arc::new(Default::default()),
@@ -1254,6 +1267,7 @@ async fn drops_disallowed_sources() {
     let mut state = process::State {
         external_port: PROXY.port().into(),
         qcmp_port: 0.into(),
+        qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
         destinations: Vec::with_capacity(1),
         addr_to_asn: Default::default(),
         sessions: Arc::new(Default::default()),
@@ -1323,5 +1337,91 @@ async fn drops_disallowed_sources() {
             }
             None => assert!(!forwarded, "{source} was dropped"),
         }
+    }
+}
+
+/// Validates the XDP path refuses the QCMP the shared responder refuses, and
+/// frees the frames it doesn't reply to
+#[tokio::test]
+async fn qcmp_refusals() {
+    use quilkin::codec::qcmp;
+
+    const PROXY: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(2, 2, 2, 2), 2020);
+    const CLIENT: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 9999);
+
+    let mut qp = qcmp::QcmpPacket::default();
+    qcmp::Protocol::ping().encode(&mut qp);
+    let ping = qp.to_vec();
+
+    // A budget of 1, so the second ping from one source is over it
+    for (source, pings, replies) in [
+        (IpAddr::V4(*CLIENT.ip()), 2, 1),
+        // Refused before the budget is consulted, as a reply would be
+        // reflected at an address that never asked
+        (IpAddr::V4(Ipv4Addr::LOCALHOST), 2, 0),
+        (IpAddr::V6(Ipv4Addr::LOCALHOST.to_ipv6_mapped()), 2, 0),
+    ] {
+        let mut cfg_state = make_config(filters::FilterChain::default(), endpoints(&[]));
+        let mut state = process::State {
+            external_port: 7777.into(),
+            qcmp_port: PROXY.port().into(),
+            qcmp_responder: qcmp::Responder::new(1),
+            destinations: Vec::with_capacity(1),
+            addr_to_asn: Default::default(),
+            sessions: Arc::new(Default::default()),
+            local_ipv4: *PROXY.ip(),
+            local_ipv6: Ipv6Addr::from_bits(0),
+            last_receive: UtcTimestamp::now(),
+        };
+
+        let mut umem = xdp::Umem::map(
+            xdp::umem::UmemCfgBuilder {
+                frame_size: xdp::umem::FrameSize::TwoK,
+                head_room: 0,
+                frame_count: 1,
+                ..Default::default()
+            }
+            .build()
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut replied = 0;
+        for _ in 0..pings {
+            // The umem holds one frame, so this only succeeds if the last
+            // round gave its frame back
+            let mut packet = unsafe { umem.alloc().expect("a frame was not freed") };
+
+            let builder = etherparse::PacketBuilder::ethernet2([3; 6], [4; 6]);
+            match source {
+                IpAddr::V4(v4) => builder
+                    .ipv4(v4.octets(), PROXY.ip().octets(), 64)
+                    .udp(CLIENT.port(), PROXY.port())
+                    .write(&mut packet, &ping)
+                    .unwrap(),
+                IpAddr::V6(v6) => builder
+                    .ipv6(v6.octets(), Ipv6Addr::from_bits(0).octets(), 64)
+                    .udp(CLIENT.port(), PROXY.port())
+                    .write(&mut packet, &ping)
+                    .unwrap(),
+            }
+
+            let (mut rx_slab, mut tx_slab) = little_slabs();
+            rx_slab.push_front(packet);
+            process::process_packets(
+                &mut rx_slab,
+                &mut umem,
+                &mut tx_slab,
+                &mut cfg_state,
+                &mut state,
+            );
+
+            if let Some(pong) = tx_slab.pop_back() {
+                replied += 1;
+                umem.free_packet(pong);
+            }
+        }
+
+        assert_eq!(replied, replies, "{source}");
     }
 }
