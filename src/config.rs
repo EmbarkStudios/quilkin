@@ -30,6 +30,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use quilkin_xds::config::Applied;
+
 use crate::{
     generated::envoy::service::discovery::v3::Resource as XdsResource,
     net::{
@@ -281,7 +283,7 @@ impl quilkin_xds::config::Configuration for Config {
         resources: Vec<XdsResource>,
         removed_resources: &[String],
         remote_addr: Option<std::net::IpAddr>,
-    ) -> quilkin_xds::Result<()> {
+    ) -> quilkin_xds::Result<Applied> {
         self.apply_delta(type_url, resources, removed_resources, remote_addr)
     }
 
@@ -778,18 +780,18 @@ impl Config {
         mut resources: Vec<XdsResource>,
         removed_resources: &[String],
         remote_addr: Option<std::net::IpAddr>,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<Applied> {
         let resource_type = type_url.parse::<ResourceType>()?;
 
         match resource_type {
             ResourceType::FilterChain => {
                 let Some(filters) = self.dyn_cfg.filters() else {
-                    return Ok(());
+                    return Ok(Applied::All);
                 };
 
                 if resources.is_empty() && !removed_resources.is_empty() {
                     tracing::info!("ignoring filter chain removal");
-                    return Ok(());
+                    return Ok(Applied::All);
                 }
 
                 // Server should only ever send exactly one filter chain, more or less indicates a bug
@@ -823,7 +825,7 @@ impl Config {
             }
             ResourceType::Datacenter => {
                 if self.dyn_cfg.datacenters().is_none() {
-                    return Ok(());
+                    return Ok(Applied::All);
                 }
 
                 let mut bridge = corro::Bridge::new(self);
@@ -897,7 +899,7 @@ impl Config {
             }
             ResourceType::Cluster => {
                 if self.dyn_cfg.clusters().is_none() {
-                    return Ok(());
+                    return Ok(Applied::All);
                 }
 
                 let mut bridge = corro::Bridge::new(self);
@@ -962,10 +964,11 @@ impl Config {
                 }
 
                 self.apply_metrics();
+                return Ok(bridge.applied());
             }
         }
 
-        Ok(())
+        Ok(Applied::All)
     }
 
     #[inline]
@@ -1183,6 +1186,64 @@ mod tests {
         assert_eq!(
             relay.dyn_cfg.clusters().unwrap().read().num_of_endpoints(),
             1
+        );
+    }
+
+    /// A locality another address owns is held, not rejected, and must not be
+    /// recorded as delivered, or the agent that offered it is never asked again
+    /// and the relay serves the departed owner's endpoints indefinitely.
+    #[test]
+    fn a_held_back_locality_is_not_reported_as_delivered() {
+        let source = Config::new(
+            None,
+            Default::default(),
+            &crate::Providers::default().fs(),
+            &mut crate::Service::default().xds(),
+        );
+        let (relay, _db) = relay_with_db();
+
+        let locality = crate::net::endpoint::Locality::new("agones", "", "");
+        source.dyn_cfg.clusters().unwrap().read().insert(
+            None,
+            Some(locality),
+            [gameserver("203.0.113.1:7777")].into(),
+        );
+
+        let client_state = quilkin_xds::config::ClientState::new(xds::CLUSTER_TYPE.into());
+        let offer = source.delta_discovery_request(&client_state).unwrap();
+        let resources = || offer.resources.clone();
+
+        let owner: std::net::IpAddr = "2001:db8::a".parse().unwrap();
+        let claimant: std::net::IpAddr = "2001:db8::b".parse().unwrap();
+
+        assert_eq!(
+            Applied::All,
+            relay
+                .apply_delta(xds::CLUSTER_TYPE, resources(), &[], Some(owner))
+                .unwrap()
+        );
+        assert_eq!(
+            1,
+            relay.dyn_cfg.clusters().unwrap().read().num_of_endpoints()
+        );
+
+        // A second address offering the same locality is held until the owner's
+        // stream closes, and saying so is what gets it offered again
+        assert_eq!(
+            Applied::Partial,
+            relay
+                .apply_delta(xds::CLUSTER_TYPE, resources(), &[], Some(claimant))
+                .unwrap(),
+            "a held back locality was reported as delivered"
+        );
+
+        // Once the owner goes, the locality is free and the same offer lands
+        quilkin_xds::config::Configuration::client_disconnected(&relay, owner);
+        assert_eq!(
+            Applied::All,
+            relay
+                .apply_delta(xds::CLUSTER_TYPE, resources(), &[], Some(claimant))
+                .unwrap()
         );
     }
 

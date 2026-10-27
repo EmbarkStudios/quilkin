@@ -1,3 +1,4 @@
+use quilkin_xds::config::Applied;
 use std::net::IpAddr;
 
 pub struct BridgeInner {
@@ -49,6 +50,7 @@ pub struct Bridge<'m> {
         super::watch::WatchGuard<'m, crate::net::ClusterMap>,
     )>,
     b: Option<BridgeInner>,
+    applied: Applied,
 }
 
 impl<'m> Bridge<'m> {
@@ -60,7 +62,13 @@ impl<'m> Bridge<'m> {
                 .map(|dc| dc.write())
                 .zip(config.dyn_cfg.clusters().map(|c| c.write())),
             b: BridgeInner::new(config),
+            applied: Applied::All,
         }
+    }
+
+    /// How much of what the bridge was given it took on.
+    pub fn applied(&self) -> Applied {
+        self.applied
     }
 
     pub fn insert_dc(&mut self, ip: IpAddr, dc: super::Datacenter) {
@@ -186,7 +194,10 @@ impl<'m> Bridge<'m> {
         let mut up = Vec::new();
 
         if let Err(error) = wsrv.apply(ip, locality, es, &mut rm, &mut up) {
-            tracing::error!(%error, "failed to apply xDS endpoint update");
+            // Held back rather than rejected: the sender can't do anything about
+            // it, and will be asked for these endpoints again once it can be
+            tracing::warn!(%error, "held back an endpoint update");
+            self.applied = Applied::Partial;
             return;
         }
 

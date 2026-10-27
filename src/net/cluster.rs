@@ -839,8 +839,13 @@ where
     ) -> crate::Result<()> {
         if let Some(raddr) = self.localities.get(&locality) {
             if *raddr != remote_addr {
+                // Held until the owner's stream closes, which releases the
+                // locality for whoever offers it next
                 eyre::bail!(
-                    "skipping cluster apply, '{locality:?}' is managed by '{:?}', not '{remote_addr:?}'",
+                    "'{}' is managed by {:?}, not {remote_addr:?}",
+                    locality
+                        .as_ref()
+                        .map_or_else(|| "<none>".to_owned(), Locality::to_string),
                     raddr.value()
                 );
             }
