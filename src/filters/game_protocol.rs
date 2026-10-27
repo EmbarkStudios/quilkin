@@ -149,7 +149,10 @@ impl Filter for GameProtocol {
 
             let addr = self.decrypt_socket_addr(addr, nonce)?;
 
-            ctx.destinations.push(addr.into());
+            // The address came out of the packet, not out of the cluster map,
+            // so there is no cluster it was routed from
+            ctx.destinations
+                .push(crate::net::Destination::new(addr.into(), None));
             ctx.contents.remove_tail(data.len() + 6);
         }
 
@@ -336,6 +339,7 @@ mod test {
                 assert_eq!(
                     dest.pop()
                         .expect("expected address")
+                        .address
                         .to_socket_addr()
                         .unwrap(),
                     server
