@@ -179,6 +179,20 @@ impl ClientTracker {
     }
 }
 
+/// How much of a delta its receiver took on.
+///
+/// A receiver can be unable to adopt a resource for a reason the sender can do
+/// nothing about, which is not the same as the delta being bad, and so is not
+/// grounds to reject it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Applied {
+    /// Every resource was adopted, and the sender can treat them as delivered.
+    All,
+    /// A resource was held back, so the sender has to offer the delta again
+    /// rather than treat it as delivered.
+    Partial,
+}
+
 pub trait Configuration: Send + Sync + Sized + 'static {
     fn identifier(&self) -> String;
 
@@ -192,7 +206,7 @@ pub trait Configuration: Send + Sync + Sized + 'static {
         resources: Vec<Resource>,
         removed_resources: &[String],
         remote_addr: Option<std::net::IpAddr>,
-    ) -> crate::Result<()>;
+    ) -> crate::Result<Applied>;
 
     fn allow_request_processing(&self, resource_type: &str) -> bool;
 
@@ -267,7 +281,10 @@ pub fn handle_delta_discovery_responses<C: Configuration>(
 
                 let res = config.apply_delta(&type_url, response.resources, &response.removed_resources, remote_addr);
 
-                if res.is_ok() {
+                // Only a delta taken on in full is recorded as delivered. Anything held
+                // back has to be offered again, which the next refresh asks for, and
+                // which rejecting the delta outright would not achieve.
+                if matches!(res, Ok(Applied::All)) {
                     let mut lock = local.get(&type_url);
 
                     // Remove any resources the upstream server has removed/doesn't have,
