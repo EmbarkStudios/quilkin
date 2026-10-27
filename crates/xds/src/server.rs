@@ -286,43 +286,56 @@ impl PeerIdentity {
 
 const RESPONSE_PROPAGATION_INTERVAL: Duration = Duration::from_millis(100);
 
-/// Buffers response broadcasts so they can be propagated at a set interval instead of every time
-/// something has changed.
-#[derive(Debug, Default)]
-struct ResponseBroadcastPropagationBuffer {
-    changed_resources: std::sync::Mutex<std::collections::HashSet<String>>,
+/// Slots in the change broadcast, which only has to outlast a client's gap
+/// between drains. A client that overruns it widens to every resource type it
+/// tracks, so the figure trades a little memory against that, and is not a
+/// correctness bound.
+const RESPONSE_BROADCAST_CAPACITY: usize = 128;
+
+/// The resource types a stream re-checks on its next propagation tick.
+///
+/// Changes are coalesced rather than sent per change, to bound the network load
+/// when cluster churn is high. Both buffers are reused across ticks, so a
+/// settled stream allocates nothing.
+#[derive(Default)]
+struct ChangedTypes {
+    narrowed: Vec<&'static str>,
+    widened: Vec<String>,
+    lagged: bool,
 }
 
-impl ResponseBroadcastPropagationBuffer {
-    /// Ingest a resource broadcast message
-    fn ingest(
-        &self,
-        result: Result<&str, tokio::sync::broadcast::error::RecvError>,
-    ) -> Result<(), tokio::sync::broadcast::error::RecvError> {
-        result.map(|resource| {
-            let mut guard = match self.changed_resources.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => {
-                    let guard = poisoned.into_inner();
-                    tracing::warn!("recovered from poisoned mutex");
-                    guard
-                }
-            };
-            guard.insert(resource.into());
-        })
+impl ChangedTypes {
+    /// Records that `resource_type` changed.
+    fn mark(&mut self, resource_type: &'static str) {
+        if !self.narrowed.contains(&resource_type) {
+            self.narrowed.push(resource_type);
+        }
     }
 
-    /// Flush all changed resources and reset the buffer
-    fn flush(&self) -> Vec<String> {
-        let mut guard = match self.changed_resources.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                let guard = poisoned.into_inner();
-                tracing::warn!("recovered from poisoned mutex");
-                guard
-            }
-        };
-        guard.drain().collect()
+    /// Records that some change was missed, which loses which types changed but
+    /// not that they did.
+    fn mark_all(&mut self) {
+        self.lagged = true;
+    }
+
+    /// Takes the types to re-check, widening to everything `tracker` follows if
+    /// a change was missed since the last call.
+    ///
+    /// The capture list keeps `tracker` out of the returned iterator, so it is
+    /// free to be mutated again while the caller iterates.
+    fn take<'a>(
+        &'a mut self,
+        tracker: &crate::config::ClientTracker,
+    ) -> impl Iterator<Item = &'a str> + use<'a> {
+        self.widened.clear();
+
+        if std::mem::take(&mut self.lagged) {
+            self.widened.extend(tracker.tracked_resources());
+            self.narrowed.clear();
+        }
+
+        let narrowed = self.narrowed.drain(..).map(|rt| -> &str { rt });
+        self.widened.iter().map(String::as_str).chain(narrowed)
     }
 }
 
@@ -356,7 +369,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         idle_request_interval: Duration,
         shutdown: ShutdownSignal,
     ) -> Self {
-        let (tx, _) = tokio::sync::broadcast::channel(10);
+        let (tx, _) = tokio::sync::broadcast::channel(RESPONSE_BROADCAST_CAPACITY);
 
         Self {
             config,
@@ -632,10 +645,7 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
         let stream = async_stream::try_stream! {
             yield response;
 
-            // Buffer changes so we only propagate at a set and controlled interval. This reduces
-            // the network load when we have a high rate of change due to high cluster load.
-            let buffer = ResponseBroadcastPropagationBuffer::default();
-            let mut lag_amount: u64 = 0;
+            let mut changed = ChangedTypes::default();
             let mut propagation_interval = tokio::time::interval(RESPONSE_PROPAGATION_INTERVAL);
             propagation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -644,16 +654,10 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
                     // Inform the connected client if any of the resources have changed, but only
                     // send the changed resources that the client doesn't already have
                     _ = propagation_interval.tick() => {
-                        // Fetch the changed resources
-                        let mut resources = buffer.flush();
-                        // If we've been lagging on updates, collect everything instead
-                        if lag_amount > 0 {
-                            tracing::warn!(lag_amount, "lagged while receiving response broadcasts");
-                            resources = client_tracker.tracked_resources().collect();
-                        }
-                        lag_amount = 0;
-                        for rt in resources {
-                            match responder(None, &rt, &mut client_tracker) {
+                        let types = changed.take(&client_tracker);
+
+                        for rt in types {
+                            match responder(None, rt, &mut client_tracker) {
                                 Ok(Some(res)) => yield res,
                                 Ok(None) => {},
                                 Err(error) => {
@@ -663,13 +667,16 @@ impl<C: crate::config::Configuration> ControlPlane<C> {
                             }
                         }
                     }
-                    // A resource has changed, buffer it for propagation
+                    // A resource has changed, coalesce it until the next tick
                     res = rx.recv() => {
-                        match buffer.ingest(res) {
-                            Ok(_) => {},
+                        match res {
+                            Ok(rt) => changed.mark(rt),
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(amount)) => {
-                                lag_amount += amount;
+                            // Routine under backpressure, and self-correcting, so metered rather
+                            // than logged
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                crate::metrics::actions_total(KIND_SERVER, "lagged").inc();
+                                changed.mark_all();
                             },
                         }
                     }
@@ -926,250 +933,70 @@ impl<C: crate::config::Configuration> AggregatedControlPlaneDiscoveryService for
         &self,
         requests: tonic::Request<tonic::Streaming<DeltaDiscoveryRequest>>,
     ) -> Result<tonic::Response<Self::SubscribeDeltaResourcesStream>, tonic::Status> {
-        tracing::debug!("starting delta stream");
         let peer = PeerIdentity::from_request(&requests, self.verify_peer_identity);
-        let mut requests = requests.into_inner();
-        let message = requests.next().await.ok_or_else(|| {
-            tracing::error!("No message found");
-            tonic::Status::invalid_argument("No message found")
-        })??;
 
-        let node_id = if let Some(node) = &message.node {
-            node.id.clone()
-        } else {
-            tracing::error!("Node identifier was not found");
-            return Err(tonic::Status::invalid_argument("Node identifier required"));
-        };
-
-        peer.verify(&node_id)?;
-
-        let mut rx = self.tx.subscribe();
-        let id = self.config.identifier();
-        let mut shutdown = self.shutdown.clone();
-
-        tracing::debug!(
-            id,
-            client = node_id,
-            count = self.tx.receiver_count(),
-            "subscribed to config updates"
-        );
-
-        let control_plane = Some(crate::core::ControlPlane {
-            identifier: id.clone(),
-        });
-
-        use crate::config::ClientTracker;
-        let mut client_tracker = ClientTracker::track_client(node_id.clone());
-
-        let responder_control_plane = control_plane.clone();
-        let client = node_id.clone();
-        let cfg = self.config.clone();
-        let responder = move |req: Option<DeltaDiscoveryRequest>,
-                              type_url: &str,
-                              client_tracker: &mut ClientTracker|
-              -> Result<Option<DeltaDiscoveryResponse>, tonic::Status> {
-            let cs = if let Some(req) = req {
-                metrics::delta_discovery_requests(&client, type_url).inc();
-
-                let cs = if let Some(cs) = client_tracker.get_state(type_url) {
-                    cs
-                } else if cfg.allow_request_processing(type_url) {
-                    client_tracker.track_state(type_url.into())
-                } else {
-                    return Err(tonic::Status::invalid_argument(format!(
-                        "resource type '{type_url}' is not allowed by this stream"
-                    )));
-                };
-
-                cs.update(req);
-                tracing::debug!(kind = type_url, "sending delta update");
-
-                cs
-            } else {
-                let Some(cs) = client_tracker.get_state(type_url) else {
-                    return Ok(None);
-                };
-
-                tracing::debug!(kind = type_url, "sending delta for resource update");
-                cs
-            };
-
-            let req = cfg
-                .delta_discovery_request(cs)
-                .map_err(|error| tonic::Status::internal(error.to_string()))?;
-
-            if req.resources.is_empty() && req.removed.is_empty() {
-                return Ok(None);
-            }
-
-            let removed_resources = req.removed.iter().cloned().collect();
-
-            match client_tracker.needs_ack(crate::config::AwaitingAck {
-                type_url: type_url.into(),
-                removed: req.removed,
-                versions: req
-                    .resources
-                    .iter()
-                    .map(|res| (res.name.clone(), res.version.clone()))
-                    .collect(),
-            }) {
-                Ok(nonce) => {
-                    let response = DeltaDiscoveryResponse {
-                        resources: req.resources,
-                        nonce: nonce.to_string(),
-                        control_plane: responder_control_plane.clone(),
-                        type_url: type_url.into(),
-                        removed_resources,
-                        system_version_info: VERSION_INFO.into(),
-                    };
-
-                    tracing::trace!(
-                        r#type = &*response.type_url,
-                        nonce = &*response.nonce,
-                        "delta discovery response"
-                    );
-
-                    Ok(Some(response))
-                }
-                Err(error) => {
-                    tracing::error!(%error, "server implementation returned invalid delta response");
-                    Err(tonic::Status::internal(error.to_string()))
-                }
-            }
-        };
-
-        let nid = node_id.clone();
-
-        let response = {
-            if message.type_url == "ignore-me" {
-                tracing::debug!(id, client = nid, "initial delta response");
-                DeltaDiscoveryResponse {
-                    resources: Vec::new(),
-                    nonce: String::new(),
-                    control_plane: control_plane.clone(),
-                    type_url: message.type_url,
-                    removed_resources: Vec::new(),
-                    system_version_info: VERSION_INFO.into(),
-                }
-            } else {
-                tracing::debug!(client = %node_id, resource_type = %message.type_url, "initial delta response");
-
-                let type_url = message.type_url.clone();
-                responder(Some(message), &type_url, &mut client_tracker)?.unwrap_or(
-                    DeltaDiscoveryResponse {
-                        resources: Vec::new(),
-                        nonce: String::new(),
-                        control_plane: control_plane.clone(),
-                        type_url,
-                        removed_resources: Vec::new(),
-                        system_version_info: VERSION_INFO.into(),
-                    },
-                )
-            }
-        };
-
-        let stream = async_stream::try_stream! {
-            yield response;
-
-            // Buffer changes so we only propagate at a set and controlled interval. This reduces
-            // the network load when we have a high rate of change due to high cluster load.
-            let buffer = ResponseBroadcastPropagationBuffer::default();
-            let mut lag_amount: u64 = 0;
-            let mut propagation_interval = tokio::time::interval(RESPONSE_PROPAGATION_INTERVAL);
-            propagation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-            loop {
-                tokio::select! {
-                    // Inform the connected client if any of the resources have changed, but only
-                    // send the changed resources that the client doesn't already have
-                    _ = propagation_interval.tick() => {
-                        // Fetch the changed resources
-                        let mut resources = buffer.flush();
-                        // If we've been lagging on updates, collect everything instead
-                        if lag_amount > 0 {
-                            tracing::warn!(lag_amount, "lagged while receiving response broadcasts");
-                            resources = client_tracker.tracked_resources().collect();
-                        }
-                        lag_amount = 0;
-                        for rt in resources {
-                            match responder(None, &rt, &mut client_tracker) {
-                                Ok(Some(res)) => yield res,
-                                Ok(None) => {},
-                                Err(error) => {
-                                    crate::metrics::errors_total(KIND_SERVER, "respond").inc();
-                                    tracing::error!(%error, "responder failed to generate response");
-                                }
-                            }
-                        }
-                    }
-                    // A resource has changed, buffer it for propagation
-                    res = rx.recv() => {
-                        match buffer.ingest(res) {
-                            Ok(_) => {},
-                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(amount)) => {
-                                lag_amount += amount;
-                            },
-                        }
-                    }
-                    client_request = requests.next() => {
-                        let client_request = match client_request.transpose() {
-                            Ok(Some(value)) => value,
-                            Ok(None) => break,
-                            Err(error) => {
-                                tracing::error!(%error, "error receiving delta response");
-                                continue;
-                            }
-                        };
-
-                        if client_request.type_url == "ignore-me" {
-                            continue;
-                        }
-
-                        let id = client_request.node.as_ref().map_or(node_id.as_str(), |node| node.id.as_str());
-
-                        tracing::trace!(resource_type = client_request.type_url, "new delta message");
-
-                        if let Some(error) = &client_request.error_detail {
-                            metrics::nacks(id, &client_request.type_url).inc();
-                            tracing::error!(nonce = %client_request.response_nonce, ?error, "NACK");
-                        } else if let Ok(nonce) = uuid::Uuid::parse_str(&client_request.response_nonce) {
-                            match client_tracker.apply_ack(nonce) {
-                                Ok(()) => {
-                                    tracing::trace!(%nonce, "ACK");
-                                }
-                                Err(error) => {
-                                    tracing::error!(%nonce, %error, "failed to process client ack");
-                                }
-                            }
-
-                            metrics::delta_discovery_requests(id, &client_request.type_url).inc();
-                            continue;
-                        }
-
-                        let type_url = client_request.type_url.clone();
-
-                        let Some(response) = responder(Some(client_request), &type_url, &mut client_tracker).unwrap() else { continue; };
-                        yield response;
-                    }
-                    _ = shutdown.changed() => {
-                        break;
-                    }
-                }
-            }
-
-            tracing::info!("terminating stream");
-        };
-
-        Ok(tonic::Response::new(Box::pin(stream.instrument(
-            tracing::info_span!("xds_server_stream", id, client = nid),
-        ))))
+        Ok(tonic::Response::new(Box::pin(
+            self.delta_aggregated_resources(requests.into_inner(), peer)
+                .in_current_span()
+                .await?,
+        )))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tracker(types: &[&str]) -> crate::config::ClientTracker {
+        let mut tracker = crate::config::ClientTracker::track_client("node".into());
+        for rt in types {
+            tracker.track_state((*rt).into());
+        }
+        tracker
+    }
+
+    fn sorted<'a>(types: impl Iterator<Item = &'a str>) -> Vec<&'a str> {
+        let mut types: Vec<_> = types.collect();
+        types.sort_unstable();
+        types
+    }
+
+    /// A missed change says nothing about which types it was, so the stream has
+    /// to re-check all of them or the client never hears about the one it lost.
+    #[test]
+    fn a_missed_change_widens_to_every_tracked_type() {
+        let tracker = tracker(&["cluster", "datacenter", "filter"]);
+        let mut changed = ChangedTypes::default();
+
+        changed.mark("cluster");
+        changed.mark_all();
+
+        assert_eq!(
+            ["cluster", "datacenter", "filter"].as_slice(),
+            sorted(changed.take(&tracker)),
+        );
+        // Widening is spent once taken, not sticky
+        changed.mark("cluster");
+        assert_eq!(["cluster"].as_slice(), sorted(changed.take(&tracker)));
+    }
+
+    /// Repeats within one interval are the common case under churn, and cost a
+    /// response each if they aren't coalesced.
+    #[test]
+    fn repeated_changes_are_coalesced_and_taken_once() {
+        let tracker = tracker(&["cluster", "datacenter"]);
+        let mut changed = ChangedTypes::default();
+
+        changed.mark("cluster");
+        changed.mark("datacenter");
+        changed.mark("cluster");
+
+        assert_eq!(
+            ["cluster", "datacenter"].as_slice(),
+            sorted(changed.take(&tracker))
+        );
+        assert_eq!(0, changed.take(&tracker).count());
+    }
 
     #[test]
     fn get_external_address() {
