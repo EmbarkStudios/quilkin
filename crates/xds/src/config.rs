@@ -179,6 +179,46 @@ impl ClientTracker {
     }
 }
 
+/// A [`ClientTracker`] that releases its client's series when it goes.
+///
+/// The series are keyed by a name the client chooses for itself, so a server
+/// that never releases them keeps a set for every client that has ever
+/// connected. Dropping is the only point every path shares: a stream ends by
+/// being dropped as often as it ends by returning.
+pub struct TrackedClient(ClientTracker);
+
+impl TrackedClient {
+    pub fn track_client(node_id: String) -> Self {
+        Self(ClientTracker::track_client(node_id))
+    }
+}
+
+impl std::ops::Deref for TrackedClient {
+    type Target = ClientTracker;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for TrackedClient {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for TrackedClient {
+    fn drop(&mut self) {
+        let mut tracked = self.0.tracked_resources().peekable();
+
+        // A client that tracked nothing never reached the metrics, and so never
+        // required a registry to be set
+        if tracked.peek().is_some() {
+            crate::metrics::release_client_series(&self.0.node_id, tracked);
+        }
+    }
+}
+
 /// How much of a delta its receiver took on.
 ///
 /// A receiver can be unable to adopt a resource for a reason the sender can do
@@ -262,9 +302,7 @@ pub fn handle_delta_discovery_responses<C: Configuration>(
                 continue;
             }
 
-            let control_plane_identifier = response.control_plane.as_ref().map(|cp| cp.identifier.as_str()).unwrap_or_default();
-
-            crate::metrics::delta_discovery_responses(control_plane_identifier, &response.type_url).inc();
+            crate::metrics::delta_discovery_responses(&identifier, &response.type_url).inc();
             tracing::trace!(
                 version = &*response.system_version_info,
                 r#type = &*response.type_url,
@@ -309,14 +347,14 @@ pub fn handle_delta_discovery_responses<C: Configuration>(
                 }
 
             let error_detail = if let Err(error) = result {
-                crate::metrics::nacks(control_plane_identifier, &type_url).inc();
+                crate::metrics::nacks(&identifier, &type_url).inc();
                 Some(quilkin_proto::generated::google::rpc::Status {
                     code: 3,
                     message: error.to_string(),
                     ..Default::default()
                 })
             } else {
-                crate::metrics::acks(control_plane_identifier, &type_url).inc();
+                crate::metrics::acks(&identifier, &type_url).inc();
                 None
             };
 
@@ -328,4 +366,41 @@ pub fn handle_delta_discovery_responses<C: Configuration>(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whether `xds_delta_discovery_requests` currently carries a series for
+    /// `client_id`.
+    fn has_series(client_id: &str) -> bool {
+        crate::metrics::registry()
+            .gather()
+            .into_iter()
+            .filter(|family| family.name() == "xds_delta_discovery_requests")
+            .flat_map(|family| family.get_metric().to_vec())
+            .flat_map(|metric| metric.get_label().to_vec())
+            .any(|label| label.name() == "client_id" && label.value() == client_id)
+    }
+
+    /// A client names itself, so a server that keeps its series keeps one set
+    /// per client that ever connected, not per client connected.
+    #[test]
+    fn a_departed_client_releases_its_series() {
+        crate::metrics::set_registry(Box::leak(Box::new(prometheus::Registry::new())));
+
+        {
+            let mut client = TrackedClient::track_client("departed".to_owned());
+            client.track_state("a-type".to_owned());
+            crate::metrics::delta_discovery_requests("departed", "a-type").inc();
+
+            assert!(has_series("departed"));
+        }
+
+        assert!(
+            !has_series("departed"),
+            "a client that disconnected left its series behind"
+        );
+    }
 }
