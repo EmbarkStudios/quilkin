@@ -3974,6 +3974,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "futures-util",
+ "governor",
  "gxhash",
  "hickory-resolver",
  "http-body-util",

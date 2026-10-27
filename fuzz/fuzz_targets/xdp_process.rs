@@ -96,6 +96,7 @@ impl Harness {
             state: process::State {
                 external_port: EXTERNAL_PORT.into(),
                 qcmp_port: QCMP_PORT.into(),
+                qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
                 destinations: Vec::with_capacity(1),
                 addr_to_asn: Default::default(),
                 sessions: Default::default(),

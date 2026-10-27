@@ -293,7 +293,8 @@ pub(crate) mod qcmp {
         METRIC.with_label_values(&[kind])
     }
 
-    pub(crate) fn errors_total(reason: &str) -> IntCounter {
+    /// `reason` is a closed set, see [`super::io_error_kind`] for why
+    pub(crate) fn errors_total(reason: &'static str) -> IntCounter {
         static METRIC: Lazy<IntCounterVec> = Lazy::new(|| {
             prometheus::register_int_counter_vec_with_registry! {
                 prometheus::opts! {
@@ -325,16 +326,10 @@ pub(crate) mod qcmp {
         METRIC.with_label_values(&[kind])
     }
 
-    pub(crate) fn packets_total_invalid(size: usize) {
-        const KIND: &str = "invalid";
-        bytes_total(KIND).inc_by(size as u64);
-        packets_total(KIND).inc();
-    }
-
-    pub(crate) fn packets_total_unsupported(size: usize) {
-        const KIND: &str = "unsupported";
-        bytes_total(KIND).inc_by(size as u64);
-        packets_total(KIND).inc();
+    /// `reason` is a [`crate::codec::qcmp::Rejection`] label, ie a closed set
+    pub(crate) fn packets_total_rejected(size: usize, reason: &'static str) {
+        bytes_total(reason).inc_by(size as u64);
+        packets_total(reason).inc();
     }
 
     pub(crate) fn packets_total_valid(size: usize) {

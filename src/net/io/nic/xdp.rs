@@ -49,6 +49,8 @@ pub struct XdpConfig<'n> {
     pub external_port: u16,
     /// The port QCMP packets can be sent to
     pub qcmp_port: u16,
+    /// QCMP replies a source may be sent per second, 0 to not limit them
+    pub qcmp_rate_limit: u32,
     /// Requires that the chosen NIC supports [`XDP_ZEROCOPY`](https://www.kernel.org/doc/html/latest/networking/af_xdp.html#xdp-copy-and-xdp-zerocopy-bind-flags)
     ///
     /// If this is false, zero copy will be used if the NIC supports it, but will
@@ -69,6 +71,7 @@ impl Default for XdpConfig<'_> {
             nic: NicConfig::Default,
             external_port: 7777,
             qcmp_port: 7600,
+            qcmp_rate_limit: 256,
             require_zero_copy: false,
             require_tx_checksum: false,
             packets_per_queue: 8 * 1024,
@@ -104,6 +107,7 @@ pub struct XdpWorkers {
     xdp_link: quilkin_xdp::aya::programs::xdp::XdpLinkId,
     external_port: NetworkU16,
     qcmp_port: NetworkU16,
+    qcmp_rate_limit: u32,
     ipv6: std::net::Ipv6Addr,
     ipv4: std::net::Ipv4Addr,
     worker_thread_scheduling: WorkerThreadScheduling,
@@ -476,6 +480,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         xdp_link,
         external_port: config.external_port.into(),
         qcmp_port: config.qcmp_port.into(),
+        qcmp_rate_limit: config.qcmp_rate_limit,
         ipv4,
         ipv6,
         worker_thread_scheduling,
@@ -607,6 +612,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
     let xdp_link = workers.xdp_link;
     let external_port = workers.external_port;
     let qcmp_port = workers.qcmp_port;
+    let qcmp_rate_limit = workers.qcmp_rate_limit;
     let ipv4 = workers.ipv4;
     let ipv6 = workers.ipv6;
     let session_state = Arc::new(process::SessionState::default());
@@ -638,6 +644,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
                 worker,
                 external_port,
                 qcmp_port,
+                qcmp_rate_limit,
                 cfg,
                 ss,
                 ipv4,
@@ -677,6 +684,7 @@ fn io_loop(
     worker: quilkin_xdp::XdpWorker,
     external_port: NetworkU16,
     qcmp_port: NetworkU16,
+    qcmp_rate_limit: u32,
     mut config: process::ConfigState,
     sessions: Arc<process::SessionState>,
     local_ipv4: std::net::Ipv4Addr,
@@ -700,6 +708,7 @@ fn io_loop(
     let mut state = process::State {
         external_port,
         qcmp_port,
+        qcmp_responder: crate::codec::qcmp::Responder::new(qcmp_rate_limit),
         destinations: Vec::with_capacity(1),
         addr_to_asn: Default::default(),
         sessions,

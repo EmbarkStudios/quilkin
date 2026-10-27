@@ -1,4 +1,5 @@
 use crate::{
+    codec::qcmp,
     filters::{self, Filter as _},
     metrics::{self, AsnInfo},
     net::{
@@ -211,6 +212,8 @@ pub struct State {
     pub destinations: Vec<crate::net::Destination>,
     pub addr_to_asn: AsnCache,
     pub sessions: Arc<SessionState>,
+    /// Per worker, as workers share no state
+    pub qcmp_responder: qcmp::Responder,
     pub local_ipv4: std::net::Ipv4Addr,
     pub local_ipv6: std::net::Ipv6Addr,
     pub last_receive: UtcTimestamp,
@@ -659,7 +662,7 @@ pub fn process_packets(
         };
 
         if headers.udp.destination == state.qcmp_port {
-            process_qcmp_packet(buffer, headers, umem, tx_slab);
+            process_qcmp_packet(buffer, headers, umem, tx_slab, &mut state.qcmp_responder);
             continue;
         }
 
@@ -979,38 +982,25 @@ fn process_qcmp_packet(
     headers: UdpHeaders,
     umem: &mut Umem,
     tx_slab: &mut HeapSlab,
+    responder: &mut qcmp::Responder,
 ) {
-    use crate::{codec::qcmp, time::UtcTimestamp};
+    use crate::time::UtcTimestamp;
 
-    fn inner(packet: &mut Packet, headers: UdpHeaders) -> bool {
+    fn inner(packet: &mut Packet, headers: UdpHeaders, responder: &mut qcmp::Responder) -> bool {
         let received_at = UtcTimestamp::now();
         let Some(data) = packet.get(headers.data.start..headers.data.end) else {
             tracing::debug!("corrupt UDP packet, data payload is out of range");
             return false;
         };
-        let command = match qcmp::Protocol::parse(data) {
-            Ok(Some(command)) => command,
-            Ok(None) => {
-                tracing::debug!("rejected non-qcmp packet");
-                return false;
-            }
-            Err(error) => {
-                tracing::debug!(%error, "rejected malformed packet");
-                return false;
-            }
-        };
-
-        let qcmp::Protocol::Ping {
-            client_timestamp,
-            nonce,
-        } = command
-        else {
-            tracing::warn!("rejected unsupported QCMP packet");
-            return false;
-        };
 
         let mut ob = qcmp::QcmpPacket::default();
-        let buf = qcmp::Protocol::ping_reply(nonce, client_timestamp, received_at).encode(&mut ob);
+        let buf = match responder.respond(data, headers.source_address(), received_at, &mut ob) {
+            Ok(pong) => pong,
+            Err(rejection) => {
+                tracing::debug!(reason = rejection.label(), "no QCMP reply");
+                return false;
+            }
+        };
 
         if let Err(error) = packet.adjust_tail(-(headers.data_length() as i32)) {
             tracing::debug!(%error, "unable to trim QCMP ping data");
@@ -1043,7 +1033,7 @@ fn process_qcmp_packet(
         true
     }
 
-    let packet = if inner(&mut packet, headers) {
+    let packet = if inner(&mut packet, headers, responder) {
         tracing::debug!("sending QCMP pong");
 
         if let Some(packet) = tx_slab.push_front(packet) {

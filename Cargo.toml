@@ -87,6 +87,7 @@ eyre.workspace = true
 fixedstr.workspace = true
 futures.workspace = true
 futures-util.workspace = true
+governor.workspace = true
 hickory-resolver = { version = "0.26", features = [
     "https-ring",
     "system-config",
@@ -239,6 +240,7 @@ eyre = "0.6.12"
 fixedstr = { version = "0.5", features = ["flex-str"] }
 futures = "0.3.31"
 futures-util = "0.3.31"
+governor = { version = "0.10.4", features = ["std"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy"] }
 jemalloc_pprof = { version = "0.9", features = ["symbolize"] }
 kube = { version = "4.2", features = [

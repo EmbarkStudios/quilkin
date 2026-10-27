@@ -16,6 +16,8 @@
 
 //! Logic for parsing and generating Quilkin Control Message Protocol (QCMP) messages.
 
+pub mod rate_limit;
+
 use eyre::Context;
 
 use crate::{
@@ -26,9 +28,11 @@ use crate::{
     },
     time::{DurationNanos, UtcTimestamp},
 };
-use std::sync::Arc;
 #[cfg(test)]
 use std::time::Duration;
+use std::{net::SocketAddr, sync::Arc};
+
+pub use rate_limit::RateLimiter;
 
 // Magic number to distinguish control packets from regular traffic.
 const MAGIC_NUMBER: &[u8] = b"QLKN";
@@ -39,6 +43,130 @@ pub const MIN_QCMP_PACKET_LEN: usize = 4 /* MAGIC_NUMBER */ + 1 /* VERSION */ + 
 pub const MAX_QCMP_PACKET_LEN: usize = MIN_QCMP_PACKET_LEN + std::mem::size_of::<u64>() * 2;
 const PING: u8 = 0;
 const PONG: u8 = 1;
+
+/// Why a received datagram got no reply
+///
+/// A closed set, as the variants label a metric.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Rejection {
+    /// A source a reply would be reflected at, rather than returned to
+    DisallowedSource,
+    /// The source has spent its budget for this window
+    RateLimited,
+    /// Not QCMP, ie the magic number is absent
+    NotQcmp,
+    /// QCMP we couldn't parse
+    Malformed,
+    /// QCMP we have no reply for, such as a reply itself
+    Unsupported,
+}
+
+impl Rejection {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::DisallowedSource => "disallowed_source",
+            Self::RateLimited => "rate_limited",
+            Self::NotQcmp => "not_qcmp",
+            Self::Malformed => "malformed",
+            Self::Unsupported => "unsupported",
+        }
+    }
+}
+
+/// Answers pings, and decides which ones to answer
+///
+/// QCMP is unauthenticated by design, like ICMP, so anyone can ask. What stops
+/// that being an amplifier is that a reply only ever goes back to the address
+/// that asked, and only so often. Both are decided here rather than per
+/// backend, so the socket and XDP paths can't drift apart on who gets answered.
+pub struct Responder {
+    limiter: RateLimiter,
+    check_source: bool,
+}
+
+impl Responder {
+    /// A responder allowing each source `rate_limit` replies per
+    /// [`rate_limit::WINDOW`], or unlimited replies when it is 0
+    pub fn new(rate_limit: u32) -> Self {
+        Self {
+            limiter: RateLimiter::new(rate_limit),
+            check_source: true,
+        }
+    }
+
+    /// Answer sources a reply would otherwise be refused to
+    ///
+    /// For the socket backend in debug builds only, which is how its tests
+    /// reach it, over loopback. The same carve out the game traffic path makes.
+    pub fn allow_any_source(&mut self) {
+        self.check_source = false;
+    }
+
+    /// The reply to send back to `source`, encoded into `out`
+    ///
+    /// `received_at` is stamped into the reply, so it is taken as close to the
+    /// receive as the caller can manage rather than read here.
+    pub fn respond<'buf>(
+        &mut self,
+        payload: &[u8],
+        source: SocketAddr,
+        received_at: UtcTimestamp,
+        out: &'buf mut QcmpPacket,
+    ) -> Result<&'buf [u8], Rejection> {
+        let result = self.decide(payload, source, received_at, out);
+
+        match &result {
+            Ok(_) => metrics::qcmp::packets_total_valid(payload.len()),
+            Err(rejection) => {
+                metrics::qcmp::packets_total_rejected(payload.len(), rejection.label());
+            }
+        }
+
+        result
+    }
+
+    fn decide<'buf>(
+        &mut self,
+        payload: &[u8],
+        source: SocketAddr,
+        received_at: UtcTimestamp,
+        out: &'buf mut QcmpPacket,
+    ) -> Result<&'buf [u8], Rejection> {
+        // The same source checks the game traffic path applies, plus a port of
+        // 0, which no reply could be returned to
+        let source_ip = source.ip().to_canonical();
+
+        if self.check_source
+            && (source.port() == 0 || crate::net::packet::disallowed_source_ip(source_ip).is_some())
+        {
+            return Err(Rejection::DisallowedSource);
+        }
+
+        // Tracked for the reason it failed to parse, which the rejection
+        // itself flattens to one kind
+        let command = match track_error(Protocol::parse(payload)) {
+            Ok(Some(command)) => command,
+            Ok(None) => return Err(Rejection::NotQcmp),
+            Err(_) => return Err(Rejection::Malformed),
+        };
+
+        let Protocol::Ping {
+            client_timestamp,
+            nonce,
+        } = command
+        else {
+            return Err(Rejection::Unsupported);
+        };
+
+        // Spent only by what would actually be replied to, so junk sent at us
+        // can't exhaust the budget of the address it was sent from
+        if !self.limiter.acquire(source_ip) {
+            return Err(Rejection::RateLimited);
+        }
+
+        Ok(Protocol::ping_reply(nonce, client_timestamp, received_at).encode(out))
+    }
+}
 
 pub struct QcmpPacket {
     buf: [u8; MAX_QCMP_PACKET_LEN],
@@ -244,24 +372,24 @@ async fn receive_task(
                     Ok((size, addr)) => {
                         let recv_timestamp = UtcTimestamp::now();
                         let Ok(Some(reply)) = Protocol::parse(&recv[..size]) else {
-                            tracing::warn!("received non qcmp packet {:?}", &recv[..size]);
+                            tracing::trace!(?addr, size, "discarded non qcmp packet");
                             continue;
                         };
 
                         let key = reply.nonce();
                         if let Some((_, waiter)) = waiters.remove(&key) {
                             if let Err(error) = waiter.send((recv_timestamp, reply)) {
-                                tracing::error!(?error, "failed to inform waiter");
+                                tracing::trace!(?error, "the waiter for this reply is gone");
                             }
                         } else {
-                            tracing::debug!(
+                            tracing::trace!(
                                 ?addr,
                                 nonce = reply.nonce(),
                                 "received packet without a waiter"
                             );
                         }
                     }
-                    Err(error) => tracing::error!(?error, "recv error"),
+                    Err(error) => tracing::debug!(?error, "recv error"),
                 }
             }
         }
@@ -381,6 +509,7 @@ pub fn port_channel() -> tokio::sync::broadcast::Sender<u16> {
 
 pub fn spawn(
     socket: socket2::Socket,
+    rate_limit: u32,
     port_rx: tokio::sync::broadcast::Receiver<u16>,
     shutdown: &mut crate::signal::ShutdownHandler,
 ) -> crate::Result<()> {
@@ -397,7 +526,7 @@ pub fn spawn(
                 .expect("couldn't create tokio runtime in thread");
 
             let res = runtime.block_on(async move {
-                let task = spawn_task(socket, port_rx, shutdown_rx)?;
+                let task = spawn_task(socket, rate_limit, port_rx, shutdown_rx)?;
                 drop(finished.send(task.await.wrap_err("qcmp task error")));
 
                 Ok::<_, eyre::Report>(())
@@ -414,6 +543,7 @@ pub fn spawn(
 
 pub(crate) fn spawn_task(
     socket: socket2::Socket,
+    rate_limit: u32,
     mut port_rx: tokio::sync::broadcast::Receiver<u16>,
     mut shutdown_rx: tokio::sync::watch::Receiver<()>,
 ) -> crate::Result<tokio::task::JoinHandle<()>> {
@@ -426,6 +556,10 @@ pub(crate) fn spawn_task(
         async move {
             let mut input_buf = [0u8; MAX_QCMP_PACKET_LEN];
             let mut output_buf = QcmpPacket::default();
+            let mut responder = Responder::new(rate_limit);
+            // The tests drive this over loopback, which is otherwise refused
+            #[cfg(debug_assertions)]
+            responder.allow_any_source();
             metrics::qcmp::active(true);
 
             loop {
@@ -470,69 +604,36 @@ pub(crate) fn spawn_task(
 
                 match track_error(result.map_err(Error::from)) {
                     Ok((size, source)) => {
-                        tracing::debug!(
-                            %source,
-                            "received QCMP ping",
-                        );
-
-                        if source.port() == 0 {
-                            tracing::debug!(%source, "rejecting packet from address with invalid port");
-                            metrics::qcmp::packets_total_invalid(size);
-                            continue;
-                        }
-
                         let received_at = UtcTimestamp::now();
-                        let command = match track_error(Protocol::parse(&input_buf[..size])) {
-                            Ok(Some(command)) => command,
-                            Ok(None) => {
-                                tracing::debug!("rejected non-qcmp packet");
-                                metrics::qcmp::packets_total_invalid(size);
-                                continue;
-                            }
-                            Err(error) => {
-                                tracing::debug!(%error, %source, "rejected malformed packet");
+
+                        let pong = match responder.respond(
+                            &input_buf[..size],
+                            source,
+                            received_at,
+                            &mut output_buf,
+                        ) {
+                            Ok(pong) => pong,
+                            Err(rejection) => {
+                                tracing::debug!(%source, reason = rejection.label(), "no QCMP reply");
                                 continue;
                             }
                         };
 
-                        let Protocol::Ping {
-                            client_timestamp,
-                            nonce,
-                        } = command
-                        else {
-                            tracing::warn!(%source, "rejected unsupported QCMP packet");
-                            metrics::qcmp::packets_total_unsupported(size);
-                            continue;
-                        };
-                        tracing::debug!(
-                            %source,
-                            %nonce,
-                            "received QCMP ping",
-                        );
+                        tracing::trace!(%source, "sending QCMP pong");
 
-                        metrics::qcmp::packets_total_valid(size);
-                        Protocol::ping_reply(nonce, client_timestamp, received_at)
-                            .encode(&mut output_buf);
-
-                        tracing::debug!(
-                            %source,
-                            %nonce,
-                            "sending QCMP pong",
-                        );
-
-                        match track_error(socket.send_to(&output_buf, source).await.map_err(Error::from)) {
+                        match track_error(socket.send_to(pong, source).await.map_err(Error::from)) {
                             Ok(len) => {
                                 if len != output_buf.len() {
-                                    tracing::error!(%source, "failed to send entire QCMP pong response, expected {} but only sent {len}", output_buf.len());
+                                    tracing::debug!(%source, "failed to send entire QCMP pong response, expected {} but only sent {len}", output_buf.len());
                                 }
                             }
                             Err(error) => {
-                                tracing::warn!(%error, %source, "error responding to ping");
+                                tracing::debug!(%error, %source, "error responding to ping");
                             }
                         }
                     }
                     Err(error) => {
-                        tracing::warn!(%error, "error receiving packet");
+                        tracing::debug!(%error, "error receiving packet");
                     }
                 };
             }
@@ -542,15 +643,21 @@ pub(crate) fn spawn_task(
     ))
 }
 
+/// Counts `error` against a bounded label
+///
+/// The version and command an error carries are read off the wire, so a label
+/// interpolating them is a dimension the sender chooses the values of. The
+/// `&'static str` is what keeps that from being expressible.
 fn track_error<T>(result: Result<T>) -> Result<T> {
     result.inspect_err(|error| {
         let reason = match error {
-            Error::UnknownVersion(version) => format!("unknown_version: {}", version),
-            Error::LengthMismatch(_, _) => "length_mismatch".into(),
-            Error::InvalidCommand(command) => format!("invalid_command: {}", command),
-            Error::Io(e) => format!("io: {}", e),
+            Error::UnknownVersion(_) => "unknown_version",
+            Error::LengthMismatch(..) => "length_mismatch",
+            Error::InvalidCommand(_) => "invalid_command",
+            Error::Io(error) => metrics::io_error_kind(error),
         };
-        metrics::qcmp::errors_total(&reason).inc();
+
+        metrics::qcmp::errors_total(reason).inc();
     })
 }
 
@@ -969,7 +1076,7 @@ mod tests {
 
         let (_tx, rx) = crate::signal::channel();
         let pc = super::port_channel();
-        spawn_task(socket, pc.subscribe(), rx).unwrap();
+        spawn_task(socket, 0, pc.subscribe(), rx).unwrap();
 
         let delay = Duration::from_millis(50);
         let node = QcmpTransceiver::with_artificial_delay(delay).unwrap();
@@ -1046,5 +1153,160 @@ mod tests {
         // Ensure that all leased nonces were unique
         let mut set = std::collections::HashSet::with_capacity(num_leasers);
         assert!(results.iter().all(|x| set.insert(x)));
+    }
+}
+
+/// The responder decides who gets answered, so it is driven directly rather
+/// than over a socket, which both backends would otherwise have to agree on
+/// separately.
+#[cfg(test)]
+mod responder {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    const CLIENT: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(5, 5, 5, 5)), 8888);
+
+    fn ping() -> QcmpPacket {
+        let mut packet = QcmpPacket::default();
+        Protocol::ping().encode(&mut packet);
+        packet
+    }
+
+    fn respond(
+        responder: &mut Responder,
+        payload: &[u8],
+        source: SocketAddr,
+    ) -> Result<Protocol, Rejection> {
+        let mut out = QcmpPacket::default();
+        let pong = responder.respond(payload, source, UtcTimestamp::now(), &mut out)?;
+        Ok(Protocol::parse(pong)
+            .expect("a reply we produced should parse")
+            .expect("a reply we produced should be qcmp"))
+    }
+
+    #[test]
+    fn answers_a_ping_with_a_matching_pong() {
+        let ping = ping();
+        let sent = Protocol::parse(&ping).unwrap().unwrap();
+
+        let reply = respond(&mut Responder::new(0), &ping, CLIENT).expect("ping was refused");
+
+        let Protocol::PingReply {
+            nonce,
+            client_timestamp,
+            ..
+        } = reply
+        else {
+            panic!("a ping should be answered with a reply");
+        };
+
+        // The nonce and client timestamp are echoed, or the client can't pair
+        // the reply with its request or measure anything from it
+        assert_eq!(nonce, sent.nonce());
+        let Protocol::Ping {
+            client_timestamp: sent_at,
+            ..
+        } = sent
+        else {
+            unreachable!("built as a ping")
+        };
+        assert_eq!(client_timestamp, sent_at);
+    }
+
+    /// The same source checks the game traffic path applies, since a reply to
+    /// one of these is reflected at an address that never asked
+    #[test]
+    fn refuses_sources_a_reply_would_be_reflected_at() {
+        let ping = ping();
+
+        for ip in [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V4(Ipv4Addr::BROADCAST),
+            IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            // The spelling a dual stack socket reports an ipv4 peer in
+            IpAddr::V6(Ipv4Addr::LOCALHOST.to_ipv6_mapped()),
+        ] {
+            let source = SocketAddr::new(ip, 8888);
+            assert_eq!(
+                respond(&mut Responder::new(0), &ping, source).err(),
+                Some(Rejection::DisallowedSource),
+                "{ip}"
+            );
+        }
+
+        // A reply can't be returned to port 0 either
+        assert_eq!(
+            respond(
+                &mut Responder::new(0),
+                &ping,
+                SocketAddr::new(CLIENT.ip(), 0)
+            )
+            .err(),
+            Some(Rejection::DisallowedSource),
+        );
+    }
+
+    #[test]
+    fn refuses_what_it_has_no_reply_for() {
+        let mut pong = QcmpPacket::default();
+        Protocol::ping_reply(0, UtcTimestamp::now(), UtcTimestamp::now()).encode(&mut pong);
+
+        for (payload, expected) in [
+            (
+                &b"not qcmp at all, but long enough to parse"[..],
+                Rejection::NotQcmp,
+            ),
+            // Too short to parse, so it never gets as far as the magic number
+            (&b"QLKN"[..], Rejection::Malformed),
+            (
+                &b"QLKN\x00\x00\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00\x00"[..],
+                Rejection::Malformed,
+            ),
+            // A reply is QCMP we understand and still don't answer, or two
+            // proxies could keep each other busy forever
+            (&pong[..], Rejection::Unsupported),
+        ] {
+            assert_eq!(
+                respond(&mut Responder::new(0), payload, CLIENT).err(),
+                Some(expected),
+                "{payload:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn stops_answering_a_source_that_outruns_its_budget() {
+        let ping = ping();
+        let mut responder = Responder::new(2);
+
+        assert!(respond(&mut responder, &ping, CLIENT).is_ok());
+        assert!(respond(&mut responder, &ping, CLIENT).is_ok());
+        assert_eq!(
+            respond(&mut responder, &ping, CLIENT).err(),
+            Some(Rejection::RateLimited),
+        );
+
+        // The budget is per source, so one address can't silence another
+        let other = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(9, 8, 7, 6)), 8888);
+        assert!(respond(&mut responder, &ping, other).is_ok());
+    }
+
+    /// Junk is refused before the budget is touched, or anyone could spend the
+    /// budget of an address they spoofed without ever producing a reply
+    #[test]
+    fn junk_does_not_spend_a_budget() {
+        let mut responder = Responder::new(1);
+
+        for _ in 0..100 {
+            assert_eq!(
+                respond(&mut responder, b"not qcmp at all, but long enough", CLIENT).err(),
+                Some(Rejection::NotQcmp),
+            );
+        }
+
+        assert!(respond(&mut responder, &ping(), CLIENT).is_ok());
     }
 }

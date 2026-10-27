@@ -139,6 +139,19 @@ pub struct Service {
         default_value_t = 7600
     )]
     qcmp_port: u16,
+    /// How many QCMP replies a single source address may be sent per second,
+    /// or 0 to not limit them.
+    ///
+    /// QCMP is answered for anyone, like ICMP, so this is what keeps the
+    /// service from being used to reflect traffic at an address that didn't
+    /// ask for it. On the XDP backend the budget is per worker, as the workers
+    /// share no state, so a source steered across them can be answered more.
+    #[clap(
+        long = "service.qcmp.rate-limit",
+        env = "QUILKIN_SERVICE_QCMP_RATE_LIMIT",
+        default_value_t = 256
+    )]
+    pub qcmp_rate_limit: u32,
     /// Whether to serve UDP requests.
     #[arg(
         long = "service.udp",
@@ -458,6 +471,7 @@ impl Default for Service {
             phoenix_port: 7600,
             qcmp_enabled: <_>::default(),
             qcmp_port: 7600,
+            qcmp_rate_limit: 256,
             udp_enabled: <_>::default(),
             udp_port: 7777,
             udp_workers: std::num::NonZeroUsize::new(num_cpus::get()).unwrap(),
@@ -985,7 +999,7 @@ impl Service {
 
         tracing::info!(port, "starting qcmp service");
 
-        crate::codec::qcmp::spawn(qcmp, qcmp_port.subscribe(), shutdown)?;
+        crate::codec::qcmp::spawn(qcmp, self.qcmp_rate_limit, qcmp_port.subscribe(), shutdown)?;
 
         Ok(())
     }
@@ -1315,6 +1329,7 @@ impl Service {
                 .map_or(xdp::NicConfig::Default, xdp::NicConfig::Name),
             external_port: udp_port,
             qcmp_port,
+            qcmp_rate_limit: self.qcmp_rate_limit,
             require_zero_copy: self.xdp.force_zerocopy,
             require_tx_checksum: self.xdp.force_tx_checksum_offload,
             packets_per_queue: self.xdp.packets_per_queue,

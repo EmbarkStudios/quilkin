@@ -28,6 +28,7 @@ pub fn default_xdp_state(
         process::State {
             external_port: 7777.into(),
             qcmp_port: 0.into(),
+            qcmp_responder: quilkin::codec::qcmp::Responder::new(0),
             destinations: Vec::with_capacity(1),
             addr_to_asn: Default::default(),
             sessions: std::sync::Arc::new(Default::default()),

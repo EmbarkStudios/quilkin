@@ -1433,7 +1433,7 @@ mod tests {
         let qcmp_port = listener.local_addr().unwrap().port();
         let socket = raw_socket_with_reuse(qcmp_port).unwrap();
         let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+        crate::codec::qcmp::spawn_task(socket, 0, pc.subscribe(), rx.clone()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
@@ -1515,7 +1515,7 @@ mod tests {
         let qcmp_port = listener.local_addr().unwrap().port();
         let socket = raw_socket_with_reuse(qcmp_port).unwrap();
         let pc = crate::codec::qcmp::port_channel();
-        crate::codec::qcmp::spawn_task(socket, pc.subscribe(), rx.clone()).unwrap();
+        crate::codec::qcmp::spawn_task(socket, 0, pc.subscribe(), rx.clone()).unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let icao_code = "ABCD".parse().unwrap();
