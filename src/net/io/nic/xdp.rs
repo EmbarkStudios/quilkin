@@ -10,7 +10,7 @@ use quilkin_xdp::{
         slab::{HeapSlab, Slab},
     },
 };
-use std::sync::Arc;
+use std::{os::fd::FromRawFd, sync::Arc};
 pub mod diagnostics;
 pub mod ll;
 mod packet;
@@ -22,6 +22,10 @@ pub enum NicConfig<'n> {
     Name(&'n str),
     /// Specifies a NIC by index, setup will fail if the index isn't valid
     Index(u32),
+    /// A [TAP](https://www.kernel.org/doc/html/latest/networking/tuntap.html) interface
+    ///
+    /// These work slightly differently than regular NICs, and is only used for testing
+    Tap(&'n str),
     /// The NIC will be determined from the set of available NICs, setup will fail
     /// if more than one NIC is found that could be used for handling traffic
     Default,
@@ -206,7 +210,7 @@ fn attach_xdp_program(
 
     let mode = quilkin_xdp::aya::programs::xdp::XdpMode::default();
     // We've already synchronized the tx and rx counts if needed before this function
-    let mut queue_count = queues.rx_count();
+    let mut queue_count = 1; //queues.rx_count();
 
     loop {
         match ebpf_prog.attach(nic, mode) {
@@ -274,6 +278,62 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
                 .ok_or_else(|| NicUnavailable::UnknownName(name.to_owned()))?
         }
         NicConfig::Index(index) => xdp::nic::NicIndex::new(index),
+        NicConfig::Tap(name) => {
+            let cname = std::ffi::CString::new(name)
+                .map_err(|_nul| NicUnavailable::UnknownName(name.to_owned()))?;
+            let nic = xdp::nic::NicIndex::lookup_by_name(&cname)
+                .map_err(NicUnavailable::Query)?
+                .ok_or_else(|| NicUnavailable::UnknownName(name.to_owned()))?;
+
+            unsafe {
+                let mut ifr: libc::ifreq = std::mem::zeroed();
+                ifr.ifr_ifru.ifru_flags =
+                    (libc::IFF_TAP | libc::IFF_NO_PI | libc::IFF_MULTI_QUEUE) as _;
+                name.as_bytes()
+                    .as_ptr()
+                    .cast::<i8>()
+                    .copy_to_nonoverlapping(ifr.ifr_name.as_mut_ptr(), name.len());
+
+                let fd = libc::open(
+                    c"/dev/net/tun".as_ptr().cast(),
+                    libc::O_RDWR | libc::O_CLOEXEC,
+                );
+                assert!(
+                    fd >= 0,
+                    "failed to open /dev/net/tun {}",
+                    std::io::Error::last_os_error()
+                );
+                if libc::ioctl(fd, libc::TUNSETIFF, &mut ifr) < 0 {
+                    let err = std::io::Error::last_os_error();
+                    libc::close(fd);
+                    panic!("failed to open {name}: {err}");
+                }
+
+                let mut file = std::fs::File::from_raw_fd(fd);
+
+                std::thread::Builder::new()
+                    .name("tap".into())
+                    .spawn(move || {
+                        use std::io::Read;
+
+                        let mut buf = [0u8; 2048];
+                        loop {
+                            let read = match file.read(&mut buf) {
+                                Ok(r) => r,
+                                Err(err) => {
+                                    eprintln!("failed to read TAP: {err}");
+                                    break;
+                                }
+                            };
+
+                            println!("read {read} bytes");
+                        }
+                    })
+                    .unwrap();
+            }
+
+            nic
+        }
     };
 
     let name = nic
@@ -324,6 +384,18 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
     // It's extremely unlikely these number will ever differ, but if they do we take the minimum
     let rx_count = device_caps.queues.rx_count();
     let tx_count = device_caps.queues.tx_count();
+
+    // #[cfg(debug_assertions)]
+    // {
+    //     if rx_count == 0 || tx_count == 0 {
+    //         assert!(device_caps.queues.rx_max() > 0);
+    //         device_caps
+    //             .queues
+    //             .set_rx_and_tx(device_caps.queues.rx_max().min(2));
+    //         nic.set_queue_counts(&device_caps.queues)
+    //             .expect("failed to set queue count");
+    //     }
+    // }
 
     if rx_count != tx_count {
         tracing::warn!(

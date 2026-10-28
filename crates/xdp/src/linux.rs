@@ -204,7 +204,7 @@ impl EbpfProgram {
                 .ok_or(BindError::MissingMap("XSK"))?,
         )?;
 
-        let queue_count = device_caps.queues.rx_count();
+        let queue_count = 1; //device_caps.queues.rx_count();
 
         let mut entries = Vec::with_capacity(queue_count as _);
         for i in 0..queue_count {

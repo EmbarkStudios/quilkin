@@ -205,6 +205,7 @@ members = [
     "crates/macros",
     "crates/proto-gen",
     "crates/quilkin-proto",
+    "crates/relay",
     "crates/system",
     "crates/test",
     "crates/types",

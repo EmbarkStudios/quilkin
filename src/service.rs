@@ -1075,11 +1075,15 @@ impl Service {
 
         tracing::info!(udp_port, qcmp_port, "setting up xdp module");
         let workers = xdp::setup_xdp_io(xdp::XdpConfig {
-            nic: self
-                .xdp
-                .network_interface
-                .as_deref()
-                .map_or(xdp::NicConfig::Default, xdp::NicConfig::Name),
+            nic: self.xdp.network_interface.as_deref().map_or_else(
+                || {
+                    self.xdp
+                        .tap_interface
+                        .as_deref()
+                        .map_or(xdp::NicConfig::Default, xdp::NicConfig::Tap)
+                },
+                xdp::NicConfig::Name,
+            ),
             external_port: udp_port,
             qcmp_port,
             require_zero_copy: self.xdp.force_zerocopy,
@@ -1684,6 +1688,8 @@ pub struct XdpOptions {
         env = "QUILKIN_SERVICE_UDP_XDP_NETWORK_INTERFACE"
     )]
     pub network_interface: Option<String>,
+    #[clap(long = "service.udp.xdp.tap-interface")]
+    pub tap_interface: Option<String>,
     /// Forces the use of [`XDP_ZEROCOPY`](https://www.kernel.org/doc/html/latest/networking/af_xdp.html#xdp-copy-and-xdp-zerocopy-bind-flags)
     ///
     /// If zero copy is not available on the chosen NIC, Quilkin exits with an error
@@ -1744,6 +1750,7 @@ impl Default for XdpOptions {
     fn default() -> Self {
         Self {
             network_interface: None,
+            tap_interface: None,
             force_zerocopy: false,
             force_tx_checksum_offload: false,
             packets_per_queue: 8 * 1024,

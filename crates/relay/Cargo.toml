@@ -1,0 +1,11 @@
+[package]
+name = "relay"
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+libc.workspace = true
+
+[lints]
+workspace = true
