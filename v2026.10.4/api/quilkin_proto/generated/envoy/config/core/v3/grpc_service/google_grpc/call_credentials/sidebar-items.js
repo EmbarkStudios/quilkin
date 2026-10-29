@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CredentialSpecifier"],"mod":["metadata_credentials_from_plugin"],"struct":["GoogleIamCredentials","MetadataCredentialsFromPlugin","ServiceAccountJwtAccessCredentials","StsService"]};

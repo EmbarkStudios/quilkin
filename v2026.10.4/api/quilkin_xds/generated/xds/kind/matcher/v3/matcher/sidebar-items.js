@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["MatcherType"],"mod":["matcher_list","matcher_tree","on_match"],"struct":["MatcherList","MatcherTree","OnMatch"]};

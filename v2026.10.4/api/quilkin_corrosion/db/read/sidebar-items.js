@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SqliteValue"],"fn":["deserialize_token_set","deserialize_vector","parse_endpoint"],"struct":["Coordinate","DatacenterRow","Ignore","NodeRow","ServerRow"],"trait":["FromSqlValue"],"type":["QueryEvent"]};

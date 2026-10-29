@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["encode","from_json","mapping_from_kind","value_from_kind","value_from_struct"]};

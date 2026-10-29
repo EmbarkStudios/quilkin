@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ContextParamSpecifier","Scheme"],"mod":["directive"],"struct":["Directive"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["NicConfig","NicUnavailable","XdpSetupError","XdpSpawnError"],"fn":["is_available","setup_xdp_io","spawn"],"mod":["diagnostics","process"],"struct":["WorkerThreadScheduling","XdpConfig","XdpLoop","XdpWorkers"]};

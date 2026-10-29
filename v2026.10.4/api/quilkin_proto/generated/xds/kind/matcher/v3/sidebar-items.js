@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["matcher","regex_matcher","string_matcher"],"struct":["ListStringMatcher","Matcher","RegexMatcher","StringMatcher"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Kind"],"struct":["Cluster","Host","Request","Route"]};

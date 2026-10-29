@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["custom_tag"],"struct":["CustomTag"]};

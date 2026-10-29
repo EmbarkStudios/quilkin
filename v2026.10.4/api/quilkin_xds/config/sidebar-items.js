@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Applied"],"fn":["handle_delta_discovery_responses","max_grpc_message_size"],"struct":["AwaitingAck","ClientState","ClientTracker","DeltaDiscoveryRes","LocalVersions","TrackedClient"],"trait":["Configuration"],"type":["TypeUrl","VersionMap"]};
