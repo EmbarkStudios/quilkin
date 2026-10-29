@@ -1073,6 +1073,21 @@ pub(crate) fn provider_task_failures_total(provider_task: &str) -> IntCounter {
     PROVIDER_TASK_FAILURES_TOTAL.with_label_values(&[provider_task])
 }
 
+pub(crate) fn xdp_next_hop_unresolved() -> &'static IntCounter {
+    static UNRESOLVED: Lazy<IntCounter> = Lazy::new(|| {
+        prometheus::register_int_counter_with_registry! {
+            prometheus::opts! {
+                "quilkin_xdp_next_hop_unresolved_total",
+                "The number of XDP frames sent through the kernel's network stack because their next hop was not resolved yet",
+            },
+            registry(),
+        }
+        .unwrap()
+    });
+
+    &UNRESOLVED
+}
+
 pub(crate) fn allocated_xdp_packets() -> &'static IntGauge {
     static ALLOCATED: Lazy<IntGauge> = Lazy::new(|| {
         prometheus::register_int_gauge_with_registry! {

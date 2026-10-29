@@ -7,6 +7,7 @@ use quilkin_xdp::xdp::{
 };
 use std::sync::Arc;
 pub mod diagnostics;
+pub mod next_hop;
 pub mod process;
 
 pub enum NicConfig<'n> {
@@ -110,6 +111,7 @@ pub struct XdpWorkers {
     qcmp_rate_limit: u32,
     ipv6: std::net::Ipv6Addr,
     ipv4: std::net::Ipv4Addr,
+    mac: xdp::packet::net_types::MacAddress,
     worker_thread_scheduling: WorkerThreadScheduling,
 }
 
@@ -326,6 +328,14 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         })
         .map_err(|err| XdpSetupError::AddressQuery(name, err))?;
 
+    let mac = name
+        .as_str()
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "NIC name is not UTF-8")
+        })
+        .and_then(next_hop::mac_address)
+        .map_err(|err| XdpSetupError::AddressQuery(name, err))?;
+
     // It's extremely unlikely these number will ever differ, but if they do we take the minimum
     let rx_count = device_caps.queues.rx_count();
     let tx_count = device_caps.queues.tx_count();
@@ -483,6 +493,7 @@ pub fn setup_xdp_io(config: XdpConfig<'_>) -> Result<XdpWorkers, XdpSetupError> 
         qcmp_rate_limit: config.qcmp_rate_limit,
         ipv4,
         ipv6,
+        mac,
         worker_thread_scheduling,
     })
 }
@@ -615,6 +626,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
     let qcmp_rate_limit = workers.qcmp_rate_limit;
     let ipv4 = workers.ipv4;
     let ipv6 = workers.ipv6;
+    let mac = workers.mac;
     let session_state = Arc::new(process::SessionState::default());
     let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let terminate = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -642,6 +654,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
 
             io_loop(
                 worker,
+                nic,
                 external_port,
                 qcmp_port,
                 qcmp_rate_limit,
@@ -649,6 +662,7 @@ pub fn spawn(workers: XdpWorkers, config: process::ConfigState) -> Result<XdpLoo
                 ss,
                 ipv4,
                 ipv6,
+                mac,
                 shutdown.clone(),
                 terminate.clone(),
             );
@@ -682,6 +696,7 @@ use crate::time::UtcTimestamp;
 #[allow(clippy::too_many_arguments)]
 fn io_loop(
     worker: quilkin_xdp::XdpWorker,
+    nic: NicIndex,
     external_port: NetworkU16,
     qcmp_port: NetworkU16,
     qcmp_rate_limit: u32,
@@ -689,6 +704,7 @@ fn io_loop(
     sessions: Arc<process::SessionState>,
     local_ipv4: std::net::Ipv4Addr,
     local_ipv6: std::net::Ipv6Addr,
+    local_mac: xdp::packet::net_types::MacAddress,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
     terminate: Arc<std::sync::atomic::AtomicBool>,
 ) {
@@ -705,6 +721,27 @@ fn io_loop(
     const POLL_TIMEOUT: xdp::socket::PollTimeout =
         xdp::socket::PollTimeout::new(Some(std::time::Duration::from_millis(100)));
 
+    let next_hops = match next_hop::Netlink::new() {
+        Ok(netlink) => Some(next_hop::NextHopCache::new(netlink, nic.into())),
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "failed to open a netlink socket, frames are sent back the way they were received"
+            );
+            None
+        }
+    };
+    let kernel = match next_hop::Kernel::new() {
+        Ok(kernel) => Some(std::rc::Rc::new(kernel)),
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "failed to open a raw socket, frames with an unresolved next hop are sent back the way they were received"
+            );
+            None
+        }
+    };
+
     let mut state = process::State {
         external_port,
         qcmp_port,
@@ -714,6 +751,9 @@ fn io_loop(
         sessions,
         local_ipv4,
         local_ipv6,
+        local_mac,
+        next_hops,
+        kernel,
         last_receive: UtcTimestamp::now(),
     };
 

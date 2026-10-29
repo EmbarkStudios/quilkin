@@ -102,6 +102,9 @@ impl Harness {
                 sessions: Default::default(),
                 local_ipv4: Ipv4Addr::new(2, 2, 2, 2),
                 local_ipv6: Ipv6Addr::new(2, 2, 2, 2, 2, 2, 2, 2),
+                local_mac: xdp::packet::net_types::MacAddress([2; 6]),
+                next_hops: None,
+                kernel: None,
                 last_receive: quilkin::time::UtcTimestamp::now(),
             },
             cfg: process::ConfigState {
