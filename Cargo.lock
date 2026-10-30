@@ -774,9 +774,9 @@ dependencies = [
 
 [[package]]
 name = "comfy-table"
-version = "8.0.0"
+version = "8.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "136c8c4c3823846e8ba6d4bda011b4e5d5827b8bb0ac26c31f9ab31abe9f54f2"
+checksum = "b96a46ad395a5e00676eddaca4a45ed78b29c08be5a878d35e4b071c625637dd"
 dependencies = [
  "crossterm",
  "unicode-segmentation",
@@ -988,7 +988,7 @@ dependencies = [
 
 [[package]]
 name = "corrosion-tests"
-version = "2026.10.3"
+version = "2026.10.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4117,7 +4117,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-macros"
-version = "2026.10.3"
+version = "2026.10.4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4126,7 +4126,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-proto"
-version = "2026.10.3"
+version = "2026.10.4"
 dependencies = [
  "prost",
  "prost-types",
@@ -4136,7 +4136,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-system"
-version = "2026.10.3"
+version = "2026.10.4"
 dependencies = [
  "axum",
  "futures",
@@ -4151,7 +4151,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-types"
-version = "2026.10.3"
+version = "2026.10.4"
 dependencies = [
  "compact_str",
  "data-encoding",
@@ -4174,7 +4174,7 @@ dependencies = [
 
 [[package]]
 name = "quilkin-xds"
-version = "2026.10.3"
+version = "2026.10.4"
 dependencies = [
  "arc-swap",
  "async-stream",
