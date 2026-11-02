@@ -90,6 +90,7 @@ impl From<Ipv6Addr> for Ip {
     }
 }
 
+#[derive(Debug)]
 #[repr(u16)]
 pub enum Source {
     Icmp = 1,
@@ -207,8 +208,29 @@ pub(super) struct InflightPing {
     time: Instant,
 }
 
+#[repr(C)]
+union SockAddrC {
+    v4: libc::sockaddr_in,
+    v6: libc::sockaddr_in6,
+}
+
+impl Default for SockAddrC {
+    fn default() -> Self {
+        Self {
+            v6: unsafe { std::mem::zeroed() },
+        }
+    }
+}
+
+impl SockAddrC {
+    #[inline]
+    fn as_ptr(&self) -> *const libc::sockaddr {
+        self as *const _ as *const libc::sockaddr
+    }
+}
+
 struct Ping {
-    addr: [u8; std::mem::size_of::<libc::sockaddr_in6>()],
+    addr: SockAddrC,
     payload: [u8; 8],
 }
 
@@ -216,32 +238,29 @@ impl Ping {
     #[inline]
     fn new() -> Self {
         Self {
-            addr: [0u8; _],
+            addr: Default::default(),
             payload: [0u8; _],
         }
     }
 
     #[inline]
-    fn build(&mut self, ip: Ip, seq: u16) -> (u32, bool) {
+    fn build(&mut self, ip: Ip, seq: u16, scope_id: u32) -> (u32, bool) {
         let ip = ip.0.octets();
 
         // SAFETY: Address manipulation within bounds
         unsafe {
             if ip[..12] == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff] {
-                let addr = &mut *self.addr.as_mut_ptr().cast::<libc::sockaddr_in>();
+                let addr = &mut self.addr.v4;
                 addr.sin_family = libc::AF_INET as _;
                 addr.sin_addr.s_addr = u32::from_ne_bytes([ip[12], ip[13], ip[14], ip[15]]);
-                addr.sin_port = 0;
 
                 icmp::make_echo_request(seq, &mut self.payload, true);
                 (std::mem::size_of::<libc::sockaddr_in>() as _, true)
             } else {
-                let addr = &mut *self.addr.as_mut_ptr().cast::<libc::sockaddr_in6>();
+                let addr = &mut self.addr.v6;
                 addr.sin6_family = libc::AF_INET6 as _;
                 addr.sin6_addr.s6_addr = ip;
-                addr.sin6_port = 0;
-                addr.sin6_flowinfo = 0;
-                addr.sin6_scope_id = 0;
+                addr.sin6_scope_id = scope_id;
 
                 icmp::make_echo_request(seq, &mut self.payload, false);
                 (std::mem::size_of::<libc::sockaddr_in6>() as _, false)
@@ -257,14 +276,14 @@ impl Ping {
 
             match family as i32 {
                 libc::AF_INET => {
-                    let v4 = &*self.addr.as_ptr().cast::<libc::sockaddr_in>();
+                    let v4 = &self.addr.v4;
                     let [a, b, c, d] = v4.sin_addr.s_addr.to_ne_bytes();
                     Ip(Ipv6Addr::from_octets([
                         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d,
                     ]))
                 }
                 libc::AF_INET6 => {
-                    let v6 = &*self.addr.as_ptr().cast::<libc::sockaddr_in6>();
+                    let v6 = &self.addr.v6;
                     Ip(Ipv6Addr::from_octets(v6.sin6_addr.s6_addr))
                 }
                 _ => unreachable!(),
@@ -294,6 +313,7 @@ pub(super) struct InflightPings {
     cache: std::sync::Arc<super::L2Cache>,
     in4: Fd,
     in6: Fd,
+    scope_id: u32,
     seq: u16,
 }
 
@@ -304,6 +324,8 @@ impl InflightPings {
         icmp: &super::icmp::IcmpSocket,
         cache: std::sync::Arc<super::L2Cache>,
     ) -> Self {
+        tracing::info!(nic = ?icmp.nic, "pinging from interface");
+
         Self {
             v: Vec::with_capacity(32),
             s: slab::Slab::with_capacity(16),
@@ -311,6 +333,7 @@ impl InflightPings {
             in4: Fd(icmp.in4.as_raw_fd()),
             in6: Fd(icmp.in6.as_raw_fd()),
             seq: 0,
+            scope_id: icmp.nic.0,
         }
     }
 
@@ -326,7 +349,7 @@ impl InflightPings {
         let key = key as u32;
 
         let ping = entry.insert(Ping::new());
-        let (addr_len, is_v4) = ping.build(ip, seq);
+        let (addr_len, is_v4) = ping.build(ip, seq, self.scope_id);
         let socket = if is_v4 { self.in4 } else { self.in6 };
 
         let time = Instant::now();
@@ -391,12 +414,15 @@ impl InflightPings {
 
         if cqe.result() < 0 {
             let res = cqe.result().abs();
+            println!("FUCK {ip} {res}");
             // Don't print on timeouts, if the destination is unreachable/slow then depend on the less spammy failure
             // after retry printing
             if res != libc::ECANCELED && res != libc::EINTR {
                 tracing::error!(error = %std::io::Error::from_raw_os_error(res), %ip, seq, "failed to send ping");
             }
             return;
+        } else {
+            tracing::info!(%ip, "LETS GO");
         }
 
         let ping = &mut self.v[i];
@@ -426,6 +452,8 @@ impl InflightPings {
             // for some amount of time
             return;
         };
+
+        tracing::info!("{i}: {} => {} ({:?})", entry.ip, entry.mac, entry.source);
 
         if matches!(entry.source, Source::Arp | Source::NeighbourAdvertisement)
             || matches!(self.v[i].state, PingState::Sent)

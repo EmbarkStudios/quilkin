@@ -31,116 +31,64 @@ cleanup() {
 
 trap cleanup EXIT
 
-for i in "${NS[@]}"
-do
-	ip netns del $i &> /dev/nul || true
-	ip netns add $i
-done
-
-for i in "${NS[@]}"
-do
-    ip link add $i-out netns $i type veth peer name $i-in netns $N
-done
-
-#ip link add proxy-two type veth peer name two-proxy
-ip -n $N link add name $BRIDGE type bridge
-
-#ip link set client-gateway netns client
-#ip link set gateway-client netns $P
-#ip link set one-proxy netns server1
-#ip link set proxy-one netns $P
-
+# for i in "${NS[@]}"
+# do
+# 	ip netns del $i &> /dev/nul || true
+# 	ip netns add $i
+# done
+#
+# for i in "${NS[@]}"
+# do
+#     ip link add $i-out netns $i type veth peer name $i-in netns $N
+# done
+#
+# ip -n $N link add name $BRIDGE type bridge
+#
 PROXY_IP4="10.0.1.1"
-PROXY_IP6="::fff1"
+PROXY_IP6="fe80::fff1"
 CLIENT_IP="10.0.1.2"
 SERVER_ONE_IP="10.0.1.3"
-SERVER_TWO_IP="::fff2"
+SERVER_TWO_IP="fe80::fff2"
+#
+# ip -n $P addr add $PROXY_IP4/24 brd + dev $P-out
+# ip -6 -n $P addr add $PROXY_IP6/64 dev $P-out
+# ip -n $C addr add $CLIENT_IP/24 dev $C-out
+# ip -n $S1 addr add $SERVER_ONE_IP/24 dev $S1-out
+# ip -6 -n $S2 addr add $SERVER_TWO_IP/64 dev $S2-out
+#
+# for i in "${NS[@]}"
+# do
+#     ip -n $N link set "$i-in" master $BRIDGE
+# done
+#
+# function up () {
+#   ip -n $1 link set lo up
+#   ip -n $1 link set $1-out up
+#   ip -n $N link set $1-in up
+# }
+#
+# for i in "${NS[@]}"
+# do
+# 	up $i
+# done
+#
+# ip -n $N link set $BRIDGE up
+# ip -n $N link set lo up
 
-#ip -n $P tuntap add dev prox mode tap multi_queue
-#ip -n $NS tuntap add dev client mode tap multi_queue
-#ip -n $NS tuntap add dev server1 mode tap multi_queue
-#ip -n $NS tuntap add dev server2 mode tap multi_queue
-
-ip -n $P addr add $PROXY_IP4/24 brd + dev $P-out
-ip -6 -n $P addr add $PROXY_IP6/64 dev $P-out
-ip -n $C addr add $CLIENT_IP/24 dev $C-out
-ip -n $S1 addr add $SERVER_ONE_IP/24 dev $S1-out
-#ip -n $NS addr add $CLIENT_IP/24 dev client
-#ip -n $NS addr add $SERVER_ONE/24 dev server1
-
-#ip -n proxy addr add $BRIDGE_IP/24 dev bri
-#ip -6 -n proxy addr add $PROXY_IP6/64 dev prox
-
-#ip -n proxy addr add $GATEWAY_IP/24 brd + dev gateway-client
-#ip -n proxy addr add $SERVER_ONE_IN/24 brd + dev proxy-one
-
-#ip -6 -n proxy addr add $SERVER_TWO_IN/64 dev proxy-two
-#ip -6 -n server2 addr add $SERVER_TWO_OUT/64 dev two-proxy
-
-#ip netns exec $N sysctl -w net.ipv4.ip_forward=1
-#ip netns exec $NS iptables -t nat -A POSTROUTING -o gateway-client -j MASQUERADE
-
-for i in "${NS[@]}"
-do
-    ip -n $N link set "$i-in" master $BRIDGE
-done
-
-function up () {
-  ip -n $1 link set lo up
-  ip -n $1 link set $1-out up
-  ip -n $N link set $1-in up
-}
-
-for i in "${NS[@]}"
-do
-	up $i
-done
-
-ip -n $N link set $BRIDGE up
-ip -n $N link set lo up
-
-#ip -n proxy route del  192.168.5.0/24  dev veth1R
-#nsenter -t $pid_netnsR -u -n ip route del  192.168.5.0/24  dev veth2R
-#ip -n $P route add $SERVER_ONE_OUT via $SERVER_ONE_IN
-#ip -n client route add $PROXY_IP4 via $GATEWAY_IP
-#ip -n $P route add $CLIENT_IP via $GATEWAY_IP
-
-#ip netns exec client ping -I $C-out -c 2 $SERVER_ONE_IP
-
-# ip -n $NS link set lo up
-# ip -n $NS link set client up
-# ip -n $NS link set prox up
-# ip -n $NS link set server1 up
-# ip -n proxy link set lo up
-# ip -n client link set lo up
-# ip -n server1 link set lo up
-# #ip -n server2 link set lo up
-# #ip -n proxy link set bri up
-# ip -n proxy link set prox up
-# ip -n client link set client-gateway up
-# ip -n proxy link set gateway-client up
-# ip -n server1 link set one-proxy up
-# ip -n proxy link set proxy-one up
-#ip -n server2 link set two-proxy up
-#ip -n proxy link set proxy-two up
-
-#ip -n client route add default via $GATEWAY_IP
-#ip -n server1 route add default via $SERVER_ONE_IN
-#ip -6 -n server2 route add default via $SERVER_TWO_IN
+#SERVER_TWO_IP=$(ip -6 -n $S2 -brief addr show scope link | awk  -F" " '{print substr($3, 1, length($3)-3)}' -)
 
 # XDP on a veth has a bit of an annoying requirement in newer kernel versions,
 # both sides need to have an XDP program attached for traffic to appear on the
 # one we actually want to test
 ROOT=$(git rev-parse --show-toplevel)
-ip -n $N link set $P-in xdpgeneric obj "$ROOT/crates/xdp/bin/dummy.bin" sec xdp
-# ip -n server1 link set veth-one xdpgeneric obj "$ROOT/crates/xdp/bin/dummy.bin" sec xdp
-# ip -n server2 link set veth-two xdpgeneric obj "$ROOT/crates/xdp/bin/dummy.bin" sec xdp
+#ip -n $N link set $P-in xdpgeneric obj "$ROOT/crates/xdp/bin/dummy.bin" sec xdp
 
 #ip netns exec $NS ./target/debug/relay&
-ip netns exec $S1 fortio udp-echo&
+#ip netns exec $S1 fortio udp-echo&
+#ip -6 netns exec $S2 fortio udp-echo&
 # ip -6 netns exec server2 fortio udp-echo&
 ip netns exec $P ./target/debug/quilkin \
-    --service.udp --service.qcmp --provider.static.endpoints=$SERVER_ONE_IP:8078 \
+    --service.udp --service.qcmp --provider.static.endpoints=$SERVER_ONE_IP:8078,[$SERVER_TWO_IP]:8078 \
     --service.udp.backend kernel --service.udp.xdp.network-interface $P-out \
     --service.udp.xdp.same-physical-network \
     --termination-timeout 1s&

@@ -25,7 +25,7 @@ pub(super) fn cache_io_loop(
 ) -> eyre::Result<()> {
     use quilkin_uring::io_uring::{opcode, squeue::SubmissionQueue, types::Fd};
 
-    const BUFFER_RING: u16 = 0xfeed;
+    const BUFFER_RING: u16 = 0xbeef;
 
     let (submitter, mut sq, mut cq) = io_ring.split();
 
@@ -63,39 +63,38 @@ pub(super) fn cache_io_loop(
         msg_flags: 0,
     };
 
+    let icmp_v4 = opcode::RecvMsgMulti::new(Fd(icmp.in4.as_raw_fd()), &recv4_hdr, BUFFER_RING)
+        .build()
+        .user_data(code::RECV4);
+    let icmp_v6 = opcode::RecvMsgMulti::new(Fd(icmp.in6.as_raw_fd()), &recv6_hdr, BUFFER_RING)
+        .build()
+        .user_data(code::RECV6);
+
     let enqueue_recv = |sq: &mut SubmissionQueue<'_>, v4: bool| -> eyre::Result<()> {
-        let (sock, (code, hdr)) = (
-            Fd(if v4 { &icmp.in4 } else { &icmp.in6 }.as_raw_fd()),
-            if v4 {
-                (code::RECV4, &recv4_hdr)
-            } else {
-                (code::RECV6, &recv6_hdr)
-            },
-        );
         // SAFETY: the socket and buffer ring live as long as the io ring
         unsafe {
-            sq.push(
-                &opcode::RecvMsgMulti::new(sock, hdr, BUFFER_RING)
-                    .build()
-                    .user_data(code),
-            )
-            .context("failed to enqueue multishot IORING_OP_RECVMSG")
+            sq.push(if v4 { &icmp_v4 } else { &icmp_v6 })
+                .context("failed to enqueue multishot IORING_OP_RECVMSG")
         }
     };
 
     enqueue_recv(&mut sq, true)?;
-    enqueue_recv(&mut sq, false)?;
+    //enqueue_recv(&mut sq, false)?;
+
+    let ping_request = req.event.io_uring_entry().user_data(code::REQUEST);
 
     // SAFETY: the eventfd lives as long as the io ring
     unsafe {
-        sq.push(&req.event.io_uring_entry().user_data(code::REQUEST))
+        sq.push(&ping_request)
             .context("failed to enqueue eventfd IORING_OP_READ")?;
     }
 
-    let mut enqueue_ebpf = |sq: &mut SubmissionQueue<'_>| -> eyre::Result<()> {
+    let ebpf = ebpf_ring.entry().user_data(code::EBPF);
+
+    let enqueue_ebpf = |sq: &mut SubmissionQueue<'_>| -> eyre::Result<()> {
         // SAFETY: the eBPF ring buffer lives as long as the io ring
         unsafe {
-            sq.push(&ebpf_ring.entry().user_data(code::EBPF))
+            sq.push(&ebpf)
                 .context("failed to enqueue IORING_OP_EPOLL_WAIT")
         }
     };
@@ -103,25 +102,26 @@ pub(super) fn cache_io_loop(
     enqueue_ebpf(&mut sq)?;
 
     let ts = io_uring::types::Timespec::from(std::time::Duration::from_millis(200));
+    let interval = opcode::Timeout::new(&ts)
+        .flags(io_uring::types::TimeoutFlags::MULTISHOT)
+        .build()
+        .user_data(code::INTERVAL);
 
     let enqueue_interval = |sq: &mut SubmissionQueue<'_>| -> eyre::Result<()> {
         // SAFETY: the timespec lives as long as the io ring
         unsafe {
-            sq.push(
-                &opcode::Timeout::new(&ts)
-                    .flags(io_uring::types::TimeoutFlags::MULTISHOT)
-                    .build()
-                    .user_data(code::INTERVAL),
-            )
-            .context("failed to enqueue IORING_OP_TIMEOUT")
+            sq.push(&interval)
+                .context("failed to enqueue IORING_OP_TIMEOUT")
         }
     };
 
     enqueue_interval(&mut sq)?;
 
+    let shutdown = shutdown.io_uring_entry().user_data(code::SHUTDOWN);
+
     // SAFETY: The shutdown lives as long as the uring
     unsafe {
-        sq.push(&shutdown.io_uring_entry().user_data(code::SHUTDOWN))
+        sq.push(&shutdown)
             .context("failed to enqueue shutdown event")?;
     }
 

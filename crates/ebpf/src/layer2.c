@@ -169,27 +169,21 @@ XdpAction redirect_ipv6(struct xdp_md* ctx) {
         if (icmp->kind == NEIGHBOR_ADVERTISEMENT) {
             MUTE valid_or_pass(na, NeighAdvert, offset);
 
-            // For now, only update the mapping if we (ie the kernel) explicitly
-            // solicited this this neighbor, as it already has all the logic
-            // around caching
-            if (na->solicited) {
-                AdvertOptions* opts = (AdvertOptions*)ptr_at(
-                    ctx, offset + sizeof(NeighAdvert), sizeof(AdvertOptions));
+            AdvertOptions* opts = (AdvertOptions*)ptr_at(
+                ctx, offset + sizeof(NeighAdvert), sizeof(AdvertOptions));
 
-                // According to
-                // https://datatracker.ietf.org/doc/html/rfc2461#section-4.4,
-                // the target link layer address SHOULD be included for unicast
-                // (ie the kernel already has the link laye address), but at
-                // least testing with my local router, it doesn't do that
-                if (opts && opts->type == NA_TARGET_LL_ADDR &&
-                    opts->length == 1) {
-                    send_mac_to_userspace(v6->src_addr, opts->ll_addr,
-                                          NEIGHBOR_ADVERTISEMENT);
-                } else {
-                    MUTE valid_or_pass(eth, EthHdr, 0);
-                    send_mac_to_userspace(v6->src_addr, eth->src_addr,
-                                          NEIGHBOR_ADVERTISEMENT);
-                }
+            // According to
+            // https://datatracker.ietf.org/doc/html/rfc2461#section-4.4,
+            // the target link layer address SHOULD be included for unicast
+            // (ie the kernel already has the link laye address), but at
+            // least testing with my local router, it doesn't do that
+            if (opts && opts->type == NA_TARGET_LL_ADDR && opts->length == 1) {
+                send_mac_to_userspace(v6->src_addr, opts->ll_addr,
+                                      NEIGHBOR_ADVERTISEMENT);
+            } else {
+                MUTE valid_or_pass(eth, EthHdr, 0);
+                send_mac_to_userspace(v6->src_addr, eth->src_addr,
+                                      NEIGHBOR_ADVERTISEMENT);
             }
         } else if (icmp->kind == ECHO_REPLYV6) {
             MUTE valid_or_pass(eth, EthHdr, 0);

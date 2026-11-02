@@ -268,8 +268,9 @@ fn layer2_caching() {
             let mut client_mac = nt::MacAddress([0; 6]);
 
             let (ctx, crx) = crossbeam_channel::bounded(64);
-            let (cache, _jh) = quilkin_xdp::l2_cache::L2Cache::with_channels(vec![ctx], ip_to_mac)
-                .expect("failed to initialize cache");
+            let (cache, _jh) =
+                quilkin_xdp::l2_cache::L2Cache::with_channels(nic, vec![ctx], ip_to_mac)
+                    .expect("failed to initialize cache");
 
             let mut queue = l2_cache::queue::CacheQueue::new(cache, crx, 0);
 

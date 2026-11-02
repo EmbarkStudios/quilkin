@@ -714,7 +714,7 @@ pub fn spawn(
         // We pop receivers off the vec, but they need to align on the index
         txs.reverse();
 
-        Some(l2_cache::L2Cache::with_channels(txs, ring)?)
+        Some(l2_cache::L2Cache::with_channels(nic, txs, ring)?)
     } else {
         None
     };

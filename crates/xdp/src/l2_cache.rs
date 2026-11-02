@@ -54,6 +54,7 @@ pub type CacheRx = crossbeam_channel::Receiver<(Ip, LinkLayerAddr)>;
 
 impl L2Cache {
     pub fn with_channels(
+        nic: xdp::nic::NicIndex,
         channels: Vec<CacheTx>,
         ebpf_ring: aya::maps::RingBuf<aya::maps::MapData>,
     ) -> Result<(Arc<Self>, std::thread::JoinHandle<()>), CacheSpawnError> {
@@ -63,7 +64,7 @@ impl L2Cache {
 
         // Create an ICMP socket that we can use to send pings to L3 IP addresses to prod the kernel into doing ARP/ICMPv6
         // requests to resolve the L2 Ethernet MAC addresses
-        let icmp = icmp::IcmpSocket::new().map_err(CacheSpawnError::Icmp)?;
+        let icmp = icmp::IcmpSocket::new(nic).map_err(CacheSpawnError::Icmp)?;
 
         let br = quilkin_uring::ring::BufferRing::new(
             QUEUE_SIZE as u16,
