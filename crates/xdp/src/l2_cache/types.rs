@@ -125,9 +125,9 @@ impl RequestSender {
     pub(super) fn send(&self, ip: Ip) {
         if self.sender.send(ip).is_err() {
             // TODO: metrics
-        } else {
-            self.writer.write(1);
         }
+
+        self.writer.write(1);
     }
 }
 

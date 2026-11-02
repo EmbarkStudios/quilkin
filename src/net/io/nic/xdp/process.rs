@@ -629,7 +629,7 @@ fn push_packet<LL: LinkLayer>(
             if let Some((packet, reason)) = ll.try_fill(
                 packet,
                 tx_slab,
-                matches!(direction, metrics::Direction::Read),
+                matches!(direction, metrics::Direction::Write),
             ) {
                 metrics::packets_dropped(direction, reason).inc();
                 umem.free_packet(packet);

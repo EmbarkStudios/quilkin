@@ -39,7 +39,19 @@ pub(super) fn cache_io_loop(
         ).context("failed to register buffer ring")?;
     };
 
-    let recv_hdr = libc::msghdr {
+    let recv4_hdr = libc::msghdr {
+        msg_namelen: std::mem::size_of::<libc::sockaddr_in>() as _,
+        // This is the only other relevant field for multishot recvmsg, we _could_ use this to get extended error information
+        // via `libc::sock_extended_err` in the future if needed https://man.archlinux.org/man/core/man-pages/IP_RECVERR.2const.en
+        msg_controllen: 0,
+        msg_name: std::ptr::null_mut(),
+        msg_control: std::ptr::null_mut(),
+        msg_iov: std::ptr::null_mut(),
+        msg_iovlen: 0,
+        msg_flags: 0,
+    };
+
+    let recv6_hdr = libc::msghdr {
         msg_namelen: std::mem::size_of::<libc::sockaddr_in6>() as _,
         // This is the only other relevant field for multishot recvmsg, we _could_ use this to get extended error information
         // via `libc::sock_extended_err` in the future if needed https://man.archlinux.org/man/core/man-pages/IP_RECVERR.2const.en
@@ -52,14 +64,18 @@ pub(super) fn cache_io_loop(
     };
 
     let enqueue_recv = |sq: &mut SubmissionQueue<'_>, v4: bool| -> eyre::Result<()> {
-        let (sock, code) = (
+        let (sock, (code, hdr)) = (
             Fd(if v4 { &icmp.in4 } else { &icmp.in6 }.as_raw_fd()),
-            if v4 { code::RECV4 } else { code::RECV6 },
+            if v4 {
+                (code::RECV4, &recv4_hdr)
+            } else {
+                (code::RECV6, &recv6_hdr)
+            },
         );
         // SAFETY: the socket and buffer ring live as long as the io ring
         unsafe {
             sq.push(
-                &opcode::RecvMsgMulti::new(sock, &recv_hdr, BUFFER_RING)
+                &opcode::RecvMsgMulti::new(sock, hdr, BUFFER_RING)
                     .build()
                     .user_data(code),
             )
@@ -112,9 +128,12 @@ pub(super) fn cache_io_loop(
     let mut pings = InflightPings::new(&icmp, cache);
 
     loop {
+        sq.sync();
+
         match submitter.submit_and_wait(1) {
             Ok(_) => {}
             Err(ref err) if matches!(err.raw_os_error(), Some(libc::EBUSY | libc::EINTR)) => {
+                tracing::warn!(%err, "BOO");
                 continue;
             }
             Err(error) => {
@@ -122,7 +141,6 @@ pub(super) fn cache_io_loop(
             }
         }
 
-        tracing::info!("got here");
         cq.sync();
 
         {
@@ -136,10 +154,11 @@ pub(super) fn cache_io_loop(
                     code::RECV4 | code::RECV6 => {
                         let ret = cqe.result();
                         let flags = cqe.flags();
+                        let is_v4 = ud & 0xff == code::RECV4;
 
                         // Requeue the recv if needed
                         if flags & flags::IORING_CQE_F_MORE == 0 {
-                            enqueue_recv(&mut sq, ud & 0xff == code::RECV4)?;
+                            enqueue_recv(&mut sq, is_v4)?;
                         }
 
                         if ret < 0 {
@@ -158,7 +177,9 @@ pub(super) fn cache_io_loop(
 
                         let mut rb = br.dequeue(buffer_id);
                         let id = rb.id();
-                        let addr = match rb.extract(ret as _, &recv_hdr) {
+                        let addr = match rb
+                            .extract(ret as _, if is_v4 { &recv4_hdr } else { &recv6_hdr })
+                        {
                             Ok(addr) => addr,
                             Err(error) => {
                                 tracing::error!(%error, "failed to extract source address");
@@ -167,7 +188,7 @@ pub(super) fn cache_io_loop(
                             }
                         };
 
-                        pings.process_reply(addr.ip().into(), &rb, addr.is_ipv4());
+                        pings.process_reply(addr.ip().into(), &rb, is_v4);
 
                         bre.enqueue_by_id(id);
                     }

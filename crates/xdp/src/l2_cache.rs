@@ -140,6 +140,7 @@ impl L2Cache {
             dashmap::Entry::Vacant(ent) => {
                 ent.insert(CacheEntry::Unknown(1 << channel as u32));
                 self.tx.send(ip);
+                tracing::warn!(%ip, channel, "enqueing request for");
                 None
             }
         }

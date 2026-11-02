@@ -71,6 +71,7 @@ impl LinkLayer for Local {
         tx_slab: &mut HeapSlab,
         to_client: bool,
     ) -> Option<(Packet, DropReason)> {
+        //tracing::info!(dest = %packet.headers.destination_address(), "GOT HERE");
         if to_client {
             let addr = if packet.headers.is_ipv4() {
                 self.ipv4_gateway
