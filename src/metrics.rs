@@ -22,7 +22,7 @@ use prometheus::{
 };
 
 pub use prometheus::Result;
-use prometheus_client::encoding::{EncodeLabelValue, LabelValueEncoder};
+use prometheus_client::encoding::{EncodeLabelSet, EncodeLabelValue, LabelValueEncoder};
 
 /// "event" is used as a label for Metrics that can apply to both Filter
 /// `read` and `write` executions.
@@ -93,27 +93,37 @@ where
 
 static INFO_APP_ID: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
 
-pub fn register_metrics(registry: &mut prometheus_client::registry::Registry, id: String) {
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct InfoLabels {
+    id: &'static str,
+    version: &'static str,
+    commit: &'static str,
+    locality: LocalityLabel,
+}
+
+pub fn register_metrics(
+    registry: &mut prometheus_client::registry::Registry,
+    id: String,
+    locality: Option<&quilkin_xds::locality::Locality>,
+) {
     use prometheus_client::metrics::{family::Family, gauge::ConstGauge};
     INFO_APP_ID.set(id).expect("APP_ID has already been set");
 
     // TODO this should be a prometheus_client::metrics::info::Info but that metric type is new
     // and not guaranteed to be widely supported by scrapers
     let quilkin_info_family =
-        Family::<Vec<(&str, &str)>, ConstGauge>::new_with_constructor(|| ConstGauge::new(1));
+        Family::<InfoLabels, ConstGauge>::new_with_constructor(|| ConstGauge::new(1));
     registry.register(
         "quilkin_info",
         "Static information about the quilkin instance",
         quilkin_info_family.clone(),
     );
-    drop(quilkin_info_family.get_or_create(&vec![
-        ("id", INFO_APP_ID.get().unwrap().as_str()),
-        ("version", clap::crate_version!()),
-        (
-            "commit",
-            crate::net::endpoint::metadata::build::GIT_COMMIT_HASH.unwrap_or("none"),
-        ),
-    ]));
+    drop(quilkin_info_family.get_or_create(&InfoLabels {
+        id: INFO_APP_ID.get().unwrap(),
+        version: clap::crate_version!(),
+        commit: crate::net::endpoint::metadata::build::GIT_COMMIT_HASH.unwrap_or("none"),
+        locality: LocalityLabel(locality.map_or("unknown", |l| l.as_str()).into()),
+    }));
 
     crate::net::metrics::register_metrics(registry);
     quilkin_system::register_metrics(registry);
