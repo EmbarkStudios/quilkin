@@ -270,7 +270,7 @@
 <a href=#270 id=270 data-nosnippet>270</a>        config.read_config(<span class="kw-2">&amp;</span><span class="self">self</span>.config, locality.clone())<span class="question-mark">?</span>;
 <a href=#271 id=271 data-nosnippet>271</a>
 <a href=#272 id=272 data-nosnippet>272</a>        <span class="kw">crate</span>::metrics::with_mut_registry(|<span class="kw-2">mut </span>registry| {
-<a href=#273 id=273 data-nosnippet>273</a>            <span class="kw">crate</span>::metrics::register_metrics(<span class="kw-2">&amp;mut </span>registry, config.id());
+<a href=#273 id=273 data-nosnippet>273</a>            <span class="kw">crate</span>::metrics::register_metrics(<span class="kw-2">&amp;mut </span>registry, config.id(), locality.as_ref());
 <a href=#274 id=274 data-nosnippet>274</a>        });
 <a href=#275 id=275 data-nosnippet>275</a>
 <a href=#276 id=276 data-nosnippet>276</a>        <span class="kw">let </span>ready = Arc::&lt;std::sync::atomic::AtomicBool&gt;::default();
