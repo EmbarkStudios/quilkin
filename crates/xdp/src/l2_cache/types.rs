@@ -368,17 +368,19 @@ impl InflightPings {
 
         // SAFETY: The pings live as long as the uring
         unsafe {
+            let ud = (key as u64) << 32 | (seq as u64) << 16;
+
             if sq
                 .push_multiple(&[
                     opcode::Send::new(socket, ping.payload.as_ptr(), ping.payload.len() as _)
-                        .dest_addr(ping.addr.as_ptr().cast())
+                        .dest_addr(ping.addr.as_ptr())
                         .dest_addr_len(addr_len)
                         .build()
-                        .user_data((key as u64) << 32 | (seq as u64) << 16 | io::code::SEND)
+                        .user_data(ud | io::code::SEND)
                         .flags(squeue::Flags::IO_LINK),
                     opcode::LinkTimeout::new(&SEND_TIMEOUT)
                         .build()
-                        .user_data((key as u64) << 32 | (seq as u64) << 16 | io::code::TIMEOUT),
+                        .user_data(ud | io::code::TIMEOUT),
                 ])
                 .is_err()
             {
@@ -414,15 +416,12 @@ impl InflightPings {
 
         if cqe.result() < 0 {
             let res = cqe.result().abs();
-            println!("FUCK {ip} {res}");
             // Don't print on timeouts, if the destination is unreachable/slow then depend on the less spammy failure
             // after retry printing
             if res != libc::ECANCELED && res != libc::EINTR {
                 tracing::error!(error = %std::io::Error::from_raw_os_error(res), %ip, seq, "failed to send ping");
             }
             return;
-        } else {
-            tracing::info!(%ip, "LETS GO");
         }
 
         let ping = &mut self.v[i];
@@ -453,8 +452,6 @@ impl InflightPings {
             return;
         };
 
-        tracing::info!("{i}: {} => {} ({:?})", entry.ip, entry.mac, entry.source);
-
         if matches!(entry.source, Source::Arp | Source::NeighbourAdvertisement)
             || matches!(self.v[i].state, PingState::Sent)
         {
@@ -472,13 +469,13 @@ impl InflightPings {
     }
 
     #[inline]
-    pub(super) fn process_reply(&mut self, ip: Ip, rb: &[u8], is_v4: bool) {
+    pub(super) fn process_reply(&mut self, ip: std::net::IpAddr, rb: &[u8]) {
         let Some(i) = self.v.iter().position(|i| i.dst == ip) else {
             // We've (probably) already gotten the L2 information from eBPF
             return;
         };
 
-        match icmp::read_echo_reply(rb, is_v4) {
+        match icmp::read_echo_reply(rb, ip.is_ipv4()) {
             Ok(seq) => {
                 // This should realistically never happen
                 if !self.v[i].seq.contains(&seq) {
@@ -495,7 +492,7 @@ impl InflightPings {
             let PingState::Mac { mac, .. } = self.v.swap_remove(i).state else {
                 unreachable!("expected a mac address, we literally just checked we had one");
             };
-            self.cache.update_mac(ip, LinkLayerAddr::Known(mac));
+            self.cache.update_mac(ip.into(), LinkLayerAddr::Known(mac));
         } else {
             let item = &mut self.v[i];
             item.time = Instant::now();

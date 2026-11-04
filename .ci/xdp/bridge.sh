@@ -3,6 +3,7 @@ set -e
 
 source="${BASH_SOURCE[0]}"
 
+DEBUG=0
 TX_COUNT=10000
 
 P=proxy
@@ -15,73 +16,82 @@ QID=
 BRIDGE=bri
 
 cleanup() {
-     echo "Cleaning up"
-#     ip netns del cs || true
-#     ip netns del proxy || true
-#     ip netns del server1 || true
-#     ip netns del server2 || true
-#
-#     if [ -z $QID ]; then
-#         pkill quilkin || true
-#     else
-#         kill $QID
-#         wait $QID
-#     fi
+    echo "Cleaning up"
+
+if [ !$DEBUG ]; then
+    for i in "${NS[@]}"
+    do
+    	ip netns del $i &> /dev/nul || true
+    done
+fi
+
+    if [ -z $QID ]; then
+        pkill quilkin || true
+    else
+        kill $QID
+        wait $QID
+    fi
 }
 
 trap cleanup EXIT
 
-# for i in "${NS[@]}"
-# do
-# 	ip netns del $i &> /dev/nul || true
-# 	ip netns add $i
-# done
-#
-# for i in "${NS[@]}"
-# do
-#     ip link add $i-out netns $i type veth peer name $i-in netns $N
-# done
-#
-# ip -n $N link add name $BRIDGE type bridge
-#
+if [ !$DEBUG ]; then
+    for i in "${NS[@]}"
+    do
+    	ip netns del $i &> /dev/nul || true
+    	ip netns add $i
+    done
+
+    for i in "${NS[@]}"
+    do
+        ip link add $i-out netns $i type veth peer name $i-in netns $N
+    done
+
+    ip -n $N link add name $BRIDGE type bridge
+fi
+
 PROXY_IP4="10.0.1.1"
 PROXY_IP6="fe80::fff1"
 CLIENT_IP="10.0.1.2"
 SERVER_ONE_IP="10.0.1.3"
 SERVER_TWO_IP="fe80::fff2"
-#
-# ip -n $P addr add $PROXY_IP4/24 brd + dev $P-out
-# ip -6 -n $P addr add $PROXY_IP6/64 dev $P-out
-# ip -n $C addr add $CLIENT_IP/24 dev $C-out
-# ip -n $S1 addr add $SERVER_ONE_IP/24 dev $S1-out
-# ip -6 -n $S2 addr add $SERVER_TWO_IP/64 dev $S2-out
-#
-# for i in "${NS[@]}"
-# do
-#     ip -n $N link set "$i-in" master $BRIDGE
-# done
-#
-# function up () {
-#   ip -n $1 link set lo up
-#   ip -n $1 link set $1-out up
-#   ip -n $N link set $1-in up
-# }
-#
-# for i in "${NS[@]}"
-# do
-# 	up $i
-# done
-#
-# ip -n $N link set $BRIDGE up
-# ip -n $N link set lo up
 
-#SERVER_TWO_IP=$(ip -6 -n $S2 -brief addr show scope link | awk  -F" " '{print substr($3, 1, length($3)-3)}' -)
+if [ !$DEBUG ]; then
+    ip -n $P addr add $PROXY_IP4/24 brd + dev $P-out
+    ip -6 -n $P addr add $PROXY_IP6/64 dev $P-out
+    ip -n $C addr add $CLIENT_IP/24 dev $C-out
+    ip -n $S1 addr add $SERVER_ONE_IP/24 dev $S1-out
+    ip -6 -n $S2 addr add $SERVER_TWO_IP/64 dev $S2-out
+
+    for i in "${NS[@]}"
+    do
+        ip -n $N link set "$i-in" master $BRIDGE
+    done
+
+    function up () {
+      ip -n $1 link set lo up
+      ip -n $1 link set $1-out up
+      ip -n $N link set $1-in up
+    }
+
+    for i in "${NS[@]}"
+    do
+    	up $i
+    done
+
+    ip -n $N link set $BRIDGE up
+    ip -n $N link set lo up
+fi
+
+SERVER_TWO_IP=$(ip -6 -n $S2 -brief addr show scope link | awk  -F" " '{print substr($3, 1, length($3)-3)}' -)
 
 # XDP on a veth has a bit of an annoying requirement in newer kernel versions,
 # both sides need to have an XDP program attached for traffic to appear on the
 # one we actually want to test
-ROOT=$(git rev-parse --show-toplevel)
-#ip -n $N link set $P-in xdpgeneric obj "$ROOT/crates/xdp/bin/dummy.bin" sec xdp
+if [ !$DEBUG ]; then
+    ROOT=$(git rev-parse --show-toplevel)
+    ip -n $N link set $P-in xdpgeneric obj "$ROOT/crates/xdp/bin/dummy.bin" sec xdp
+fi
 
 #ip netns exec $NS ./target/debug/relay&
 #ip netns exec $S1 fortio udp-echo&

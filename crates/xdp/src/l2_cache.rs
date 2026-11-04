@@ -68,9 +68,9 @@ impl L2Cache {
 
         let br = quilkin_uring::ring::BufferRing::new(
             QUEUE_SIZE as u16,
-            // we only deal with the minimal 8 byte ICMP echo request/reply packets, but we need to handle the case that
-            // for SOCK_RAW IPv4 sockets, receives will include the 20 byte IPv4 header
-            32,
+            // we only deal with small ICMP packets here, but we get an -EFAULT for ipv6 if we use any power of 2 lower
+            // than 256, which is irritating but fine
+            256,
         )
         .map_err(CacheSpawnError::BufferRing)?;
 
@@ -141,7 +141,6 @@ impl L2Cache {
             dashmap::Entry::Vacant(ent) => {
                 ent.insert(CacheEntry::Unknown(1 << channel as u32));
                 self.tx.send(ip);
-                tracing::warn!(%ip, channel, "enqueing request for");
                 None
             }
         }

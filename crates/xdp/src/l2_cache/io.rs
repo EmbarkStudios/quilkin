@@ -7,11 +7,11 @@ pub mod code {
     pub const RECV4: u64 = 0;
     pub const RECV6: u64 = 1;
     pub const SEND: u64 = 2;
-    pub const REQUEST: u64 = 4;
-    pub const EBPF: u64 = 5;
-    pub const INTERVAL: u64 = 6;
-    pub const TIMEOUT: u64 = 7;
-    pub const SHUTDOWN: u64 = 8;
+    pub const REQUEST: u64 = 3;
+    pub const EBPF: u64 = 4;
+    pub const INTERVAL: u64 = 5;
+    pub const TIMEOUT: u64 = 6;
+    pub const SHUTDOWN: u64 = 7;
 }
 
 pub(super) fn cache_io_loop(
@@ -41,53 +41,42 @@ pub(super) fn cache_io_loop(
 
     let recv4_hdr = libc::msghdr {
         msg_namelen: std::mem::size_of::<libc::sockaddr_in>() as _,
-        // This is the only other relevant field for multishot recvmsg, we _could_ use this to get extended error information
-        // via `libc::sock_extended_err` in the future if needed https://man.archlinux.org/man/core/man-pages/IP_RECVERR.2const.en
-        msg_controllen: 0,
-        msg_name: std::ptr::null_mut(),
-        msg_control: std::ptr::null_mut(),
-        msg_iov: std::ptr::null_mut(),
-        msg_iovlen: 0,
-        msg_flags: 0,
+        ..unsafe { std::mem::zeroed() }
     };
-
     let recv6_hdr = libc::msghdr {
-        msg_namelen: std::mem::size_of::<libc::sockaddr_in6>() as _,
-        // This is the only other relevant field for multishot recvmsg, we _could_ use this to get extended error information
-        // via `libc::sock_extended_err` in the future if needed https://man.archlinux.org/man/core/man-pages/IP_RECVERR.2const.en
-        msg_controllen: 0,
-        msg_name: std::ptr::null_mut(),
-        msg_control: std::ptr::null_mut(),
-        msg_iov: std::ptr::null_mut(),
-        msg_iovlen: 0,
-        msg_flags: 0,
+        msg_namelen: std::mem::size_of::<libc::sockaddr_storage>() as _,
+        ..unsafe { std::mem::zeroed() }
     };
 
-    let icmp_v4 = opcode::RecvMsgMulti::new(Fd(icmp.in4.as_raw_fd()), &recv4_hdr, BUFFER_RING)
+    let recv4 = opcode::RecvMsgMulti::new(Fd(icmp.in4.as_raw_fd()), &recv4_hdr, BUFFER_RING)
         .build()
         .user_data(code::RECV4);
-    let icmp_v6 = opcode::RecvMsgMulti::new(Fd(icmp.in6.as_raw_fd()), &recv6_hdr, BUFFER_RING)
+    let recv6 = opcode::RecvMsgMulti::new(Fd(icmp.in6.as_raw_fd()), &recv6_hdr, BUFFER_RING)
         .build()
         .user_data(code::RECV6);
 
     let enqueue_recv = |sq: &mut SubmissionQueue<'_>, v4: bool| -> eyre::Result<()> {
         // SAFETY: the socket and buffer ring live as long as the io ring
         unsafe {
-            sq.push(if v4 { &icmp_v4 } else { &icmp_v6 })
+            sq.push(if v4 { &recv4 } else { &recv6 })
                 .context("failed to enqueue multishot IORING_OP_RECVMSG")
         }
     };
 
     enqueue_recv(&mut sq, true)?;
-    //enqueue_recv(&mut sq, false)?;
+    enqueue_recv(&mut sq, false)?;
 
     let ping_request = req.event.io_uring_entry().user_data(code::REQUEST);
 
-    // SAFETY: the eventfd lives as long as the io ring
-    unsafe {
-        sq.push(&ping_request)
-            .context("failed to enqueue eventfd IORING_OP_READ")?;
-    }
+    let enqueue_req = |sq: &mut SubmissionQueue<'_>| -> eyre::Result<()> {
+        // SAFETY: the eventfd lives as long as the io ring
+        unsafe {
+            sq.push(&ping_request)
+                .context("failed to enqueue eventfd IORING_OP_READ")
+        }
+    };
+
+    enqueue_req(&mut sq)?;
 
     let ebpf = ebpf_ring.entry().user_data(code::EBPF);
 
@@ -188,7 +177,7 @@ pub(super) fn cache_io_loop(
                             }
                         };
 
-                        pings.process_reply(addr.ip().into(), &rb, is_v4);
+                        pings.process_reply(addr.ip(), &rb);
 
                         bre.enqueue_by_id(id);
                     }
@@ -197,6 +186,8 @@ pub(super) fn cache_io_loop(
                         for req_ip in req.rx.try_iter() {
                             if !pings.ping(req_ip, &mut sq) {}
                         }
+
+                        enqueue_req(&mut sq)?;
                     }
                     // We've finished sending an ICMP echo request
                     code::SEND => {
@@ -207,6 +198,8 @@ pub(super) fn cache_io_loop(
                         while let Some(entry) = ebpf_ring.read() {
                             pings.process_ebpf(entry);
                         }
+
+                        enqueue_ebpf(&mut sq)?;
                     }
                     // Since we're sending ICMP packets we need to handle the timeouts ourselves
                     code::INTERVAL => {
