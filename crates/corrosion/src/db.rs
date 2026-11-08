@@ -139,17 +139,61 @@ impl DBLimits {
 }
 
 /// Returns `true` if `err` is `SQLITE_FULL`.
+///
+/// A full database arrives in two shapes: as itself, and as the generic error
+/// `cr-sqlite` re-raises when one of its own triggers is what ran out of room,
+/// which names the original code in its message and nowhere else. Both have to
+/// reach [`crate::persistent::mutator::Transactor::with_full_recovery`], since
+/// recovery is what frees the space to carry on.
 pub fn is_disk_full(err: &rusqlite::Error) -> bool {
-    matches!(
-        err,
-        rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error {
-                code: rusqlite::ErrorCode::DiskFull,
-                ..
-            },
-            _
-        )
-    )
+    let rusqlite::Error::SqliteFailure(ffi, message) = err else {
+        return false;
+    };
+
+    ffi.code == rusqlite::ErrorCode::DiskFull
+        || message.as_deref().is_some_and(|m| m.ends_with("code FULL"))
+}
+
+/// Smallest lift [`LiftedPageLimit`] applies, so a database too small for the
+/// proportional one still gets room to work in.
+const MIN_RECOVERY_PAGES: i64 = 64;
+
+/// Raises `max_page_count` for as long as it is held, restoring it on the way out.
+///
+/// Recovering space costs space. Deleting a row from a CRSQL table writes before
+/// it frees, since the row's tombstone is an insert into the table's clock, and
+/// checkpointing moves WAL frames into a database file that may have to grow to
+/// take them. At the limit neither can run, so the work that would bring a full
+/// database back under its limit is the work the limit forbids.
+///
+/// The lift comes out of the reserve [`derive_limits`] leaves unallocated for
+/// this, and lasts only as long as the recovery.
+struct LiftedPageLimit<'c> {
+    conn: &'c rusqlite::Connection,
+    limit: i64,
+}
+
+impl<'c> LiftedPageLimit<'c> {
+    fn new(conn: &'c rusqlite::Connection) -> rusqlite::Result<Self> {
+        let limit: i64 = conn.query_row("PRAGMA max_page_count", [], |row| row.get(0))?;
+        conn.pragma_update(
+            None,
+            "max_page_count",
+            limit.saturating_add((limit / 10).max(MIN_RECOVERY_PAGES)),
+        )?;
+
+        Ok(Self { conn, limit })
+    }
+}
+
+impl Drop for LiftedPageLimit<'_> {
+    fn drop(&mut self) {
+        // Only after the pages have been reclaimed, since SQLite will not take a
+        // limit below the size the database currently is
+        if let Err(error) = self.conn.pragma_update(None, "max_page_count", self.limit) {
+            tracing::error!(%error, limit = self.limit, "failed to restore the page limit");
+        }
+    }
 }
 
 /// Checkpoints the WAL and runs incremental vacuum. If `purge_count` is `Some(n)`,
@@ -157,6 +201,8 @@ pub fn is_disk_full(err: &rusqlite::Error) -> bool {
 pub async fn recover_space(pool: &SplitPool, purge_count: Option<usize>) -> eyre::Result<()> {
     let conn = pool.write_priority().await?;
     tokio::task::block_in_place(|| {
+        let _lifted = LiftedPageLimit::new(&conn)?;
+
         if let Some(count) = purge_count {
             conn.execute(
                 "DELETE FROM servers WHERE endpoint IN \

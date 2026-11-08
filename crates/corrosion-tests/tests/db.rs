@@ -407,6 +407,15 @@ async fn reaps_nodes_that_stopped_renewing() {
 async fn updates_datacenters() {
     let sp = prep("updates_datacenters", 1).await;
 
+    // A peer registers its datacenter before contributing servers, as both a
+    // mutating connection and the xDS bridge do
+    {
+        let mut v = smallvec::SmallVec::<[_; 1]>::new();
+        let mut dc = write::Datacenter(&mut v);
+        dc.insert(PREP_PEER, 8999, IcaoCode::new_testing(*b"BOOP"));
+        exec_all(dc.0, &sp).await;
+    }
+
     let only_row = async || {
         let conn = sp.read().await.unwrap();
         let statement = conn
@@ -504,5 +513,50 @@ async fn servers_survive_an_unknown_icao() {
     assert_eq!(
         0, remaining,
         "a server added under an unknown code was left uncollectable"
+    );
+}
+
+/// A server change costs one row, not a rewrite of every server its datacenter
+/// holds, which is why the datacenter row carries no per-server state.
+#[tokio::test]
+async fn server_changes_leave_the_datacenter_row_alone() {
+    let sp = prep("server_changes_leave_the_datacenter_row_alone", 0).await;
+    let icao = IcaoCode::new_testing(*b"BOOP");
+
+    let mut v = smallvec::SmallVec::<[_; 8]>::new();
+    {
+        let mut dc = write::Datacenter(&mut v);
+        dc.insert(PREP_PEER, 7600, icao);
+        exec_all(dc.0, &sp).await;
+    }
+
+    // Its latest version, which only moves if something wrote to the row
+    let datacenter = async || {
+        let conn = sp.read().await.unwrap();
+        conn.query_row(
+            "SELECT port,(SELECT coalesce(max(db_version),0) FROM dc__crsql_clock) FROM dc",
+            [],
+            |row| Ok((row.get::<_, u16>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .unwrap()
+    };
+    let registered = datacenter().await;
+    assert_eq!(7600, registered.0);
+
+    {
+        let mut srv = write::Server::for_peer(PREP_PEER, &mut v);
+        for i in 0..64 {
+            let row = make_row(i);
+            srv.upsert(&row.endpoint, row.icao, &row.tokens);
+        }
+        srv.remove_deferred(&make_row(0).endpoint);
+        srv.remove_immediate(&make_row(1).endpoint);
+        exec_all(srv.statements, &sp).await;
+    }
+
+    assert_eq!(
+        registered,
+        datacenter().await,
+        "a server change wrote to its datacenter's row"
     );
 }

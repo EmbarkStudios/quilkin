@@ -131,8 +131,7 @@ impl<'s, const N: usize> Server<'s, N> {
     /// Create a statement to insert a new server
     ///
     /// `None` for `icao` keeps the stored code, taking the column default only
-    /// for a row that is new. The server is indexed against the peer's
-    /// datacenter either way, so [`Datacenter::remove`] can still find it
+    /// for a row that is new
     #[inline]
     pub fn upsert(
         &mut self,
@@ -142,10 +141,6 @@ impl<'s, const N: usize> Server<'s, N> {
     ) {
         let icao = icao.into();
         let peer_ip = self.peer.ip().to_string();
-        let server = to_compact_str(endpoint);
-
-        let null_if_unknown = || icao.map_or(SqliteParam::Null, |icao| icao.to_sql());
-        let or_default = icao.unwrap_or_default().to_sql();
 
         self.statements.push(Statement::WithParams(
             "INSERT INTO servers (endpoint,icao,tokens,contributors,cont_update) VALUES (?,?,?,jsonb(json_object(?,json_object())),unixepoch('now'))
@@ -156,27 +151,12 @@ impl<'s, const N: usize> Server<'s, N> {
                 tokens = ?".into(),
             vec![
                 endpoint.to_sql(),
-                or_default.clone(),
+                icao.unwrap_or_default().to_sql(),
                 tokens.to_sql(),
                 peer_ip.clone().into(),
-                peer_ip.clone().into(),
-                null_if_unknown(),
-                tokens.to_sql(),
-            ],
-        ));
-
-        self.statements.push(Statement::WithParams(
-            "INSERT INTO dc (ip,port,icao,servers) VALUES (?,?,?,jsonb(json_object(?,json_object())))
-            ON CONFLICT(ip) DO UPDATE SET
-                servers = jsonb_patch(servers,json_object(?,json_object()))
-            WHERE ? IS NULL OR excluded.icao = dc.icao".into(),
-            vec![
                 peer_ip.into(),
-                self.peer.port().into(),
-                or_default,
-                SqliteParam::Text(server.clone()),
-                SqliteParam::Text(server),
-                null_if_unknown(),
+                icao.map_or(SqliteParam::Null, |icao| icao.to_sql()),
+                tokens.to_sql(),
             ],
         ));
     }
@@ -192,13 +172,6 @@ impl<'s, const N: usize> Server<'s, N> {
                 .into(),
             vec![endpoint.to_sql()],
         ));
-
-        let server = to_compact_str(endpoint);
-
-        self.statements.push(Statement::WithParams(
-            "UPDATE dc SET servers = jsonb_patch(servers,json_object(?,NULL)) WHERE rowid = (SELECT MIN(rowid) FROM dc WHERE ip = ?)".into(),
-            vec![SqliteParam::Text(server), self.peer.ip().to_string().into()],
-        ));
     }
 
     /// Create a statement to remove the peer as a contributor to the server
@@ -209,8 +182,6 @@ impl<'s, const N: usize> Server<'s, N> {
     /// time period.
     #[inline]
     pub fn remove_deferred(&mut self, endpoint: &Endpoint) {
-        let server = to_compact_str(endpoint);
-
         self.statements.push(Statement::WithParams(
             "UPDATE servers SET
                 contributors = jsonb_patch(contributors,json_object(?,NULL)),
@@ -218,11 +189,6 @@ impl<'s, const N: usize> Server<'s, N> {
             WHERE rowid = (SELECT MIN(rowid) FROM servers WHERE endpoint = ?)"
                 .into(),
             vec![self.peer.to_sql(), endpoint.to_sql()],
-        ));
-
-        self.statements.push(Statement::WithParams(
-            "UPDATE dc SET servers = jsonb_patch(servers,json_object(?,NULL)) WHERE rowid = (SELECT MIN(rowid) FROM dc WHERE ip = ?)".into(),
-            vec![SqliteParam::Text(server), self.peer.to_sql()],
         ));
     }
 
@@ -404,7 +370,7 @@ impl<const N: usize> Datacenter<'_, N> {
         ];
 
         self.0.push(Statement::WithParams(
-            "INSERT INTO dc (ip,port,icao,servers) VALUES (?,?,?,jsonb('{}'))
+            "INSERT INTO dc (ip,port,icao) VALUES (?,?,?)
             ON CONFLICT(ip) DO UPDATE SET
                 port = excluded.port,
                 icao = excluded.icao"
@@ -425,12 +391,16 @@ impl<const N: usize> Datacenter<'_, N> {
         let time = update_time.unwrap_or(time::UtcDateTime::now());
 
         self.0.push(Statement::WithParams(
-            "WITH sj AS (SELECT server.key FROM dc JOIN json_each(dc.servers) AS server WHERE ip = ?)
-            UPDATE servers SET
+            "UPDATE servers SET
                 contributors = jsonb_patch(contributors,json_object(?,NULL)),
                 cont_update = ?
-            WHERE endpoint IN (SELECT key FROM sj)".into(),
-            vec![peer.to_sql(), peer.to_sql(), SqliteParam::Integer(time.unix_timestamp())],
+            WHERE EXISTS (SELECT 1 FROM json_each(servers.contributors) WHERE key = ?)"
+                .into(),
+            vec![
+                peer.to_sql(),
+                SqliteParam::Integer(time.unix_timestamp()),
+                peer.to_sql(),
+            ],
         ));
 
         self.0.push(Statement::WithParams(

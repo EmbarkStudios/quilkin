@@ -36,13 +36,13 @@ impl InstaPrinter {
             prow.add_cell(Cell::new(&srow.get::<_, String>(1).unwrap()));
             prow.add_cell(Cell::new(&srow.get::<_, String>(2).unwrap()));
         });
-        let statement = conn
-            .prepare("SELECT ip,icao,json(servers) FROM dc")
-            .unwrap();
+        // Which servers a peer fed is read back from `servers.contributors`
+        // above, the side that is written
+        let statement = conn.prepare("SELECT ip,icao,port FROM dc").unwrap();
         let dc = ct::query_to_string(statement, |srow, prow| {
             prow.add_cell(Cell::new(&srow.get::<_, String>(0).unwrap()));
             prow.add_cell(Cell::new(&srow.get::<_, String>(1).unwrap()));
-            prow.add_cell(Cell::new(&srow.get::<_, String>(2).unwrap()));
+            prow.add_cell(Cell::new(&srow.get::<_, u16>(2).unwrap().to_string()));
         });
 
         servers.push('\n');

@@ -18,9 +18,7 @@ CREATE TABLE dc (
     -- the QCMP port used for pinging
     port int not null default 0,
     -- icao code
-    icao char(4) not null default 'XXXX',
-    -- the JSONB set of servers that this peer contributed
-    servers blob
+    icao char(4) not null default 'XXXX'
 );
 
 CREATE TABLE node (
