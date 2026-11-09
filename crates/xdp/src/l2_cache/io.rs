@@ -4,14 +4,15 @@ use quilkin_uring::{eventfd, flags, io_uring, ring};
 use std::os::fd::AsRawFd;
 
 pub mod code {
-    pub const RECV4: u64 = 0;
-    pub const RECV6: u64 = 1;
-    pub const SEND: u64 = 2;
-    pub const REQUEST: u64 = 3;
-    pub const EBPF: u64 = 4;
-    pub const INTERVAL: u64 = 5;
-    pub const TIMEOUT: u64 = 6;
-    pub const SHUTDOWN: u64 = 7;
+    pub const RECV_ICMP4: u64 = 0;
+    pub const RECV_ICMP6: u64 = 1;
+    pub const SEND_ICMP: u64 = 2;
+    pub const SEND_RAW: u64 = 3;
+    pub const REQUEST: u64 = 4;
+    pub const EBPF: u64 = 5;
+    pub const INTERVAL: u64 = 6;
+    pub const TIMEOUT: u64 = 7;
+    pub const SHUTDOWN: u64 = 8;
 }
 
 pub(super) fn cache_io_loop(
@@ -50,10 +51,10 @@ pub(super) fn cache_io_loop(
 
     let recv4 = opcode::RecvMsgMulti::new(Fd(icmp.in4.as_raw_fd()), &recv4_hdr, BUFFER_RING)
         .build()
-        .user_data(code::RECV4);
+        .user_data(code::RECV_ICMP4);
     let recv6 = opcode::RecvMsgMulti::new(Fd(icmp.in6.as_raw_fd()), &recv6_hdr, BUFFER_RING)
         .build()
-        .user_data(code::RECV6);
+        .user_data(code::RECV_ICMP6);
 
     let enqueue_recv = |sq: &mut SubmissionQueue<'_>, v4: bool| -> eyre::Result<()> {
         // SAFETY: the socket and buffer ring live as long as the io ring
@@ -114,7 +115,7 @@ pub(super) fn cache_io_loop(
             .context("failed to enqueue shutdown event")?;
     }
 
-    let mut pings = InflightPings::new(&icmp, cache);
+    let mut pings = InflightPings::new(&icmp, cache)?;
 
     loop {
         sq.sync();
@@ -122,7 +123,6 @@ pub(super) fn cache_io_loop(
         match submitter.submit_and_wait(1) {
             Ok(_) => {}
             Err(ref err) if matches!(err.raw_os_error(), Some(libc::EBUSY | libc::EINTR)) => {
-                tracing::warn!(%err, "BOO");
                 continue;
             }
             Err(error) => {
@@ -140,10 +140,10 @@ pub(super) fn cache_io_loop(
 
                 match ud & 0xff {
                     // We've received a response to an ICMP echo request
-                    code::RECV4 | code::RECV6 => {
+                    code::RECV_ICMP4 | code::RECV_ICMP6 => {
                         let ret = cqe.result();
                         let flags = cqe.flags();
-                        let is_v4 = ud & 0xff == code::RECV4;
+                        let is_v4 = ud & 0xff == code::RECV_ICMP4;
 
                         // Requeue the recv if needed
                         if flags & flags::IORING_CQE_F_MORE == 0 {
@@ -190,10 +190,13 @@ pub(super) fn cache_io_loop(
                         enqueue_req(&mut sq)?;
                     }
                     // We've finished sending an ICMP echo request
-                    code::SEND => {
+                    code::SEND_ICMP => {
                         pings.process_send(cqe);
                     }
-                    // We've intercepted either an ARP (IPv4) response or an ICMPv6 (IPv6) neighbor advertisement
+                    // We've finished a raw `sendto`
+                    code::SEND_RAW => {}
+                    // We've intercepted either an ARP (IPv4) response or an ICMPv6 (IPv6) neighbor advertisement, or
+                    // the response to our ICMP/v6 echo request
                     code::EBPF => {
                         while let Some(entry) = ebpf_ring.read() {
                             pings.process_ebpf(entry);

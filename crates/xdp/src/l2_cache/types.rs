@@ -2,7 +2,7 @@ use super::{CacheSpawnError, icmp, io};
 use quilkin_uring::{
     eventfd,
     io_uring::{
-        opcode, squeue,
+        SubmissionQueue, opcode, squeue,
         types::{Fd, Timespec},
     },
     slab,
@@ -94,6 +94,8 @@ impl From<Ipv6Addr> for Ip {
 #[repr(u16)]
 pub enum Source {
     Icmp = 1,
+    DesinationUnreachablev4 = 3,
+    DesinationUnreachablev6 = 4, // We can't use 1 which is the actual value of ICMPv6 destination unreachable since it's also the protocol number for ICMP
     Icmpv6 = 58,
     NeighbourAdvertisement = 136,
     Arp = 0x0608,
@@ -116,15 +118,46 @@ pub fn read_entry(ring: &mut aya::maps::RingBuf<aya::maps::MapData>) -> Option<R
     })
 }
 
+pub struct RequestData {
+    /// The raw packet data, including the layer 3 and 4 headers
+    pub(crate) buf: [u8; 2016],
+    /// Desination address, we still have to supply this with `IPPROTO_RAW` `sendto` since the kernel still needs
+    /// it to perform layer2 resolution
+    pub(crate) addr: SockAddrC,
+    /// The amount of valid bytes in the `buf`
+    pub(crate) len: u16,
+}
+
+impl RequestData {
+    pub fn copy_from_raw(
+        packet: &xdp::Packet,
+        headers: &xdp::packet::net_types::UdpHeaders,
+    ) -> Request {
+        let mut b = Box::new(RequestData {
+            buf: [0u8; 2016],
+            addr: headers.destination_address().into(),
+            len: 0,
+        });
+
+        let len = packet.len() - xdp::packet::net_types::EthHdr::LEN;
+        b.buf[..len].copy_from_slice(&packet[xdp::packet::net_types::EthHdr::LEN..]);
+        b.len = len as u16;
+        b
+    }
+}
+
+pub type Request = Box<RequestData>;
+
+#[derive(Clone)]
 pub(super) struct RequestSender {
-    pub(super) sender: crossbeam_channel::Sender<Ip>,
+    pub(super) sender: crossbeam_channel::Sender<Request>,
     pub(super) writer: eventfd::EventFdWriter,
 }
 
 impl RequestSender {
     #[inline]
-    pub(super) fn send(&self, ip: Ip) {
-        if self.sender.send(ip).is_err() {
+    pub(super) fn send(&self, req: Request) {
+        if self.sender.send(req).is_err() {
             // TODO: metrics
         }
 
@@ -133,7 +166,7 @@ impl RequestSender {
 }
 
 pub(super) struct RequestReceiver {
-    pub(super) rx: crossbeam_channel::Receiver<Ip>,
+    pub(super) rx: crossbeam_channel::Receiver<Request>,
     /// File descriptor we use to signal requests have been queued
     pub(super) event: eventfd::EventFd,
 }
@@ -206,6 +239,7 @@ pub(super) struct InflightPing {
     dst: Ip,
     state: PingState,
     time: Instant,
+    key: u32,
 }
 
 #[repr(C)]
@@ -222,7 +256,72 @@ impl Default for SockAddrC {
     }
 }
 
+impl From<std::net::SocketAddr> for SockAddrC {
+    fn from(value: std::net::SocketAddr) -> Self {
+        let mut this = Self::default();
+
+        // SAFETY: accessing union fields
+        unsafe {
+            match value {
+                std::net::SocketAddr::V4(v4) => {
+                    let t = &mut this.v4;
+                    t.sin_family = libc::AF_INET as _;
+                    t.sin_addr.s_addr = v4.ip().to_bits().to_be();
+                    t.sin_port = v4.port().to_be();
+                }
+                std::net::SocketAddr::V6(v6) => {
+                    let t = &mut this.v6;
+                    t.sin6_family = libc::AF_INET6 as _;
+                    t.sin6_addr.s6_addr = v6.ip().octets();
+                    t.sin6_port = v6.port().to_be();
+                    t.sin6_scope_id = v6.scope_id();
+                    t.sin6_flowinfo = v6.flowinfo();
+                }
+            }
+        }
+
+        this
+    }
+}
+
 impl SockAddrC {
+    #[inline]
+    fn ip(&self) -> Ip {
+        // SAFETY: byte reinterpretation within bounds
+        unsafe {
+            let family = self.as_ptr().cast::<u16>().read_unaligned();
+
+            match family as i32 {
+                libc::AF_INET => {
+                    let v4 = &self.v4;
+                    let [a, b, c, d] = v4.sin_addr.s_addr.to_ne_bytes();
+                    Ip(Ipv6Addr::from_octets([
+                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d,
+                    ]))
+                }
+                libc::AF_INET6 => {
+                    let v6 = &self.v6;
+                    Ip(Ipv6Addr::from_octets(v6.sin6_addr.s6_addr))
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[inline]
+    fn as_v6(&mut self) -> Option<&mut libc::sockaddr_in6> {
+        // SAFETY: union/pointer access within bounds
+        unsafe {
+            let family = self.as_ptr().cast::<u16>().read_unaligned();
+
+            if family as i32 == libc::AF_INET6 {
+                Some(&mut self.v6)
+            } else {
+                None
+            }
+        }
+    }
+
     #[inline]
     fn as_ptr(&self) -> *const libc::sockaddr {
         self as *const _ as *const libc::sockaddr
@@ -230,65 +329,30 @@ impl SockAddrC {
 }
 
 struct Ping {
-    addr: SockAddrC,
+    req: Request,
     payload: [u8; 8],
 }
 
 impl Ping {
     #[inline]
-    fn new() -> Self {
+    fn new(req: Request) -> Self {
         Self {
-            addr: Default::default(),
+            req,
             payload: [0u8; _],
         }
     }
 
     #[inline]
-    fn build(&mut self, ip: Ip, seq: u16, scope_id: u32) -> (u32, bool) {
-        let ip = ip.0.octets();
+    fn build(&mut self, seq: u16, scope_id: u32) -> (u32, bool) {
+        let ret = if let Some(v6) = self.req.addr.as_v6() {
+            v6.sin6_scope_id = scope_id;
+            (std::mem::size_of::<libc::sockaddr_in6>() as _, false)
+        } else {
+            (std::mem::size_of::<libc::sockaddr_in>() as _, true)
+        };
 
-        // SAFETY: Address manipulation within bounds
-        unsafe {
-            if ip[..12] == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff] {
-                let addr = &mut self.addr.v4;
-                addr.sin_family = libc::AF_INET as _;
-                addr.sin_addr.s_addr = u32::from_ne_bytes([ip[12], ip[13], ip[14], ip[15]]);
-
-                icmp::make_echo_request(seq, &mut self.payload, true);
-                (std::mem::size_of::<libc::sockaddr_in>() as _, true)
-            } else {
-                let addr = &mut self.addr.v6;
-                addr.sin6_family = libc::AF_INET6 as _;
-                addr.sin6_addr.s6_addr = ip;
-                addr.sin6_scope_id = scope_id;
-
-                icmp::make_echo_request(seq, &mut self.payload, false);
-                (std::mem::size_of::<libc::sockaddr_in6>() as _, false)
-            }
-        }
-    }
-
-    #[inline]
-    fn ip(&self) -> Ip {
-        // SAFETY: byte reinterpretation within bounds
-        unsafe {
-            let family = self.addr.as_ptr().cast::<u16>().read_unaligned();
-
-            match family as i32 {
-                libc::AF_INET => {
-                    let v4 = &self.addr.v4;
-                    let [a, b, c, d] = v4.sin_addr.s_addr.to_ne_bytes();
-                    Ip(Ipv6Addr::from_octets([
-                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d,
-                    ]))
-                }
-                libc::AF_INET6 => {
-                    let v6 = &self.addr.v6;
-                    Ip(Ipv6Addr::from_octets(v6.sin6_addr.s6_addr))
-                }
-                _ => unreachable!(),
-            }
-        }
+        icmp::make_echo_request(seq, &mut self.payload, ret.1);
+        ret
     }
 }
 
@@ -311,6 +375,7 @@ pub(super) struct InflightPings {
     v: Vec<InflightPing>,
     s: slab::Slab<Ping>,
     cache: std::sync::Arc<super::L2Cache>,
+    raw: RawSocket,
     in4: Fd,
     in6: Fd,
     scope_id: u32,
@@ -323,22 +388,25 @@ impl InflightPings {
     pub(super) fn new(
         icmp: &super::icmp::IcmpSocket,
         cache: std::sync::Arc<super::L2Cache>,
-    ) -> Self {
+    ) -> eyre::Result<Self> {
         tracing::info!(nic = ?icmp.nic, "pinging from interface");
 
-        Self {
+        let raw = RawSocket::new()?;
+
+        Ok(Self {
             v: Vec::with_capacity(32),
             s: slab::Slab::with_capacity(16),
             cache,
+            raw,
             in4: Fd(icmp.in4.as_raw_fd()),
             in6: Fd(icmp.in6.as_raw_fd()),
             seq: 0,
             scope_id: icmp.nic.0,
-        }
+        })
     }
 
     #[inline]
-    pub(super) fn ping(&mut self, ip: Ip, sq: &mut squeue::SubmissionQueue<'_>) -> bool {
+    pub(super) fn ping(&mut self, req: Request, sq: &mut squeue::SubmissionQueue<'_>) -> bool {
         let seq = self.seq;
         self.seq = self.seq.wrapping_add(1);
 
@@ -348,36 +416,47 @@ impl InflightPings {
         assert!(key < 0xffffffff);
         let key = key as u32;
 
-        let ping = entry.insert(Ping::new());
-        let (addr_len, is_v4) = ping.build(ip, seq, self.scope_id);
+        let dst = req.addr.ip();
+
+        let ping = entry.insert(Ping::new(req));
+        let (addr_len, is_v4) = ping.build(seq, self.scope_id);
         let socket = if is_v4 { self.in4 } else { self.in6 };
 
         let time = Instant::now();
 
-        if let Some(ping) = self.v.iter_mut().find(|p| p.dst == ip) {
-            ping.seq.push(seq);
-            ping.time = time;
-        } else {
-            self.v.push(InflightPing {
-                seq: smallvec::SmallVec::from_buf_and_len([seq, 0, 0], 1),
-                dst: ip,
-                state: PingState::Sending,
-                time,
-            });
-        }
+        self.v.push(InflightPing {
+            key,
+            seq: smallvec::SmallVec::from_buf_and_len([seq, 0, 0], 1),
+            dst,
+            state: PingState::Sending,
+            time,
+        });
 
-        // SAFETY: The pings live as long as the uring
+        // SAFETY: The pings and sends live as long as the uring
         unsafe {
             let ud = (key as u64) << 32 | (seq as u64) << 16;
 
             if sq
                 .push_multiple(&[
                     opcode::Send::new(socket, ping.payload.as_ptr(), ping.payload.len() as _)
-                        .dest_addr(ping.addr.as_ptr())
+                        .dest_addr(ping.req.addr.as_ptr())
                         .dest_addr_len(addr_len)
                         .build()
-                        .user_data(ud | io::code::SEND)
+                        .user_data(ud | io::code::SEND_ICMP)
                         .flags(squeue::Flags::IO_LINK),
+                    opcode::LinkTimeout::new(&SEND_TIMEOUT)
+                        .build()
+                        .user_data(ud | io::code::TIMEOUT),
+                    opcode::Send::new(
+                        Fd(self.raw.socket.as_raw_fd()),
+                        ping.req.buf.as_ptr(),
+                        ping.req.len as _,
+                    )
+                    .dest_addr(ping.req.addr.as_ptr())
+                    .dest_addr_len(addr_len)
+                    .build()
+                    .user_data(ud | io::code::SEND_RAW)
+                    .flags(squeue::Flags::IO_LINK),
                     opcode::LinkTimeout::new(&SEND_TIMEOUT)
                         .build()
                         .user_data(ud | io::code::TIMEOUT),
@@ -387,8 +466,53 @@ impl InflightPings {
                 // Cleanup the memory if our squeue is full, we will try to enqueue it again later
                 if self.s.try_remove(key as usize).is_none() {
                     // This should not happen since we literally just allocated it, but want to avoid a panic
-                    tracing::error!(%ip, "failed to cleanup entry after failing to enqueue it to submission queue");
+                    tracing::error!(%dst, "failed to cleanup entry after failing to enqueue it to submission queue");
                 }
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn ping_retry(&mut self, i: usize, sq: &mut squeue::SubmissionQueue<'_>) -> bool {
+        let seq = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+
+        let time = Instant::now();
+
+        let Some(inflight) = self.v.get_mut(i) else {
+            return false;
+        };
+
+        let Some(ping) = self.s.get_mut(inflight.key as _) else {
+            return false;
+        };
+
+        inflight.seq.push(seq);
+        inflight.time = time;
+
+        let (addr_len, is_v4) = ping.build(seq, self.scope_id);
+        let socket = if is_v4 { self.in4 } else { self.in6 };
+
+        // SAFETY: The pings and sends live as long as the uring
+        unsafe {
+            let ud = (inflight.key as u64) << 32 | (seq as u64) << 16;
+
+            if sq
+                .push_multiple(&[
+                    opcode::Send::new(socket, ping.payload.as_ptr(), ping.payload.len() as _)
+                        .dest_addr(ping.req.addr.as_ptr())
+                        .dest_addr_len(addr_len)
+                        .build()
+                        .user_data(ud | io::code::SEND_ICMP)
+                        .flags(squeue::Flags::IO_LINK),
+                    opcode::LinkTimeout::new(&SEND_TIMEOUT)
+                        .build()
+                        .user_data(ud | io::code::TIMEOUT),
+                ])
+                .is_err()
+            {
                 return false;
             }
         }
@@ -407,7 +531,7 @@ impl InflightPings {
             return;
         };
 
-        let ip = entry.ip();
+        let ip = entry.req.addr.ip();
 
         let Some(i) = self.v.iter().position(|i| i.dst == ip) else {
             tracing::error!(%ip, seq, "completion entry had no associated ping data");
@@ -502,7 +626,7 @@ impl InflightPings {
 
     #[inline]
     pub(super) fn process_timeouts(&mut self, sq: &mut squeue::SubmissionQueue<'_>) {
-        const TIMEOUT: Duration = Duration::from_millis(500);
+        const TIMEOUT: Duration = Duration::from_millis(1000);
 
         let mut i = 0;
 
@@ -515,9 +639,10 @@ impl InflightPings {
 
             // If we've already sent 3 pings then consider the host unreachable, falling back to the default behavior of
             // using a gateway mac
-            if self.v[i].seq.len() < PING_ATTEMPTS {
-                if !self.ping(self.v[i].dst, sq) {
-                    tracing::error!("failed to enqueue ping retry");
+            let count = self.v[i].seq.len();
+            if count < PING_ATTEMPTS {
+                if !self.ping_retry(i, sq) {
+                    tracing::error!(attempt = count + 1, "failed to enqueue ping retry");
                 }
 
                 i += 1;
@@ -534,5 +659,46 @@ impl InflightPings {
                 self.cache.update_mac(failed.dst, lladdr);
             }
         }
+    }
+}
+
+pub(crate) struct RawSocket {
+    pub socket: std::net::UdpSocket,
+}
+
+impl RawSocket {
+    pub fn new() -> eyre::Result<Self> {
+        use eyre::WrapErr;
+
+        // SAFETY: raw syscalls, all arguments are valid and we check for errors
+        let socket = unsafe {
+            let socket = libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_RAW);
+            if socket < 0 {
+                return Err(std::io::Error::last_os_error())
+                    .context("failed to create IPPROTO_RAW socket");
+            }
+
+            let enable = 1;
+            if libc::setsockopt(
+                socket,
+                libc::IPPROTO_IPV6,
+                libc::IPV6_HDRINCL,
+                (&raw const enable).cast(),
+                std::mem::size_of_val(&enable) as _,
+            ) != 0
+            {
+                return Err(std::io::Error::last_os_error())
+                    .context("failed to enable IPV6_HDRINCL");
+            }
+
+            use std::os::fd::FromRawFd;
+            std::net::UdpSocket::from_raw_fd(socket)
+        };
+
+        socket
+            .set_nonblocking(true)
+            .context("failed to enable non-blocking")?;
+
+        Ok(Self { socket })
     }
 }

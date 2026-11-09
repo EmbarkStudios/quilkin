@@ -1,6 +1,5 @@
 pub mod icmp;
 pub mod io;
-pub mod router;
 pub mod types;
 
 pub use crossbeam_channel;
@@ -30,6 +29,10 @@ pub enum CacheSpawnError {
 }
 
 /// A cache of IP -> MAC addresses
+///
+/// If a destination IP does not have a cached address, it invokes the kernel's normal layer 2 resolution (ARP/ICMPv6)
+/// via a non-XDP sendto as well as an ICMP ping request to ensure our cache stays up to date with the kernel regardless
+/// of the current state
 pub struct L2Cache {
     map: dashmap::DashMap<Ip, LinkLayerAddr>,
     tx: types::RequestSender,
@@ -102,12 +105,18 @@ impl L2Cache {
         self.shutdown.write(1);
     }
 
+    /// Retrieves the layer 2 address for the destination IP, otherwise performs a `sendto`
     #[inline]
-    pub fn mac_for_ip(&self, ip: std::net::IpAddr) -> Option<LinkLayerAddr> {
-        let ip = ip.into();
+    pub fn cached_or_send(
+        &self,
+        packet: &xdp::Packet,
+        headers: &xdp::packet::net_types::UdpHeaders,
+    ) -> Option<LinkLayerAddr> {
+        let ip = headers.destination_address().ip().into();
         let ll = self.map.get(&ip).map(|ll| *ll);
         if ll.is_none() {
-            self.tx.send(ip);
+            self.tx
+                .send(types::RequestData::copy_from_raw(packet, headers));
         }
 
         ll

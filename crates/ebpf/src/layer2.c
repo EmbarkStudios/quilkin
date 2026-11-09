@@ -33,6 +33,8 @@ const u8 ECHO_REPLYV4 = 0;
 const u8 ECHO_REPLYV6 = 129;
 // https://datatracker.ietf.org/doc/html/rfc4861#section-4.4
 const u8 NEIGHBOR_ADVERTISEMENT = 136;
+const u8 DESTINATION_UNREACHABLEV6 = 1;
+const u8 DESTINATION_UNREACHABLEV4 = 3;
 
 // https://datatracker.ietf.org/doc/html/rfc4861#section-4.6
 const u8 NA_TARGET_LL_ADDR = 2;
@@ -100,6 +102,21 @@ inline void send_mac_to_userspace(const IP ip, const MAC mac, u16 kind) {
     bpf_ringbuf_submit(entry, BPF_RB_ADAPTIVE);
 }
 
+inline void unreachable_ip(const IP ip, u16 kind) {
+    RingBufEntry* entry =
+        bpf_ringbuf_reserve(&IP_TO_MAC, sizeof(RingBufEntry), 0);
+
+    if (!entry) {
+        return;
+    }
+
+    __builtin_memcpy(entry->ip, ip, 16);
+    __builtin_memset(entry->mac, 0, 6);
+    entry->kind = kind;
+
+    bpf_ringbuf_submit(entry, BPF_RB_ADAPTIVE);
+}
+
 inline XdpAction redirect_ipv4(struct xdp_md* ctx) {
     size_t offset = sizeof(EthHdr);
     valid_or_pass(v4, Ipv4Hdr, offset);
@@ -144,6 +161,29 @@ inline XdpAction redirect_ipv4(struct xdp_md* ctx) {
             };
 
             send_mac_to_userspace(address, eth->src_addr, ICMP);
+        } else if (icmp->kind == DESTINATION_UNREACHABLEV4) {
+            // Attempt to recover the original IPv4 header that triggered this
+            // destination unreachable packet
+            MUTE valid_or_pass(original, Ipv4Hdr, offset + sizeof(IcmpHeader));
+            IP address = {
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0xff,
+                0xff,
+                original->dst_addr[0],
+                original->dst_addr[1],
+                original->dst_addr[2],
+                original->dst_addr[3],
+            };
+            unreachable_ip(address, DESTINATION_UNREACHABLEV4);
         }
         break;
     default:
@@ -188,6 +228,8 @@ XdpAction redirect_ipv6(struct xdp_md* ctx) {
         } else if (icmp->kind == ECHO_REPLYV6) {
             MUTE valid_or_pass(eth, EthHdr, 0);
             send_mac_to_userspace(v6->src_addr, eth->src_addr, ICMPv6);
+        } else if (icmp->kind == DESTINATION_UNREACHABLEV6) {
+            // unreachable_ip(v6->src_addr, DESTINATION_UNREACHABLEV6);
         }
 
         break;

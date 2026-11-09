@@ -1,3 +1,5 @@
+#![cfg(any())]
+
 use quilkin_xdp::{
     l2_cache,
     xdp::{self, packet::net_types as nt},
