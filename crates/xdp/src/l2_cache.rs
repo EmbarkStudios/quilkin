@@ -1,6 +1,6 @@
 pub mod icmp;
 pub mod io;
-pub mod queue;
+pub mod router;
 pub mod types;
 
 pub use crossbeam_channel;
@@ -9,18 +9,8 @@ use quilkin_uring::eventfd;
 use std::{io::Error, sync::Arc};
 use types::{Ip, LinkLayerAddr};
 
-enum CacheEntry {
-    Unknown(u128),
-    Known {
-        interested: u128,
-        addr: LinkLayerAddr,
-    },
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum CacheSpawnError {
-    #[error("{0} invalid number of XDP RX queues, must be >= 1 and <= 128")]
-    InvalidRxQueueCount(usize),
     #[error("failed to create ICMP socket")]
     Icmp(#[source] Error),
     #[error("failed to create buffer ring")]
@@ -37,31 +27,20 @@ pub enum CacheSpawnError {
     EpollRingBuf(#[source] Error),
     #[error("failed to spawn thread")]
     Thread(#[source] Error),
-    #[error("failed to retrieve gateway MAC address")]
-    Gateway(#[source] eyre::Error),
 }
 
 /// A cache of IP -> MAC addresses
 pub struct L2Cache {
-    map: dashmap::DashMap<Ip, CacheEntry>,
-    channels: Vec<CacheTx>,
+    map: dashmap::DashMap<Ip, LinkLayerAddr>,
     tx: types::RequestSender,
     shutdown: eventfd::EventFdWriter,
 }
 
-pub type CacheTx = crossbeam_channel::Sender<(Ip, LinkLayerAddr)>;
-pub type CacheRx = crossbeam_channel::Receiver<(Ip, LinkLayerAddr)>;
-
 impl L2Cache {
-    pub fn with_channels(
+    pub fn new(
         nic: xdp::nic::NicIndex,
-        channels: Vec<CacheTx>,
         ebpf_ring: aya::maps::RingBuf<aya::maps::MapData>,
     ) -> Result<(Arc<Self>, std::thread::JoinHandle<()>), CacheSpawnError> {
-        if channels.len() > 128 || channels.is_empty() {
-            return Err(CacheSpawnError::InvalidRxQueueCount(channels.len()));
-        }
-
         // Create an ICMP socket that we can use to send pings to L3 IP addresses to prod the kernel into doing ARP/ICMPv6
         // requests to resolve the L2 Ethernet MAC addresses
         let icmp = icmp::IcmpSocket::new(nic).map_err(CacheSpawnError::Icmp)?;
@@ -96,7 +75,6 @@ impl L2Cache {
 
         let this = Arc::new(Self {
             map: Default::default(),
-            channels,
             tx,
             shutdown: shutdown.writer(),
         });
@@ -125,71 +103,18 @@ impl L2Cache {
     }
 
     #[inline]
-    pub fn mac_for_ip(&self, ip: std::net::IpAddr, channel: u8) -> Option<LinkLayerAddr> {
+    pub fn mac_for_ip(&self, ip: std::net::IpAddr) -> Option<LinkLayerAddr> {
         let ip = ip.into();
-        match self.map.entry(ip) {
-            dashmap::Entry::Occupied(mut ent) => match ent.get_mut() {
-                CacheEntry::Known { addr, interested } => {
-                    *interested |= 1 << channel as u32;
-                    Some(*addr)
-                }
-                CacheEntry::Unknown(ws) => {
-                    *ws |= 1 << channel as u32;
-                    None
-                }
-            },
-            dashmap::Entry::Vacant(ent) => {
-                ent.insert(CacheEntry::Unknown(1 << channel as u32));
-                self.tx.send(ip);
-                None
-            }
+        let ll = self.map.get(&ip).map(|ll| *ll);
+        if ll.is_none() {
+            self.tx.send(ip);
         }
+
+        ll
     }
 
     #[inline]
     fn update_mac(&self, ip: Ip, lladdr: LinkLayerAddr) {
-        let int = {
-            let Some(mut entry) = self.map.get_mut(&ip) else {
-                tracing::warn!(ip = %ip.0, %lladdr, "attempted to update link layer address for an entry not in the map");
-                return;
-            };
-
-            match entry.value_mut() {
-                CacheEntry::Known { interested, addr } => {
-                    if addr == &lladdr {
-                        tracing::debug!(ip = %ip.0, %lladdr, "skipping update for identical mac");
-                        return;
-                    }
-
-                    // Notify all of the interested XDP threads of the new mac
-                    *addr = lladdr;
-                    *interested
-                }
-                CacheEntry::Unknown(int) => {
-                    let int = *int;
-                    *entry.value_mut() = CacheEntry::Known {
-                        interested: int,
-                        addr: lladdr,
-                    };
-                    int
-                }
-            }
-        };
-
-        self.notify(int, ip, lladdr);
-    }
-
-    #[inline]
-    fn notify(&self, int: u128, ip: Ip, lladdr: LinkLayerAddr) {
-        for (i, c) in self.channels.iter().enumerate() {
-            if int & 1 << i as u32 == 0 {
-                continue;
-            }
-
-            if c.try_send((ip, lladdr)).is_err() {
-                // TODO: counter instead
-                tracing::warn!(index = i, "XDP channel full");
-            }
-        }
+        self.map.insert(ip, lladdr);
     }
 }

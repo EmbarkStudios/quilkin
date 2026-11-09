@@ -31,11 +31,10 @@ impl LinkLayer for Swap {
     }
 }
 
-use l2_cache::queue::CacheQueue;
+use l2_cache::router::CacheQueue;
 
 pub(super) struct Local {
     queue: CacheQueue,
-    overflow: std::collections::VecDeque<Packet>,
     ipv6_gateway: MacAddress,
     ipv4_gateway: MacAddress,
 }
@@ -48,7 +47,6 @@ impl Local {
     ) -> Self {
         Self {
             queue: CacheQueue::new(cache, rx, rxid),
-            overflow: Default::default(),
             ipv4_gateway: MacAddress([0; 6]),
             ipv6_gateway: MacAddress([0; 6]),
         }
@@ -71,7 +69,6 @@ impl LinkLayer for Local {
         tx_slab: &mut HeapSlab,
         to_client: bool,
     ) -> Option<(Packet, DropReason)> {
-        //tracing::info!(dest = %packet.headers.destination_address(), "GOT HERE");
         if to_client {
             let addr = if packet.headers.is_ipv4() {
                 self.ipv4_gateway
@@ -84,17 +81,19 @@ impl LinkLayer for Local {
                 .map(|p| (p, DropReason::QueueFull));
         }
 
-        self.queue
-            .try_fill(packet.buffer, packet.headers, tx_slab)
-            .map(|(rejected, packet, _hdrs)| {
-                (
-                    packet,
-                    match rejected {
-                        l2_cache::queue::Rejected::Full => DropReason::QueueFull,
-                        l2_cache::queue::Rejected::Unreachable => DropReason::UnreachableIp,
-                    },
-                )
-            })
+        let Some(rejected) = self.queue.try_fill(packet.buffer, packet.headers) else {
+            return tx_slab
+                .push_front(packet.buffer)
+                .map(|p| (p, DropReason::QueueFull));
+        };
+
+        Some((
+            packet.buffer,
+            match rejected {
+                l2_cache::router::Rejected::Unreachable => DropReason::UnreachableIp,
+                l2_cache::router::Rejected::SendTo(_) => DropReason::SocketError,
+            },
+        ))
     }
 
     fn update(&mut self, tx_slab: &mut HeapSlab, umem: &mut xdp::Umem) {
