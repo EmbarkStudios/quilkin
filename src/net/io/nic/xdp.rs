@@ -216,15 +216,38 @@ fn attach_xdp_program(
     ebpf_prog.load_into_kernel()?;
 
     let mode = quilkin_xdp::aya::programs::xdp::XdpMode::default();
+    let original_queues = *queues;
+    let original_count = queue_count;
+
+    let restore = |queues: &mut quilkin_xdp::xdp::nic::Queues, current_count: u32| {
+        *queues = original_queues;
+        if current_count == original_count {
+            return;
+        }
+
+        match nic.set_queue_counts(queues) {
+            Ok(()) => tracing::info!(
+                ?nic,
+                queue_count = original_count,
+                "restored NIC queue count"
+            ),
+            Err(error) => tracing::error!(
+                %error,
+                ?nic,
+                queue_count = original_count,
+                "failed to restore NIC queue count"
+            ),
+        }
+    };
 
     loop {
         match ebpf_prog.attach(nic, mode) {
             Ok(link) => return Ok((link, queue_count)),
             Err(error) => {
-                let reduced = queue_count / 2;
-                if reduced < 1 {
+                let Some(reduced) = next_queue_count_to_try(queue_count) else {
+                    restore(queues, queue_count);
                     return Err(error);
-                }
+                };
 
                 queues.set_rx_and_tx(reduced);
 
@@ -234,6 +257,7 @@ fn attach_xdp_program(
                         ?nic,
                         "failed to reduce NIC queue count for XDP, giving up"
                     );
+                    restore(queues, queue_count);
                     return Err(error);
                 }
 
