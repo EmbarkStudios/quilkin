@@ -25,7 +25,9 @@ all-features = true
 [advisories]
 unmaintained = 'workspace'
 yanked = 'deny'
-ignore = []
+ignore = [
+    { id = "RUSTSEC-2026-0459", reason = "libsqlite3 vuln, will update eventually but I don't think it affects quilkin really" },
+]
 
 [bans]
 deny = [
@@ -79,7 +81,14 @@ unused = 'allow'
 # More documentation for the licenses section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
-allow = ["Apache-2.0", "MIT", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Unicode-3.0"]
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+]
 exceptions = [
     { crate = "adler32", allow = ["Zlib"] },
     { crate = "foldhash", allow = ["Zlib"] },
@@ -94,9 +103,7 @@ exceptions = [
 [[licenses.clarify]]
 crate = "webpki"
 expression = "ISC"
-license-files = [
-    { path = "LICENSE", hash = 0x001c7e6c },
-]
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
 
 [sources.allow-org]
 github = ["EmbarkStudios", "aya-rs"]

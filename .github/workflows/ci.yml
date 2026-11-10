@@ -76,7 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-            submodules: true
+          submodules: true
       - run: cargo run -p proto-gen -- validate
 
   test:
@@ -133,7 +133,7 @@ jobs:
     strategy:
       matrix:
         os:
-          - macos-14
+          - macos-26
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
