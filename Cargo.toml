@@ -314,7 +314,7 @@ xdp = "0.8.0"
 # Corrosion libraries. The libraries that corrosion transitively depends on that
 # we also need to depend on should be kept in line with the versions used by corrosion
 camino = "1.2"
-rusqlite = "=0.38"
+rusqlite = "=0.41.1"
 uhlc = { version = "0.9", default-features = false }
 
 corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
