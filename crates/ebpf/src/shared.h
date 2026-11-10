@@ -55,6 +55,28 @@ typedef struct {
 #define ntohs(in) in
 #endif
 
+#define force_inline __attribute__((always_inline))
+
+/// The external port used by clients. Network order.
+volatile const u16 EXTERNAL_PORT_NO;
+/// The port used to respond to QCMP messages. Network order.
+volatile const u16 QCMP_PORT_NO;
+
+/// The beginning of the port range quilkin will use for server sessions, we
+/// take advantage of the fact that, by default, the range Linux uses for
+/// assigning ephemeral ports is 32768–60999, so we can easily determine in eBPF
+/// if a port is intended for quilkin or not without relying on extra state
+const u16 EPHEMERAL_PORT_START = 61000;
+
+force_inline XdpAction redirect_udp(const UdpHdr* udp) {
+    if (udp->dst == EXTERNAL_PORT_NO || udp->dst == QCMP_PORT_NO ||
+        ntohs(udp->dst) >= EPHEMERAL_PORT_START) {
+        return XDP_REDIRECT;
+    } else {
+        return XDP_PASS;
+    }
+}
+
 inline const void* ptr_at(struct xdp_md* ctx, size_t offset, size_t len) {
     if (ctx->data + offset + len > ctx->data_end) {
         return 0;

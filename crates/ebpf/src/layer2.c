@@ -62,27 +62,7 @@ typedef struct {
     u16 kind;
 } RingBufEntry;
 
-/// The external port used by clients. Network order.
-volatile const u16 EXTERNAL_PORT_NO;
-/// The port used to respond to QCMP messages. Network order.
-volatile const u16 QCMP_PORT_NO;
-
-/// The beginning of the port range quilkin will use for server sessions, we
-/// take advantage of the fact that, by default, the range Linux uses for
-/// assigning ephemeral ports is 32768–60999, so we can easily determine in eBPF
-/// if a port is intended for quilkin or not without relying on extra state
-const u16 EPHEMERAL_PORT_START = 61000;
-
-inline XdpAction redirect_udp(const UdpHdr* udp) {
-    if (udp->dst == EXTERNAL_PORT_NO || udp->dst == QCMP_PORT_NO ||
-        ntohs(udp->dst) >= EPHEMERAL_PORT_START) {
-        return XDP_REDIRECT;
-    } else {
-        return XDP_PASS;
-    }
-}
-
-inline void send_mac_to_userspace(const IP ip, const MAC mac, u16 kind) {
+force_inline void send_mac_to_userspace(const IP ip, const MAC mac, u16 kind) {
     RingBufEntry* entry =
         bpf_ringbuf_reserve(&IP_TO_MAC, sizeof(RingBufEntry), 0);
 
@@ -102,7 +82,7 @@ inline void send_mac_to_userspace(const IP ip, const MAC mac, u16 kind) {
     bpf_ringbuf_submit(entry, BPF_RB_ADAPTIVE);
 }
 
-inline void unreachable_ip(const IP ip, u16 kind) {
+force_inline void unreachable_ip(const IP ip, u16 kind) {
     RingBufEntry* entry =
         bpf_ringbuf_reserve(&IP_TO_MAC, sizeof(RingBufEntry), 0);
 
@@ -112,12 +92,12 @@ inline void unreachable_ip(const IP ip, u16 kind) {
 
     __builtin_memcpy(entry->ip, ip, 16);
     __builtin_memset(entry->mac, 0, 6);
-    entry->kind = kind;
+    entry->kind = 0xf0 | kind;
 
     bpf_ringbuf_submit(entry, BPF_RB_ADAPTIVE);
 }
 
-inline XdpAction redirect_ipv4(struct xdp_md* ctx) {
+force_inline XdpAction redirect_ipv4(struct xdp_md* ctx) {
     size_t offset = sizeof(EthHdr);
     valid_or_pass(v4, Ipv4Hdr, offset);
     offset += sizeof(Ipv4Hdr);
@@ -164,7 +144,10 @@ inline XdpAction redirect_ipv4(struct xdp_md* ctx) {
         } else if (icmp->kind == DESTINATION_UNREACHABLEV4) {
             // Attempt to recover the original IPv4 header that triggered this
             // destination unreachable packet
-            MUTE valid_or_pass(original, Ipv4Hdr, offset + sizeof(IcmpHeader));
+            // The ICMP header can contain the length and/or MTU, but we don't
+            // care about either
+            MUTE valid_or_pass(original, Ipv4Hdr,
+                               offset + sizeof(IcmpHeader) + 4);
             IP address = {
                 0,
                 0,
@@ -193,7 +176,7 @@ inline XdpAction redirect_ipv4(struct xdp_md* ctx) {
     return XDP_PASS;
 }
 
-XdpAction redirect_ipv6(struct xdp_md* ctx) {
+force_inline XdpAction redirect_ipv6(struct xdp_md* ctx) {
     size_t offset = sizeof(EthHdr);
     valid_or_pass(v6, Ipv6Hdr, offset);
     offset += sizeof(Ipv6Hdr);
@@ -229,7 +212,8 @@ XdpAction redirect_ipv6(struct xdp_md* ctx) {
             MUTE valid_or_pass(eth, EthHdr, 0);
             send_mac_to_userspace(v6->src_addr, eth->src_addr, ICMPv6);
         } else if (icmp->kind == DESTINATION_UNREACHABLEV6) {
-            // unreachable_ip(v6->src_addr, DESTINATION_UNREACHABLEV6);
+            MUTE valid_or_pass(original, Ipv6Hdr, offset + 4);
+            unreachable_ip(original->dst_addr, DESTINATION_UNREACHABLEV6);
         }
 
         break;
@@ -240,7 +224,7 @@ XdpAction redirect_ipv6(struct xdp_md* ctx) {
     return XDP_PASS;
 }
 
-XdpAction handle_arp(struct xdp_md* ctx) {
+force_inline XdpAction handle_arp(struct xdp_md* ctx) {
     valid_or_pass(arp_hdr, ArpHdr, sizeof(EthHdr));
 
     // Sanity check that the hardware address is a MAC and the protocol address
@@ -275,7 +259,7 @@ XdpAction handle_arp(struct xdp_md* ctx) {
     return XDP_PASS;
 }
 
-XdpAction redirect_packet(struct xdp_md* ctx) {
+force_inline XdpAction redirect_packet(struct xdp_md* ctx) {
     size_t off = 0;
     valid_or_pass(eth, EthHdr, off);
 

@@ -94,8 +94,8 @@ impl From<Ipv6Addr> for Ip {
 #[repr(u16)]
 pub enum Source {
     Icmp = 1,
-    DesinationUnreachablev4 = 3,
-    DesinationUnreachablev6 = 4, // We can't use 1 which is the actual value of ICMPv6 destination unreachable since it's also the protocol number for ICMP
+    DesinationUnreachablev4 = 0xf0 | 3,
+    DesinationUnreachablev6 = 0xf0 | 1,
     Icmpv6 = 58,
     NeighbourAdvertisement = 136,
     Arp = 0x0608,
@@ -243,7 +243,7 @@ pub(super) struct InflightPing {
 }
 
 #[repr(C)]
-union SockAddrC {
+pub union SockAddrC {
     v4: libc::sockaddr_in,
     v6: libc::sockaddr_in6,
 }
@@ -286,7 +286,7 @@ impl From<std::net::SocketAddr> for SockAddrC {
 
 impl SockAddrC {
     #[inline]
-    fn ip(&self) -> Ip {
+    pub fn ip(&self) -> Ip {
         // SAFETY: byte reinterpretation within bounds
         unsafe {
             let family = self.as_ptr().cast::<u16>().read_unaligned();
@@ -309,7 +309,7 @@ impl SockAddrC {
     }
 
     #[inline]
-    fn as_v6(&mut self) -> Option<&mut libc::sockaddr_in6> {
+    pub fn as_v6(&mut self) -> Option<&mut libc::sockaddr_in6> {
         // SAFETY: union/pointer access within bounds
         unsafe {
             let family = self.as_ptr().cast::<u16>().read_unaligned();
@@ -371,13 +371,18 @@ impl fmt::Display for LinkLayerAddr {
     }
 }
 
+struct SocketFds {
+    ping: Fd,
+    raw: Fd,
+}
+
 pub(super) struct InflightPings {
     v: Vec<InflightPing>,
     s: slab::Slab<Ping>,
     cache: std::sync::Arc<super::L2Cache>,
     raw: RawSocket,
-    in4: Fd,
-    in6: Fd,
+    in4: SocketFds,
+    in6: SocketFds,
     scope_id: u32,
     seq: u16,
 }
@@ -392,14 +397,22 @@ impl InflightPings {
         tracing::info!(nic = ?icmp.nic, "pinging from interface");
 
         let raw = RawSocket::new()?;
+        let in4 = SocketFds {
+            ping: Fd(icmp.in4.as_raw_fd()),
+            raw: Fd(raw.in4.as_raw_fd()),
+        };
+        let in6 = SocketFds {
+            ping: Fd(icmp.in6.as_raw_fd()),
+            raw: Fd(raw.in6.as_raw_fd()),
+        };
 
         Ok(Self {
             v: Vec::with_capacity(32),
             s: slab::Slab::with_capacity(16),
             cache,
             raw,
-            in4: Fd(icmp.in4.as_raw_fd()),
-            in6: Fd(icmp.in6.as_raw_fd()),
+            in4,
+            in6,
             seq: 0,
             scope_id: icmp.nic.0,
         })
@@ -420,7 +433,7 @@ impl InflightPings {
 
         let ping = entry.insert(Ping::new(req));
         let (addr_len, is_v4) = ping.build(seq, self.scope_id);
-        let socket = if is_v4 { self.in4 } else { self.in6 };
+        let socks = if is_v4 { &self.in4 } else { &self.in6 };
 
         let time = Instant::now();
 
@@ -438,7 +451,7 @@ impl InflightPings {
 
             if sq
                 .push_multiple(&[
-                    opcode::Send::new(socket, ping.payload.as_ptr(), ping.payload.len() as _)
+                    opcode::Send::new(socks.ping, ping.payload.as_ptr(), ping.payload.len() as _)
                         .dest_addr(ping.req.addr.as_ptr())
                         .dest_addr_len(addr_len)
                         .build()
@@ -447,16 +460,12 @@ impl InflightPings {
                     opcode::LinkTimeout::new(&SEND_TIMEOUT)
                         .build()
                         .user_data(ud | io::code::TIMEOUT),
-                    opcode::Send::new(
-                        Fd(self.raw.socket.as_raw_fd()),
-                        ping.req.buf.as_ptr(),
-                        ping.req.len as _,
-                    )
-                    .dest_addr(ping.req.addr.as_ptr())
-                    .dest_addr_len(addr_len)
-                    .build()
-                    .user_data(ud | io::code::SEND_RAW)
-                    .flags(squeue::Flags::IO_LINK),
+                    opcode::Send::new(socks.raw, ping.req.buf.as_ptr(), ping.req.len as _)
+                        .dest_addr(ping.req.addr.as_ptr())
+                        .dest_addr_len(addr_len)
+                        .build()
+                        .user_data(ud | io::code::SEND_RAW)
+                        .flags(squeue::Flags::IO_LINK),
                     opcode::LinkTimeout::new(&SEND_TIMEOUT)
                         .build()
                         .user_data(ud | io::code::TIMEOUT),
@@ -493,7 +502,7 @@ impl InflightPings {
         inflight.time = time;
 
         let (addr_len, is_v4) = ping.build(seq, self.scope_id);
-        let socket = if is_v4 { self.in4 } else { self.in6 };
+        let socket = if is_v4 { self.in4.ping } else { self.in6.ping };
 
         // SAFETY: The pings and sends live as long as the uring
         unsafe {
@@ -662,43 +671,52 @@ impl InflightPings {
     }
 }
 
-pub(crate) struct RawSocket {
-    pub socket: std::net::UdpSocket,
+pub struct RawSocket {
+    pub in4: std::net::UdpSocket,
+    pub in6: std::net::UdpSocket,
 }
 
 impl RawSocket {
     pub fn new() -> eyre::Result<Self> {
         use eyre::WrapErr;
 
-        // SAFETY: raw syscalls, all arguments are valid and we check for errors
-        let socket = unsafe {
-            let socket = libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_RAW);
-            if socket < 0 {
-                return Err(std::io::Error::last_os_error())
-                    .context("failed to create IPPROTO_RAW socket");
-            }
+        fn create(domain: i32, lvl: i32, hdr_incl: i32) -> eyre::Result<std::net::UdpSocket> {
+            // SAFETY: raw syscalls, all arguments are valid and we check for errors
+            unsafe {
+                let socket = libc::socket(domain, libc::SOCK_RAW, libc::IPPROTO_RAW);
+                if socket < 0 {
+                    return Err(std::io::Error::last_os_error())
+                        .context("failed to create IPPROTO_RAW socket");
+                }
 
-            let enable = 1;
-            if libc::setsockopt(
-                socket,
-                libc::IPPROTO_IPV6,
-                libc::IPV6_HDRINCL,
-                (&raw const enable).cast(),
-                std::mem::size_of_val(&enable) as _,
-            ) != 0
-            {
-                return Err(std::io::Error::last_os_error())
-                    .context("failed to enable IPV6_HDRINCL");
-            }
+                let enable = 1;
+                if libc::setsockopt(
+                    socket,
+                    lvl,
+                    hdr_incl,
+                    (&raw const enable).cast(),
+                    std::mem::size_of_val(&enable) as _,
+                ) != 0
+                {
+                    return Err(std::io::Error::last_os_error())
+                        .context("failed to enable IPV6_HDRINCL");
+                }
 
-            use std::os::fd::FromRawFd;
-            std::net::UdpSocket::from_raw_fd(socket)
+                use std::os::fd::FromRawFd;
+                Ok(std::net::UdpSocket::from_raw_fd(socket))
+            }
         };
 
-        socket
-            .set_nonblocking(true)
+        let in4 = create(libc::AF_INET, libc::IPPROTO_IP, libc::IP_HDRINCL)
+            .context("failed to create raw IPv4 socket")?;
+        let in6 = create(libc::AF_INET6, libc::IPPROTO_IPV6, libc::IPV6_HDRINCL)
+            .context("failed to create raw IPv6 socket")?;
+
+        in4.set_nonblocking(true)
+            .context("failed to enable non-blocking")?;
+        in6.set_nonblocking(true)
             .context("failed to enable non-blocking")?;
 
-        Ok(Self { socket })
+        Ok(Self { in4, in6 })
     }
 }

@@ -604,7 +604,11 @@ fn handles_ping_responses(loaded: &mut Loaded) {
         let mut v = Vec::new();
         pb.write_to_vec(&mut v, &payload).unwrap();
 
-        assert_eq!(run(&mut loaded.program, &v,), XdpAction::Pass);
+        let hdrs = dbg!(ep::PacketHeaders::from_ethernet_slice(&v).unwrap());
+
+        dbg!(ep::PacketHeaders::from_ip_slice(hdrs.payload.slice()).unwrap());
+
+        assert_eq!(run(&mut loaded.program, &v), XdpAction::Pass);
 
         let entry = quilkin_xdp::l2_cache::types::read_entry(&mut rb)
             .expect("expected entry via ICMP failure");
@@ -614,6 +618,60 @@ fn handles_ping_responses(loaded: &mut Loaded) {
             matches!(
                 entry.source,
                 quilkin_xdp::l2_cache::types::Source::DesinationUnreachablev4
+            ),
+            "expected source as an ICMP packet"
+        );
+    }
+
+    // An ICMPv6 destination unreachable https://en.wikipedia.org/wiki/ICMPv6#mwQQ
+    {
+        let src_mac = [0x30, 0xc5, 0x99, 0xd0, 0x0e, 0x7a];
+        let src_ip = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 168, 1, 100];
+        let dst_ip = Ipv6Addr::from_octets([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 168, 1, 2]);
+        let router = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 168, 1, 1];
+        let pb = ep::PacketBuilder::ethernet2(src_mac, [0x04, 0xf4, 0x1c, 0xea, 0x7f, 0x17])
+            .ipv6(router, src_ip, 64)
+            .icmpv6_raw(
+                ep::icmpv6::TYPE_DST_UNREACH,
+                ep::icmpv6::CODE_DST_UNREACH_ADDR,
+                [0; 4],
+            );
+
+        let mut payload = Vec::new();
+
+        // The ICMP message will contain the IP header of the original datagram that triggered this destination unreachable
+        // error
+        ep::PacketBuilder::ipv6(src_ip, dst_ip.octets(), 32)
+            .icmpv6_echo_request(3382, 5)
+            .write_to_vec(
+                &mut payload,
+                &[
+                    0xec, 0xd3, 0xf1, 0x6a, 0x00, 0x00, 0x00, 0x00, 0x77, 0x41, 0x0a, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
+                    0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26,
+                    0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33,
+                    0x34, 0x35, 0x36, 0x37,
+                ],
+            )
+            .unwrap();
+
+        let mut v = Vec::new();
+        pb.write_to_vec(&mut v, &payload).unwrap();
+
+        let hdrs = dbg!(ep::PacketHeaders::from_ethernet_slice(&v).unwrap());
+
+        dbg!(ep::PacketHeaders::from_ip_slice(hdrs.payload.slice()).unwrap());
+
+        assert_eq!(run(&mut loaded.program, &v), XdpAction::Pass);
+
+        let entry = quilkin_xdp::l2_cache::types::read_entry(&mut rb)
+            .expect("expected entry via ICMP failure");
+
+        assert_entry!(entry, dst_ip, [0; 6]);
+        assert!(
+            matches!(
+                entry.source,
+                quilkin_xdp::l2_cache::types::Source::DesinationUnreachablev6
             ),
             "expected source as an ICMP packet"
         );
