@@ -25,9 +25,7 @@ all-features = true
 [advisories]
 unmaintained = 'workspace'
 yanked = 'deny'
-ignore = [
-    { id = "RUSTSEC-2026-0459", reason = "libsqlite3 vuln, will update eventually but I don't think it affects quilkin really" },
-]
+ignore = []
 
 [bans]
 deny = [
@@ -35,17 +33,6 @@ deny = [
     { crate = "openssl", use-instead = "rustls" },
     { crate = "aws-lc-sys", use-instead = "ring" },
     { crate = "cmake", use-instead = "cc" },
-    # Ideally this is banned, but there are just far too many users of it :(
-    # { crate = "chrono", use-instead = "time", wrappers = [
-    #     "expect-json",
-    #     "k8s-openapi",
-    #     "kube-client",
-    #     "kube-core",
-    #     "kube-leader-election",
-    #     #
-    #     "postgres-types",
-    #     "rusqlite",
-    # ] },
 ]
 multiple-versions = "deny"
 skip = [
@@ -98,6 +85,7 @@ exceptions = [
     { crate = "foca", allow = ["MPL-2.0"] },
     # Never seen this one before, but it seems fine I guess
     { crate = "minicbor", allow = ["BlueOak-1.0.0"] },
+    { crate = "ar_archive_writer", allow = ["Apache-2.0 WITH LLVM-exception"] },
 ]
 
 [[licenses.clarify]]
