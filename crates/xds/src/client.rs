@@ -47,6 +47,12 @@ type MdsGrpcClient = AggregatedControlPlaneDiscoveryServiceClient<TonicChannel>;
 pub type AdsClient = Client<AdsGrpcClient>;
 pub type MdsClient = Client<MdsGrpcClient>;
 
+/// Adds metadata (gRPC headers) to the request that opens a delta stream, for
+/// example an `authorization` header. Called every time a stream is opened,
+/// including reconnects, so it can return a freshly read credential.
+pub type RequestMetadataFn =
+    Arc<dyn Fn(&mut tonic::metadata::MetadataMap) -> Result<()> + Send + Sync>;
+
 pub(crate) const IDLE_REQUEST_INTERVAL: Duration = Duration::from_secs(30);
 
 const REQUEST_BUFFER_SIZE: usize = 100;
@@ -139,6 +145,7 @@ pub struct Client<C: ServiceClient> {
     client: C,
     identifier: Arc<str>,
     management_servers: Vec<Endpoint>,
+    request_metadata: Option<RequestMetadataFn>,
 }
 
 impl<C: ServiceClient> Client<C> {
@@ -160,7 +167,15 @@ impl<C: ServiceClient> Client<C> {
             client,
             identifier: Arc::from(identifier),
             management_servers,
+            request_metadata: None,
         })
+    }
+
+    /// Sets a function that adds metadata to the request opening each delta
+    /// stream. See [`RequestMetadataFn`].
+    pub fn with_request_metadata(mut self, f: RequestMetadataFn) -> Self {
+        self.request_metadata = Some(f);
+        self
     }
 
     async fn connect_with_backoff(management_servers: &[Endpoint]) -> Result<(C, Endpoint)> {
@@ -270,17 +285,22 @@ impl MdsClient {
             tokio::time::sleep(LEADERSHIP_CHECK_INTERVAL).await;
         }
 
-        let (mut ds, mut stream) =
-            match DeltaServerStream::connect(self.client.clone(), identifier.clone()).await {
-                Ok(ds) => {
-                    tracing::debug!("acquired aggregated delta stream");
-                    ds
-                }
-                Err(err) => {
-                    tracing::error!(error = ?err, "failed to acquire aggregated delta stream");
-                    return Err(self);
-                }
-            };
+        let (mut ds, mut stream) = match DeltaServerStream::connect(
+            self.client.clone(),
+            identifier.clone(),
+            self.request_metadata.as_ref(),
+        )
+        .await
+        {
+            Ok(ds) => {
+                tracing::debug!("acquired aggregated delta stream");
+                ds
+            }
+            Err(err) => {
+                tracing::error!(error = ?err, "failed to acquire aggregated delta stream");
+                return Err(self);
+            }
+        };
 
         let id = identifier.clone();
         let handle = tokio::task::spawn(
@@ -367,7 +387,7 @@ impl MdsClient {
                         match MdsClient::connect_with_backoff(&self.management_servers)
                            .await {
                             Ok((client, _)) => {
-                                match DeltaServerStream::connect(client, identifier.clone()).await {
+                                match DeltaServerStream::connect(client, identifier.clone(), self.request_metadata.as_ref()).await {
                                     Ok(res) => {
                                         (ds, stream) = res;
                                         break;
@@ -521,6 +541,7 @@ impl DeltaServerStream {
     async fn connect(
         mut client: MdsGrpcClient,
         identifier: String,
+        request_metadata: Option<&RequestMetadataFn>,
     ) -> Result<(Self, tonic::Streaming<DeltaDiscoveryRequest>)> {
         crate::metrics::actions_total(KIND_SERVER, "connect").inc();
         let (res_tx, responses_rx) = tokio::sync::mpsc::channel(REQUEST_BUFFER_SIZE);
@@ -532,8 +553,14 @@ impl DeltaServerStream {
             })
             .await?;
 
+        let mut request =
+            tonic::Request::new(tokio_stream::wrappers::ReceiverStream::new(responses_rx));
+        if let Some(f) = request_metadata {
+            f(request.metadata_mut())?;
+        }
+
         let stream = client
-            .delta_aggregated_resources(tokio_stream::wrappers::ReceiverStream::new(responses_rx))
+            .delta_aggregated_resources(request)
             .in_current_span()
             .await?
             .into_inner();
