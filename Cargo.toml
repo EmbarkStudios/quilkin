@@ -314,7 +314,7 @@ xdp = "0.8.0"
 # Corrosion libraries. The libraries that corrosion transitively depends on that
 # we also need to depend on should be kept in line with the versions used by corrosion
 camino = "1.2"
-rusqlite = "=0.38"
+rusqlite = "=0.41"
 uhlc = { version = "0.9", default-features = false }
 
 corro-api-types = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
@@ -324,13 +324,13 @@ corro-utils = { git = "https://github.com/EmbarkStudios/corrosion", branch = "mi
 spawn = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 sqlite-pool = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
 tripwire = { git = "https://github.com/EmbarkStudios/corrosion", branch = "misc" }
-# corro-api-types = { path = "../corrosion/crates/corro-api-types" }
-# corro-client = { path = "../corrosion/crates/corro-client" }
-# corro-types = { path = "../corrosion/crates/corro-types" }
-# corro-utils = { path = "../corrosion/crates/corro-utils" }
-# spawn = { path = "../corrosion/crates/spawn" }
-# sqlite-pool = { path = "../corrosion/crates/sqlite-pool" }
-# tripwire = { path = "../corrosion/crates/tripwire" }
+# corro-api-types = { path = "../corro/crates/corro-api-types" }
+# corro-client = { path = "../corro/crates/corro-client" }
+# corro-types = { path = "../corro/crates/corro-types" }
+# corro-utils = { path = "../corro/crates/corro-utils" }
+# spawn = { path = "../corro/crates/spawn" }
+# sqlite-pool = { path = "../corro/crates/sqlite-pool" }
+# tripwire = { path = "../corro/crates/tripwire" }
 x509-parser = "0.18"
 
 [workspace.lints.clippy]
