@@ -825,7 +825,7 @@ dependencies = [
 [[package]]
 name = "consul-client"
 version = "0.2.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#71c10d32efb619e07cdb5df445d033e9434c58cc"
 dependencies = [
  "camino",
  "http",
@@ -884,7 +884,7 @@ checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
 [[package]]
 name = "corro-api-types"
 version = "0.2.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#71c10d32efb619e07cdb5df445d033e9434c58cc"
 dependencies = [
  "camino",
  "compact_str",
@@ -903,7 +903,7 @@ dependencies = [
 [[package]]
 name = "corro-base-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#71c10d32efb619e07cdb5df445d033e9434c58cc"
 dependencies = [
  "camino",
  "compact_str",
@@ -923,7 +923,7 @@ dependencies = [
 [[package]]
 name = "corro-types"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#71c10d32efb619e07cdb5df445d033e9434c58cc"
 dependencies = [
  "antithesis_sdk",
  "arc-swap",
@@ -979,7 +979,7 @@ dependencies = [
 [[package]]
 name = "corro-utils"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#71c10d32efb619e07cdb5df445d033e9434c58cc"
 dependencies = [
  "eyre",
  "tokio",
@@ -1958,11 +1958,11 @@ dependencies = [
 
 [[package]]
 name = "hashlink"
-version = "0.11.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "824e001ac4f3012dd16a264bec811403a67ca9deb6c102fc5049b32c4574b35f"
+checksum = "a596f1b20ed2cc5ecac41a164aaebc7258057060f06c0cf7a2ba3991ee7990fb"
 dependencies = [
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -2891,9 +2891,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.36.0"
+version = "0.39.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95b4103cffefa72eb8428cb6b47d6627161e51c2739fc5e3b734584157bc642a"
+checksum = "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
 dependencies = [
  "cc",
  "pkg-config",
@@ -4243,9 +4243,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.18"
+version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
+checksum = "0e750cca55fe4f0439a15d0bb529da9651e79993e8e72c61a899a36d462befbe"
 dependencies = [
  "bytes",
  "fastbloom",
@@ -4267,9 +4267,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.5.15"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35a133f956daabe89a61a685c2649f13d82d5aa4bd5d12d1277e1072a21c0694"
+checksum = "af66907df18639dcf4db56ca65490cabc4b27a97dbadd96f2926cca73298f016"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -4610,12 +4610,11 @@ dependencies = [
 
 [[package]]
 name = "rusqlite"
-version = "0.38.0"
+version = "0.41.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1c93dd1c9683b438c392c492109cb702b8090b2bfc8fed6f6e4eb4523f17af3"
+checksum = "da9bba6f3506135e120a6586df05be18b48d18896600646a4bec8f993d91a594"
 dependencies = [
  "bitflags 2.13.2",
- "chrono",
  "fallible-iterator",
  "fallible-streaming-iterator",
  "hashlink",
@@ -4674,9 +4673,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags 2.13.2",
  "errno",
@@ -5117,7 +5116,7 @@ dependencies = [
 [[package]]
 name = "spawn"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#71c10d32efb619e07cdb5df445d033e9434c58cc"
 dependencies = [
  "futures",
  "parking_lot",
@@ -5170,7 +5169,7 @@ dependencies = [
 [[package]]
 name = "sqlite-functions"
 version = "0.1.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#71c10d32efb619e07cdb5df445d033e9434c58cc"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -5179,7 +5178,7 @@ dependencies = [
 [[package]]
 name = "sqlite-pool"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#71c10d32efb619e07cdb5df445d033e9434c58cc"
 dependencies = [
  "arc-swap",
  "deadpool",
@@ -5849,7 +5848,7 @@ dependencies = [
 [[package]]
 name = "tripwire"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#1e80f6a05fdba0a205e8a06ddef859c7294b1d49"
+source = "git+https://github.com/EmbarkStudios/corrosion?branch=misc#71c10d32efb619e07cdb5df445d033e9434c58cc"
 dependencies = [
  "futures",
  "futures-util",
