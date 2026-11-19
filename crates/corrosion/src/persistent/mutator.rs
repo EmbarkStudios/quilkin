@@ -33,8 +33,10 @@ struct PendingWrite {
     response_tx: oneshot::Sender<ExecResponse>,
 }
 
+/// Defers to [`db::is_disk_full`], which knows the shapes a full database
+/// arrives in; the raw error code is only one of them.
 fn is_disk_full_change_error(err: &ChangeError) -> bool {
-    err.sqlite_error_code() == Some(rusqlite::ErrorCode::DiskFull)
+    matches!(err, ChangeError::Rusqlite { source, .. } if db::is_disk_full(source))
 }
 
 fn rusqlite_err(source: rusqlite::Error, actor_id: ActorId) -> ChangeError {

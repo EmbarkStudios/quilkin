@@ -295,6 +295,10 @@ async fn recover_space_purge_count_exceeding_rows_deletes_all() {
 
 /// Fills a file-backed database with a tiny `max_page_count` until it returns
 /// `SQLITE_FULL`, then verifies that `with_full_recovery` resolves it.
+///
+/// Reaching the page limit through a CRSQL trigger is the case that matters:
+/// the purge that frees space needs space of its own for the tombstone, so it
+/// only runs because [`recover_space`] lifts the limit for the duration.
 #[tokio::test(flavor = "multi_thread")]
 async fn end_to_end_recovery_from_real_sqlite_full() {
     use corrosion::db::write;

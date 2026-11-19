@@ -203,7 +203,9 @@ async fn server_subscriptions() {
             }
         });
 
-        assert_eq!(4, s.statements.len());
+        // One statement per server, rather than one per server plus a rewrite of
+        // everything its datacenter holds
+        assert_eq!(2, s.statements.len());
     }
 
     pool.transaction(states.iter()).await;
