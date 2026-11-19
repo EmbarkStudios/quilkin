@@ -1,5 +1,5 @@
 use etherparse as ep;
-use std::{io, net, os::fd::AsRawFd};
+use std::{net, os::fd::AsRawFd};
 
 use quilkin_xdp::l2_cache::types::RawSocket;
 
@@ -72,10 +72,11 @@ fn sends_raw() {
     };
 
     let src_port = 8888;
+    let src_port6 = 10001;
     let dst_port = 9999;
 
     std::thread::scope(|s| {
-        s.spawn(|| {
+        let sent = s.spawn(|| {
             let f = std::fs::File::open("/var/run/netns/raw-sender").unwrap();
             unsafe {
                 libc::setns(f.as_raw_fd(), libc::CLONE_NEWNET);
@@ -86,23 +87,36 @@ fn sends_raw() {
             raw.in6.set_nonblocking(false).unwrap();
 
             let mut send = Vec::new();
+            let mut sent = 0;
 
             for i in 1..64u8 {
                 let payload = vec![i; i as usize];
-                //                 ep::PacketBuilder::ipv4(tx_ip.octets(), rx_ip.octets(), 64)
-                //                     .udp(src_port, dst_port)
-                //                     .write_to_vec(&mut send, &payload)
-                //                     .unwrap();
-                //
-                //                 raw.in4.send_to(&send, (rx_ip, dst_port)).unwrap();
-                //                 send.clear();
-
-                ep::PacketBuilder::ipv6(tx_ip6.octets(), rx_ip6.octets(), 64)
+                ep::PacketBuilder::ipv4(tx_ip.octets(), rx_ip.octets(), 64)
                     .udp(src_port, dst_port)
                     .write_to_vec(&mut send, &payload)
                     .unwrap();
 
-                raw.in6.send_to(&send, (rx_ip6, dst_port)).unwrap();
+                raw.in4.send_to(&send, (rx_ip, dst_port)).unwrap();
+                sent += 1;
+                send.clear();
+
+                ep::PacketBuilder::ipv6(tx_ip6.octets(), rx_ip6.octets(), 64)
+                    .udp(src_port6, dst_port)
+                    .write_to_vec(&mut send, &payload)
+                    .unwrap();
+
+                loop {
+                    // Note the 0 here, raw ipv6 sendto will fail if it's anything but 0
+                    match raw.in6.send_to(&send, (rx_ip6, 0)) {
+                        Ok(_) => break,
+                        Err(err) if err.kind() == std::io::ErrorKind::AddrNotAvailable => {
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            continue;
+                        }
+                        Err(err) => panic!("ipv6 sendto failed: {err}"),
+                    }
+                }
+                sent += 1;
                 send.clear();
             }
 
@@ -113,18 +127,21 @@ fn sends_raw() {
 
             raw.in4.send_to(&send, (rx_ip, dst_port)).unwrap();
             send.clear();
+            sent
         });
-        s.spawn(|| {
+        let recvd = s.spawn(|| {
             let f = std::fs::File::open("/var/run/netns/raw-echo").unwrap();
             unsafe {
                 libc::setns(f.as_raw_fd(), libc::CLONE_NEWNET);
             };
 
+            let mut count = 0;
+
             let echo = std::net::UdpSocket::bind((std::net::Ipv6Addr::UNSPECIFIED, dst_port))
                 .expect("failed to bind echo socket");
             let mut buf = [0; 128];
             loop {
-                let (read, addr) = dbg!(echo.recv_from(&mut buf).unwrap());
+                let (read, addr) = echo.recv_from(&mut buf).unwrap();
 
                 assert!(buf[..read].iter().all(|b| *b == read as u8));
 
@@ -132,8 +149,13 @@ fn sends_raw() {
                     break;
                 }
 
+                count += 1;
                 echo.send_to(&buf[..read], addr).unwrap();
             }
+
+            count
         });
+
+        assert_eq!(sent.join().unwrap(), recvd.join().unwrap());
     });
 }

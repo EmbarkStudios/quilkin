@@ -4,6 +4,7 @@ use quilkin_uring::{
     io_uring::{
         SubmissionQueue, opcode, squeue,
         types::{Fd, Timespec},
+        cqueue::Entry as Cqe,
     },
     slab,
 };
@@ -15,7 +16,7 @@ use std::{
 };
 use xdp::packet::net_types::MacAddress;
 
-#[derive(Hash, Copy, Clone, PartialEq, Eq)]
+#[derive(Hash, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Ip(pub Ipv6Addr);
 
 impl fmt::Display for Ip {
@@ -118,35 +119,25 @@ pub fn read_entry(ring: &mut aya::maps::RingBuf<aya::maps::MapData>) -> Option<R
     })
 }
 
-pub struct RequestData {
+pub struct Request {
     /// The raw packet data, including the layer 3 and 4 headers
-    pub(crate) buf: [u8; 2016],
+    pub(crate) buf: Box<[u8]>,
     /// Desination address, we still have to supply this with `IPPROTO_RAW` `sendto` since the kernel still needs
     /// it to perform layer2 resolution
     pub(crate) addr: SockAddrC,
-    /// The amount of valid bytes in the `buf`
-    pub(crate) len: u16,
 }
 
-impl RequestData {
+impl Request {
     pub fn copy_from_raw(
         packet: &xdp::Packet,
         headers: &xdp::packet::net_types::UdpHeaders,
-    ) -> Request {
-        let mut b = Box::new(RequestData {
-            buf: [0u8; 2016],
+    ) -> Self {
+        Self {
+            buf: packet[xdp::packet::net_types::EthHdr::LEN..].into(),
             addr: headers.destination_address().into(),
-            len: 0,
-        });
-
-        let len = packet.len() - xdp::packet::net_types::EthHdr::LEN;
-        b.buf[..len].copy_from_slice(&packet[xdp::packet::net_types::EthHdr::LEN..]);
-        b.len = len as u16;
-        b
+        }
     }
 }
-
-pub type Request = Box<RequestData>;
 
 #[derive(Clone)]
 pub(super) struct RequestSender {
@@ -329,22 +320,22 @@ impl SockAddrC {
 }
 
 struct Ping {
-    req: Request,
+    dst: SockAddrC,
     payload: [u8; 8],
 }
 
 impl Ping {
     #[inline]
-    fn new(req: Request) -> Self {
+    fn new(dst: SockAddrC) -> Self {
         Self {
-            req,
+            dst,
             payload: [0u8; _],
         }
     }
 
     #[inline]
     fn build(&mut self, seq: u16, scope_id: u32) -> (u32, bool) {
-        let ret = if let Some(v6) = self.req.addr.as_v6() {
+        let ret = if let Some(v6) = self.dst.as_v6() {
             v6.sin6_scope_id = scope_id;
             (std::mem::size_of::<libc::sockaddr_in6>() as _, false)
         } else {
@@ -376,20 +367,71 @@ struct SocketFds {
     raw: Fd,
 }
 
-pub(super) struct InflightPings {
-    v: Vec<InflightPing>,
-    s: slab::Slab<Ping>,
+struct Remote {
+    addr: SockAddrC,
+    /// The MAC address of the remote if known
+    ll: Option<MacAddress>,
+}
+
+struct PingBucket {
+    remotes: Vec<Remote>,
+}
+
+impl PingBucket {
+    #[inline]
+    fn insert(&mut self, addr: SockAddrC) {
+        let ip = addr.ip();
+        if let Err(i) = self.remotes.binary_search_by(|r| r.addr.ip().cmp(&ip)) {
+            self.remotes.insert(i, Remote {
+                addr,
+                ll: None,
+            });
+        }
+    }
+}
+
+struct PingBuckets {
+    buckets: [PingBucket; 6],
+    current_bucket: usize,
+}
+
+impl PingBuckets {
+    #[inline]
+    fn get(&mut self, ip: &Ip) -> Option<&mut Remote> {
+        self.buckets.iter_mut().find_map(|buck| {
+            let i = buck.remotes.binary_search_by(|r| r.addr.ip().cmp(ip)).ok()?;
+            Some(&mut buck.remotes[i])
+        })
+    }
+
+    #[inline]
+    fn insert(&mut self, addr: SockAddrC) {
+        let b = self.buckets.iter_mut().min_by(|a, b| a.remotes.len().cmp(&b.remotes.len())).unwrap();
+        b.insert(addr);
+    }
+}
+
+
+pub(super) struct Pinger {
+
+
+    buckets: PingBuckets,
+    raw_sends: slab::Slab<(Request, Ping)>,
     cache: std::sync::Arc<super::L2Cache>,
+    /// Owned socket, just for keeping it alive
+    #[allow(dead_code)]
     raw: RawSocket,
     in4: SocketFds,
     in6: SocketFds,
     scope_id: u32,
     seq: u16,
+
 }
 
-const SEND_TIMEOUT: Timespec = Timespec::new().sec(2);
+const SEND_TIMEOUT: Timespec = Timespec::new().sec(3);
+const RAW_SEND_TIMEOUT: Timespec = Timespec::new().sec(9);
 
-impl InflightPings {
+impl Pinger {
     pub(super) fn new(
         icmp: &super::icmp::IcmpSocket,
         cache: std::sync::Arc<super::L2Cache>,
@@ -419,7 +461,7 @@ impl InflightPings {
     }
 
     #[inline]
-    pub(super) fn ping(&mut self, req: Request, sq: &mut squeue::SubmissionQueue<'_>) -> bool {
+    pub(super) fn raw_enqueue(&mut self, req: Request, sq: &mut squeue::SubmissionQueue<'_>) -> bool {
         let seq = self.seq;
         self.seq = self.seq.wrapping_add(1);
 
@@ -460,15 +502,7 @@ impl InflightPings {
                     opcode::LinkTimeout::new(&SEND_TIMEOUT)
                         .build()
                         .user_data(ud | io::code::TIMEOUT),
-                    opcode::Send::new(socks.raw, ping.req.buf.as_ptr(), ping.req.len as _)
-                        .dest_addr(ping.req.addr.as_ptr())
-                        .dest_addr_len(addr_len)
-                        .build()
-                        .user_data(ud | io::code::SEND_RAW)
-                        .flags(squeue::Flags::IO_LINK),
-                    opcode::LinkTimeout::new(&SEND_TIMEOUT)
-                        .build()
-                        .user_data(ud | io::code::TIMEOUT),
+                    ,
                 ])
                 .is_err()
             {
@@ -530,7 +564,7 @@ impl InflightPings {
     }
 
     #[inline]
-    pub(super) fn process_send(&mut self, cqe: quilkin_uring::io_uring::cqueue::Entry) {
+    pub(super) fn process_send(&mut self, cqe: Cqe) {
         let ud = cqe.user_data();
         let key = (ud >> 32) as usize;
         let seq = (ud >> 16) as u16;
@@ -599,6 +633,30 @@ impl InflightPings {
                 src: entry.source,
             };
         }
+    }
+
+    fn raw_enqueue(&mut self, req: Request, sq: &mut SubmissionQueue<'_>) {
+
+    }
+
+    fn raw_dequeue(&mut self, cqe: Cqe) {
+
+    }
+
+    fn ping_enqueue(&mut self, sq: &mut SubmissionQueue<'_>, scratch: &mut bumpalo::Bump) {
+        opcode::Send::new(socks.raw, ping.req.buf.as_ptr(), ping.req.len as _)
+            .dest_addr(ping.req.addr.as_ptr())
+            .dest_addr_len(addr_len)
+            .build()
+            .user_data(ud | io::code::SEND_RAW)
+            .flags(squeue::Flags::IO_LINK),
+        opcode::LinkTimeout::new(&SEND_TIMEOUT)
+            .build()
+            .user_data(ud | io::code::TIMEOUT)
+    }
+
+    fn ping_dequeue(&mut self, cqe: Cqe, sq: &mut SubmissionQueue<'_>, scratch: &mut bumpalo::Bump) {
+
     }
 
     #[inline]
@@ -705,7 +763,7 @@ impl RawSocket {
                 use std::os::fd::FromRawFd;
                 Ok(std::net::UdpSocket::from_raw_fd(socket))
             }
-        };
+        }
 
         let in4 = create(libc::AF_INET, libc::IPPROTO_IP, libc::IP_HDRINCL)
             .context("failed to create raw IPv4 socket")?;

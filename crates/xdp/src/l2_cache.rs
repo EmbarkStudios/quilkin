@@ -115,8 +115,7 @@ impl L2Cache {
         let ip = headers.destination_address().ip().into();
         let ll = self.map.get(&ip).map(|ll| *ll);
         if ll.is_none() {
-            self.tx
-                .send(types::RequestData::copy_from_raw(packet, headers));
+            self.tx.send(types::Request::copy_from_raw(packet, headers));
         }
 
         ll

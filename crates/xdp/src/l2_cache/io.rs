@@ -91,7 +91,7 @@ pub(super) fn cache_io_loop(
 
     enqueue_ebpf(&mut sq)?;
 
-    let ts = io_uring::types::Timespec::from(std::time::Duration::from_millis(200));
+    let ts = io_uring::types::Timespec::new().sec(10);
     let interval = opcode::Timeout::new(&ts)
         .flags(io_uring::types::TimeoutFlags::MULTISHOT)
         .build()
@@ -115,7 +115,7 @@ pub(super) fn cache_io_loop(
             .context("failed to enqueue shutdown event")?;
     }
 
-    let mut pings = InflightPings::new(&icmp, cache)?;
+    let mut pings = Pinger::new(&icmp, cache)?;
 
     loop {
         sq.sync();
@@ -184,7 +184,7 @@ pub(super) fn cache_io_loop(
                     // An XDP worker needs to send a packet to an IP address it doesn't know the MAC address of
                     code::REQUEST => {
                         for req_ip in req.rx.try_iter() {
-                            if !pings.ping(req_ip, &mut sq) {}
+                            pings.raw_enqueue(req_ip, &mut sq);
                         }
 
                         enqueue_req(&mut sq)?;
@@ -194,7 +194,9 @@ pub(super) fn cache_io_loop(
                         pings.process_send(cqe);
                     }
                     // We've finished a raw `sendto`
-                    code::SEND_RAW => {}
+                    code::SEND_RAW => {
+                        pings.raw_dequeue(cqe);
+                    }
                     // We've intercepted either an ARP (IPv4) response or an ICMPv6 (IPv6) neighbor advertisement, or
                     // the response to our ICMP/v6 echo request
                     code::EBPF => {

@@ -567,6 +567,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
+name = "bumpalo"
+version = "3.21.0"
+source = "git+https://github.com/Jake-Shadle/bumpalo?branch=main#6639c0d2a50b23221489532a657fc06d3f9ceeba"
+
+[[package]]
 name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4152,10 +4157,12 @@ dependencies = [
  "aya",
  "aya-log",
  "aya-obj",
+ "bumpalo 3.21.0",
  "crossbeam-channel",
  "dashmap",
  "etherparse",
  "eyre",
+ "fastbloom",
  "libc",
  "quilkin-uring",
  "smallvec",
@@ -6111,7 +6118,7 @@ version = "0.2.128"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "411e4887f0071ef2d2164a9d5fdf2d20efbef78fccd3a78b0c10a1dc5295e48a"
 dependencies = [
- "bumpalo",
+ "bumpalo 3.20.3",
  "proc-macro2",
  "quote",
  "syn 3.0.9",

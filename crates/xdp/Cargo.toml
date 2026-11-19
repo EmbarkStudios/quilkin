@@ -16,9 +16,11 @@ aya = { git = "https://github.com/aya-rs/aya", rev = "2453204" }
 # Allows forwarding trace messages from eBPF programs to a global logger, note we use a git dependency here as aya has
 # updated many dependencies but has not made a release in over half a year
 aya-log = { git = "https://github.com/aya-rs/aya", rev = "2453204" }
+bumpalo = { git = "https://github.com/Jake-Shadle/bumpalo", branch = "main" }
 crossbeam-channel = "0.5"
 dashmap.workspace = true
 eyre.workspace = true
+fastbloom = { version = "0.17", default-features = false }
 libc.workspace = true
 quilkin-uring.workspace = true
 smallvec.workspace = true
