@@ -1,12 +1,8 @@
 use super::{CacheSpawnError, icmp, io};
 use quilkin_uring::{
-    eventfd,
-    io_uring::{
-        SubmissionQueue, opcode, squeue,
-        types::{Fd, Timespec},
-        cqueue::Entry as Cqe,
-    },
-    slab,
+    eventfd, io_uring::{
+        self, SubmissionQueue, cqueue::Entry as Cqe, opcode, squeue, types::{Fd, Timespec},
+    }, slab,
 };
 use std::{
     fmt,
@@ -14,6 +10,7 @@ use std::{
     os::fd::{AsRawFd, FromRawFd},
     time::{Duration, Instant},
 };
+use bumpalo::Bump;
 use xdp::packet::net_types::MacAddress;
 
 #[derive(Hash, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -314,35 +311,67 @@ impl SockAddrC {
     }
 
     #[inline]
+    pub fn is_v4(&self) -> bool {
+        unsafe { self.as_ptr().cast::<u16>().read_unaligned() == 2 }
+    }
+
+    #[inline]
+    pub fn len(&self) -> u32 {
+        if self.is_v4() {
+            std::mem::size_of::<libc::sockaddr_in>() as _
+        } else {
+            std::mem::size_of::<libc::sockaddr_in6>() as _
+        }
+    }
+
+    #[inline]
     fn as_ptr(&self) -> *const libc::sockaddr {
         self as *const _ as *const libc::sockaddr
     }
 }
 
+type PingPayload = [u8; 8];
+
 struct Ping {
     dst: SockAddrC,
-    payload: [u8; 8],
+    /// Pings are sent in buckets, 10 seconds max for the bucket, and a 3 second timeout for each individual ping giving
+    /// each remote in the bucket a max of 3 retries
+    payloads: smallvec::SmallVec<[PingPayload; 3]>,
 }
 
 impl Ping {
     #[inline]
-    fn new(dst: SockAddrC) -> Self {
+    fn new(mut dst: SockAddrC, scope_id: u32) -> Self {
+        if let Some(dst) = dst.as_v6() {
+            dst.sin6_scope_id = scope_id;
+        }
+
         Self {
             dst,
-            payload: [0u8; _],
+            payloads: Default::default(),
         }
     }
 
     #[inline]
-    fn build(&mut self, seq: u16, scope_id: u32) -> (u32, bool) {
-        let ret = if let Some(v6) = self.dst.as_v6() {
-            v6.sin6_scope_id = scope_id;
-            (std::mem::size_of::<libc::sockaddr_in6>() as _, false)
-        } else {
-            (std::mem::size_of::<libc::sockaddr_in>() as _, true)
-        };
+    fn build(&mut self, seq: &mut u16, in4: Fd, in6: Fd) -> Option<io_uring::squeue::Entry> {
+        if self.payloads.len() >= 3 {
+            return None;
+        }
 
-        icmp::make_echo_request(seq, &mut self.payload, ret.1);
+        let is_v4 = self.dst.is_v4();
+
+        let mut payload = [0u8; 8];
+        icmp::make_echo_request(*seq, &mut payload, is_v4);
+        self.payloads.push(payload);
+
+        *seq = seq.wrapping_add(1);
+
+        opcode::Send::new(if is_v4 { in4 } else { in6 }, self.payloads.last().unwrap().as_ptr(), 8)
+            .dest_addr(self.dst.as_ptr())
+            .dest_addr_len(self.dst.len())
+            .build()
+
+
         ret
     }
 }
@@ -392,8 +421,19 @@ impl PingBucket {
 
 struct PingBuckets {
     buckets: [PingBucket; 6],
+    current: Vec<Ping, Bump>,
+    in4: Fd,
+    in6: Fd,
+    total_remotes: usize,
     current_bucket: usize,
+    scope_id: u32,
+    generation: u32,
+    /// The sequence for the next ping
+    seq: u16,
 }
+
+const SEND_TIMEOUT: Timespec = Timespec::new().sec(3);
+const RAW_SEND_TIMEOUT: Timespec = Timespec::new().sec(9);
 
 impl PingBuckets {
     #[inline]
@@ -409,12 +449,52 @@ impl PingBuckets {
         let b = self.buckets.iter_mut().min_by(|a, b| a.remotes.len().cmp(&b.remotes.len())).unwrap();
         b.insert(addr);
     }
+
+    fn dispatch(&mut self, sq: &mut SubmissionQueue<'_>, pings: &mut Vec<Ping, &mut Bump>) {
+
+        let bucket = &self.buckets[self.current_bucket];
+        let required = bucket.remotes.len() * 2;
+
+        if required == 0 {
+            return;
+        }
+
+        if sq.capacity() - sq.len() < required {
+            tracing::warn!(required, available = sq.capacity() - sq.len(), bucket = self.current_bucket, "submission queue capacity insufficient");
+            return;
+        }
+
+        pings.reserve_exact(bucket.remotes.len());
+
+        for remote in &bucket.remotes {
+            pings.push(Ping::new(remote.addr, self.scope_id));
+        }
+
+        for ping in pings {
+            let seq = self.seq;
+            self.seq = self.seq.wrapping_add(1);
+
+            ping.build(&mut seq);
+
+            sq.push_multiple([
+
+                    .user_data(ud | io::code::SEND_RAW)
+                    .flags(squeue::Flags::IO_LINK),
+                opcode::LinkTimeout::new(&SEND_TIMEOUT)
+                    .build()
+                    .user_data(ud | io::code::TIMEOUT)
+            ]).expect("unreachable"); // we already checked the available capacity before the loop
+        }
+
+
+
+    }
+
+    fn
 }
 
 
 pub(super) struct Pinger {
-
-
     buckets: PingBuckets,
     raw_sends: slab::Slab<(Request, Ping)>,
     cache: std::sync::Arc<super::L2Cache>,
@@ -428,8 +508,7 @@ pub(super) struct Pinger {
 
 }
 
-const SEND_TIMEOUT: Timespec = Timespec::new().sec(3);
-const RAW_SEND_TIMEOUT: Timespec = Timespec::new().sec(9);
+
 
 impl Pinger {
     pub(super) fn new(
@@ -612,7 +691,7 @@ impl Pinger {
 
     #[inline]
     pub(super) fn process_ebpf(&mut self, entry: RingEntry) {
-        let Some(i) = self.v.iter().position(|i| i.dst == entry.ip) else {
+        let Some(remote) = self.buckets.get(&entry.ip) else {
             // TODO: other processes on this node could be causing ARP/ICMPv6 address resolution to nodes that we might
             // be interested in in the future, but since we're not interested now we don't care, but we could cache them
             // for some amount of time
@@ -644,15 +723,10 @@ impl Pinger {
     }
 
     fn ping_enqueue(&mut self, sq: &mut SubmissionQueue<'_>, scratch: &mut bumpalo::Bump) {
-        opcode::Send::new(socks.raw, ping.req.buf.as_ptr(), ping.req.len as _)
-            .dest_addr(ping.req.addr.as_ptr())
-            .dest_addr_len(addr_len)
-            .build()
-            .user_data(ud | io::code::SEND_RAW)
-            .flags(squeue::Flags::IO_LINK),
-        opcode::LinkTimeout::new(&SEND_TIMEOUT)
-            .build()
-            .user_data(ud | io::code::TIMEOUT)
+        self.buckets.dispatch(sq, scratch);
+
+
+
     }
 
     fn ping_dequeue(&mut self, cqe: Cqe, sq: &mut SubmissionQueue<'_>, scratch: &mut bumpalo::Bump) {

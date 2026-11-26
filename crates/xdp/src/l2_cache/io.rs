@@ -1,6 +1,12 @@
+use crate::l2_cache::io::code::BUCKET_INTERVAL;
+
 use super::{icmp::IcmpSocket, types::*};
 use eyre::WrapErr;
-use quilkin_uring::{eventfd, flags, io_uring, ring};
+use quilkin_uring::{
+    eventfd, flags,
+    io_uring::{self, types::Timespec},
+    ring,
+};
 use std::os::fd::AsRawFd;
 
 pub mod code {
@@ -15,6 +21,8 @@ pub mod code {
     pub const SHUTDOWN: u64 = 8;
 }
 
+const BUCKET_INTERVAL: Timespec = Timespec::new().sec(10);
+
 pub(super) fn cache_io_loop(
     icmp: IcmpSocket,
     mut req: RequestReceiver,
@@ -24,7 +32,7 @@ pub(super) fn cache_io_loop(
     cache: std::sync::Arc<super::L2Cache>,
     mut shutdown: eventfd::EventFd,
 ) -> eyre::Result<()> {
-    use quilkin_uring::io_uring::{opcode, squeue::SubmissionQueue, types::Fd};
+    use io_uring::{opcode, squeue::SubmissionQueue, types::Fd};
 
     const BUFFER_RING: u16 = 0xbeef;
 
@@ -91,8 +99,9 @@ pub(super) fn cache_io_loop(
 
     enqueue_ebpf(&mut sq)?;
 
-    let ts = io_uring::types::Timespec::new().sec(10);
-    let interval = opcode::Timeout::new(&ts)
+    enqueue_interval()
+
+    let interval = opcode::Timeout::new(&BUCKET_INTERVAL)
         .flags(io_uring::types::TimeoutFlags::MULTISHOT)
         .build()
         .user_data(code::INTERVAL);
